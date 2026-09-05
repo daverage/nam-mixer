@@ -26,6 +26,7 @@ class RenderedPair:
     dry: np.ndarray
     amp_a: np.ndarray
     amp_b: np.ndarray
+    envelope_db: np.ndarray
     sample_rate: int
 
 
@@ -37,11 +38,22 @@ def render_pair(
 ) -> RenderedPair:
     """Render `dry` through both amp models. The expensive step -- call once
     per (amp_a, amp_b, dry) choice, then reuse the result across slider moves.
+
+    Also computes the crossover envelope here (depends only on `dry` and
+    `sample_rate`, not on crossover/transition/trim) so `build_hybrid` never
+    has to recompute it on every slider move.
     """
     dry = np.asarray(dry, dtype=np.float32)
     amp_a_render = render(amp_a, dry, sample_rate)
     amp_b_render = render(amp_b, dry, sample_rate)
-    return RenderedPair(dry=dry, amp_a=amp_a_render, amp_b=amp_b_render, sample_rate=sample_rate)
+    envelope_db = rms_envelope_db(dry, sample_rate)
+    return RenderedPair(
+        dry=dry,
+        amp_a=amp_a_render,
+        amp_b=amp_b_render,
+        envelope_db=envelope_db,
+        sample_rate=sample_rate,
+    )
 
 
 @dataclass
@@ -49,6 +61,9 @@ class HybridResult:
     hybrid: np.ndarray
     blend_curve: np.ndarray
     auto_trim_db: float
+    manual_trim_db: float
+    effective_b_trim_db: float
+    alignment_offset_samples: int
     level_match: LevelMatchResult | None
 
 
@@ -62,30 +77,39 @@ def build_hybrid(
 ) -> HybridResult:
     """Blend an already-rendered amp pair. Cheap -- safe to call on every
     crossover/transition/trim slider move without re-running NAM inference.
-    """
-    envelope_db = rms_envelope_db(pair.dry, pair.sample_rate)
 
-    amp_b_render, _offset = align_to_reference(pair.amp_a, pair.amp_b, enabled=align_enabled)
+    `manual_b_trim_db` is always applied, on top of the auto-match trim when
+    `auto_level` is on -- auto-level gives a safe starting point, the manual
+    trim is the user's tweak from there, and the two combine rather than one
+    replacing the other.
+    """
+    envelope_db = pair.envelope_db
+
+    amp_b_render, offset = align_to_reference(pair.amp_a, pair.amp_b, enabled=align_enabled)
 
     level_match_result: LevelMatchResult | None = None
+    auto_trim_db = 0.0
     if auto_level:
         level_match_result = compute_crossover_trim(
             envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
         )
-        b_trim_db = level_match_result.suggested_b_trim_db
-    else:
-        b_trim_db = manual_b_trim_db
+        auto_trim_db = level_match_result.suggested_b_trim_db
+
+    effective_b_trim_db = auto_trim_db + manual_b_trim_db
 
     config = CrossoverConfig(
         crossover_dbfs=crossover_dbfs,
         transition_width_db=transition_width_db,
-        amp_b_trim_db=b_trim_db,
+        amp_b_trim_db=effective_b_trim_db,
     )
     hybrid_audio, t_curve = blend(envelope_db, pair.amp_a, amp_b_render, config)
 
     return HybridResult(
         hybrid=hybrid_audio,
         blend_curve=t_curve,
-        auto_trim_db=b_trim_db,
+        auto_trim_db=auto_trim_db,
+        manual_trim_db=manual_b_trim_db,
+        effective_b_trim_db=effective_b_trim_db,
+        alignment_offset_samples=offset,
         level_match=level_match_result,
     )

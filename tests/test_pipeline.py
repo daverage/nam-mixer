@@ -1,5 +1,6 @@
 import numpy as np
 
+from hybrid.envelope import rms_envelope_db
 from hybrid.pipeline import RenderedPair, build_hybrid
 
 
@@ -8,7 +9,8 @@ def _synthetic_pair(n=10000, sample_rate=48000):
     dry = np.linspace(-1.0, 1.0, n).astype(np.float32) * rng.uniform(0.5, 1.0, n).astype(np.float32)
     amp_a = np.full(n, 1.0, dtype=np.float32)
     amp_b = np.full(n, 2.0, dtype=np.float32)
-    return RenderedPair(dry=dry, amp_a=amp_a, amp_b=amp_b, sample_rate=sample_rate)
+    envelope_db = rms_envelope_db(dry, sample_rate)
+    return RenderedPair(dry=dry, amp_a=amp_a, amp_b=amp_b, envelope_db=envelope_db, sample_rate=sample_rate)
 
 
 def test_build_hybrid_manual_trim_no_auto_level():
@@ -22,6 +24,8 @@ def test_build_hybrid_manual_trim_no_auto_level():
     )
     assert result.level_match is None
     assert result.auto_trim_db == 0.0
+    assert result.manual_trim_db == 0.0
+    assert result.effective_b_trim_db == 0.0
     assert len(result.hybrid) == len(pair.dry)
     assert len(result.blend_curve) == len(pair.dry)
 
@@ -36,6 +40,29 @@ def test_build_hybrid_auto_level_returns_level_match_result():
     )
     assert result.level_match is not None
     assert np.isfinite(result.auto_trim_db)
+    assert result.effective_b_trim_db == result.auto_trim_db
+
+
+def test_build_hybrid_manual_trim_combines_with_auto_trim():
+    """Auto-match gives a starting point; the manual tweak should add to it,
+    not replace it."""
+    pair = _synthetic_pair()
+    auto_only = build_hybrid(
+        pair,
+        crossover_dbfs=-22.0,
+        transition_width_db=8.0,
+        auto_level=True,
+    )
+    auto_plus_manual = build_hybrid(
+        pair,
+        crossover_dbfs=-22.0,
+        transition_width_db=8.0,
+        auto_level=True,
+        manual_b_trim_db=0.7,
+    )
+    assert auto_plus_manual.auto_trim_db == auto_only.auto_trim_db
+    assert auto_plus_manual.manual_trim_db == 0.7
+    assert auto_plus_manual.effective_b_trim_db == auto_only.auto_trim_db + 0.7
 
 
 def test_build_hybrid_is_cheap_to_call_repeatedly_on_same_pair():

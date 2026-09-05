@@ -118,3 +118,5 @@ project fixtures like `assets/di/*.wav`.
   latency. Pass `enabled=False` (skips correction, still length-matches) until
   real NAM inference is wired in and the official inference API's latency
   behavior is understood — see the module docstring.
+
+At the end of each major change, commit and push the repo
