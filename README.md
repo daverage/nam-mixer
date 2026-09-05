@@ -212,10 +212,13 @@ The test suite covers `hybrid/envelope.py`, `hybrid/blend.py`,
 `tests/test_render.py` exercises real NAM inference and is skipped
 automatically unless both `native/nam_render` has been built (see its
 README) and a real `.nam` file is present at
-`assets/nam_models/FenderSuperReverb1977_Clean.nam`. `torch`/
-`neural-amp-modeler` in `requirements.txt` are not needed for inference at
-all now (that's handled by `native/nam_render`) — they remain there for the
-future A2 training step.
+`assets/nam_models/FenderSuperReverb1977_Clean.nam`.
+
+`torch`/`neural-amp-modeler` are no longer in `requirements.txt` — inference
+is handled entirely by the native `nam_render` tool now. They only matter for
+the eventual A2 training step, and live in `requirements-training.txt`
+instead (install into a separate, supported-Python-version environment when
+you get to that step).
 
 ## Relationship to NAMtoClo
 

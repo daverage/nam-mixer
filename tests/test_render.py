@@ -41,6 +41,29 @@ def test_render_real_model_length_and_sanity():
     assert np.max(np.abs(out)) > 0
 
 
+def test_render_is_deterministic():
+    """Same DI through the same model twice should produce identical (or
+    extremely close) output -- establishing this before generating any real
+    training targets."""
+    model = load_nam(MODEL_PATH)
+    sample_rate = int(model.sample_rate or 48000)
+    rng = np.random.default_rng(1)
+    audio = rng.uniform(-0.3, 0.3, sample_rate).astype(np.float32)
+
+    out1 = render(model, audio, sample_rate)
+    out2 = render(model, audio, sample_rate)
+
+    np.testing.assert_allclose(out1, out2, atol=1e-6)
+
+
+def test_render_rejects_stereo_input():
+    model = load_nam(MODEL_PATH)
+    sample_rate = int(model.sample_rate or 48000)
+    stereo = np.zeros((100, 2), dtype=np.float32)
+    with pytest.raises(NamRenderError):
+        render(model, stereo, sample_rate)
+
+
 def test_render_missing_exe_raises_nam_render_error(monkeypatch):
     import hybrid.render as render_module
 

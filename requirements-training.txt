@@ -1,0 +1,8 @@
+# Dependencies for training a fresh NAM model on hybrid output (not needed to
+# run the Hybrid Builder itself -- see requirements.txt for that).
+#
+# torch/neural-amp-modeler currently require a supported Python version; if
+# `pip install -r requirements-training.txt` fails on your interpreter, use a
+# separate Python 3.11/3.12 environment for the training step.
+torch
+neural-amp-modeler

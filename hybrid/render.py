@@ -65,6 +65,9 @@ def find_nam_render_exe() -> Path:
     )
 
 
+_SUBPROCESS_TIMEOUT_S = 120.0
+
+
 def render(model: NamModel, audio: np.ndarray, sample_rate: int) -> np.ndarray:
     """Render `audio` (mono float32, at `sample_rate`) through `model`.
 
@@ -73,10 +76,16 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int) -> np.ndarray:
       the caller's responsibility, not this function's. If `sample_rate`
       doesn't match what the model expects, nam_render's own check will
       raise NamRenderError with the mismatch reported.
-    - Raises NamRenderError if the native tool is missing or exits non-zero.
+    - Raises NamRenderError if the native tool is missing, times out, exits
+      non-zero, or its output doesn't match this function's contract (mono,
+      same length, same sample rate, all-finite) -- this module is the
+      boundary between native code and the rest of the app, so it verifies
+      that contract rather than trusting the subprocess blindly.
     """
     exe = find_nam_render_exe()
     audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim != 1:
+        raise NamRenderError(f"NAM render currently requires mono audio, got shape {audio.shape}")
 
     with tempfile.TemporaryDirectory(prefix="hybrid_nam_render_") as tmp:
         tmp_dir = Path(tmp)
@@ -84,15 +93,37 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         out_path = tmp_dir / "output.wav"
         sf.write(in_path, audio, sample_rate, subtype="FLOAT")
 
-        result = subprocess.run(
-            [str(exe), str(model.path), str(in_path), str(out_path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [str(exe), str(model.path), str(in_path), str(out_path)],
+                capture_output=True,
+                text=True,
+                timeout=_SUBPROCESS_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise NamRenderError(
+                f"nam_render timed out after {_SUBPROCESS_TIMEOUT_S}s for {model.path}"
+            ) from exc
+
         if result.returncode != 0 or not out_path.is_file():
             message = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise NamRenderError(f"nam_render failed for {model.path}: {message}")
 
-        rendered, _ = sf.read(out_path, dtype="float32")
+        rendered, out_sample_rate = sf.read(out_path, dtype="float32")
+
+    if rendered.ndim != 1:
+        raise NamRenderError(
+            f"nam_render produced non-mono output for {model.path}: shape {rendered.shape}"
+        )
+    if len(rendered) != len(audio):
+        raise NamRenderError(
+            f"nam_render output length {len(rendered)} != input length {len(audio)} for {model.path}"
+        )
+    if out_sample_rate != sample_rate:
+        raise NamRenderError(
+            f"nam_render output sample rate {out_sample_rate} != input sample rate {sample_rate} for {model.path}"
+        )
+    if not np.all(np.isfinite(rendered)):
+        raise NamRenderError(f"nam_render produced non-finite samples for {model.path}")
 
     return rendered
