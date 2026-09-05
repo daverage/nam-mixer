@@ -736,7 +736,7 @@ generateBtn.addEventListener("click", async () => {
     lastDesignId = data.design_id;
     lastTrainingCommand = data.training_command;
     document.getElementById("a2-training-section").hidden = false;
-    document.getElementById("local-training-command").textContent = lastTrainingCommand;
+    updateLocalTrainingCommand();
     refreshKaggleStatus();
   } catch (err) {
     generateStatus.textContent = "Request failed: " + err;
@@ -769,6 +769,22 @@ const kagglePanel = document.getElementById("kaggle-panel");
 const localPanel = document.getElementById("local-panel");
 let kaggleAuthPollTimer = null;
 let kaggleJobSubmittedAt = null;
+
+// --- Training quality (epoch preset: draft=20 / standard=60 / high_def=120) -
+function selectedEpochPreset() {
+  const checked = document.querySelector('input[name="a2-epoch-preset"]:checked');
+  return checked ? checked.value : "standard";
+}
+
+function updateLocalTrainingCommand() {
+  const preset = selectedEpochPreset();
+  const command = preset === "standard" ? lastTrainingCommand : `${lastTrainingCommand} --epoch-preset ${preset}`;
+  document.getElementById("local-training-command").textContent = command;
+}
+
+document.querySelectorAll('input[name="a2-epoch-preset"]').forEach((el) => {
+  el.addEventListener("change", updateLocalTrainingCommand);
+});
 
 // State label, elapsed-since-submit, and a progress bar/log tail when
 // available -- a bare repeating "running" string with no other signal made
@@ -914,7 +930,7 @@ trainA2Btn.addEventListener("click", async () => {
     const resp = await fetch("/api/kaggle/train", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ design_id: lastDesignId }),
+      body: JSON.stringify({ design_id: lastDesignId, epoch_preset: selectedEpochPreset() }),
     });
     const data = await resp.json();
     if (!resp.ok) {

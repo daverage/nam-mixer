@@ -255,3 +255,139 @@ def test_main_end_to_end_with_mocked_trainer(tmp_path, monkeypatch):
     assert updated["training"]["output_nam_path"] == str(exported_nam)
     assert "full_metrics_vs_target" in updated["training"]
     assert "_bundle_dir" not in updated
+
+
+# --- --epoch-preset (draft=20 / standard=60 / high_def=120) --------------
+
+def test_main_records_default_epoch_preset_in_manifest(tmp_path, monkeypatch):
+    manifest_path, bundle_dir = _make_bundle(tmp_path)
+    exported_nam = _write_nam(tmp_path / "trained.nam")
+
+    monkeypatch.setattr(train_a2, "check_receptive_field", lambda manifest, sr: None)
+    monkeypatch.setattr(train_a2, "_run_official_trainer", lambda *a, **k: exported_nam)
+    monkeypatch.setattr(train_a2, "render", lambda model, a, sr, **kwargs: np.asarray(a, dtype=np.float32).copy())
+
+    rc = train_a2.main([str(manifest_path)])
+    assert rc == 0
+
+    with open(manifest_path) as f:
+        updated = json.load(f)
+    assert updated["training"]["epoch_preset"] == "standard"
+    assert updated["training"]["epochs"] == 60
+
+
+@pytest.mark.parametrize("preset,expected_epochs", [("draft", 20), ("standard", 60), ("high_def", 120)])
+def test_main_epoch_preset_flag_selects_settings_passed_to_trainer(tmp_path, monkeypatch, preset, expected_epochs):
+    manifest_path, bundle_dir = _make_bundle(tmp_path)
+    exported_nam = _write_nam(tmp_path / "trained.nam")
+    captured = {}
+
+    def fake_run_official_trainer(input_path, target_path, output_dir, settings, device, manifest):
+        captured["settings"] = settings
+        return exported_nam
+
+    monkeypatch.setattr(train_a2, "check_receptive_field", lambda manifest, sr: None)
+    monkeypatch.setattr(train_a2, "_run_official_trainer", fake_run_official_trainer)
+    monkeypatch.setattr(train_a2, "render", lambda model, a, sr, **kwargs: np.asarray(a, dtype=np.float32).copy())
+
+    rc = train_a2.main([str(manifest_path), "--epoch-preset", preset])
+    assert rc == 0
+    assert captured["settings"].epochs == expected_epochs
+    assert captured["settings"].fast_dev_run is False
+
+    with open(manifest_path) as f:
+        updated = json.load(f)
+    assert updated["training"]["epoch_preset"] == preset
+    assert updated["training"]["epochs"] == expected_epochs
+
+
+def test_main_quick_flag_overrides_epoch_preset(tmp_path, monkeypatch):
+    """--quick is a distinct 1-epoch smoke test, not one of the quality
+    presets -- passing both must still run the smoke test, never a preset."""
+    manifest_path, bundle_dir = _make_bundle(tmp_path)
+    exported_nam = _write_nam(tmp_path / "trained.nam")
+    captured = {}
+
+    def fake_run_official_trainer(input_path, target_path, output_dir, settings, device, manifest):
+        captured["settings"] = settings
+        return exported_nam
+
+    monkeypatch.setattr(train_a2, "check_receptive_field", lambda manifest, sr: None)
+    monkeypatch.setattr(train_a2, "_run_official_trainer", fake_run_official_trainer)
+    monkeypatch.setattr(train_a2, "render", lambda model, a, sr, **kwargs: np.asarray(a, dtype=np.float32).copy())
+
+    rc = train_a2.main([str(manifest_path), "--quick", "--epoch-preset", "high_def"])
+    assert rc == 0
+    assert captured["settings"].epochs == 1
+    assert captured["settings"].fast_dev_run is True
+
+    with open(manifest_path) as f:
+        updated = json.load(f)
+    assert updated["training"]["quick_mode"] is True
+    assert updated["training"]["epoch_preset"] is None  # not a preset run
+
+
+def test_epoch_preset_flag_rejects_unknown_value(tmp_path):
+    manifest_path, bundle_dir = _make_bundle(tmp_path)
+    with pytest.raises(SystemExit):
+        train_a2.main([str(manifest_path), "--epoch-preset", "ultra"])
+
+
+def test_run_official_trainer_forwards_settings_epochs_to_core_train(tmp_path, monkeypatch):
+    """Direct test of _run_official_trainer itself: whatever A2TrainingSettings
+    it's given, `epochs` must reach nam.train.core.train() unchanged --
+    proves the draft/standard/high_def epoch count actually controls the
+    real trainer call, not just what's recorded in the manifest."""
+    import types
+
+    input_path = tmp_path / "input.wav"
+    target_path = tmp_path / "target.wav"
+    output_dir = tmp_path / "out"
+    sf.write(input_path, np.zeros(1000, dtype=np.float32), 48000, subtype="FLOAT")
+    sf.write(target_path, np.zeros(1000, dtype=np.float32), 48000, subtype="FLOAT")
+
+    captured = {}
+
+    class FakeNet:
+        def export(self, export_dir, basename, user_metadata, other_metadata):
+            Path(export_dir).mkdir(parents=True, exist_ok=True)
+            (Path(export_dir) / f"{basename}.nam").write_text("{}", encoding="utf-8")
+
+    class FakeModel:
+        net = FakeNet()
+
+    class FakeMetadata:
+        def model_dump(self):
+            return {}
+
+    class FakeTrainOutput:
+        model = FakeModel()
+        metadata = FakeMetadata()
+
+    def fake_train(**kwargs):
+        captured.update(kwargs)
+        return FakeTrainOutput()
+
+    class FakeGearType:
+        AMP = "amp"
+
+    class FakeUserMetadata:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setitem(sys.modules, "nam", types.ModuleType("nam"))
+    monkeypatch.setitem(sys.modules, "nam.train", types.ModuleType("nam.train"))
+    monkeypatch.setitem(sys.modules, "nam.train.core", types.SimpleNamespace(train=fake_train))
+    monkeypatch.setitem(sys.modules, "nam.train.metadata", types.SimpleNamespace(TRAINING_KEY="training"))
+    monkeypatch.setitem(sys.modules, "nam.models", types.ModuleType("nam.models"))
+    monkeypatch.setitem(sys.modules, "nam.models.metadata", types.SimpleNamespace(
+        GearType=FakeGearType, UserMetadata=FakeUserMetadata,
+    ))
+
+    settings = train_a2.settings_for_preset("high_def")
+    manifest = {"amp_a": {"filename": "A.nam"}, "amp_b": {"filename": "B.nam"}, "calibration": {"applied": False}}
+
+    nam_path = train_a2._run_official_trainer(input_path, target_path, output_dir, settings, "auto", manifest)
+
+    assert captured["epochs"] == 120
+    assert nam_path.is_file()

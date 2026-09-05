@@ -18,6 +18,7 @@ import soundfile as sf
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
+from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
@@ -615,6 +616,8 @@ def api_generate():
             "amp_b_gain_db": design.amp_b_calibration_gain_db,
         },
         "training_command": f"python scripts/train_a2.py {bundle.training_manifest_path}",
+        "epoch_presets": A2_EPOCH_PRESETS,
+        "default_epoch_preset": DEFAULT_EPOCH_PRESET,
         "warnings": bundle.warnings,
         "implemented": True,
     })
@@ -676,6 +679,9 @@ def api_kaggle_train():
     design_id = data.get("design_id")
     if not design_id:
         return jsonify({"error": "design_id is required (from a prior POST /api/generate response)"}), 400
+    epoch_preset = data.get("epoch_preset", DEFAULT_EPOCH_PRESET)
+    if epoch_preset not in A2_EPOCH_PRESETS:
+        return jsonify({"error": f"epoch_preset must be one of {sorted(A2_EPOCH_PRESETS)}, got {epoch_preset!r}"}), 400
 
     bundle_dir = A2_OUTPUT_DIR / secure_filename(str(design_id))
     manifest_path = bundle_dir / "training_manifest.json"
@@ -683,7 +689,7 @@ def api_kaggle_train():
         return jsonify({"error": f"no generated training bundle found for design_id {design_id!r} -- call POST /api/generate first"}), 400
 
     try:
-        job = _kaggle_manager.submit_async(design_id, bundle_dir)
+        job = _kaggle_manager.submit_async(design_id, bundle_dir, epoch_preset=epoch_preset)
     except KaggleTrainingError as exc:
         return jsonify({"error": str(exc)}), 400
 

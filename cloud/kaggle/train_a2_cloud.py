@@ -45,8 +45,24 @@ from pathlib import Path
 NEURAL_AMP_MODELER_VERSION = "0.13.0"
 OFFICIAL_V3_INPUT_MD5 = "36cd1af62985c2fac3e654333e36431e"
 
-TRAINING_SETTINGS = {
-    "epochs": 100,
+REQUIRED_SAMPLE_RATE = 48000
+
+
+class CloudTrainingError(RuntimeError):
+    pass
+
+
+# Quality/speed presets -- draft for a fast preview, standard for normal use,
+# high_def for the best result at the cost of a longer run. Only "epochs"
+# differs between presets; every other setting below stays identical.
+EPOCH_PRESETS = {
+    "draft": 20,
+    "standard": 60,
+    "high_def": 120,
+}
+DEFAULT_EPOCH_PRESET = "standard"
+
+_BASE_SETTINGS = {
     "batch_size": 16,
     "ny": 8192,
     "seed": 0,
@@ -55,13 +71,19 @@ TRAINING_SETTINGS = {
     "fast_dev_run": False,
     "silent": True,
 }
-QUICK_SETTINGS = {**TRAINING_SETTINGS, "epochs": 1, "fast_dev_run": True}
-
-REQUIRED_SAMPLE_RATE = 48000
 
 
-class CloudTrainingError(RuntimeError):
-    pass
+def settings_for_preset(preset: str) -> dict:
+    if preset not in EPOCH_PRESETS:
+        raise CloudTrainingError(f"unknown A2 epoch preset {preset!r} -- choose one of {sorted(EPOCH_PRESETS)}")
+    return {**_BASE_SETTINGS, "epochs": EPOCH_PRESETS[preset]}
+
+
+# Kept for backward compatibility / parity checks against
+# hybrid/a2_training_settings.py's A2_TRAINING_SETTINGS (both use the same
+# DEFAULT_EPOCH_PRESET).
+TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
+QUICK_SETTINGS = {**_BASE_SETTINGS, "epochs": 1, "fast_dev_run": True}
 
 
 def _find_input_dir() -> Path:
@@ -190,7 +212,11 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     }
 
 
-def run_training(bundle_dir: Path, output_dir: Path, quick: bool) -> dict:
+def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: str = DEFAULT_EPOCH_PRESET) -> dict:
+    # Validated before importing torch/nam -- an unknown preset should fail
+    # immediately, not after paying for a heavy import first.
+    settings = QUICK_SETTINGS if quick else settings_for_preset(epoch_preset)
+
     import nam.train.core as core
     from nam.models.metadata import GearType, UserMetadata
     from nam.train.metadata import TRAINING_KEY
@@ -198,7 +224,6 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool) -> dict:
     with open(bundle_dir / "training_manifest.json", "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
-    settings = QUICK_SETTINGS if quick else TRAINING_SETTINGS
     output_dir.mkdir(parents=True, exist_ok=True)
 
     start = time.time()
@@ -247,10 +272,17 @@ def main() -> int:
     try:
         bundle_dir = _find_input_dir()
         quick = False
+        epoch_preset = DEFAULT_EPOCH_PRESET
         cloud_job_path = bundle_dir / "cloud_job.json"
         if cloud_job_path.is_file():
             with open(cloud_job_path, "r", encoding="utf-8") as f:
-                json.load(f)  # currently informational only (job_id/design_id/accelerator)
+                cloud_job = json.load(f)
+            requested_preset = cloud_job.get("epoch_preset")
+            if requested_preset in EPOCH_PRESETS:
+                epoch_preset = requested_preset
+            elif requested_preset is not None:
+                print(f"WARNING: cloud_job.json requested unknown epoch_preset {requested_preset!r} -- "
+                      f"falling back to {DEFAULT_EPOCH_PRESET!r}")
 
         env_info = print_diagnostics()
         result["environment"] = env_info
@@ -264,7 +296,7 @@ def main() -> int:
         result["input"] = input_info
 
         output_dir = Path("/kaggle/working/a2_output")
-        train_result = run_training(bundle_dir, output_dir, quick=quick)
+        train_result = run_training(bundle_dir, output_dir, quick=quick, epoch_preset=epoch_preset)
 
         nam_path = train_result["nam_path"]
         final_nam_path = Path("/kaggle/working") / nam_path.name
@@ -276,6 +308,7 @@ def main() -> int:
             "torch_version": env_info.get("torch_version"),
             "cuda_version": env_info.get("cuda_runtime_version"),
             "gpu_name": env_info.get("gpu_name"),
+            "epoch_preset": epoch_preset if not quick else None,
             "epochs": train_result["settings"]["epochs"],
             "batch_size": train_result["settings"]["batch_size"],
             "ny": train_result["settings"]["ny"],

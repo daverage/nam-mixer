@@ -138,11 +138,39 @@ legitimate, not a hang to short-circuit aggressively. It is NOT caused by
 upload being unreliable -- all specifically ruled out by direct reproduction
 against the real account.
 
-Training hyperparameters (epochs=100, batch_size=16, ny=8192, seed=0,
-latency=0) are defined once in `hybrid/a2_training_settings.py` and shared by
-both the local trainer and the cloud worker -- this is enforced by
-`tests/test_a2_training_settings.py`, so the two paths cannot silently drift
-apart.
+Training hyperparameters (batch_size=16, ny=8192, seed=0, latency=0, plus the
+epoch count -- see "Training quality presets" below) are defined once in
+`hybrid/a2_training_settings.py` and shared by both the local trainer and the
+cloud worker -- this is enforced by `tests/test_a2_training_settings.py`, so
+the two paths cannot silently drift apart.
+
+### Training quality presets
+
+Both trainers accept an epoch-count preset instead of a single fixed value:
+
+| Preset      | Epochs | Use case                          |
+|-------------|--------|------------------------------------|
+| `draft`     | 20     | Fast preview of the crossfade      |
+| `standard`  | 60     | Normal use (UI default)            |
+| `high_def`  | 120    | Best result, longest run           |
+
+`hybrid/a2_training_settings.py`'s `A2_EPOCH_PRESETS`/`settings_for_preset()`
+are the single source of truth; `cloud/kaggle/train_a2_cloud.py` mirrors them
+as `EPOCH_PRESETS`/`settings_for_preset()` (parity enforced by
+`tests/test_a2_training_settings.py`, same mechanism as the other shared
+constants). Only `epochs` differs between presets -- batch_size/ny/seed/
+latency/etc are identical across all three.
+
+- **Local**: `python scripts/train_a2.py <manifest> --epoch-preset draft|standard|high_def` (defaults to `standard`; ignored if `--quick` is also passed, which is a separate 1-epoch smoke test, never a quality preset).
+- **Kaggle**: `POST /api/kaggle/train` accepts an `"epoch_preset"` field in its
+  JSON body (defaults to `"standard"`); `KaggleJobManager.submit`/
+  `submit_async` take an `epoch_preset` kwarg and reject an unrecognized
+  value immediately (never silently falls back). The chosen preset is
+  recorded in `job.epoch_preset` and staged into the dataset's
+  `cloud_job.json`, which the cloud worker reads to select its own
+  `settings_for_preset()` call -- falling back to `standard` with a printed
+  warning only if `cloud_job.json` is somehow missing or names an unknown
+  preset (defensive, since the app itself already validates before staging).
 
 ## Accelerator
 

@@ -25,18 +25,45 @@ class A2TrainingSettings:
     silent: bool
 
 
-# Normal, full-quality training run -- the only settings that may produce a
-# model we call "final" (docs/kaggle_training.md / docs/phase3.md section 15).
-A2_TRAINING_SETTINGS = A2TrainingSettings(
-    epochs=100,
-    batch_size=16,
-    ny=8192,
-    seed=0,
-    latency=0,  # synthetic target -- authoritatively zero, never auto-detected
-    ignore_checks=False,
-    fast_dev_run=False,
-    silent=True,
-)
+# Quality/speed presets for a real (non-smoke-test) training run -- draft for
+# a fast preview, standard for normal use, high_def for the best result at
+# the cost of a longer run. Every non-epochs setting (batch_size/ny/seed/
+# latency/etc, see _full_settings below) stays identical across presets --
+# only the number of epochs differs.
+A2_EPOCH_PRESETS: dict[str, int] = {
+    "draft": 20,
+    "standard": 60,
+    "high_def": 120,
+}
+DEFAULT_EPOCH_PRESET = "standard"
+
+
+def _full_settings(epochs: int) -> A2TrainingSettings:
+    return A2TrainingSettings(
+        epochs=epochs,
+        batch_size=16,
+        ny=8192,
+        seed=0,
+        latency=0,  # synthetic target -- authoritatively zero, never auto-detected
+        ignore_checks=False,
+        fast_dev_run=False,
+        silent=True,
+    )
+
+
+def settings_for_preset(preset: str) -> A2TrainingSettings:
+    """Full (non-smoke-test) training settings for one of A2_EPOCH_PRESETS'
+    named quality levels ("draft"/"standard"/"high_def"). Raises ValueError
+    on an unrecognized preset name rather than silently falling back --
+    an invalid preset should never quietly train at the wrong length."""
+    if preset not in A2_EPOCH_PRESETS:
+        raise ValueError(f"unknown A2 epoch preset {preset!r} -- choose one of {sorted(A2_EPOCH_PRESETS)}")
+    return _full_settings(A2_EPOCH_PRESETS[preset])
+
+
+# Normal, full-quality training run at the default preset -- kept for
+# backward compatibility with callers that don't need preset selection.
+A2_TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
 
 # Fast development/smoke-test run only -- never the final model (docs/phase3.md
 # section 15, docs/kaggle_training.md "real end-to-end test" section).

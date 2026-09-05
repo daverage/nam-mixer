@@ -44,6 +44,7 @@ from typing import Optional
 
 import numpy as np
 
+from .a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from .nam_loader import load_nam
 from .render import NamRenderError, render
 from .validation import compute_esr_metrics
@@ -469,6 +470,7 @@ class KaggleJob:
     dataset_ref: Optional[str] = None
     kernel_ref: Optional[str] = None
     accelerator: str = ACCELERATOR
+    epoch_preset: str = DEFAULT_EPOCH_PRESET
     upload_completed_at: Optional[float] = None
     dataset_ready_at: Optional[float] = None
     dataset_verified_at: Optional[float] = None
@@ -625,6 +627,7 @@ class KaggleJobManager:
             "job_id": job.job_id,
             "design_id": job.design_id,
             "accelerator": job.accelerator,
+            "epoch_preset": job.epoch_preset,
         }
         _atomic_write_json(dataset_staging / "cloud_job.json", cloud_job)
 
@@ -909,10 +912,14 @@ class KaggleJobManager:
                 time.sleep(self.kernel_verify_delay_s)
         return False
 
-    def _precheck_and_reserve_job(self, design_id: str) -> KaggleJob:
+    def _precheck_and_reserve_job(self, design_id: str, epoch_preset: str = DEFAULT_EPOCH_PRESET) -> KaggleJob:
         """Shared by `submit`/`submit_async`: CLI/auth checks, resolving a
         stuck existing job, and reserving a fresh job_id -- all fast/cheap,
         safe to run synchronously inside the Flask request."""
+        if epoch_preset not in A2_EPOCH_PRESETS:
+            raise KaggleTrainingError(
+                f"unknown epoch_preset {epoch_preset!r} -- choose one of {sorted(A2_EPOCH_PRESETS)}"
+            )
         if not self.cli.is_installed():
             raise KaggleTrainingError("Kaggle CLI is not installed. Run: pip install kaggle")
         if not self.cli.is_authenticated():
@@ -931,7 +938,7 @@ class KaggleJobManager:
                     f"a Kaggle job is already in progress for this design ({existing.job_id}, state={existing.state})"
                 )
 
-        job = KaggleJob(job_id=uuid.uuid4().hex[:12], design_id=design_id)
+        job = KaggleJob(job_id=uuid.uuid4().hex[:12], design_id=design_id, epoch_preset=epoch_preset)
         save_job(self.a2_output_dir, job)
         return job
 
@@ -944,18 +951,18 @@ class KaggleJobManager:
         self.create_dataset(job, dataset_staging)
         self.create_kernel(job, kernel_staging)
 
-    def submit(self, design_id: str, bundle_dir: Path) -> KaggleJob:
+    def submit(self, design_id: str, bundle_dir: Path, epoch_preset: str = DEFAULT_EPOCH_PRESET) -> KaggleJob:
         """Synchronous end-to-end submission -- blocks for the entire
         upload. Kept for tests and any caller that genuinely wants to wait;
         the Flask route uses `submit_async` instead so a slow/flaky Kaggle
         upload (see docs/kaggle_training.md -- a real production run took
         several minutes under real network conditions) never blocks the
         request thread."""
-        job = self._precheck_and_reserve_job(design_id)
+        job = self._precheck_and_reserve_job(design_id, epoch_preset)
         self._run_pipeline(job, bundle_dir)
         return job
 
-    def submit_async(self, design_id: str, bundle_dir: Path) -> KaggleJob:
+    def submit_async(self, design_id: str, bundle_dir: Path, epoch_preset: str = DEFAULT_EPOCH_PRESET) -> KaggleJob:
         """Returns immediately (job in state "preparing"/"uploading_dataset")
         once CLI/auth pre-checks pass; the actual stage/upload/verify/kernel
         pipeline runs on a background thread. A plain daemon thread is
@@ -964,7 +971,7 @@ class KaggleJobManager:
         step still persists job state to disk immediately, so a Flask
         restart mid-upload loses only the ability to keep watching that one
         upload live, never the record of what happened."""
-        job = self._precheck_and_reserve_job(design_id)
+        job = self._precheck_and_reserve_job(design_id, epoch_preset)
 
         def _worker() -> None:
             try:

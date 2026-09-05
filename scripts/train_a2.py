@@ -5,7 +5,7 @@ docs/phase3.md sections 13-21, 31-33.
 Runs INSIDE the dedicated training environment (see scripts/setup_a2_env.ps1)
 -- has no Flask import, is independently runnable:
 
-    python scripts/train_a2.py work/a2/<design_id>/training_manifest.json [--quick] [--device auto]
+    python scripts/train_a2.py work/a2/<design_id>/training_manifest.json [--quick] [--epoch-preset draft|standard|high_def] [--device auto]
 
 What it does, in order (aborts non-zero on any failure -- never silently
 degrades to "worked around it"):
@@ -53,7 +53,13 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from hybrid.a2_training_settings import settings_for, user_metadata_kwargs  # noqa: E402
+from hybrid.a2_training_settings import (  # noqa: E402
+    A2_EPOCH_PRESETS,
+    A2_QUICK_SETTINGS,
+    DEFAULT_EPOCH_PRESET,
+    settings_for_preset,
+    user_metadata_kwargs,
+)
 from hybrid.receptive_field import (  # noqa: E402
     ReceptiveFieldUnavailable,
     assert_envelope_history_fits,
@@ -259,7 +265,7 @@ def _build_user_metadata(manifest: dict):
     )
 
 
-def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path, quick: bool, device: str, manifest: dict) -> Path:
+def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path, settings, device: str, manifest: dict) -> Path:
     """Call the official current neural-amp-modeler simplified A2 trainer:
     `nam.train.core.train()`.
 
@@ -298,11 +304,11 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
               "override -- it selects CUDA/MPS/CPU automatically. Continuing with automatic selection.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Shared with cloud/kaggle/train_a2_cloud.py -- see
-    # hybrid/a2_training_settings.py. This is the parity mechanism that keeps
-    # local and Kaggle GPU training from silently drifting apart.
-    settings = settings_for(quick)
-
+    # `settings` (an A2TrainingSettings -- either A2_QUICK_SETTINGS or
+    # settings_for_preset(<draft|standard|high_def>)) is shared with
+    # cloud/kaggle/train_a2_cloud.py -- see hybrid/a2_training_settings.py.
+    # This is the parity mechanism that keeps local and Kaggle GPU training
+    # from silently drifting apart.
     result = core.train(
         input_path=str(input_path),
         output_path=str(target_path),
@@ -394,6 +400,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path, help="path to training_manifest.json")
     parser.add_argument("--quick", action="store_true", help="fast development smoke-test run (NOT for the final model)")
+    parser.add_argument(
+        "--epoch-preset", choices=sorted(A2_EPOCH_PRESETS), default=DEFAULT_EPOCH_PRESET,
+        help=f"training quality/length ({', '.join(f'{k}={v}' for k, v in A2_EPOCH_PRESETS.items())} epochs); ignored if --quick",
+    )
     parser.add_argument("--device", default="auto", help="'auto', 'cpu', 'cuda', or 'mps'")
     parser.add_argument("--output-dir", type=Path, default=None, help="defaults to <bundle_dir>/a2_output")
     args = parser.parse_args(argv)
@@ -411,8 +421,12 @@ def main(argv=None) -> int:
         output_dir = args.output_dir or (bundle_dir / "a2_output")
         if args.quick:
             print("--quick: running a fast development smoke test, NOT the final model.")
+            settings = A2_QUICK_SETTINGS
+        else:
+            settings = settings_for_preset(args.epoch_preset)
+            print(f"--epoch-preset={args.epoch_preset}: training for {settings.epochs} epochs.")
 
-        nam_path = _run_official_trainer(input_path, target_path, output_dir, args.quick, args.device, manifest)
+        nam_path = _run_official_trainer(input_path, target_path, output_dir, settings, args.device, manifest)
         print(f"Trainer produced: {nam_path}")
 
         full_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=False)
@@ -429,6 +443,8 @@ def main(argv=None) -> int:
             **env_info,
             "device_requested": args.device,
             "quick_mode": args.quick,
+            "epoch_preset": args.epoch_preset if not args.quick else None,
+            "epochs": settings.epochs,
             "output_nam_path": str(nam_path),
             "output_nam_sha256": _sha256_file(nam_path),
             "full_metrics_vs_target": full_metrics,

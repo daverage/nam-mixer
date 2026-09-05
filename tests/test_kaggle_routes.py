@@ -57,7 +57,7 @@ def test_train_surfaces_manager_error_distinctly(client, tmp_path, monkeypatch):
     bundle_dir.mkdir()
     (bundle_dir / "training_manifest.json").write_text("{}")
 
-    def fake_submit(design_id, bundle_dir_arg):
+    def fake_submit(design_id, bundle_dir_arg, epoch_preset=None):
         raise KaggleTrainingError("Kaggle CLI is not authenticated. Run: kaggle auth login")
     monkeypatch.setattr(app_module._kaggle_manager, "submit_async", fake_submit)
 
@@ -72,15 +72,48 @@ def test_train_success_returns_job_id(client, tmp_path, monkeypatch):
     bundle_dir.mkdir()
     (bundle_dir / "training_manifest.json").write_text("{}")
 
-    monkeypatch.setattr(
-        app_module._kaggle_manager, "submit_async",
-        lambda design_id, bundle_dir_arg: KaggleJob(job_id="abc123", design_id=design_id, state="submitted"),
-    )
+    captured = {}
+
+    def fake_submit(design_id, bundle_dir_arg, epoch_preset=None):
+        captured["epoch_preset"] = epoch_preset
+        return KaggleJob(job_id="abc123", design_id=design_id, state="submitted")
+
+    monkeypatch.setattr(app_module._kaggle_manager, "submit_async", fake_submit)
     resp = client.post("/api/kaggle/train", json={"design_id": "mydesign"})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["job_id"] == "abc123"
     assert data["state"] == "submitted"
+    assert captured["epoch_preset"] == "standard"  # default when unspecified
+
+
+def test_train_passes_through_requested_epoch_preset(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    bundle_dir = tmp_path / "mydesign"
+    bundle_dir.mkdir()
+    (bundle_dir / "training_manifest.json").write_text("{}")
+
+    captured = {}
+
+    def fake_submit(design_id, bundle_dir_arg, epoch_preset=None):
+        captured["epoch_preset"] = epoch_preset
+        return KaggleJob(job_id="abc123", design_id=design_id, state="submitted", epoch_preset=epoch_preset)
+
+    monkeypatch.setattr(app_module._kaggle_manager, "submit_async", fake_submit)
+    resp = client.post("/api/kaggle/train", json={"design_id": "mydesign", "epoch_preset": "high_def"})
+    assert resp.status_code == 200
+    assert captured["epoch_preset"] == "high_def"
+
+
+def test_train_rejects_unknown_epoch_preset(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    bundle_dir = tmp_path / "mydesign"
+    bundle_dir.mkdir()
+    (bundle_dir / "training_manifest.json").write_text("{}")
+
+    resp = client.post("/api/kaggle/train", json={"design_id": "mydesign", "epoch_preset": "ultra"})
+    assert resp.status_code == 400
+    assert "epoch_preset" in resp.get_json()["error"]
 
 
 def test_job_status_requires_design_id(client):

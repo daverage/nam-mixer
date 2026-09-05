@@ -205,6 +205,13 @@
         <div id="generate-result" class="generate-result" hidden></div>
 
         <div id="a2-training-section" hidden>
+          <label class="field-label">Training quality</label>
+          <div class="radio-row">
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-draft" value="draft"> Draft <span class="hint">(20 epochs, fast preview)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-standard" value="standard" checked> Standard <span class="hint">(60 epochs)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-high_def" value="high_def"> High def <span class="hint">(120 epochs, slowest)</span></label>
+          </div>
+
           <label class="field-label">Training</label>
           <div class="radio-row">
             <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Kaggle GPU <span class="hint">(recommended)</span></label>

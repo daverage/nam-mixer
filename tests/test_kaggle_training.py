@@ -15,7 +15,9 @@ import soundfile as sf
 
 import hybrid.kaggle_training as kaggle_training
 from hybrid.kaggle_training import (
+    A2_EPOCH_PRESETS,
     ACCELERATOR,
+    DEFAULT_EPOCH_PRESET,
     FORBIDDEN_ACCELERATORS,
     REQUIRED_DATASET_FILES,
     STAGED_BUNDLE_FILES,
@@ -252,6 +254,20 @@ def test_staging_allow_list(tmp_path, bundle_dir):
     assert job.state == "uploading"
 
 
+def test_staging_writes_job_epoch_preset_into_cloud_job_json(tmp_path, bundle_dir):
+    manager = KaggleJobManager(tmp_path)
+    job = KaggleJob(job_id="abc123", design_id="mydesign", epoch_preset="high_def")
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
+
+    cloud_job = json.loads((dataset_staging / "cloud_job.json").read_text())
+    assert cloud_job["epoch_preset"] == "high_def"
+
+
+def test_kaggle_job_defaults_to_standard_epoch_preset():
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    assert job.epoch_preset == DEFAULT_EPOCH_PRESET == "standard"
+
+
 def test_staging_missing_file_raises(tmp_path, bundle_dir):
     (bundle_dir / "input.wav").unlink()
     manager = KaggleJobManager(tmp_path)
@@ -432,6 +448,35 @@ def test_submit_rejects_second_concurrent_job(tmp_path, bundle_dir, monkeypatch)
     assert job1.state == "queued"
     with pytest.raises(KaggleTrainingError, match="already in progress"):
         manager.submit("mydesign", bundle_dir)
+
+
+# --- epoch preset selection (draft=20 / standard=60 / high_def=120) ------
+
+def test_submit_rejects_unknown_epoch_preset(tmp_path, bundle_dir, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    with pytest.raises(KaggleTrainingError, match="unknown epoch_preset"):
+        manager.submit("mydesign", bundle_dir, epoch_preset="ultra")
+
+
+@pytest.mark.parametrize("preset", sorted(A2_EPOCH_PRESETS))
+def test_submit_threads_epoch_preset_through_to_staged_cloud_job(tmp_path, bundle_dir, monkeypatch, preset):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager.submit("mydesign", bundle_dir, epoch_preset=preset)
+
+    assert job.epoch_preset == preset
+    cloud_job = json.loads(
+        (_job_dir(tmp_path, "mydesign", job.job_id) / "dataset_staging" / "cloud_job.json").read_text()
+    )
+    assert cloud_job["epoch_preset"] == preset
+
+
+def test_submit_defaults_to_standard_epoch_preset_when_unspecified(tmp_path, bundle_dir, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager.submit("mydesign", bundle_dir)
+    assert job.epoch_preset == "standard"
 
 
 # --- refresh() migration path for pre-fix bare kernel_ref jobs -----------
