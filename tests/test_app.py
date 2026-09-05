@@ -8,12 +8,14 @@ need a fresh render).
 from __future__ import annotations
 
 import json as jsonlib
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import app as app_module
 import hybrid.pipeline as pipeline
+import hybrid.training_target as training_target
 
 # Smallest bundled DI fixture (17.75s) -- keeps these tests fast since the
 # causal envelope follower is a real (if cheap) per-sample computation.
@@ -25,6 +27,7 @@ def identity_render(monkeypatch):
     def fake_render(model, audio, sample_rate):
         return np.asarray(audio, dtype=np.float32).copy()
     monkeypatch.setattr(pipeline, "render", fake_render)
+    monkeypatch.setattr(training_target, "render", fake_render)
 
 
 @pytest.fixture
@@ -167,3 +170,95 @@ def test_active_profile_without_custom_gain_is_rejected(client, tmp_path):
 
     resp = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, input_profile_id="active_buffered"))
     assert resp.status_code == 400
+
+
+@pytest.fixture
+def isolated_training_paths(tmp_path, monkeypatch):
+    """Redirect app.py's training-input/bundle paths into tmp_path so these
+    tests never touch the real work/ directory."""
+    training_path = tmp_path / "training_input" / "input.wav"
+    a2_dir = tmp_path / "a2"
+    a2_dir.mkdir()
+    monkeypatch.setattr(app_module, "TRAINING_INPUT_PATH", training_path)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    return training_path, a2_dir
+
+
+def _write_training_wav(path, n=4800, sample_rate=48000):
+    import soundfile as sf
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(0)
+    audio = (0.3 * rng.uniform(-1, 1, n)).astype(np.float32)
+    sf.write(path, audio, sample_rate, subtype="FLOAT")
+    return path
+
+
+def test_training_input_status_missing_by_default(client, isolated_training_paths):
+    resp = client.get("/api/training_input/status")
+    assert resp.status_code == 200
+    assert resp.get_json()["ready"] is False
+
+
+def test_training_input_upload_accepts_valid_wav(client, isolated_training_paths, tmp_path):
+    src = _write_training_wav(tmp_path / "src.wav")
+    with open(src, "rb") as f:
+        resp = client.post("/api/training_input/upload", data={"file": (f, "input.wav")}, content_type="multipart/form-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ready"] is True
+
+    status = client.get("/api/training_input/status").get_json()
+    assert status["ready"] is True
+
+
+def test_training_input_upload_rejects_wrong_sample_rate(client, isolated_training_paths, tmp_path):
+    src = _write_training_wav(tmp_path / "src.wav", sample_rate=44100)
+    with open(src, "rb") as f:
+        resp = client.post("/api/training_input/upload", data={"file": (f, "input.wav")}, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert client.get("/api/training_input/status").get_json()["ready"] is False
+
+
+def test_generate_requires_rendered_pair(client, isolated_training_paths):
+    app_module._rendered_pair_cache["pair"] = None
+    resp = client.post("/api/generate", json={})
+    assert resp.status_code == 400
+
+
+def test_generate_requires_training_input(client, isolated_training_paths, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    resp = client.post("/api/generate", json={"crossover_dbfs": -20.0, "transition_width_db": 8.0})
+    assert resp.status_code == 400
+    assert resp.get_json()["training_input_ready"] is False
+
+
+def test_generate_end_to_end_produces_bundle(client, isolated_training_paths, tmp_path):
+    training_path, a2_dir = isolated_training_paths
+    _write_training_wav(training_path)
+
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    resp = client.post("/api/generate", json={
+        "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "auto_level": False, "manual_b_trim_db": 1.5,
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["implemented"] is True
+    assert Path(data["target_path"]).is_file()
+    assert Path(data["manifest_path"]).is_file()
+
+    with open(data["manifest_path"]) as f:
+        manifest = jsonlib.load(f)
+    # The design was auditioned at input_profile_id=vintage_humbucker (0 dB
+    # gain, per _render_body's default) -- but this proves the field exists
+    # and generation never re-applies ANY profile gain to the training input.
+    assert manifest["design"]["pickup_profile_applied_to_training_input"] is False
+    assert manifest["design"]["frozen_effective_b_trim_db"] == pytest.approx(1.5)

@@ -20,7 +20,7 @@ import numpy as np
 from .align import align_to_reference
 from .blend import CrossoverConfig, blend
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU, resolve_calibration
-from .envelope import rms_envelope_db
+from .envelope import DEFAULT_BOUNDED_ENVELOPE_CONFIG, BoundedEnvelopeConfig, bounded_causal_envelope_db
 from .input_profiles import db_to_amplitude
 from .level_match import LevelMatchResult, compute_crossover_trim
 from .nam_loader import NamModel
@@ -72,6 +72,7 @@ def render_pair(
     input_profile_gain_db: float = 0.0,
     calibration_mode: str = "auto",
     reference_input_level_dbu: float = DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
+    envelope_config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
 ) -> RenderedPair:
     """Render `dry` through both amp models. The expensive step -- call again
     whenever amp_a, amp_b, dry, the input profile, or calibration settings
@@ -106,8 +107,8 @@ def render_pair(
     amp_a_render = render(amp_a, amp_a_input, sample_rate)
     amp_b_render = render(amp_b, amp_b_input, sample_rate)
 
-    envelope_db = rms_envelope_db(profiled_dry, sample_rate)
-    source_envelope_db = rms_envelope_db(dry, sample_rate)
+    envelope_db = bounded_causal_envelope_db(profiled_dry, sample_rate, envelope_config)
+    source_envelope_db = bounded_causal_envelope_db(dry, sample_rate, envelope_config)
 
     return RenderedPair(
         dry=dry,

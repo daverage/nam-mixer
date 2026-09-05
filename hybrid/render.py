@@ -68,7 +68,7 @@ def find_nam_render_exe() -> Path:
 _SUBPROCESS_TIMEOUT_S = 120.0
 
 
-def render(model: NamModel, audio: np.ndarray, sample_rate: int) -> np.ndarray:
+def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | None = None) -> np.ndarray:
     """Render `audio` (mono float32, at `sample_rate`) through `model`.
 
     - Input and output are both mono float32 numpy arrays of the same length.
@@ -76,6 +76,15 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int) -> np.ndarray:
       the caller's responsibility, not this function's. If `sample_rate`
       doesn't match what the model expects, nam_render's own check will
       raise NamRenderError with the mismatch reported.
+    - `slim`: optional NAMCore "slimmable size" in [0.0, 1.0] -- only
+      meaningful for models built as a `SlimmableContainer`/slimmable WaveNet
+      (e.g. an A2 packed model's Full/Lite submodels), forwarded to the
+      native tool's `--slim` flag verbatim (0.0 is the largest/"Full"
+      submodel, 1.0 the smallest/"Lite" one -- see
+      native/nam_render/build/_deps/namcore-src/NAM/wavenet/slimmable.cpp).
+      Left as `None` (the default, no flag passed) for ordinary
+      non-slimmable models -- this is purely additive, existing callers are
+      unaffected. docs/phase3.md section 20.
     - Raises NamRenderError if the native tool is missing, times out, exits
       non-zero, or its output doesn't match this function's contract (mono,
       same length, same sample rate, all-finite) -- this module is the
@@ -93,9 +102,14 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int) -> np.ndarray:
         out_path = tmp_dir / "output.wav"
         sf.write(in_path, audio, sample_rate, subtype="FLOAT")
 
+        cmd = [str(exe)]
+        if slim is not None:
+            cmd += ["--slim", str(slim)]
+        cmd += [str(model.path), str(in_path), str(out_path)]
+
         try:
             result = subprocess.run(
-                [str(exe), str(model.path), str(in_path), str(out_path)],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=_SUBPROCESS_TIMEOUT_S,

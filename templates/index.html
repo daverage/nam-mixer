@@ -175,9 +175,21 @@
       </section>
 
       <section class="card card-muted">
-        <h2>Generate hybrid training target</h2>
-        <button id="btn-generate" class="btn btn-secondary">Generate Hybrid Target</button>
-        <div class="info">Not implemented yet -- see <code>hybrid/render.py</code>.</div>
+        <h2><span class="step">5</span> Create A2</h2>
+        <div class="info">
+          Freezes the CURRENT crossover/transition/trim into an immutable
+          design, then blends the official NAM training excitation through
+          it (unmodified by the input profile above -- that's a
+          design/preview-only control, see docs/phase3.md).
+        </div>
+
+        <label class="field-label" for="training-input-file">Official NAM training input (48&nbsp;kHz mono WAV)</label>
+        <input type="file" id="training-input-file" accept=".wav" class="file-input">
+        <div id="training-input-status" class="info">Checking...</div>
+
+        <button id="btn-generate" class="btn btn-secondary btn-block">Generate Training Bundle</button>
+        <div id="generate-status" class="info"></div>
+        <div id="generate-result" class="generate-result" hidden></div>
       </section>
 
     </main>

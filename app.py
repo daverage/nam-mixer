@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 import soundfile as sf
@@ -20,6 +21,7 @@ from werkzeug.utils import secure_filename
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
+from hybrid.design import freeze_design
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
@@ -30,6 +32,7 @@ from hybrid.nam_loader import load_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError
 from hybrid.safety import preview_safety_limiter
+from hybrid.training_target import TrainingInputError, generate_training_bundle, validate_training_input
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
 # We warn rather than silently clip or normalize -- see docs/INPUT_PROFILE_RESEARCH.md.
@@ -44,6 +47,11 @@ WORK_DIR = BASE_DIR / "work"
 WORK_DIR.mkdir(exist_ok=True)
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
+TRAINING_INPUT_DIR = WORK_DIR / "training_input"
+TRAINING_INPUT_DIR.mkdir(exist_ok=True)
+TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
+A2_OUTPUT_DIR = WORK_DIR / "a2"
+A2_OUTPUT_DIR.mkdir(exist_ok=True)
 
 app = Flask(__name__)
 
@@ -51,7 +59,10 @@ app = Flask(__name__)
 # for the last-rendered amp pair is the whole point of splitting
 # render_pair()/build_hybrid() apart: sliders should only ever hit
 # build_hybrid() against this, never re-invoke NAM inference.
-_rendered_pair_cache: dict = {"pair": None, "amp_a_summary": None, "amp_b_summary": None, "di_file": None}
+_rendered_pair_cache: dict = {
+    "pair": None, "amp_a_summary": None, "amp_b_summary": None, "di_file": None,
+    "amp_a_path": None, "amp_b_path": None,
+}
 
 
 def _profile_options(instrument_type: str) -> list[dict]:
@@ -224,6 +235,8 @@ def api_render_pair():
     _rendered_pair_cache["amp_a_summary"] = amp_a.summary()
     _rendered_pair_cache["amp_b_summary"] = amp_b.summary()
     _rendered_pair_cache["di_file"] = di_file
+    _rendered_pair_cache["amp_a_path"] = amp_a_path
+    _rendered_pair_cache["amp_b_path"] = amp_b_path
 
     warnings = []
     if pair.calibration_warning:
@@ -476,14 +489,121 @@ def api_preview():
     return Response(buf.read(), mimetype="audio/wav", headers=headers)
 
 
+@app.route("/api/training_input/status", methods=["GET"])
+def api_training_input_status():
+    """Whether an official NAM training input has been uploaded/is usable --
+    see docs/phase3.md section 7. Never falls back to a genre DI clip."""
+    if not TRAINING_INPUT_PATH.is_file():
+        return jsonify({"ready": False, "path": str(TRAINING_INPUT_PATH), "error": "no official training input uploaded yet"})
+    try:
+        _, info = validate_training_input(TRAINING_INPUT_PATH)
+    except TrainingInputError as exc:
+        return jsonify({"ready": False, "path": str(TRAINING_INPUT_PATH), "error": str(exc)})
+    return jsonify({
+        "ready": True, "path": str(TRAINING_INPUT_PATH),
+        "sample_rate": info.sample_rate, "frame_count": info.frame_count, "sha256": info.sha256,
+    })
+
+
+@app.route("/api/training_input/upload", methods=["POST"])
+def api_training_input_upload():
+    """Accept the official NAM training input WAV picked in the browser.
+    Validated immediately (mono, 48 kHz, finite) -- an invalid file is
+    rejected and not saved, per docs/phase3.md section 7's "ABORT, do not
+    bypass the check"."""
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "no file uploaded"}), 400
+    TRAINING_INPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    upload.save(TRAINING_INPUT_PATH)
+    try:
+        _, info = validate_training_input(TRAINING_INPUT_PATH)
+    except TrainingInputError as exc:
+        TRAINING_INPUT_PATH.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({
+        "ready": True, "path": str(TRAINING_INPUT_PATH),
+        "sample_rate": info.sample_rate, "frame_count": info.frame_count, "sha256": info.sha256,
+    })
+
+
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
-    """Generate a synthetic hybrid training target. Not functional yet -- depends
-    on hybrid.render.render() being implemented first (see that module)."""
+    """Freeze the currently-auditioned HybridDesign and generate a real,
+    reproducible A2 training bundle from it -- see hybrid/design.py and
+    hybrid/training_target.py. Requires a rendered/auditioned amp pair
+    (POST /api/render_pair) and an uploaded official NAM training input
+    (POST /api/training_input/upload) -- never trains on the preview/genre DI.
+    """
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    if pair is None:
+        return jsonify({"error": "Render and audition an amp pair first (POST /api/render_pair)."}), 400
+    amp_a_path = _rendered_pair_cache["amp_a_path"]
+    amp_b_path = _rendered_pair_cache["amp_b_path"]
+    di_file = _rendered_pair_cache["di_file"]
+
+    if not TRAINING_INPUT_PATH.is_file():
+        return jsonify({
+            "error": "Official NAM training input is missing. Upload one first (POST /api/training_input/upload).",
+            "training_input_ready": False,
+        }), 400
+
+    data = request.get_json(force=True)
+    try:
+        crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
+    except (TypeError, ValueError):
+        return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+
+    # Alignment is never exposed as a UI control (see freeze_design/build_hybrid
+    # call sites) -- it stays off, matching every other build_hybrid() call in
+    # this app.
+    result = build_hybrid(
+        pair,
+        crossover_dbfs=crossover_dbfs,
+        transition_width_db=transition_width_db,
+        auto_level=auto_level,
+        manual_b_trim_db=manual_b_trim_db,
+        align_enabled=False,
+    )
+
+    design = freeze_design(
+        pair, result,
+        amp_a_path=amp_a_path, amp_b_path=amp_b_path,
+        crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
+        alignment_enabled=False, design_di_file=di_file,
+    )
+
+    design_id = str(data.get("design_id") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    bundle_dir = A2_OUTPUT_DIR / design_id
+
+    try:
+        design.write_json(bundle_dir / "hybrid_design.json")
+        bundle = generate_training_bundle(design, TRAINING_INPUT_PATH, bundle_dir)
+    except (TrainingInputError, OSError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
     return jsonify({
-        "error": "Hybrid target generation depends on NAM rendering, which is not implemented yet. See hybrid/render.py.",
-        "implemented": False,
-    }), 501
+        "design_id": design_id,
+        "bundle_dir": str(bundle.bundle_dir),
+        "input_path": str(bundle.input_path),
+        "target_path": str(bundle.hybrid_target_path),
+        "manifest_path": str(bundle.training_manifest_path),
+        "safety_report": {
+            "raw_peak_dbfs": bundle.safety.raw_peak_dbfs,
+            "final_peak_dbfs": bundle.safety.final_peak_dbfs,
+            "gain_reduction_db": bundle.safety.gain_reduction_db,
+        },
+        "calibration_summary": {
+            "requested_mode": design.calibration_mode,
+            "effective_mode": design.calibration_effective_mode,
+            "applied": design.calibration_applied,
+            "amp_a_gain_db": design.amp_a_calibration_gain_db,
+            "amp_b_gain_db": design.amp_b_calibration_gain_db,
+        },
+        "training_command": f"python scripts/train_a2.py {bundle.training_manifest_path}",
+        "warnings": bundle.warnings,
+        "implemented": True,
+    })
 
 
 if __name__ == "__main__":

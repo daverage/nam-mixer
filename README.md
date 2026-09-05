@@ -126,7 +126,7 @@ training pair used to eventually train an A2 model must come from a real NAM
 training/reamping signal, not from `assets/di/`. This distinction is
 deliberate and should not be blurred — see `assets/di/README.md` for more.
 
-## Workflow (target, once fully implemented)
+## Workflow
 
 1. Select Amp A `.nam` and Amp B `.nam`.
 2. Choose the crossover point (dBFS) and transition width (dB) — how loud the
@@ -135,12 +135,24 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
 3. Auto level-match trims Amp B to Amp A around the crossover region; override
    manually if desired.
 4. Preview Amp A alone, Amp B alone, and the hybrid blend against a chosen
-   genre DI.
-5. Generate the hybrid synthetic target (dry input → Amp A render → Amp B
-   render → level-matched, blended output — with an *optional*, currently
-   disabled-by-default alignment step, see below), with metadata describing
-   exactly how it was built.
-6. (Future) Train a NAM A2 model on the generated input/output pair.
+   genre DI, using an input profile to simulate different pickups/output
+   levels (DESIGN/preview context only — see "Input profile vs. crossover vs.
+   NAM calibration" above).
+5. **Create A2**: upload the official NAM training excitation, then "Generate
+   Training Bundle" — this freezes everything from steps 2-4 into an
+   immutable `HybridDesign` (`hybrid/design.py`) and blends the *official*
+   training input (not the preview DI, and not with the input-profile gain
+   applied — the profile only shaped *design/preview*, never the actual
+   training excitation) through Amp A/Amp B with that frozen design
+   (`hybrid/training_target.py`). Produces `input.wav`, `hybrid_target.wav`
+   (+ `hybrid_target_raw.wav` for comparison), `hybrid.hybrid.json`, and
+   `training_manifest.json` under `work/a2/<design_id>/`.
+6. Train a real A2 (PackedWaveNet) model on the bundle with
+   `scripts/train_a2.py` (needs a separate Torch/`neural-amp-modeler`
+   environment — see `requirements-training.txt` /
+   `scripts/setup_a2_env.ps1` — never the app's own Python environment),
+   which also validates the exported `.nam` by loading and rendering it
+   through the existing native NAMCore renderer.
 
 ## Current limitations / experimental status
 

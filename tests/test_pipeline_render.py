@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 import hybrid.pipeline as pipeline
-from hybrid.envelope import rms_envelope_db
+from hybrid.envelope import bounded_causal_envelope_db
 from hybrid.input_profiles import db_to_amplitude
 from hybrid.nam_loader import NamModel
 from hybrid.pipeline import render_pair
@@ -60,7 +60,7 @@ def test_input_profile_gain_halves_amplitude_for_minus6db():
 def test_envelope_is_derived_from_profiled_dry_not_source_dry():
     dry = _dry()
     pair = render_pair(_fake_model(), _fake_model(), dry, 48000, input_profile_gain_db=6.0, calibration_mode="raw")
-    expected = rms_envelope_db((dry * db_to_amplitude(6.0)).astype(np.float32), 48000)
+    expected = bounded_causal_envelope_db((dry * db_to_amplitude(6.0)).astype(np.float32), 48000)
     np.testing.assert_allclose(pair.envelope_db, expected)
     # And it must NOT match the un-profiled source envelope once gain != 0.
     assert not np.allclose(pair.envelope_db, pair.source_envelope_db)
@@ -69,7 +69,7 @@ def test_envelope_is_derived_from_profiled_dry_not_source_dry():
 def test_source_envelope_matches_raw_dry_regardless_of_profile_gain():
     dry = _dry()
     pair = render_pair(_fake_model(), _fake_model(), dry, 48000, input_profile_gain_db=6.0, calibration_mode="raw")
-    np.testing.assert_allclose(pair.source_envelope_db, rms_envelope_db(dry, 48000))
+    np.testing.assert_allclose(pair.source_envelope_db, bounded_causal_envelope_db(dry, 48000))
 
 
 def test_auto_calibration_applies_per_model_gain_both_calibrated():
@@ -85,7 +85,7 @@ def test_auto_calibration_applies_per_model_gain_both_calibrated():
     assert np.max(np.abs(pair.amp_a)) > np.max(np.abs(pair.amp_b))
     # But the crossover envelope must stay linked to the common profiled signal,
     # unaffected by either model's own per-model calibration split.
-    np.testing.assert_allclose(pair.envelope_db, rms_envelope_db(pair.profiled_dry, 48000))
+    np.testing.assert_allclose(pair.envelope_db, bounded_causal_envelope_db(pair.profiled_dry, 48000))
 
 
 def test_auto_calibration_falls_back_to_raw_when_only_one_model_calibrated():

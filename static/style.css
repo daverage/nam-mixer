@@ -330,6 +330,17 @@ details.advanced summary {
 }
 details.advanced summary:hover { color: var(--text); }
 
+.generate-result {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+.generate-result code { word-break: break-all; }
+
 .warning-box {
   margin-top: 0.75rem;
   padding: 0.6rem 0.75rem;

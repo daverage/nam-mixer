@@ -1,8 +1,22 @@
-# Dependencies for training a fresh NAM model on hybrid output (not needed to
-# run the Hybrid Builder itself -- see requirements.txt for that).
+# Training-only dependencies for the A2 hybrid target -- docs/phase3.md
+# sections 13-14. Deliberately SEPARATE from requirements.txt: the normal
+# Flask/runtime app (hybrid/, app.py) must keep working without any of this
+# installed (see CLAUDE.md) -- render.py shells out to the native nam_render
+# tool, not this package.
 #
-# torch/neural-amp-modeler currently require a supported Python version; if
-# `pip install -r requirements-training.txt` fails on your interpreter, use a
-# separate Python 3.11/3.12 environment for the training step.
-torch
-neural-amp-modeler
+# Install into a DEDICATED environment (see scripts/setup_a2_env.ps1), not the
+# environment app.py runs in. On this project's Windows dev machine the
+# runtime environment is Python 3.14, which is too new for published Torch
+# wheels as of this writing -- prefer Python 3.12 for the training venv.
+#
+# Pinned to a specific neural-amp-modeler release for reproducibility --
+# verify compatibility with your installed Torch/CUDA before training a real
+# model, then record the ACTUAL installed versions in training_manifest.json
+# (scripts/train_a2.py does this automatically).
+neural-amp-modeler==0.13.0
+
+# Torch is intentionally NOT pinned here -- pick the build that matches your
+# platform/CUDA (see https://pytorch.org/get-started/locally/ for the current
+# install command) and record what actually got installed via
+# `pip show torch` / the training manifest, rather than forcing one wheel
+# that may not exist for your platform.

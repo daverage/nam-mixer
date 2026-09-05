@@ -593,4 +593,82 @@ async function preview(source) {
 document.getElementById("btn-preview-a").addEventListener("click", () => preview("a"));
 document.getElementById("btn-preview-hybrid").addEventListener("click", () => preview("hybrid"));
 document.getElementById("btn-preview-b").addEventListener("click", () => preview("b"));
-document.getElementById("btn-generate").addEventListener("click", () => notImplementedAction("/api/generate"));
+const trainingInputFile = document.getElementById("training-input-file");
+const trainingInputStatus = document.getElementById("training-input-status");
+const generateStatus = document.getElementById("generate-status");
+const generateResult = document.getElementById("generate-result");
+let trainingInputReady = false;
+
+async function refreshTrainingInputStatus() {
+  try {
+    const resp = await fetch("/api/training_input/status");
+    const data = await resp.json();
+    trainingInputReady = !!data.ready;
+    trainingInputStatus.textContent = data.ready
+      ? `Ready: ${data.path} (${data.frame_count} frames @ ${data.sample_rate} Hz)`
+      : `Missing: ${data.error || "no official training input uploaded yet"}`;
+  } catch (err) {
+    trainingInputStatus.textContent = "Could not check training input status: " + err;
+  }
+}
+refreshTrainingInputStatus();
+
+trainingInputFile.addEventListener("change", async () => {
+  const file = trainingInputFile.files[0];
+  if (!file) return;
+  trainingInputStatus.textContent = `Uploading ${file.name}...`;
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const resp = await fetch("/api/training_input/upload", { method: "POST", body: formData });
+    const data = await resp.json();
+    if (!resp.ok) {
+      trainingInputStatus.textContent = "Error: " + data.error;
+      trainingInputReady = false;
+      return;
+    }
+    trainingInputReady = true;
+    trainingInputStatus.textContent = `Ready: ${data.path} (${data.frame_count} frames @ ${data.sample_rate} Hz)`;
+  } catch (err) {
+    trainingInputStatus.textContent = "Upload failed: " + err;
+  }
+});
+
+document.getElementById("btn-generate").addEventListener("click", async () => {
+  if (!havePair) {
+    setStatus("Render and audition an amp pair first.", true);
+    return;
+  }
+  if (!trainingInputReady) {
+    setStatus("Upload the official NAM training input first.", true);
+    return;
+  }
+  generateStatus.textContent = "Generating training bundle (running NAM inference on the official input)...";
+  generateResult.hidden = true;
+  try {
+    const resp = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(hybridParamsBody()),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      generateStatus.textContent = "Error: " + (data.error || "generation failed");
+      setStatus("Training bundle generation failed.", true);
+      return;
+    }
+    generateStatus.textContent = `Bundle generated: ${data.design_id}`;
+    generateResult.hidden = false;
+    generateResult.innerHTML = `
+      <div><strong>Bundle:</strong> <code>${data.bundle_dir}</code></div>
+      <div><strong>Target:</strong> <code>${data.target_path}</code> (peak ${data.safety_report.final_peak_dbfs.toFixed(1)} dBFS, safety reduction ${data.safety_report.gain_reduction_db.toFixed(2)} dB)</div>
+      <div><strong>Calibration:</strong> ${data.calibration_summary.effective_mode} (requested ${data.calibration_summary.requested_mode})</div>
+      <div><strong>Train it with:</strong> <code>${data.training_command}</code></div>
+      ${data.warnings && data.warnings.length ? `<div class="warning-box">${data.warnings.join(" ")}</div>` : ""}
+    `;
+    setStatus("Training bundle ready.");
+  } catch (err) {
+    generateStatus.textContent = "Request failed: " + err;
+    setStatus("Training bundle generation failed.", true);
+  }
+});

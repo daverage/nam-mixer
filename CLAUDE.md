@@ -19,10 +19,17 @@ limitations — it is detailed and should be read before making architectural ch
 see `native/nam_render/README.md` to build it), avoiding both the torch
 dependency and any risk of guessing wrong at the `.nam` on-disk schema, since
 NAMCore's own loader is authoritative. The full render → level-match → blend
-pipeline IS wired into the Flask routes and browser UI (`/api/render_pair`,
+pipeline is wired into the Flask routes and browser UI (`/api/render_pair`,
 `/api/preview`, `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
-`/api/profile_coverage`) — only `/api/generate` (final A2 training-target
-generation) still intentionally returns HTTP 501.
+`/api/profile_coverage`), and `/api/generate` (final A2 training-target
+generation, `hybrid/training_target.py`) is real as of the phase-3 work in
+docs/phase3.md — it freezes the current design (`hybrid/design.py`) and
+blends the OFFICIAL NAM training excitation through it (never the preview
+DI, never with the pickup-profile gain applied — see that doc). Actually
+training the resulting bundle into a `.nam` (`scripts/train_a2.py`) requires
+a separate Torch/`neural-amp-modeler` environment — see
+`requirements-training.txt`/`scripts/setup_a2_env.ps1` — and is NOT run by
+the Flask app itself.
 
 **Second key thing:** there are three separate, easily-conflated "level"
 concepts, at two different costs:
@@ -48,7 +55,7 @@ never wire it to a user-facing control; use `input_profile_gain_db` on
 ## Commands
 
 ```bash
-pip install -r requirements.txt   # flask, numpy, scipy, soundfile, torch, neural-amp-modeler, pytest
+pip install -r requirements.txt   # flask, numpy, scipy, soundfile, pytest -- no torch here, see below
 python app.py                     # runs Flask dev server on http://127.0.0.1:5000/
 python -m pytest tests/           # full test suite
 python -m pytest tests/test_blend.py           # single test file
@@ -58,12 +65,16 @@ python -m pytest tests/test_blend.py::test_name -v  # single test
 The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`,
 `hybrid/nam_loader.py`, `hybrid/input_profiles.py`, `hybrid/calibration.py`,
-`hybrid/coverage.py`, and `hybrid/pipeline.py` against synthetic signals only
-(the pipeline tests fake out `render()` via monkeypatch) — no torch or built
-native tool required. `tests/test_render.py` exercises real NAM inference and
-auto-skips unless `native/nam_render` has been built AND a real `.nam` file
-exists at `assets/nam_models/FenderSuperReverb1977_Clean.nam` (gitignored,
-user-provided).
+`hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`, and
+`hybrid/training_target.py` against synthetic signals only (the pipeline/
+training-target tests fake out `render()` via monkeypatch) — no torch or
+built native tool required. `tests/test_render.py` exercises real NAM
+inference and auto-skips unless `native/nam_render` has been built AND a real
+`.nam` file exists at `assets/nam_models/FenderSuperReverb1977_Clean.nam`
+(gitignored, user-provided). `tests/test_receptive_field.py` and part of
+`tests/test_train_a2.py` auto-skip/exercise their "unavailable" path unless a
+training environment (see `requirements-training.txt`) is actually installed
+-- see docs/phase3.md for the training-environment split.
 
 ```bash
 cmake -B native/nam_render/build -S native/nam_render
