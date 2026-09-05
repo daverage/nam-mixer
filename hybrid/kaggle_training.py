@@ -47,6 +47,14 @@ from .validation import compute_esr_metrics
 ACCELERATOR = "NvidiaTeslaT4"
 FORBIDDEN_ACCELERATORS = {"NvidiaTeslaP100", "TPU"}
 
+# `kernels push` returning exit code 0 is NOT sufficient evidence the kernel
+# actually exists on Kaggle's side -- a real production run observed a
+# "submitted" job whose kernel could never be resolved (wrong/bare slug).
+# Bound the post-push existence check so a Kaggle eventual-consistency delay
+# doesn't fail us immediately, without blocking forever either.
+KERNEL_VERIFY_ATTEMPTS = 3
+KERNEL_VERIFY_DELAY_S = 5
+
 # Allow-list of files staged into the Kaggle dataset for a job -- nothing
 # else is ever copied out of a design's bundle dir, in particular never
 # assets/nam_models/*.nam or any preview DI (see docs/kaggle_training.md).
@@ -326,9 +334,17 @@ class KaggleTrainingError(RuntimeError):
 
 
 class KaggleJobManager:
-    def __init__(self, a2_output_dir: Path, cli: Optional[KaggleCli] = None):
+    def __init__(
+        self,
+        a2_output_dir: Path,
+        cli: Optional[KaggleCli] = None,
+        kernel_verify_attempts: int = KERNEL_VERIFY_ATTEMPTS,
+        kernel_verify_delay_s: float = KERNEL_VERIFY_DELAY_S,
+    ):
         self.a2_output_dir = Path(a2_output_dir)
         self.cli = cli or KaggleCli()
+        self.kernel_verify_attempts = kernel_verify_attempts
+        self.kernel_verify_delay_s = kernel_verify_delay_s
 
     # -- status -------------------------------------------------------
 
@@ -415,9 +431,23 @@ class KaggleJobManager:
         if job.dataset_ref is None:
             raise KaggleTrainingError("cannot create kernel before a dataset exists for this job")
 
+        # Kaggle requires kernel-metadata.json's "id" to be
+        # "<username>/<slug>" too -- a bare slug silently resolves to
+        # something that never matches the kernel Kaggle actually creates
+        # (observed in production: kernels.get denied / "Not found" against
+        # the bare-slug ref this app had persisted). Exactly mirrors
+        # create_dataset()'s fix above.
         kernel_slug = f"hybrid-a2-train-{_safe_slug(job.design_id, 20)}-{_safe_slug(job.job_id, 12)}"
+        username = self.cli.username()
+        if not username:
+            job.state = "failed"
+            job.error = "could not determine the authenticated Kaggle username (required to create a private kernel)"
+            save_job(self.a2_output_dir, job)
+            raise KaggleTrainingError(job.error)
+        kernel_ref = f"{username}/{kernel_slug}"
+
         kernel_metadata = {
-            "id": kernel_slug,
+            "id": kernel_ref,
             "title": kernel_slug,
             "code_file": "train_a2_cloud.py",
             "language": "python",
@@ -439,9 +469,33 @@ class KaggleJobManager:
             save_job(self.a2_output_dir, job)
             raise KaggleTrainingError(job.error)
 
-        job.kernel_ref = kernel_slug
+        # `kernels push` exiting 0 is NOT sufficient evidence the kernel
+        # actually exists -- verify it resolves (with bounded retry for
+        # Kaggle-side eventual consistency) before ever calling this job
+        # "submitted". Never leave state=="submitted" for an unresolved
+        # kernel -- the dataset/staging are preserved either way for
+        # diagnosis (we never delete them here).
+        if not self._verify_kernel_exists(kernel_ref):
+            job.state = "failed"
+            job.error = (
+                f"kernel push reported success but Kaggle did not create/resolve the kernel "
+                f"({kernel_ref}) after {self.kernel_verify_attempts} attempts -- the dataset "
+                f"({job.dataset_ref}) and staging directory are preserved for diagnosis"
+            )
+            save_job(self.a2_output_dir, job)
+            raise KaggleTrainingError(job.error)
+
+        job.kernel_ref = kernel_ref
         job.state = "submitted"
         save_job(self.a2_output_dir, job)
+
+    def _verify_kernel_exists(self, kernel_ref: str) -> bool:
+        for attempt in range(self.kernel_verify_attempts):
+            if self.cli.kernels_status(kernel_ref).ok:
+                return True
+            if attempt < self.kernel_verify_attempts - 1:
+                time.sleep(self.kernel_verify_delay_s)
+        return False
 
     def submit(self, design_id: str, bundle_dir: Path) -> KaggleJob:
         if not self.cli.is_installed():
@@ -451,9 +505,15 @@ class KaggleJobManager:
 
         existing = find_active_job(self.a2_output_dir, design_id)
         if existing is not None and existing.state not in TERMINAL_STATES:
-            raise KaggleTrainingError(
-                f"a Kaggle job is already in progress for this design ({existing.job_id}, state={existing.state})"
-            )
+            # Give a stuck job (e.g. one left "submitted" by the pre-fix
+            # bare-kernel-slug bug) a chance to resolve to failed via the
+            # same migration path refresh() uses, rather than letting a job
+            # that was never real block this design forever.
+            existing = self.refresh(existing)
+            if existing.state not in TERMINAL_STATES:
+                raise KaggleTrainingError(
+                    f"a Kaggle job is already in progress for this design ({existing.job_id}, state={existing.state})"
+                )
 
         job = KaggleJob(job_id=uuid.uuid4().hex[:12], design_id=design_id)
         save_job(self.a2_output_dir, job)
@@ -470,6 +530,28 @@ class KaggleJobManager:
     def refresh(self, job: KaggleJob) -> KaggleJob:
         if job.state in TERMINAL_STATES or job.kernel_ref is None:
             return job
+
+        if "/" not in job.kernel_ref:
+            # Migration path for a job stuck by the pre-fix version, which
+            # persisted a bare kernel slug that never actually resolved on
+            # Kaggle. Try to safely qualify it with the authenticated
+            # username and confirm it actually resolves; if it doesn't,
+            # this job can never proceed (the kernel it thinks it has was
+            # never real) -- fail it rather than blocking find_active_job
+            # forever.
+            username = self.cli.username()
+            qualified = f"{username}/{job.kernel_ref}" if username else None
+            if qualified and self.cli.kernels_status(qualified).ok:
+                job.kernel_ref = qualified
+            else:
+                job.state = "failed"
+                job.error = (
+                    f"stuck job from a previous buggy version: kernel_ref {job.kernel_ref!r} "
+                    "was never a valid Kaggle kernel reference and could not be resolved -- "
+                    "submit a new training job for this design"
+                )
+                save_job(self.a2_output_dir, job)
+                return job
 
         result = self.cli.kernels_status(job.kernel_ref)
         if not result.ok:

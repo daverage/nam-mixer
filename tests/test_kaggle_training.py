@@ -233,7 +233,7 @@ def test_create_dataset_slug_bounded_for_long_ids(tmp_path, bundle_dir, monkeypa
 
 
 def test_create_kernel_is_always_private_and_t4(tmp_path, bundle_dir, monkeypatch):
-    manager = KaggleJobManager(tmp_path)
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0)
     cli, calls = make_cli(monkeypatch)
     manager.cli = cli
     job = KaggleJob(job_id="abc123", design_id="mydesign")
@@ -248,6 +248,86 @@ def test_create_kernel_is_always_private_and_t4(tmp_path, bundle_dir, monkeypatc
     assert "--accelerator" in push_call[0]
     assert push_call[0][push_call[0].index("--accelerator") + 1] == ACCELERATOR
     assert job.state == "submitted"
+
+
+def test_create_kernel_id_and_ref_are_username_qualified(tmp_path, bundle_dir, monkeypatch):
+    """Production bug: create_kernel() persisted a BARE kernel slug (no
+    "username/" prefix) as both kernel-metadata.json's "id" and
+    job.kernel_ref, so `kaggle kernels status <bare-slug>` (and every other
+    command built from job.kernel_ref) resolved to nothing on the real
+    Kaggle API even though `kernels push` exited 0."""
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0)
+    cli, calls = make_cli(monkeypatch)
+    manager.cli = cli
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, staging)
+    manager.create_kernel(job, staging)
+
+    metadata = json.loads((staging / "kernel-metadata.json").read_text())
+    assert metadata["id"] == f"testuser/{metadata['title']}"
+    assert job.kernel_ref == metadata["id"]
+    assert job.kernel_ref.startswith("testuser/")
+
+    # Every subsequent command built from job.kernel_ref must carry the full
+    # owner/slug ref, never the bare slug.
+    status_calls = [c for c in calls if c[1:3] == ["kernels", "status"]]
+    assert status_calls
+    assert all(c[3] == job.kernel_ref for c in status_calls)
+
+
+def test_create_kernel_fails_when_push_succeeds_but_status_never_resolves(tmp_path, bundle_dir, monkeypatch):
+    """A successful `kernels push` (exit 0) is NOT sufficient evidence the
+    kernel exists -- this is exactly the production bug's failure mode:
+    Kaggle silently never created/resolved the kernel. The job must be
+    marked failed, never left "submitted"."""
+    def responses(argv):
+        if argv[1:3] == ["kernels", "status"]:
+            return FakeCompleted(1, "", "Permission 'kernels.get' was denied")
+        return FakeCompleted(0, "" if argv[1] != "config" else DEFAULT_CONFIG_VIEW.stdout, "")
+
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=2)
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager.cli = cli
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, staging)
+
+    with pytest.raises(KaggleTrainingError, match="did not create/resolve the kernel"):
+        manager.create_kernel(job, staging)
+
+    assert job.state == "failed"
+    assert job.kernel_ref is None  # never persisted -- it was never real
+    status_calls = [c for c in calls if c[1:3] == ["kernels", "status"]]
+    assert len(status_calls) == 2  # bounded retry, not infinite
+
+
+def test_create_kernel_succeeds_when_status_resolves_on_second_attempt(tmp_path, bundle_dir, monkeypatch):
+    """Eventual consistency: the first status check can fail immediately
+    after push without that being a real failure, as long as it resolves
+    within the bounded retry window."""
+    attempt_count = {"n": 0}
+
+    def responses(argv):
+        if argv[1:3] == ["kernels", "status"]:
+            attempt_count["n"] += 1
+            if attempt_count["n"] == 1:
+                return FakeCompleted(1, "", "Not found")
+            return FakeCompleted(0, "queued", "")
+        if argv[1:3] == ["config", "view"]:
+            return DEFAULT_CONFIG_VIEW
+        return FakeCompleted(0, "", "")
+
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=3)
+    cli, _ = make_cli(monkeypatch, responses=responses)
+    manager.cli = cli
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, staging)
+    manager.create_kernel(job, staging)
+
+    assert job.state == "submitted"
+    assert job.kernel_ref == f"testuser/hybrid-a2-train-mydesign-{job.job_id[:12]}"
 
 
 def test_submit_requires_cli_installed(tmp_path, bundle_dir, monkeypatch):
@@ -271,6 +351,67 @@ def test_submit_rejects_second_concurrent_job(tmp_path, bundle_dir, monkeypatch)
     assert job1.state == "submitted"
     with pytest.raises(KaggleTrainingError, match="already in progress"):
         manager.submit("mydesign", bundle_dir)
+
+
+# --- refresh() migration path for pre-fix bare kernel_ref jobs -----------
+
+def test_refresh_migrates_bare_kernel_ref_when_it_actually_resolves(tmp_path, monkeypatch):
+    """A job persisted by the buggy pre-fix version has a bare kernel_ref
+    (no "username/" prefix). If it happens to still resolve once qualified
+    with the authenticated username, migrate it in place rather than
+    failing a job that could actually proceed."""
+    def responses(argv):
+        if argv[1:3] == ["kernels", "status"] and argv[3] == "testuser/bare-kernel-slug":
+            return FakeCompleted(0, "running", "")
+        if argv[1:3] == ["config", "view"]:
+            return DEFAULT_CONFIG_VIEW
+        return FakeCompleted(1, "", "Not found")  # bare ref alone never resolves
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="submitted",
+                     dataset_ref="testuser/ds1", kernel_ref="bare-kernel-slug")
+    save_job(tmp_path, job)
+
+    refreshed = manager.refresh(job)
+    assert refreshed.kernel_ref == "testuser/bare-kernel-slug"
+    assert refreshed.state != "failed"
+
+
+def test_refresh_fails_stuck_job_with_unresolvable_bare_kernel_ref(tmp_path, monkeypatch):
+    """Exactly the production incident: a bare kernel_ref that was never a
+    real Kaggle kernel. refresh() must fail the job (never leave it
+    "submitted" forever) rather than blocking find_active_job permanently."""
+    cli, _ = make_cli(monkeypatch, responses=lambda argv: FakeCompleted(1, "", "Not found"))
+    manager = KaggleJobManager(tmp_path, cli=cli)
+
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="submitted",
+                     dataset_ref="testuser/ds1", kernel_ref="bare-kernel-slug")
+    save_job(tmp_path, job)
+
+    refreshed = manager.refresh(job)
+    assert refreshed.state == "failed"
+    assert "stuck job" in refreshed.error
+    assert refreshed.kernel_ref == "bare-kernel-slug"  # left as-is, not silently rewritten to a lie
+
+
+def test_submit_unblocks_when_existing_job_is_a_stuck_bare_ref(tmp_path, bundle_dir, monkeypatch):
+    cli, _ = make_cli(monkeypatch, responses=lambda argv: (
+        FakeCompleted(1, "", "Not found") if argv[1:3] == ["kernels", "status"] else FakeCompleted(0, "", "")
+    ))
+    manager = KaggleJobManager(tmp_path, cli=cli, kernel_verify_delay_s=0)
+
+    stuck = KaggleJob(job_id="stuck1", design_id="mydesign", state="submitted",
+                       dataset_ref="testuser/ds1", kernel_ref="bare-kernel-slug")
+    save_job(tmp_path, stuck)
+
+    # A fresh submit should refresh (and fail) the stuck job rather than
+    # being permanently blocked by it -- but the new submission itself also
+    # fails here (kernels_status always denies), which is fine: the point is
+    # it's not rejected with "already in progress".
+    with pytest.raises(KaggleTrainingError) as excinfo:
+        manager.submit("mydesign", bundle_dir)
+    assert "already in progress" not in str(excinfo.value)
 
 
 # --- job persistence ----------------------------------------------------
