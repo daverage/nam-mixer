@@ -205,7 +205,15 @@
             </div>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
             <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train A2</button>
-            <div id="kaggle-progress" class="info" hidden></div>
+            <div id="kaggle-progress-box" class="generate-result" hidden>
+              <div id="kaggle-progress-line"><strong id="kaggle-progress-state">--</strong></div>
+              <div id="kaggle-progress-bar-track" class="progress-track" hidden><div id="kaggle-progress-bar-fill" class="progress-fill"></div></div>
+              <div id="kaggle-progress-meta" class="hint"></div>
+              <details id="kaggle-log-details">
+                <summary>Recent log output</summary>
+                <pre id="kaggle-log-tail" class="log-tail"></pre>
+              </details>
+            </div>
             <div id="kaggle-result" class="generate-result" hidden></div>
           </div>
 

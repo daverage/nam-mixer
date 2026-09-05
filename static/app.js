@@ -696,7 +696,12 @@ let kaggleJobPollTimer = null;
 const kaggleStatusEl = document.getElementById("kaggle-status");
 const kaggleConnectBtn = document.getElementById("btn-kaggle-connect");
 const trainA2Btn = document.getElementById("btn-train-a2");
-const kaggleProgressEl = document.getElementById("kaggle-progress");
+const kaggleProgressBox = document.getElementById("kaggle-progress-box");
+const kaggleProgressState = document.getElementById("kaggle-progress-state");
+const kaggleProgressMeta = document.getElementById("kaggle-progress-meta");
+const kaggleProgressBarTrack = document.getElementById("kaggle-progress-bar-track");
+const kaggleProgressBarFill = document.getElementById("kaggle-progress-bar-fill");
+const kaggleLogTail = document.getElementById("kaggle-log-tail");
 const kaggleResultEl = document.getElementById("kaggle-result");
 const kaggleRefreshBtn = document.getElementById("btn-kaggle-refresh");
 const kaggleBackendRadio = document.getElementById("a2-backend-kaggle");
@@ -704,6 +709,38 @@ const localBackendRadio = document.getElementById("a2-backend-local");
 const kagglePanel = document.getElementById("kaggle-panel");
 const localPanel = document.getElementById("local-panel");
 let kaggleAuthPollTimer = null;
+let kaggleJobSubmittedAt = null;
+
+// State label, elapsed-since-submit, and a progress bar/log tail when
+// available -- a bare repeating "running" string with no other signal made
+// it look stuck even while training was progressing normally.
+function renderKaggleProgress(stateLabel, data) {
+  kaggleProgressBox.hidden = false;
+  kaggleProgressState.textContent = stateLabel;
+
+  const metaParts = [];
+  if (kaggleJobSubmittedAt) {
+    const elapsedS = Math.round((Date.now() - kaggleJobSubmittedAt) / 1000);
+    const mins = Math.floor(elapsedS / 60);
+    const secs = elapsedS % 60;
+    metaParts.push(`elapsed ${mins}m ${secs}s`);
+  }
+  metaParts.push(`last checked ${new Date().toLocaleTimeString()}`);
+
+  if (data && data.progress) {
+    const { epoch, total_epochs } = data.progress;
+    metaParts.unshift(`epoch ${epoch}/${total_epochs}`);
+    kaggleProgressBarTrack.hidden = false;
+    kaggleProgressBarFill.style.width = `${Math.min(100, (epoch / total_epochs) * 100)}%`;
+  } else {
+    kaggleProgressBarTrack.hidden = true;
+  }
+  kaggleProgressMeta.textContent = metaParts.join(" — ");
+
+  if (data && typeof data.log_tail === "string") {
+    kaggleLogTail.textContent = data.log_tail.trim() || "(no log output yet)";
+  }
+}
 
 function updateBackendPanels() {
   const useKaggle = kaggleBackendRadio.checked;
@@ -811,8 +848,8 @@ trainA2Btn.addEventListener("click", async () => {
     return;
   }
   trainA2Btn.disabled = true;
-  kaggleProgressEl.hidden = false;
-  kaggleProgressEl.textContent = "Uploading training pair...";
+  kaggleJobSubmittedAt = Date.now();
+  renderKaggleProgress("Uploading training pair...", null);
   kaggleResultEl.hidden = true;
   try {
     const resp = await fetch("/api/kaggle/train", {
@@ -822,35 +859,49 @@ trainA2Btn.addEventListener("click", async () => {
     });
     const data = await resp.json();
     if (!resp.ok) {
-      kaggleProgressEl.textContent = "Error: " + (data.error || "training request failed");
+      renderKaggleProgress("Error: " + (data.error || "training request failed"), null);
       trainA2Btn.disabled = false;
       return;
     }
     pollKaggleJob(lastDesignId, data.job_id);
   } catch (err) {
-    kaggleProgressEl.textContent = "Request failed: " + err;
+    renderKaggleProgress("Request failed: " + err, null);
     trainA2Btn.disabled = false;
   }
 });
 
+const KAGGLE_JOB_POLL_MS = 10000;
+let kaggleLastJobData = null;
+let kaggleTickTimer = null;
+
 function pollKaggleJob(designId, jobId) {
   if (kaggleJobPollTimer) clearInterval(kaggleJobPollTimer);
+  if (kaggleTickTimer) clearInterval(kaggleTickTimer);
   trainA2Btn.disabled = true;
-  kaggleProgressEl.hidden = false;
+  if (!kaggleJobSubmittedAt) kaggleJobSubmittedAt = Date.now();
+  renderKaggleProgress("Checking job...", null);
+
+  // A 1s local ticker keeps "elapsed" visibly moving between the slower
+  // network polls below -- reassurance that the page itself hasn't frozen,
+  // independent of whether Kaggle actually has anything new to report.
+  kaggleTickTimer = setInterval(() => {
+    if (kaggleLastJobData) renderKaggleProgress(kaggleLastJobData.state, kaggleLastJobData);
+  }, 1000);
 
   const poll = async () => {
     try {
       const resp = await fetch(`/api/kaggle/jobs/${encodeURIComponent(jobId)}?design_id=${encodeURIComponent(designId)}`);
       const data = await resp.json();
       if (!resp.ok) {
-        kaggleProgressEl.textContent = "Error checking job: " + (data.error || "unknown error");
+        renderKaggleProgress("Error checking job: " + (data.error || "unknown error"), null);
         return;
       }
-      const progressText = data.progress ? `epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "";
-      kaggleProgressEl.textContent = `${data.state}${progressText ? " — " + progressText : ""}`;
+      kaggleLastJobData = data;
+      renderKaggleProgress(data.state, data);
 
       if (data.state === "complete") {
         clearInterval(kaggleJobPollTimer);
+        clearInterval(kaggleTickTimer);
         trainA2Btn.disabled = false;
         kaggleResultEl.hidden = false;
         kaggleResultEl.innerHTML = `
@@ -860,16 +911,17 @@ function pollKaggleJob(designId, jobId) {
         setStatus("Kaggle A2 training complete.");
       } else if (data.state === "failed") {
         clearInterval(kaggleJobPollTimer);
+        clearInterval(kaggleTickTimer);
         trainA2Btn.disabled = false;
-        kaggleProgressEl.textContent = "Failed: " + (data.error || "unknown error");
+        renderKaggleProgress("Failed: " + (data.error || "unknown error"), data);
         setStatus("Kaggle A2 training failed.", true);
       }
     } catch (err) {
-      kaggleProgressEl.textContent = "Polling error: " + err;
+      renderKaggleProgress("Polling error: " + err, kaggleLastJobData);
     }
   };
   poll();
-  kaggleJobPollTimer = setInterval(poll, 10000);
+  kaggleJobPollTimer = setInterval(poll, KAGGLE_JOB_POLL_MS);
 }
 
 updateBackendPanels();

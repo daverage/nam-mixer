@@ -683,8 +683,15 @@ def api_kaggle_job_status(job_id: str):
     if job is None:
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
     job = _kaggle_manager.refresh(job)
+    # Pull fresh logs from Kaggle on every poll while the job is still
+    # active -- reading only the local log FILE here (as this used to do)
+    # meant it never actually changed unless something else happened to hit
+    # /jobs/<id>/logs first, so the UI looked stuck even while training was
+    # progressing normally.
+    tail = _kaggle_manager.fetch_logs(job) if job.state not in ("complete", "failed") else _kaggle_manager.read_log_tail(job)
     response = job.to_dict()
-    response["progress"] = _kaggle_manager.parse_progress(_kaggle_manager.read_log_tail(job))
+    response["progress"] = _kaggle_manager.parse_progress(tail)
+    response["log_tail"] = "\n".join(tail.splitlines()[-20:])
     return jsonify(response)
 
 

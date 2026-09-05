@@ -102,13 +102,19 @@ def test_job_status_refreshes_and_returns_state(client, tmp_path, monkeypatch):
     save_job(tmp_path, job)
 
     monkeypatch.setattr(app_module._kaggle_manager, "refresh", lambda j: j)
+    # Status for a non-terminal job pulls fresh logs (fetch_logs), not just
+    # the local file (read_log_tail) -- mock both explicitly so this test
+    # doesn't rely on the incidental kernel_ref=None short-circuit inside
+    # fetch_logs to avoid a real Kaggle CLI call.
+    monkeypatch.setattr(app_module._kaggle_manager, "fetch_logs", lambda j: "Epoch 3/100\n")
     monkeypatch.setattr(app_module._kaggle_manager, "read_log_tail", lambda j, n=200: "")
 
     resp = client.get("/api/kaggle/jobs/j1?design_id=mydesign")
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["state"] == "running"
-    assert "progress" in data
+    assert data["progress"] == {"epoch": 3, "total_epochs": 100}
+    assert data["log_tail"] == "Epoch 3/100"
 
 
 def test_job_logs_bounded(client, tmp_path, monkeypatch):

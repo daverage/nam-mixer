@@ -350,6 +350,41 @@ details.advanced summary:hover { color: var(--text); }
 }
 .status-row .info { margin: 0; }
 
+#kaggle-progress-box { line-height: 1.5; }
+#kaggle-progress-state { font-size: 0.9rem; }
+.hint { color: var(--text-muted); font-size: 0.75rem; }
+
+.progress-track {
+  margin: 0.5rem 0;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border, rgba(255, 255, 255, 0.12));
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+#kaggle-log-details { margin-top: 0.5rem; font-size: 0.75rem; }
+#kaggle-log-details summary { cursor: pointer; color: var(--text-muted); }
+.log-tail {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+}
+
 .generate-result {
   margin-top: 0.75rem;
   padding: 0.6rem 0.75rem;
