@@ -62,6 +62,31 @@ point**, where it actually matters), this project measures each amp's loudness
 using only the portion of the render that falls near the chosen crossover level
 and computes a trim from that. See `hybrid/level_match.py`.
 
+## Input profile vs. crossover vs. NAM calibration — three separate knobs
+
+It's easy to conflate these; they operate at different stages and have very
+different costs:
+
+- **Input profile** (`hybrid/input_profiles.py`, `render_pair()`): simulates a
+  different instrument/pickup driving the signal chain *before* it reaches
+  either NAM. This changes the actual audio both amps receive, so changing it
+  is EXPENSIVE — it requires re-running NAM inference for both amps. See
+  `docs/INPUT_PROFILE_RESEARCH.md` for the research behind the presets and
+  why active pickups deliberately have no fixed preset.
+- **Crossover / transition width / manual trim** (`build_hybrid()`): changes
+  only how the *already-rendered* Amp A/B responses are blended together.
+  This is CHEAP — pure numpy, no NAM inference, safe to recompute on every
+  slider move.
+- **NAM input calibration** (`hybrid/calibration.py`): when both `.nam`
+  captures report their own recording calibration (`input_level_dbu`),
+  applies the official NAM plugin's per-model compensation formula so two
+  differently-calibrated captures see the same virtual physical input level.
+  This also happens at render time (it's folded into `render_pair()`
+  alongside the input profile), but it's a distinct concept from "how hard is
+  the (virtual) instrument driving the amps" — one is about the instrument,
+  the other is about reconciling two amp captures' own assumptions about
+  their input level.
+
 ## Why the genre/style DI files are included
 
 `assets/di/` contains real recorded DI (direct input) guitar/bass performances,
@@ -149,9 +174,11 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
   timing offset. It stays available (`enabled=True`) for later use, but only
   once we've verified what latency guarantees, if any, the official NAM
   inference API actually makes — see that module's docstring.
-- The Flask app (`app.py`) and UI (`templates/index.html`, `static/`) expose
-  the intended controls and routes, but `/api/preview` and `/api/generate`
-  currently return HTTP 501 until rendering is wired in.
+- The Flask app (`app.py`) and UI (`templates/index.html`, `static/`) now
+  wire up real rendering and preview end-to-end (`/api/render_pair`,
+  `/api/preview`, `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
+  `/api/profile_coverage`). `/api/generate` (final training-target generation)
+  still intentionally returns HTTP 501 — see "Not implemented yet" below.
 - No A2 training step exists yet at all — that remains future work once
   synthetic target generation is working end-to-end.
 - No automated audio-quality/tone judgment is attempted anywhere in this

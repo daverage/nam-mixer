@@ -39,9 +39,48 @@
         </select>
         <div class="info">See <code>assets/di/README.md</code> for what each clip is good for.</div>
 
+        <label class="field-label" for="instrument-select">Instrument</label>
+        <select id="instrument-select" class="select-input">
+          <option value="guitar">Guitar</option>
+          <option value="bass">Bass</option>
+        </select>
+
+        <label class="field-label" for="input-profile-select">Input profile</label>
+        <select id="input-profile-select" class="select-input"></select>
+        <div id="input-profile-description" class="info"></div>
+
+        <div id="custom-gain-row" class="slider-row" hidden>
+          <label for="custom-gain-slider">Relative input gain</label>
+          <span id="custom-gain-value" class="value-chip">+0.0 dB</span>
+        </div>
+        <input type="range" id="custom-gain-slider" min="-12" max="12" step="0.1" value="0" class="slider slider-gain" hidden>
+
+        <details class="advanced">
+          <summary>Advanced: NAM input calibration</summary>
+          <label class="field-label" for="calibration-mode-select">Calibration mode</label>
+          <select id="calibration-mode-select" class="select-input">
+            <option value="auto" selected>Auto</option>
+            <option value="raw">Raw</option>
+          </select>
+          <div class="info">
+            Auto compensates for each model's own recording calibration
+            (<code>input_level_dbu</code>) so two differently-captured NAMs
+            see the same virtual input level -- only when BOTH models
+            provide it, otherwise raw digital level is used for both.
+          </div>
+          <label class="field-label" for="reference-dbu-input">Reference level (dBu)</label>
+          <input type="number" id="reference-dbu-input" value="{{ default_reference_input_level_dbu }}" step="0.5" class="select-input">
+          <div class="info">The virtual analogue level assumed to correspond to digital full scale (NAM plugin default: +12 dBu). Not a pickup output value.</div>
+        </details>
+
         <button id="btn-render-pair" class="btn btn-primary btn-block">Render Amps</button>
         <div id="render-status" class="info"></div>
+        <div id="render-warnings" class="warning-box" hidden></div>
       </section>
+
+      <script id="input-profiles-data" type="application/json">
+        {{ {"guitar": guitar_profiles, "bass": bass_profiles} | tojson }}
+      </script>
 
       <section class="card">
         <h2><span class="step">2</span> Crossover &amp; transition</h2>
@@ -51,6 +90,7 @@
           <span id="crossover-value" class="value-chip">-22.0 dBFS</span>
         </div>
         <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
+        <div id="suggested-crossover-note" class="info"></div>
 
         <div class="slider-row">
           <label for="transition-slider">Transition width</label>
@@ -97,22 +137,6 @@
       </section>
 
       <section class="card">
-        <h2>Test input gain</h2>
-        <div class="slider-row">
-          <label for="dry-gain-slider">Simulated input level</label>
-          <span id="dry-gain-value" class="value-chip">+0.0 dB</span>
-        </div>
-        <input type="range" id="dry-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
-        <div class="info">
-          Shifts when the crossfade triggers, as if you played louder or
-          softer -- it does <strong>not</strong> re-amp the audio, so use it
-          to test the transition logic when this DI clip never naturally
-          reaches the crossover point. Watch the journey chart below as you
-          drag this.
-        </div>
-      </section>
-
-      <section class="card">
         <h2>The journey between amps</h2>
         <div class="legend">
           <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
@@ -127,6 +151,27 @@
           <div id="journey-tooltip" class="journey-tooltip" hidden></div>
         </div>
         <div id="journey-empty" class="info">Render an amp pair to see the crossfade journey here.</div>
+      </section>
+
+      <section class="card">
+        <h2>Expected crossover coverage</h2>
+        <div class="info">
+          For each input profile, the share of ACTIVE playing time (silence
+          excluded) that would land mostly in Amp A, in transition, or mostly
+          in Amp B at the current crossover settings -- a reachability check,
+          not a claim about how it will sound. Updates instantly; does not
+          re-render the amps.
+        </div>
+        <div id="coverage-warning" class="warning-box" hidden></div>
+        <div class="table-wrap">
+          <table id="coverage-table" class="coverage-table" hidden>
+            <thead>
+              <tr><th>Input profile</th><th>Amp A</th><th>Transition</th><th>Amp B</th></tr>
+            </thead>
+            <tbody id="coverage-tbody"></tbody>
+          </table>
+        </div>
+        <div id="coverage-empty" class="info">Render an amp pair to see coverage for each input profile.</div>
       </section>
 
       <section class="card card-muted">

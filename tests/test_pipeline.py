@@ -10,7 +10,10 @@ def _synthetic_pair(n=10000, sample_rate=48000):
     amp_a = np.full(n, 1.0, dtype=np.float32)
     amp_b = np.full(n, 2.0, dtype=np.float32)
     envelope_db = rms_envelope_db(dry, sample_rate)
-    return RenderedPair(dry=dry, amp_a=amp_a, amp_b=amp_b, envelope_db=envelope_db, sample_rate=sample_rate)
+    return RenderedPair(
+        dry=dry, profiled_dry=dry, amp_a=amp_a, amp_b=amp_b,
+        envelope_db=envelope_db, source_envelope_db=envelope_db, sample_rate=sample_rate,
+    )
 
 
 def test_build_hybrid_manual_trim_no_auto_level():
@@ -96,7 +99,10 @@ def _two_region_pair(n=20000, sample_rate=48000):
         np.full(n - n // 2, 1.0, dtype=np.float32),  # loud half: Amp B matches Amp A
     ])
     envelope_db = rms_envelope_db(dry, sample_rate)
-    return RenderedPair(dry=dry, amp_a=amp_a, amp_b=amp_b, envelope_db=envelope_db, sample_rate=sample_rate)
+    return RenderedPair(
+        dry=dry, profiled_dry=dry, amp_a=amp_a, amp_b=amp_b,
+        envelope_db=envelope_db, source_envelope_db=envelope_db, sample_rate=sample_rate,
+    )
 
 
 def test_auto_trim_ignores_dry_gain_db_and_measures_the_real_input_level():

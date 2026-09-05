@@ -7,6 +7,11 @@ function setStatus(msg, isError) {
   statusEl.style.color = isError ? "#c0362c" : "";
 }
 
+function fmtSigned(x) {
+  const v = parseFloat(x);
+  return (v >= 0 ? "+" : "") + v.toFixed(1);
+}
+
 // Resolved server-side paths for the uploaded .nam files, keyed by "a"/"b" --
 // filled in once each upload completes, read by the Render Amps handler.
 const ampServerPaths = { a: null, b: null };
@@ -47,6 +52,97 @@ document.getElementById("amp-b-file").addEventListener("change", () =>
   uploadNam("b", "amp-b-file", "amp-b-info")
 );
 
+// ---- Input profile controls (instrument / profile / custom gain / calibration) ----
+// Selecting a different profile changes the actual signal fed to both NAMs,
+// so it's an EXPENSIVE-path setting like the amp files/DI -- it requires
+// clicking Render Amps again, unlike crossover/transition/trim below.
+
+const profilesData = JSON.parse(document.getElementById("input-profiles-data").textContent);
+const instrumentSelect = document.getElementById("instrument-select");
+const profileSelect = document.getElementById("input-profile-select");
+const profileDescription = document.getElementById("input-profile-description");
+const customGainRow = document.getElementById("custom-gain-row");
+const customGainSlider = document.getElementById("custom-gain-slider");
+const customGainValue = document.getElementById("custom-gain-value");
+const calibrationModeSelect = document.getElementById("calibration-mode-select");
+const referenceDbuInput = document.getElementById("reference-dbu-input");
+const renderWarnings = document.getElementById("render-warnings");
+const suggestedCrossoverNote = document.getElementById("suggested-crossover-note");
+
+function currentProfile() {
+  const profiles = profilesData[instrumentSelect.value] || [];
+  return profiles.find((p) => p.id === profileSelect.value);
+}
+
+function updateProfileDescription() {
+  const profile = currentProfile();
+  if (!profile) {
+    profileDescription.textContent = "";
+    return;
+  }
+  profileDescription.textContent = profile.description;
+  customGainRow.hidden = !profile.requires_custom_gain;
+  customGainSlider.hidden = !profile.requires_custom_gain;
+}
+
+function populateProfileSelect() {
+  const profiles = profilesData[instrumentSelect.value] || [];
+  profileSelect.innerHTML = "";
+  profiles.forEach((p) => {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.requires_custom_gain ? `${p.label} -- Custom` : `${p.label} (${fmtSigned(p.gain_db)} dB)`;
+    profileSelect.appendChild(opt);
+  });
+  updateProfileDescription();
+}
+
+function markProfileStale() {
+  if (havePair) {
+    previewButtons.forEach((btn) => (btn.disabled = true));
+    renderStatus.textContent = "Input profile changed -- click Render Amps to update.";
+  }
+}
+
+instrumentSelect.addEventListener("change", () => {
+  populateProfileSelect();
+  markProfileStale();
+  updateCoverage();
+});
+profileSelect.addEventListener("change", () => {
+  updateProfileDescription();
+  markProfileStale();
+  updateCoverage();
+});
+customGainSlider.addEventListener("input", () => {
+  customGainValue.textContent = `${fmtSigned(customGainSlider.value)} dB`;
+  markProfileStale();
+  updateCoverage();
+});
+calibrationModeSelect.addEventListener("change", markProfileStale);
+referenceDbuInput.addEventListener("change", markProfileStale);
+
+// DI filenames beginning with "bass_" are a trivial, documented instrument
+// hint (see hybrid/input_profiles.py) -- used only as a default, never as a
+// claim about what pickup actually produced the recording.
+const diSelector = document.getElementById("di-selector");
+
+function applyInstrumentHintFromDi() {
+  const desired = diSelector.value.startsWith("bass_") ? "bass" : "guitar";
+  if (instrumentSelect.value !== desired) {
+    instrumentSelect.value = desired;
+    populateProfileSelect();
+  }
+}
+
+diSelector.addEventListener("change", () => {
+  applyInstrumentHintFromDi();
+  markProfileStale();
+});
+
+applyInstrumentHintFromDi();
+populateProfileSelect();
+
 const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
 crossoverSlider.addEventListener("input", () => {
@@ -69,24 +165,12 @@ document.querySelectorAll(".preset-btn").forEach((btn) => {
   });
 });
 
-function fmtSigned(x) {
-  const v = parseFloat(x);
-  return (v >= 0 ? "+" : "") + v.toFixed(1);
-}
-
 document.getElementById("auto-level-match").addEventListener("change", scheduleUpdate);
 
 const ampBTrimSlider = document.getElementById("amp-b-trim");
 const ampBTrimValue = document.getElementById("amp-b-trim-value");
 ampBTrimSlider.addEventListener("input", () => {
   ampBTrimValue.textContent = `${fmtSigned(ampBTrimSlider.value)} dB`;
-  scheduleUpdate();
-});
-
-const dryGainSlider = document.getElementById("dry-gain-slider");
-const dryGainValue = document.getElementById("dry-gain-value");
-dryGainSlider.addEventListener("input", () => {
-  dryGainValue.textContent = `${fmtSigned(dryGainSlider.value)} dB`;
   scheduleUpdate();
 });
 
@@ -111,6 +195,10 @@ const renderStatus = document.getElementById("render-status");
 const journeyCanvas = document.getElementById("journey-canvas");
 const journeyTooltip = document.getElementById("journey-tooltip");
 const journeyEmpty = document.getElementById("journey-empty");
+const coverageTable = document.getElementById("coverage-table");
+const coverageTbody = document.getElementById("coverage-tbody");
+const coverageEmpty = document.getElementById("coverage-empty");
+const coverageWarning = document.getElementById("coverage-warning");
 
 let havePair = false;
 let updateTimer = null;
@@ -123,7 +211,6 @@ function hybridParamsBody() {
     transition_width_db: parseFloat(transitionSlider.value),
     auto_level: document.getElementById("auto-level-match").checked,
     manual_b_trim_db: parseFloat(ampBTrimSlider.value) || 0.0,
-    dry_gain_db: parseFloat(dryGainSlider.value) || 0.0,
   };
 }
 
@@ -133,6 +220,7 @@ function scheduleUpdate() {
   updateTimer = setTimeout(() => {
     updateTrimReadout();
     updateJourney();
+    updateCoverage();
   }, 150);
 }
 
@@ -171,6 +259,46 @@ async function updateJourney() {
     drawJourney();
   } catch (err) {
     // Visualization is a debug aid, not critical path -- fail quietly.
+  }
+}
+
+async function updateCoverage() {
+  if (!havePair) return;
+  try {
+    const resp = await fetch("/api/profile_coverage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        crossover_dbfs: parseFloat(crossoverSlider.value),
+        transition_width_db: parseFloat(transitionSlider.value),
+        instrument_type: instrumentSelect.value,
+        custom_input_gain_db: parseFloat(customGainSlider.value) || 0.0,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) return;
+
+    coverageTbody.innerHTML = "";
+    data.coverage.forEach((row) => {
+      const tr = document.createElement("tr");
+      const cell = (text) => {
+        const td = document.createElement("td");
+        td.textContent = text;
+        return td;
+      };
+      tr.appendChild(cell(row.label));
+      tr.appendChild(cell(`${Math.round(row.amp_a_fraction * 100)}%`));
+      tr.appendChild(cell(`${Math.round(row.transition_fraction * 100)}%`));
+      tr.appendChild(cell(`${Math.round(row.amp_b_fraction * 100)}%`));
+      coverageTbody.appendChild(tr);
+    });
+    coverageTable.hidden = false;
+    coverageEmpty.hidden = true;
+
+    coverageWarning.hidden = !data.reachability_warning;
+    coverageWarning.textContent = data.reachability_warning || "";
+  } catch (err) {
+    // Diagnostic panel only -- fail quietly.
   }
 }
 
@@ -364,13 +492,26 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
     setStatus("Choose both Amp A and Amp B .nam files and pick a DI clip first.", true);
     return;
   }
+
+  const profile = currentProfile();
+  const instrument_type = instrumentSelect.value;
+  const input_profile_id = profileSelect.value;
+  const custom_input_gain_db = profile && profile.requires_custom_gain ? parseFloat(customGainSlider.value) : null;
+  const calibration_mode = calibrationModeSelect.value;
+  const reference_input_level_dbu = parseFloat(referenceDbuInput.value) || 12.0;
+
   renderStatus.textContent = "Rendering (running NAM inference twice)...";
+  renderWarnings.hidden = true;
   previewButtons.forEach((btn) => (btn.disabled = true));
   try {
     const resp = await fetch("/api/render_pair", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amp_a_path, amp_b_path, di_file }),
+      body: JSON.stringify({
+        amp_a_path, amp_b_path, di_file,
+        instrument_type, input_profile_id, custom_input_gain_db,
+        calibration_mode, reference_input_level_dbu,
+      }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -378,11 +519,36 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
       setStatus("Render failed.", true);
       return;
     }
-    renderStatus.textContent = `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz.`;
+    renderStatus.textContent =
+      `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz -- ` +
+      `input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
+
+    if (data.warnings && data.warnings.length) {
+      renderWarnings.hidden = false;
+      renderWarnings.textContent = data.warnings.join(" ");
+    }
+
+    suggestedCrossoverNote.innerHTML = "";
+    if (data.suggested_crossover_dbfs !== null && data.suggested_crossover_dbfs !== undefined) {
+      const suggested = data.suggested_crossover_dbfs;
+      suggestedCrossoverNote.append(`Suggested crossover: ${suggested.toFixed(1)} dBFS (from this DI's active-signal level) `);
+      const useBtn = document.createElement("button");
+      useBtn.type = "button";
+      useBtn.className = "link-btn";
+      useBtn.textContent = "Use suggested";
+      useBtn.addEventListener("click", () => {
+        crossoverSlider.value = suggested.toFixed(1);
+        crossoverValue.textContent = `${suggested.toFixed(1)} dBFS`;
+        scheduleUpdate();
+      });
+      suggestedCrossoverNote.appendChild(useBtn);
+    }
+
     previewButtons.forEach((btn) => (btn.disabled = false));
     havePair = true;
     updateTrimReadout();
     updateJourney();
+    updateCoverage();
     setStatus("Amp pair rendered and cached -- sliders now only recompute the blend.");
   } catch (err) {
     renderStatus.textContent = "Request failed: " + err;
