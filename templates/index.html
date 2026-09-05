@@ -199,9 +199,12 @@
           </div>
 
           <div id="kaggle-panel">
-            <div id="kaggle-status" class="info">Checking Kaggle connection...</div>
+            <div class="status-row">
+              <div id="kaggle-status" class="info">Checking Kaggle connection...</div>
+              <button id="btn-kaggle-refresh" type="button" class="link-btn">Refresh</button>
+            </div>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
-            <button id="btn-train-a2" class="btn btn-primary btn-block">Train A2</button>
+            <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train A2</button>
             <div id="kaggle-progress" class="info" hidden></div>
             <div id="kaggle-result" class="generate-result" hidden></div>
           </div>

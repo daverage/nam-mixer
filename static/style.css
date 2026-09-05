@@ -342,6 +342,14 @@ details.advanced summary:hover { color: var(--text); }
 #a2-training-section { margin-top: 0.75rem; }
 #kaggle-panel, #local-panel { margin-top: 0.4rem; }
 
+.status-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.status-row .info { margin: 0; }
+
 .generate-result {
   margin-top: 0.75rem;
   padding: 0.6rem 0.75rem;

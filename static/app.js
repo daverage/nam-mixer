@@ -485,7 +485,8 @@ player.addEventListener("pause", () => drawJourney());
 player.addEventListener("ended", () => drawJourney());
 window.addEventListener("resize", () => drawJourney());
 
-document.getElementById("btn-render-pair").addEventListener("click", async () => {
+const renderPairBtn = document.getElementById("btn-render-pair");
+renderPairBtn.addEventListener("click", async () => {
   const amp_a_path = ampServerPaths.a;
   const amp_b_path = ampServerPaths.b;
   const di_file = document.getElementById("di-selector").value;
@@ -501,6 +502,7 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
   const calibration_mode = calibrationModeSelect.value;
   const reference_input_level_dbu = parseFloat(referenceDbuInput.value) || 12.0;
 
+  renderPairBtn.disabled = true;
   renderStatus.textContent = "Rendering (running NAM inference twice)...";
   renderWarnings.hidden = true;
   previewButtons.forEach((btn) => (btn.disabled = true));
@@ -557,6 +559,8 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
   } catch (err) {
     renderStatus.textContent = "Request failed: " + err;
     setStatus("Render failed.", true);
+  } finally {
+    renderPairBtn.disabled = false;
   }
 });
 
@@ -634,7 +638,8 @@ trainingInputFile.addEventListener("change", async () => {
   }
 });
 
-document.getElementById("btn-generate").addEventListener("click", async () => {
+const generateBtn = document.getElementById("btn-generate");
+generateBtn.addEventListener("click", async () => {
   if (!havePair) {
     setStatus("Render and audition an amp pair first.", true);
     return;
@@ -643,6 +648,7 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
     setStatus("Upload the official NAM training input first.", true);
     return;
   }
+  generateBtn.disabled = true;
   generateStatus.textContent = "Generating training bundle (running NAM inference on the official input)...";
   generateResult.hidden = true;
   try {
@@ -676,6 +682,8 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
   } catch (err) {
     generateStatus.textContent = "Request failed: " + err;
     setStatus("Training bundle generation failed.", true);
+  } finally {
+    generateBtn.disabled = false;
   }
 });
 
@@ -690,10 +698,12 @@ const kaggleConnectBtn = document.getElementById("btn-kaggle-connect");
 const trainA2Btn = document.getElementById("btn-train-a2");
 const kaggleProgressEl = document.getElementById("kaggle-progress");
 const kaggleResultEl = document.getElementById("kaggle-result");
+const kaggleRefreshBtn = document.getElementById("btn-kaggle-refresh");
 const kaggleBackendRadio = document.getElementById("a2-backend-kaggle");
 const localBackendRadio = document.getElementById("a2-backend-local");
 const kagglePanel = document.getElementById("kaggle-panel");
 const localPanel = document.getElementById("local-panel");
+let kaggleAuthPollTimer = null;
 
 function updateBackendPanels() {
   const useKaggle = kaggleBackendRadio.checked;
@@ -702,6 +712,16 @@ function updateBackendPanels() {
 }
 kaggleBackendRadio.addEventListener("change", updateBackendPanels);
 localBackendRadio.addEventListener("change", updateBackendPanels);
+
+function formatGpuQuota(raw) {
+  // `kaggle quota`'s raw CLI table output, best-effort extraction of just
+  // the GPU row -- never fatal if the format doesn't match (older/newer
+  // CLI versions), just falls back to something readable.
+  if (!raw) return "available";
+  const match = raw.match(/GPU\s+([\d.]+)h\s+([\d.]+)h\s+([\d.]+)h/);
+  if (!match) return raw.split("\n")[0].trim() || "available";
+  return `${match[2]}h remaining of ${match[3]}h`;
+}
 
 async function refreshKaggleStatus() {
   try {
@@ -723,30 +743,67 @@ async function refreshKaggleStatus() {
     }
     kaggleAuthenticated = true;
     kaggleConnectBtn.hidden = true;
-    trainA2Btn.disabled = false;
-    const quota = data.quota_available ? (data.quota_raw || "available") : "unavailable";
+    const quota = data.quota_available ? formatGpuQuota(data.quota_raw) : "unavailable";
     kaggleStatusEl.textContent = `Connected ✓  CLI ${data.cli_version || "?"}  GPU: NVIDIA T4  Quota: ${quota}`;
 
-    if (data.job && data.job.state && !["complete", "failed"].includes(data.job.state)) {
+    const activeJob = data.job && data.job.state && !["complete", "failed"].includes(data.job.state);
+    trainA2Btn.disabled = !!activeJob;
+    if (activeJob) {
       pollKaggleJob(data.job.design_id, data.job.job_id);
     }
+    return true;
   } catch (err) {
     kaggleStatusEl.textContent = "Could not check Kaggle status: " + err;
+    return false;
   }
 }
+refreshKaggleStatus();
+
+kaggleRefreshBtn.addEventListener("click", () => refreshKaggleStatus());
 
 kaggleConnectBtn.addEventListener("click", async () => {
+  kaggleConnectBtn.disabled = true;
   kaggleStatusEl.textContent = "Starting Kaggle authentication...";
   try {
     const resp = await fetch("/api/kaggle/auth/start", { method: "POST" });
     const data = await resp.json();
+    if (!resp.ok) {
+      kaggleStatusEl.textContent = "Error: " + (data.error || "could not start Kaggle auth");
+      kaggleConnectBtn.disabled = false;
+      return;
+    }
     kaggleStatusEl.textContent = data.started
-      ? "A Kaggle login flow was started. Complete it in your browser, then click Connect Kaggle again to refresh."
-      : `Run this yourself, then refresh: ${data.command}`;
+      ? "A Kaggle login flow was started. Complete it in your browser -- this updates automatically once connected."
+      : `Run this yourself -- this updates automatically once connected: ${data.command}`;
   } catch (err) {
     kaggleStatusEl.textContent = "Could not start Kaggle auth: " + err;
+    kaggleConnectBtn.disabled = false;
+    return;
   }
+  pollKaggleAuth();
 });
+
+// After starting `kaggle auth login` we can't know when the user finishes the
+// browser OAuth flow, so poll status for a while rather than requiring a
+// manual page refresh -- this is exactly the flow the user found confusing
+// (Connect Kaggle appearing to do nothing until a full reload).
+function pollKaggleAuth() {
+  if (kaggleAuthPollTimer) clearInterval(kaggleAuthPollTimer);
+  let attempts = 0;
+  const maxAttempts = 100; // ~5 minutes at 3s
+  kaggleAuthPollTimer = setInterval(async () => {
+    attempts += 1;
+    await refreshKaggleStatus();
+    if (kaggleAuthenticated || attempts >= maxAttempts) {
+      clearInterval(kaggleAuthPollTimer);
+      kaggleAuthPollTimer = null;
+      kaggleConnectBtn.disabled = false;
+      if (!kaggleAuthenticated) {
+        kaggleStatusEl.textContent += " Still not connected -- click Connect Kaggle again once you've finished logging in, or Refresh.";
+      }
+    }
+  }, 3000);
+}
 
 trainA2Btn.addEventListener("click", async () => {
   if (!lastDesignId) {
@@ -778,6 +835,7 @@ trainA2Btn.addEventListener("click", async () => {
 
 function pollKaggleJob(designId, jobId) {
   if (kaggleJobPollTimer) clearInterval(kaggleJobPollTimer);
+  trainA2Btn.disabled = true;
   kaggleProgressEl.hidden = false;
 
   const poll = async () => {
