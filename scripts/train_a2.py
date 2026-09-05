@@ -60,6 +60,7 @@ from hybrid.receptive_field import (  # noqa: E402
 )
 from hybrid.render import NamRenderError, render  # noqa: E402
 from hybrid.nam_loader import load_nam  # noqa: E402
+from hybrid.validation import compute_esr_metrics  # noqa: E402
 
 
 class TrainingAbort(RuntimeError):
@@ -384,32 +385,9 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
 
 def compare_to_target(rendered: np.ndarray, target_path: Path) -> dict:
     target_audio, _ = _read_audio(target_path)
-    n = min(len(rendered), len(target_audio))
-    a = rendered[:n].astype(np.float64)
-    b = target_audio[:n].astype(np.float64)
-
-    err = a - b
-    esr = float(np.sum(err ** 2) / max(np.sum(b ** 2), 1e-12))
-
-    a_rms = np.sqrt(np.mean(a ** 2))
-    b_rms = np.sqrt(np.mean(b ** 2))
-    if b_rms > 1e-12:
-        a_normalized = a * (b_rms / max(a_rms, 1e-12))
-        gain_normalized_esr = float(np.sum((a_normalized - b) ** 2) / max(np.sum(b ** 2), 1e-12))
-    else:
-        gain_normalized_esr = float("nan")
-
-    rms_diff = float(abs(a_rms - b_rms))
-    peak_diff = float(abs(np.max(np.abs(a)) - np.max(np.abs(b))))
-
-    metrics = {
-        "raw_esr": esr,
-        "gain_normalized_esr": gain_normalized_esr,
-        "rms_difference": rms_diff,
-        "peak_difference": peak_diff,
-    }
-    print(f"vs target: raw ESR={esr:.5f}  gain-normalized ESR={gain_normalized_esr:.5f}  "
-          f"RMS diff={rms_diff:.5f}  peak diff={peak_diff:.5f}")
+    metrics = compute_esr_metrics(rendered, target_audio)
+    print(f"vs target: raw ESR={metrics['raw_esr']:.5f}  gain-normalized ESR={metrics['gain_normalized_esr']:.5f}  "
+          f"RMS diff={metrics['rms_difference']:.5f}  peak diff={metrics['peak_difference']:.5f}")
     return metrics
 
 
