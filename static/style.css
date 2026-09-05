@@ -1,0 +1,28 @@
+/* Minimal styling -- functional clarity over visual polish, per project brief. */
+body {
+  font-family: -apple-system, Segoe UI, Arial, sans-serif;
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #222;
+}
+h1 { font-size: 1.4rem; }
+.experimental {
+  background: #b00;
+  color: white;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+section {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+h2 { font-size: 0.95rem; margin: 0 0 0.5rem 0; text-transform: uppercase; letter-spacing: 0.03em; }
+.info { color: #666; font-size: 0.85rem; margin-top: 0.25rem; }
+input[type="range"] { width: 70%; vertical-align: middle; }
+button { margin: 0.15rem; }
+.preset-btn { font-size: 0.75rem; }

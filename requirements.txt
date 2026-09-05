@@ -1,0 +1,7 @@
+flask
+numpy
+scipy
+soundfile
+torch
+neural-amp-modeler
+pytest

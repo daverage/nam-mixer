@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hybrid NAM Builder</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <h1>HYBRID NAM BUILDER <span class="experimental">EXPERIMENTAL</span></h1>
+
+  <section>
+    <h2>AMP A</h2>
+    <input type="text" id="amp-a-path" placeholder="Path to Amp A .nam file">
+    <button id="btn-load-a">Load</button>
+    <div id="amp-a-info" class="info"></div>
+  </section>
+
+  <section>
+    <h2>AMP B</h2>
+    <input type="text" id="amp-b-path" placeholder="Path to Amp B .nam file">
+    <button id="btn-load-b">Load</button>
+    <div id="amp-b-info" class="info"></div>
+  </section>
+
+  <section>
+    <h2>LEVEL MATCH</h2>
+    <label><input type="checkbox" id="auto-level-match" checked> Auto level match</label>
+    <div>
+      Amp A trim: <input type="number" id="amp-a-trim" value="0.0" step="0.1"> dB
+    </div>
+    <div>
+      Amp B trim: <input type="number" id="amp-b-trim" value="0.0" step="0.1"> dB
+      <span id="amp-b-trim-note" class="info">(calculated once both amps are loaded)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>CROSSOVER</h2>
+    <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22">
+    <span id="crossover-value">-22.0 dBFS</span>
+  </section>
+
+  <section>
+    <h2>TRANSITION</h2>
+    <input type="range" id="transition-slider" min="2" max="18" step="0.5" value="{{ default_transition_width_db }}">
+    <span id="transition-value">{{ default_transition_width_db }} dB</span>
+    <div class="info">
+      Presets (dB):
+      {% for name, value in transition_presets.items() %}
+        <button class="preset-btn" data-value="{{ value }}">{{ name.replace('_', ' ') }} ({{ value }})</button>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <h2>PREVIEW DI</h2>
+    <select id="di-selector">
+      {% for f in di_files %}
+        <option value="{{ f }}">{{ f }}</option>
+      {% endfor %}
+    </select>
+    <div class="info">See <code>assets/di/README.md</code> for what each clip is good for.</div>
+  </section>
+
+  <section>
+    <button id="btn-preview-a">Preview Amp A</button>
+    <button id="btn-preview-hybrid">Preview Hybrid</button>
+    <button id="btn-preview-b">Preview Amp B</button>
+  </section>
+
+  <section>
+    <button id="btn-generate">Generate Hybrid Target</button>
+  </section>
+
+  <div id="status" class="info"></div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

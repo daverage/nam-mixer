@@ -1,0 +1,98 @@
+[
+  {
+    "filename": "bass_downtown.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 23.84,
+    "peak_dbfs": -9.13,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 18.87,
+    "dynamic_range_db_p10_p90": 14.77,
+    "lead_silence_s": 0.006,
+    "trail_silence_s": 0.981
+  },
+  {
+    "filename": "bass_rollin.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 28.93,
+    "peak_dbfs": -8.85,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 19.15,
+    "dynamic_range_db_p10_p90": 8.7,
+    "lead_silence_s": 0.353,
+    "trail_silence_s": 0.583
+  },
+  {
+    "filename": "clean_mayer.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 25.94,
+    "peak_dbfs": -12.77,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 15.23,
+    "dynamic_range_db_p10_p90": 19.28,
+    "lead_silence_s": 0.082,
+    "trail_silence_s": 0.482
+  },
+  {
+    "filename": "clean_smooth.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 47.75,
+    "peak_dbfs": -9.8,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 18.2,
+    "dynamic_range_db_p10_p90": 16.33,
+    "lead_silence_s": 0.155,
+    "trail_silence_s": 1.467
+  },
+  {
+    "filename": "high_metalcore.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 20.41,
+    "peak_dbfs": -8.38,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 19.62,
+    "dynamic_range_db_p10_p90": 10.67,
+    "lead_silence_s": 0.244,
+    "trail_silence_s": 0.735
+  },
+  {
+    "filename": "high_thrash.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 17.75,
+    "peak_dbfs": -8.18,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 19.82,
+    "dynamic_range_db_p10_p90": 16.56,
+    "lead_silence_s": 0.017,
+    "trail_silence_s": 0.08
+  },
+  {
+    "filename": "moderate_brit.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 41.64,
+    "peak_dbfs": -12.11,
+    "rms_dbfs": -28.0,
+    "crest_factor_db": 15.89,
+    "dynamic_range_db_p10_p90": 29.56,
+    "lead_silence_s": 0.375,
+    "trail_silence_s": 1.099
+  },
+  {
+    "filename": "moderate_hotrod.wav",
+    "sample_rate": 48000,
+    "channels": 1,
+    "duration_s": 30.28,
+    "peak_dbfs": -8.0,
+    "rms_dbfs": -28.62,
+    "crest_factor_db": 20.62,
+    "dynamic_range_db_p10_p90": 15.89,
+    "lead_silence_s": 0.162,
+    "trail_silence_s": 0.328
+  }
+]
