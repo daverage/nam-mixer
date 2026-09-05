@@ -34,9 +34,14 @@ class FakeCompleted:
         self.stderr = stderr
 
 
+DEFAULT_CONFIG_VIEW = FakeCompleted(0, "Configuration values from C:\\Users\\x\\.kaggle\n- username: testuser\n- auth_method: OAUTH\n", "")
+
+
 def make_cli(monkeypatch, executable="/usr/bin/kaggle", responses=None):
     """responses: dict mapping a tuple of argv (after the executable) to a
-    FakeCompleted, or a callable(argv) -> FakeCompleted."""
+    FakeCompleted, or a callable(argv) -> FakeCompleted. `config view`
+    defaults to reporting username "testuser" (needed by create_dataset's
+    KaggleCli.username() call) unless a dict `responses` overrides it."""
     responses = responses or {}
     calls = []
 
@@ -49,6 +54,8 @@ def make_cli(monkeypatch, executable="/usr/bin/kaggle", responses=None):
             return responses(argv)
         if key in responses:
             return responses[key]
+        if key == ("config", "view"):
+            return DEFAULT_CONFIG_VIEW
         return FakeCompleted(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -195,7 +202,34 @@ def test_create_dataset_is_always_private(tmp_path, bundle_dir, monkeypatch):
     assert push_call
     assert "--public" not in push_call[0]
     assert job.dataset_ref == metadata["id"]
+    # Kaggle's dataset_create_new does ref.split("/")[1] unconditionally --
+    # a bare slug crashes with IndexError, so id must be "username/slug".
+    assert metadata["id"] == f"testuser/{metadata['title']}"
+    assert 6 <= len(metadata["title"]) <= 50
     assert job.state == "waiting_for_dataset"
+
+
+def test_create_dataset_fails_cleanly_without_username(tmp_path, bundle_dir, monkeypatch):
+    manager = KaggleJobManager(tmp_path)
+    cli, _ = make_cli(monkeypatch, responses={("config", "view"): FakeCompleted(0, "no username line here", "")})
+    manager.cli = cli
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+    with pytest.raises(KaggleTrainingError, match="username"):
+        manager.create_dataset(job, staging)
+    assert job.state == "failed"
+
+
+def test_create_dataset_slug_bounded_for_long_ids(tmp_path, bundle_dir, monkeypatch):
+    manager = KaggleJobManager(tmp_path)
+    cli, _ = make_cli(monkeypatch)
+    manager.cli = cli
+    job = KaggleJob(job_id="a" * 40, design_id="a-very-long-design-name-that-goes-on-and-on-and-on")
+    staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, staging)
+    metadata = json.loads((staging / "dataset-metadata.json").read_text())
+    assert 6 <= len(metadata["title"]) <= 50
+    assert metadata["id"].startswith("testuser/")
 
 
 def test_create_kernel_is_always_private_and_t4(tmp_path, bundle_dir, monkeypatch):

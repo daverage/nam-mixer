@@ -169,6 +169,22 @@ class KaggleCli:
             return {"quota_available": False, "quota_error": result.stderr.strip() or "quota command failed"}
         return {"quota_available": True, "quota_raw": result.stdout.strip()}
 
+    def username(self) -> Optional[str]:
+        """The authenticated Kaggle username -- NOT a credential (it's the
+        public handle, not a secret), needed because a Kaggle dataset's
+        `id` must be `"<username>/<slug>"`; the installed CLI's own
+        `dataset_create_new` crashes with an IndexError on a bare slug (it
+        does `ref.split("/")[1]` unconditionally). `kaggle config view` is
+        the CLI's own documented way to read it back -- never
+        `auth print-access-token`."""
+        if not self.is_installed():
+            return None
+        result = self._run(["config", "view"], timeout=15)
+        if not result.ok:
+            return None
+        match = re.search(r"username:\s*(\S+)", result.combined)
+        return match.group(1) if match else None
+
     def datasets_create(self, dataset_dir: Path) -> CliResult:
         return self._run(["datasets", "create", "-p", str(dataset_dir)], timeout=600)
 
@@ -362,10 +378,24 @@ class KaggleJobManager:
         return staging
 
     def create_dataset(self, job: KaggleJob, staging_dir: Path) -> None:
-        slug = f"hybrid-a2-{_safe_slug(job.design_id)}-{_safe_slug(job.job_id, 12)}"
+        # Kaggle requires dataset-metadata.json's "id" to be
+        # "<username>/<slug>" -- the installed CLI's own dataset_create_new
+        # does `ref.split("/")[1]` unconditionally and raises an unhandled
+        # IndexError on a bare slug. Also keep the bare slug within Kaggle's
+        # 6-50 character title/slug bound regardless of how long design_id/
+        # job_id happen to be.
+        slug = f"hybrid-a2-{_safe_slug(job.design_id, 20)}-{_safe_slug(job.job_id, 12)}"
+        username = self.cli.username()
+        if not username:
+            job.state = "failed"
+            job.error = "could not determine the authenticated Kaggle username (required to create a private dataset)"
+            save_job(self.a2_output_dir, job)
+            raise KaggleTrainingError(job.error)
+        dataset_ref = f"{username}/{slug}"
+
         dataset_metadata = {
             "title": slug,
-            "id": slug,
+            "id": dataset_ref,
             "licenses": [{"name": "CC0-1.0"}],
         }
         _atomic_write_json(staging_dir / "dataset-metadata.json", dataset_metadata)
@@ -377,7 +407,7 @@ class KaggleJobManager:
             save_job(self.a2_output_dir, job)
             raise KaggleTrainingError(job.error)
 
-        job.dataset_ref = slug
+        job.dataset_ref = dataset_ref
         job.state = "waiting_for_dataset"
         save_job(self.a2_output_dir, job)
 
@@ -385,7 +415,7 @@ class KaggleJobManager:
         if job.dataset_ref is None:
             raise KaggleTrainingError("cannot create kernel before a dataset exists for this job")
 
-        kernel_slug = f"hybrid-a2-train-{_safe_slug(job.design_id)}-{_safe_slug(job.job_id, 12)}"
+        kernel_slug = f"hybrid-a2-train-{_safe_slug(job.design_id, 20)}-{_safe_slug(job.job_id, 12)}"
         kernel_metadata = {
             "id": kernel_slug,
             "title": kernel_slug,
