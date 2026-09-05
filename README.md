@@ -112,7 +112,8 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
 4. Preview Amp A alone, Amp B alone, and the hybrid blend against a chosen
    genre DI.
 5. Generate the hybrid synthetic target (dry input → Amp A render → Amp B
-   render → aligned, level-matched, blended output), with metadata describing
+   render → level-matched, blended output — with an *optional*, currently
+   disabled-by-default alignment step, see below), with metadata describing
    exactly how it was built.
 6. (Future) Train a NAM A2 model on the generated input/output pair.
 
@@ -133,6 +134,14 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
   alignment correction, and safety/peak-ceiling logic are all implemented and
   unit-tested (`hybrid/*.py`, `tests/`) against synthetic signals, but have not
   yet been exercised against real NAM renders end-to-end.
+- **A/B alignment (`hybrid/align.py`) is optional and disabled by default**
+  (`align_to_reference(..., enabled=False)`). It cross-correlates Amp A's
+  render directly against Amp B's render, which can misread a genuine
+  tonal/phase difference between dissimilar amps (e.g. clean vs. heavily
+  distorted) as latency and "correct" for something that isn't actually a
+  timing offset. It stays available (`enabled=True`) for later use, but only
+  once we've verified what latency guarantees, if any, the official NAM
+  inference API actually makes — see that module's docstring.
 - The Flask app (`app.py`) and UI (`templates/index.html`, `static/`) expose
   the intended controls and routes, but `/api/preview` and `/api/generate`
   currently return HTTP 501 until rendering is wired in.

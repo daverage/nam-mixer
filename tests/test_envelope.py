@@ -25,3 +25,30 @@ def test_envelope_handles_silence():
     audio = np.zeros(sr)
     env = rms_envelope_db(audio, sr)
     assert np.all(np.isfinite(env))
+
+
+def test_envelope_is_causal_future_independent():
+    """A sample's envelope must not depend on audio that comes after it.
+
+    This becomes the crossover control signal baked into the synthetic
+    training target, so it must be causal -- see hybrid/envelope.py's
+    docstring. Regression test: two signals identical up to sample `split`
+    but arbitrarily different after it must produce identical envelopes up
+    to `split` (a centered/non-causal window would leak the future content
+    backward and fail this).
+    """
+    sr = 44100
+    rng = np.random.default_rng(4)
+    split = sr // 2
+
+    shared_head = rng.uniform(-0.3, 0.3, split)
+    tail_a = np.zeros(sr - split)
+    tail_b = rng.uniform(-1.0, 1.0, sr - split)
+
+    audio_a = np.concatenate([shared_head, tail_a])
+    audio_b = np.concatenate([shared_head, tail_b])
+
+    env_a = rms_envelope_db(audio_a, sr)
+    env_b = rms_envelope_db(audio_b, sr)
+
+    np.testing.assert_array_equal(env_a[:split], env_b[:split])

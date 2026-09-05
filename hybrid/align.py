@@ -76,17 +76,18 @@ def align_to_reference(
     reference: np.ndarray,
     other: np.ndarray,
     max_lag: int = _MAX_LAG_SAMPLES_DEFAULT,
-    enabled: bool = True,
+    enabled: bool = False,
 ) -> tuple[np.ndarray, int]:
     """Shift `other` to align with `reference`; returns (aligned_other, offset_applied).
 
     Aligned output is truncated/zero-padded to the same length as `reference`
     so downstream blending never has to worry about length mismatches.
 
-    `enabled=False` skips the cross-correlation entirely (offset forced to 0,
-    `other` only length-matched to `reference`) -- see the module docstring for
-    why this matters when `reference` and `other` are tonally dissimilar amp
-    renders.
+    Defaults to `enabled=False`: skips the cross-correlation entirely (offset
+    forced to 0, `other` only length-matched to `reference`) -- see the module
+    docstring for why this matters when `reference` and `other` are tonally
+    dissimilar amp renders. Pass `enabled=True` to opt back into the
+    cross-correlation-based correction.
     """
     n = len(reference)
     if not enabled:
