@@ -84,3 +84,23 @@ as the actual input for generating a real A2 training pair; see README.md's
 "Preview DIs vs. NAM training material" section for the distinction.
 
 `work/` is a gitignored scratch output directory.
+
+`assets/nam_models/` holds the user's own `.nam` amp capture files (e.g. a
+Fender clean + a JCM800 high-gain capture) used as Amp A/Amp B inputs. These
+are gitignored (`assets/nam_models/*.nam`) — personal captures, not versioned
+project fixtures like `assets/di/*.wav`.
+
+## Known caveats in the current implementation
+
+- `hybrid/envelope.py`'s `rms_envelope_db` is deliberately **causal** (a
+  zero-padded windowed sum, not `np.convolve(..., mode="same")`) — the
+  envelope becomes the crossover control signal baked into the synthetic
+  training target, so it must never be influenced by samples after the
+  current one, or a causal A2 model trained on the result would be asked to
+  predict the future.
+- `hybrid/align.py`'s `align_to_reference` cross-correlates Amp A's render
+  directly against Amp B's render, which can misread a genuine tonal/phase
+  difference between dissimilar amps (e.g. clean vs. heavily distorted) as
+  latency. Pass `enabled=False` (skips correction, still length-matches) until
+  real NAM inference is wired in and the official inference API's latency
+  behavior is understood — see the module docstring.

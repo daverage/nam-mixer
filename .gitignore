@@ -1,6 +1,9 @@
 work/*
 !work/.gitkeep
 
+# Personal amp captures -- not project fixtures like assets/di/*.wav.
+assets/nam_models/*.nam
+
 __pycache__/
 *.pyc
 .pytest_cache/

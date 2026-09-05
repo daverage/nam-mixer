@@ -5,6 +5,18 @@ introduce slightly different fixed latency. Blending two renders that are offset
 by even a handful of samples smears transients and can sound like a phasey
 crossfade rather than a clean amp swap, so we measure and correct this before
 blend.py ever runs.
+
+CAUTION: `estimate_offset`/`align_to_reference` cross-correlate Amp A's render
+directly against Amp B's render. When A and B are tonally very different (e.g.
+a clean amp vs. a heavily distorted one), differences in distortion, filtering,
+compression and phase response can themselves reduce the correlation score,
+which this algorithm cannot distinguish from genuine fixed latency -- it could
+"correct" a real tonal difference as if it were a timing offset, and shifting
+Amp B's samples that way risks its own causality problems downstream. Until
+NAM inference is wired in and we've established what latency guarantees (if
+any) the official inference API actually makes, pass `enabled=False` to
+`align_to_reference` to skip correction (renders are still truncated/padded to
+match length) rather than trusting this cross-correlation blind.
 """
 from __future__ import annotations
 
@@ -60,14 +72,31 @@ def estimate_offset(reference: np.ndarray, other: np.ndarray, max_lag: int = _MA
     return best_lag
 
 
-def align_to_reference(reference: np.ndarray, other: np.ndarray, max_lag: int = _MAX_LAG_SAMPLES_DEFAULT) -> tuple[np.ndarray, int]:
+def align_to_reference(
+    reference: np.ndarray,
+    other: np.ndarray,
+    max_lag: int = _MAX_LAG_SAMPLES_DEFAULT,
+    enabled: bool = True,
+) -> tuple[np.ndarray, int]:
     """Shift `other` to align with `reference`; returns (aligned_other, offset_applied).
 
     Aligned output is truncated/zero-padded to the same length as `reference`
     so downstream blending never has to worry about length mismatches.
+
+    `enabled=False` skips the cross-correlation entirely (offset forced to 0,
+    `other` only length-matched to `reference`) -- see the module docstring for
+    why this matters when `reference` and `other` are tonally dissimilar amp
+    renders.
     """
-    offset = estimate_offset(reference, other, max_lag=max_lag)
     n = len(reference)
+    if not enabled:
+        aligned = other[:n]
+        if len(aligned) < n:
+            aligned = np.pad(aligned, (0, n - len(aligned)))
+        logger.debug("align: disabled, skipping cross-correlation")
+        return aligned, 0
+
+    offset = estimate_offset(reference, other, max_lag=max_lag)
 
     if offset == 0:
         logger.debug("align: no correction needed (offset=0)")

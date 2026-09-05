@@ -22,12 +22,19 @@ def rms_envelope_db(
 ) -> np.ndarray:
     """Return a per-sample envelope of `audio` in dBFS, same length as `audio`.
 
-    Method: a moving-RMS estimate followed by asymmetric attack/release smoothing
-    (fast attack, slower release) so the envelope tracks picking transients
-    without chattering during decay. This is a reasonable default, not a
-    claimed-optimal one -- replace this function's body to experiment with other
-    envelope followers (peak-based, different window sizes, etc.) without
-    changing callers.
+    Method: a CAUSAL moving-RMS estimate (only the current and preceding
+    `window_ms` of samples, never future ones) followed by asymmetric
+    attack/release smoothing (fast attack, slower release) so the envelope
+    tracks picking transients without chattering during decay. Causality
+    matters here specifically because this envelope becomes the crossover
+    control signal baked into the synthetic hybrid training target -- a
+    non-causal (centered) window would let the target start moving toward
+    Amp B before the louder input that justifies it has actually arrived,
+    which a causal A2 model trained on that target could never reproduce.
+    This is a reasonable default, not a claimed-optimal one -- replace this
+    function's body to experiment with other envelope followers (peak-based,
+    different window sizes, etc.) without changing callers, but keep any
+    replacement causal for the same reason.
     """
     audio = np.asarray(audio, dtype=np.float64)
     n = len(audio)
@@ -36,8 +43,13 @@ def rms_envelope_db(
 
     win = max(1, int(sample_rate * window_ms / 1000.0))
     squared = audio * audio
-    kernel = np.ones(win, dtype=np.float64) / win
-    mean_sq = np.convolve(squared, kernel, mode="same")
+    # Causal windowed mean-of-squares via a zero-padded cumulative sum: sample i's
+    # window covers only samples [i - win + 1, i] (missing history at the start
+    # is treated as silence), never samples after i.
+    padded = np.concatenate([np.zeros(win - 1, dtype=np.float64), squared])
+    cumsum = np.concatenate([[0.0], np.cumsum(padded)])
+    window_sum = cumsum[win:] - cumsum[:n]
+    mean_sq = window_sum / win
     rms = np.sqrt(np.maximum(mean_sq, 0.0))
 
     attack_coef = _time_to_coef(attack_ms, sample_rate)
