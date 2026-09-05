@@ -65,6 +65,21 @@ def test_build_hybrid_manual_trim_combines_with_auto_trim():
     assert auto_plus_manual.effective_b_trim_db == auto_only.auto_trim_db + 0.7
 
 
+def test_build_hybrid_dry_gain_db_shifts_envelope_and_pushes_toward_amp_b():
+    """dry_gain_db is the test-only "pretend I played louder" control -- it
+    should shift the whole envelope up by exactly that many dB (an exact
+    log-domain identity, not an approximation) and therefore push the blend
+    weight toward Amp B for a crossover point the unshifted signal never
+    reaches."""
+    pair = _synthetic_pair()
+    quiet = build_hybrid(pair, crossover_dbfs=0.0, transition_width_db=2.0, auto_level=False)
+    loud = build_hybrid(pair, crossover_dbfs=0.0, transition_width_db=2.0, auto_level=False, dry_gain_db=40.0)
+
+    np.testing.assert_allclose(loud.envelope_db, pair.envelope_db + 40.0)
+    assert quiet.blend_curve.max() < 0.5
+    assert loud.blend_curve.max() > 0.5
+
+
 def test_build_hybrid_is_cheap_to_call_repeatedly_on_same_pair():
     """Different crossover points on the same RenderedPair shouldn't require
     re-rendering -- this is the whole point of splitting render_pair out."""

@@ -61,6 +61,17 @@
   </section>
 
   <section>
+    <h2>TEST INPUT GAIN</h2>
+    <input type="range" id="dry-gain-slider" min="-24" max="24" step="0.5" value="0">
+    <span id="dry-gain-value">0.0 dB</span>
+    <div class="info">
+      Shifts the crossover trigger only (as if you played louder/softer) --
+      does NOT re-amp the audio, so it's for exercising the transition logic
+      when the chosen DI clip never naturally reaches the crossover point.
+    </div>
+  </section>
+
+  <section>
     <button id="btn-render-pair">Render Amps</button>
     <span id="render-status" class="info"></span>
   </section>
@@ -71,6 +82,15 @@
     <button id="btn-preview-b" disabled>Preview Amp B</button>
     <div id="trim-readout" class="info"></div>
     <audio id="player" controls></audio>
+  </section>
+
+  <section>
+    <h2>THE JOURNEY BETWEEN AMPS</h2>
+    <canvas id="journey-canvas" width="900" height="220"></canvas>
+    <div class="info">
+      Top: dry input envelope (dBFS) over time, with the crossover band
+      shaded. Bottom: the resulting mix -- blue is Amp A, orange is Amp B.
+    </div>
   </section>
 
   <section>

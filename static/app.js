@@ -52,26 +52,33 @@ const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
 crossoverSlider.addEventListener("input", () => {
   crossoverValue.textContent = `${crossoverSlider.value} dBFS`;
-  scheduleBlendInfoUpdate();
+  scheduleUpdate();
 });
 
 const transitionSlider = document.getElementById("transition-slider");
 const transitionValue = document.getElementById("transition-value");
 transitionSlider.addEventListener("input", () => {
   transitionValue.textContent = `${transitionSlider.value} dB`;
-  scheduleBlendInfoUpdate();
+  scheduleUpdate();
 });
 
 document.querySelectorAll(".preset-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     transitionSlider.value = btn.dataset.value;
     transitionValue.textContent = `${btn.dataset.value} dB`;
-    scheduleBlendInfoUpdate();
+    scheduleUpdate();
   });
 });
 
-document.getElementById("auto-level-match").addEventListener("change", scheduleBlendInfoUpdate);
-document.getElementById("amp-b-trim").addEventListener("input", scheduleBlendInfoUpdate);
+document.getElementById("auto-level-match").addEventListener("change", scheduleUpdate);
+document.getElementById("amp-b-trim").addEventListener("input", scheduleUpdate);
+
+const dryGainSlider = document.getElementById("dry-gain-slider");
+const dryGainValue = document.getElementById("dry-gain-value");
+dryGainSlider.addEventListener("input", () => {
+  dryGainValue.textContent = `${dryGainSlider.value} dB`;
+  scheduleUpdate();
+});
 
 async function notImplementedAction(url) {
   try {
@@ -91,28 +98,36 @@ const previewButtons = [
 const player = document.getElementById("player");
 const trimReadout = document.getElementById("trim-readout");
 const renderStatus = document.getElementById("render-status");
+const journeyCanvas = document.getElementById("journey-canvas");
 
 let havePair = false;
-let blendInfoTimer = null;
+let updateTimer = null;
 
-function scheduleBlendInfoUpdate() {
-  if (!havePair) return;
-  clearTimeout(blendInfoTimer);
-  blendInfoTimer = setTimeout(updateBlendInfo, 150);
-}
-
-async function updateBlendInfo() {
-  const body = {
+function hybridParamsBody() {
+  return {
     crossover_dbfs: parseFloat(crossoverSlider.value),
     transition_width_db: parseFloat(transitionSlider.value),
     auto_level: document.getElementById("auto-level-match").checked,
     manual_b_trim_db: parseFloat(document.getElementById("amp-b-trim").value) || 0.0,
+    dry_gain_db: parseFloat(dryGainSlider.value) || 0.0,
   };
+}
+
+function scheduleUpdate() {
+  if (!havePair) return;
+  clearTimeout(updateTimer);
+  updateTimer = setTimeout(() => {
+    updateTrimReadout();
+    updateJourney();
+  }, 150);
+}
+
+async function updateTrimReadout() {
   try {
     const resp = await fetch("/api/blend_info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(hybridParamsBody()),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -126,6 +141,85 @@ async function updateBlendInfo() {
   } catch (err) {
     trimReadout.textContent = "Trim update failed: " + err;
   }
+}
+
+async function updateJourney() {
+  try {
+    const resp = await fetch("/api/blend_curve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(hybridParamsBody()),
+    });
+    const data = await resp.json();
+    if (!resp.ok) return;
+    drawJourney(data);
+  } catch (err) {
+    // Visualization is a debug aid, not critical path -- fail quietly.
+  }
+}
+
+function drawJourney(data) {
+  const ctx = journeyCanvas.getContext("2d");
+  const W = journeyCanvas.width;
+  const H = journeyCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const n = data.times.length;
+  if (n < 2) return;
+
+  const envTop = 0;
+  const envHeight = H * 0.6;
+  const mixTop = envHeight + 10;
+  const mixHeight = H - mixTop;
+
+  const dbMin = -60, dbMax = 0;
+  const xAt = (i) => (i / (n - 1)) * W;
+  const envYAt = (db) => envTop + envHeight * (1 - (Math.max(dbMin, Math.min(dbMax, db)) - dbMin) / (dbMax - dbMin));
+
+  // Shade the crossover transition band on the envelope panel.
+  const lo = data.crossover_dbfs - data.transition_width_db / 2.0;
+  const hi = data.crossover_dbfs + data.transition_width_db / 2.0;
+  ctx.fillStyle = "rgba(150, 100, 200, 0.15)";
+  ctx.fillRect(0, envYAt(hi), W, envYAt(lo) - envYAt(hi));
+  ctx.strokeStyle = "rgba(150, 100, 200, 0.6)";
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(0, envYAt(data.crossover_dbfs));
+  ctx.lineTo(W, envYAt(data.crossover_dbfs));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Envelope trace.
+  ctx.strokeStyle = "#444";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  data.envelope_db.forEach((db, i) => {
+    const x = xAt(i), y = envYAt(db);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Mix panel: filled area, color interpolated between Amp A (blue) and
+  // Amp B (orange) by the blend weight at each point.
+  const colorA = [51, 102, 204];
+  const colorB = [230, 126, 34];
+  for (let i = 0; i < n - 1; i++) {
+    const t = data.blend_weight[i];
+    const r = Math.round(colorA[0] + (colorB[0] - colorA[0]) * t);
+    const g = Math.round(colorA[1] + (colorB[1] - colorA[1]) * t);
+    const b = Math.round(colorA[2] + (colorB[2] - colorA[2]) * t);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(xAt(i), mixTop, xAt(i + 1) - xAt(i) + 1, mixHeight);
+  }
+
+  // Mix panel labels.
+  ctx.fillStyle = "#fff";
+  ctx.font = "11px sans-serif";
+  ctx.fillText("A", 4, mixTop + mixHeight / 2 + 4);
+  ctx.textAlign = "right";
+  ctx.fillText("B", W - 4, mixTop + mixHeight / 2 + 4);
+  ctx.textAlign = "left";
 }
 
 document.getElementById("btn-render-pair").addEventListener("click", async () => {
@@ -153,7 +247,8 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
     renderStatus.textContent = `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz.`;
     previewButtons.forEach((btn) => (btn.disabled = false));
     havePair = true;
-    updateBlendInfo();
+    updateTrimReadout();
+    updateJourney();
     setStatus("Amp pair rendered and cached -- sliders now only recompute the blend.");
   } catch (err) {
     renderStatus.textContent = "Request failed: " + err;
@@ -162,13 +257,7 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
 });
 
 async function preview(source) {
-  const body = { source };
-  if (source === "hybrid") {
-    body.crossover_dbfs = parseFloat(crossoverSlider.value);
-    body.transition_width_db = parseFloat(transitionSlider.value);
-    body.auto_level = document.getElementById("auto-level-match").checked;
-    body.manual_b_trim_db = parseFloat(document.getElementById("amp-b-trim").value) || 0.0;
-  }
+  const body = source === "hybrid" ? { source, ...hybridParamsBody() } : { source };
   try {
     const resp = await fetch("/api/preview", {
       method: "POST",
@@ -185,8 +274,6 @@ async function preview(source) {
       const manual = resp.headers.get("X-Manual-Trim-Db");
       const effective = resp.headers.get("X-Effective-Trim-Db");
       trimReadout.textContent = `Auto match ${auto} dB, manual tweak ${manual} dB, effective trim ${effective} dB`;
-    } else {
-      trimReadout.textContent = "";
     }
     const blob = await resp.blob();
     player.src = URL.createObjectURL(blob);

@@ -60,6 +60,7 @@ def render_pair(
 class HybridResult:
     hybrid: np.ndarray
     blend_curve: np.ndarray
+    envelope_db: np.ndarray
     auto_trim_db: float
     manual_trim_db: float
     effective_b_trim_db: float
@@ -74,6 +75,7 @@ def build_hybrid(
     auto_level: bool = True,
     manual_b_trim_db: float = 0.0,
     align_enabled: bool = False,
+    dry_gain_db: float = 0.0,
 ) -> HybridResult:
     """Blend an already-rendered amp pair. Cheap -- safe to call on every
     crossover/transition/trim slider move without re-running NAM inference.
@@ -82,8 +84,16 @@ def build_hybrid(
     `auto_level` is on -- auto-level gives a safe starting point, the manual
     trim is the user's tweak from there, and the two combine rather than one
     replacing the other.
+
+    `dry_gain_db` is a TEST-ONLY control: it shifts the cached envelope by a
+    constant (dB(x * g) = dB(x) + 20*log10(g), so this is an exact, O(n) shift
+    -- no need to re-run rms_envelope_db) to let you push the crossover
+    trigger up/down without needing a louder/quieter DI take. It does NOT
+    re-render either amp at a hotter input, so it's for exercising the
+    blend/threshold logic, not for previewing how the amps would actually
+    respond to a different input level.
     """
-    envelope_db = pair.envelope_db
+    envelope_db = pair.envelope_db + dry_gain_db
 
     amp_b_render, offset = align_to_reference(pair.amp_a, pair.amp_b, enabled=align_enabled)
 
@@ -107,6 +117,7 @@ def build_hybrid(
     return HybridResult(
         hybrid=hybrid_audio,
         blend_curve=t_curve,
+        envelope_db=envelope_db,
         auto_trim_db=auto_trim_db,
         manual_trim_db=manual_b_trim_db,
         effective_b_trim_db=effective_b_trim_db,

@@ -169,13 +169,15 @@ def api_render_pair():
 
 
 def _parse_hybrid_params(data: dict):
-    """Shared crossover/transition/trim parsing for /api/preview and
-    /api/blend_info -- both drive the same build_hybrid() call."""
+    """Shared crossover/transition/trim/test-gain parsing for /api/preview,
+    /api/blend_info, and /api/blend_curve -- all drive the same
+    build_hybrid() call."""
     crossover_dbfs = float(data.get("crossover_dbfs", -22.0))
     transition_width_db = float(data.get("transition_width_db", DEFAULT_TRANSITION_WIDTH_DB))
     manual_b_trim_db = float(data.get("manual_b_trim_db", 0.0))
     auto_level = bool(data.get("auto_level", True))
-    return crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level
+    dry_gain_db = float(data.get("dry_gain_db", 0.0))
+    return crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level, dry_gain_db
 
 
 @app.route("/api/blend_info", methods=["POST"])
@@ -194,9 +196,9 @@ def api_blend_info():
 
     data = request.get_json(force=True)
     try:
-        crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
+        crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level, dry_gain_db = _parse_hybrid_params(data)
     except (TypeError, ValueError):
-        return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+        return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db/dry_gain_db must be numbers"}), 400
 
     result = build_hybrid(
         pair,
@@ -204,12 +206,60 @@ def api_blend_info():
         transition_width_db=transition_width_db,
         auto_level=auto_level,
         manual_b_trim_db=manual_b_trim_db,
+        dry_gain_db=dry_gain_db,
     )
     return jsonify({
         "auto_trim_db": result.auto_trim_db,
         "manual_trim_db": result.manual_trim_db,
         "effective_b_trim_db": result.effective_b_trim_db,
         "alignment_offset_samples": result.alignment_offset_samples,
+    })
+
+
+@app.route("/api/blend_curve", methods=["POST"])
+def api_blend_curve():
+    """Downsampled time series for the "journey between amps" visualization:
+    the dry envelope (with any test dry_gain_db applied) and the resulting
+    Amp B blend weight, both against a shared time axis.
+
+    Downsampled with a simple stride (not min/max decimation) to a fixed
+    number of points -- this is a debug/visualization aid, not the audio
+    path, so losing brief spikes between sampled points is an acceptable
+    tradeoff for a small, fast response.
+    """
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    if pair is None:
+        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
+
+    data = request.get_json(force=True)
+    try:
+        crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level, dry_gain_db = _parse_hybrid_params(data)
+    except (TypeError, ValueError):
+        return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db/dry_gain_db must be numbers"}), 400
+    max_points = int(data.get("max_points", 600))
+
+    result = build_hybrid(
+        pair,
+        crossover_dbfs=crossover_dbfs,
+        transition_width_db=transition_width_db,
+        auto_level=auto_level,
+        manual_b_trim_db=manual_b_trim_db,
+        dry_gain_db=dry_gain_db,
+    )
+
+    n = len(result.blend_curve)
+    stride = max(1, n // max_points)
+    idx = range(0, n, stride)
+    times = [i / pair.sample_rate for i in idx]
+    envelope_db = [float(result.envelope_db[i]) for i in idx]
+    blend_weight = [float(result.blend_curve[i]) for i in idx]
+
+    return jsonify({
+        "times": times,
+        "envelope_db": envelope_db,
+        "blend_weight": blend_weight,
+        "crossover_dbfs": crossover_dbfs,
+        "transition_width_db": transition_width_db,
     })
 
 
@@ -237,9 +287,9 @@ def api_preview():
         audio = pair.amp_b
     elif source == "hybrid":
         try:
-            crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
+            crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level, dry_gain_db = _parse_hybrid_params(data)
         except (TypeError, ValueError):
-            return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+            return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db/dry_gain_db must be numbers"}), 400
 
         result = build_hybrid(
             pair,
@@ -247,6 +297,7 @@ def api_preview():
             transition_width_db=transition_width_db,
             auto_level=auto_level,
             manual_b_trim_db=manual_b_trim_db,
+            dry_gain_db=dry_gain_db,
         )
         audio = result.hybrid
         headers = {
