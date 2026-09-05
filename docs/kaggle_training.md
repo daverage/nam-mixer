@@ -33,10 +33,19 @@ below persists to `job.json` immediately, so a restart mid-upload only loses
 the ability to keep watching that one attempt live, never the record of what
 happened.
 
-1. Stages **only** `input.wav`, `hybrid_target.wav`, `training_manifest.json`,
-   and `cloud_job.json` (already produced by "Generate Training Bundle") into
-   a job-specific staging directory -- never your source `.nam` files or any
-   preview DI. State: `preparing`.
+1. Stages into two SEPARATE job-specific staging directories -- never your
+   source `.nam` files or any preview DI:
+   - **dataset staging**: only `input.wav`, `hybrid_target.wav`,
+     `training_manifest.json`, and `cloud_job.json` (already produced by
+     "Generate Training Bundle") plus `dataset-metadata.json`.
+   - **kernel staging**: only `train_a2_cloud.py` plus `kernel-metadata.json`.
+     The cloud worker script never rides inside the dataset payload, and the
+     kernel push never re-uploads the training data -- the kernel gets it
+     via `dataset_sources` instead (the cloud script searches
+     `/kaggle/input/**/input.wav` for it, so this split needs no script
+     change).
+
+   State: `preparing`.
 2. Computes the dataset's `owner/slug` reference and **persists it to
    `job.json` before the upload even starts** -- this is the intended
    reference, not proof the dataset exists yet, but it means the reference is
@@ -45,18 +54,30 @@ happened.
    `work/a2/<design_id>/kaggle/<job_id>/logs/kaggle.log` line-by-line as it
    happens (never `subprocess.run(capture_output=True)`, which would give no
    visibility until the whole upload finishes). State: `uploading_dataset`.
-3. **Mandatory remote verification** -- `kaggle datasets status == ready` is
-   NOT trusted as proof the upload is complete (a real incident showed Kaggle
-   reporting "ready" for a dataset containing only 1 of 5 intended files).
-   Calls `kaggle datasets files <ref> -v` and confirms every required file is
-   present with a size matching the local staged copy. If anything is
-   missing or truncated, the job fails with a specific error listing exactly
-   what's wrong, and the dataset is left in place for diagnosis (never
-   auto-deleted, never blindly retried under a new slug). State:
-   `verifying_dataset`.
+3. **Mandatory remote verification, tolerant of Kaggle's post-create eventual
+   consistency** -- `kaggle datasets status == ready` is NOT trusted as proof
+   the upload is complete (a real incident showed Kaggle reporting "ready"
+   for a dataset containing only 1 of 5 intended files). Calls
+   `kaggle datasets files <ref> -v` and confirms every required file is
+   present with a size matching the local staged copy. A separate real
+   incident (dataset `andrzejmarczewski/hybrid-a2-20260905t200558z-
+   ab2994879d66`) proved the very FIRST such call after a successful upload
+   can transiently 403/404/come back empty even though the dataset is
+   genuinely complete -- manually re-checking the same dataset moments later
+   showed `status: ready` and a full, correctly-sized file listing. So this
+   step polls `datasets status` then `datasets files` in a bounded settling
+   window (`DATASET_VERIFY_TIMEOUT_S` = 120s, retried every
+   `DATASET_VERIFY_INTERVAL_S` = 3s), logging each attempt to `kaggle.log`.
+   Once the listing is actually readable, an incomplete or wrong-sized
+   payload fails **immediately** -- it is never retried, since waiting
+   cannot fix a genuinely wrong upload. If the dataset never becomes readable
+   within the timeout, the job fails with a clear message and the dataset is
+   left in place for diagnosis (never auto-deleted, never blindly retried
+   under a new slug). State: `verifying_dataset`.
 4. Only after verification passes: creates a **unique, private** Kaggle
    kernel (a Python script, not a notebook) requesting an `NvidiaTeslaT4`
-   accelerator, and pushes it. State: `creating_kernel`.
+   accelerator, and pushes it (from the kernel staging directory only).
+   State: `creating_kernel`.
 5. `kernels push` exiting 0 is also not trusted alone -- confirms the kernel
    actually resolves via `kaggle kernels status <ref>` (bounded retry for
    Kaggle-side eventual consistency) before ever considering it submitted.

@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -15,6 +16,7 @@ import soundfile as sf
 from hybrid.kaggle_training import (
     ACCELERATOR,
     FORBIDDEN_ACCELERATORS,
+    REQUIRED_DATASET_FILES,
     STAGED_BUNDLE_FILES,
     CliResult,
     KaggleCli,
@@ -101,6 +103,10 @@ def make_cli(monkeypatch, executable="/usr/bin/kaggle", responses=None):
             return responses[key]
         if key == ("config", "view"):
             return DEFAULT_CONFIG_VIEW
+        if key[:2] == ("datasets", "status"):
+            # Default: dataset is immediately ready -- tests that care about
+            # settling/eventual-consistency override this via `responses`.
+            return FakeCompleted(0, "ready", "")
         if key[:2] == ("datasets", "files") and state["last_dataset_dir"] is not None:
             return _auto_datasets_files_response(state["last_dataset_dir"])
         return FakeCompleted(returncode=0, stdout="", stderr="")
@@ -228,15 +234,19 @@ def cloud_script(tmp_path, monkeypatch):
 def test_staging_allow_list(tmp_path, bundle_dir):
     manager = KaggleJobManager(tmp_path)
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
 
-    staged_names = {p.name for p in staging.iterdir()}
+    dataset_names = {p.name for p in dataset_staging.iterdir()}
+    kernel_names = {p.name for p in kernel_staging.iterdir()}
     for name in STAGED_BUNDLE_FILES:
-        assert name in staged_names
-    assert "amp_a_source.nam" not in staged_names
-    assert "some_di.wav" not in staged_names
-    assert "cloud_job.json" in staged_names
-    assert "train_a2_cloud.py" in staged_names
+        assert name in dataset_names
+    assert "amp_a_source.nam" not in dataset_names
+    assert "some_di.wav" not in dataset_names
+    assert "cloud_job.json" in dataset_names
+    # The cloud worker script belongs ONLY in kernel staging -- never
+    # re-uploaded as part of the dataset payload.
+    assert "train_a2_cloud.py" not in dataset_names
+    assert "train_a2_cloud.py" in kernel_names
     assert job.state == "uploading"
 
 
@@ -253,10 +263,10 @@ def test_create_dataset_is_always_private(tmp_path, bundle_dir, monkeypatch):
     cli, calls = make_cli(monkeypatch)
     manager.cli = cli
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
-    manager.create_dataset(job, staging)
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, dataset_staging)
 
-    metadata = json.loads((staging / "dataset-metadata.json").read_text())
+    metadata = json.loads((dataset_staging / "dataset-metadata.json").read_text())
     assert "public" not in json.dumps(metadata).lower() or metadata.get("public") is not True
     push_call = [c for c in calls if c[1:3] == ["datasets", "create"]]
     assert push_call
@@ -274,9 +284,9 @@ def test_create_dataset_fails_cleanly_without_username(tmp_path, bundle_dir, mon
     cli, _ = make_cli(monkeypatch, responses={("config", "view"): FakeCompleted(0, "no username line here", "")})
     manager.cli = cli
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
     with pytest.raises(KaggleTrainingError, match="username"):
-        manager.create_dataset(job, staging)
+        manager.create_dataset(job, dataset_staging)
     assert job.state == "failed"
 
 
@@ -285,9 +295,9 @@ def test_create_dataset_slug_bounded_for_long_ids(tmp_path, bundle_dir, monkeypa
     cli, _ = make_cli(monkeypatch)
     manager.cli = cli
     job = KaggleJob(job_id="a" * 40, design_id="a-very-long-design-name-that-goes-on-and-on-and-on")
-    staging = manager.stage(job, bundle_dir)
-    manager.create_dataset(job, staging)
-    metadata = json.loads((staging / "dataset-metadata.json").read_text())
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, dataset_staging)
+    metadata = json.loads((dataset_staging / "dataset-metadata.json").read_text())
     assert 6 <= len(metadata["title"]) <= 50
     assert metadata["id"].startswith("testuser/")
 
@@ -297,11 +307,11 @@ def test_create_kernel_is_always_private_and_t4(tmp_path, bundle_dir, monkeypatc
     cli, calls = make_cli(monkeypatch)
     manager.cli = cli
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
-    manager.create_dataset(job, staging)
-    manager.create_kernel(job, staging)
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, dataset_staging)
+    manager.create_kernel(job, kernel_staging)
 
-    metadata = json.loads((staging / "kernel-metadata.json").read_text())
+    metadata = json.loads((kernel_staging / "kernel-metadata.json").read_text())
     assert metadata["is_private"] is True
     push_call = [c for c in calls if c[1:3] == ["kernels", "push"]]
     assert push_call
@@ -320,11 +330,11 @@ def test_create_kernel_id_and_ref_are_username_qualified(tmp_path, bundle_dir, m
     cli, calls = make_cli(monkeypatch)
     manager.cli = cli
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
-    manager.create_dataset(job, staging)
-    manager.create_kernel(job, staging)
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
+    manager.create_dataset(job, dataset_staging)
+    manager.create_kernel(job, kernel_staging)
 
-    metadata = json.loads((staging / "kernel-metadata.json").read_text())
+    metadata = json.loads((kernel_staging / "kernel-metadata.json").read_text())
     assert metadata["id"] == f"testuser/{metadata['title']}"
     assert job.kernel_ref == metadata["id"]
     assert job.kernel_ref.startswith("testuser/")
@@ -343,21 +353,23 @@ def test_create_kernel_fails_when_push_succeeds_but_status_never_resolves(tmp_pa
     marked failed, never left "submitted"."""
     manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=2)
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
 
     def responses(argv):
         if argv[1:3] == ["kernels", "status"]:
             return FakeCompleted(1, "", "Permission 'kernels.get' was denied")
+        if argv[1:3] == ["datasets", "status"]:
+            return FakeCompleted(0, "ready", "")
         if argv[1:3] == ["datasets", "files"]:
-            return _auto_datasets_files_response(staging)
+            return _auto_datasets_files_response(dataset_staging)
         return FakeCompleted(0, "" if argv[1] != "config" else DEFAULT_CONFIG_VIEW.stdout, "")
 
     cli, calls = make_cli(monkeypatch, responses=responses)
     manager.cli = cli
-    manager.create_dataset(job, staging)
+    manager.create_dataset(job, dataset_staging)
 
     with pytest.raises(KaggleTrainingError, match="did not create/resolve the kernel"):
-        manager.create_kernel(job, staging)
+        manager.create_kernel(job, kernel_staging)
 
     assert job.state == "failed"
     assert job.kernel_ref is None  # never persisted -- it was never real
@@ -372,7 +384,7 @@ def test_create_kernel_succeeds_when_status_resolves_on_second_attempt(tmp_path,
     attempt_count = {"n": 0}
     manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=3)
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
 
     def responses(argv):
         if argv[1:3] == ["kernels", "status"]:
@@ -382,14 +394,16 @@ def test_create_kernel_succeeds_when_status_resolves_on_second_attempt(tmp_path,
             return FakeCompleted(0, "queued", "")
         if argv[1:3] == ["config", "view"]:
             return DEFAULT_CONFIG_VIEW
+        if argv[1:3] == ["datasets", "status"]:
+            return FakeCompleted(0, "ready", "")
         if argv[1:3] == ["datasets", "files"]:
-            return _auto_datasets_files_response(staging)
+            return _auto_datasets_files_response(dataset_staging)
         return FakeCompleted(0, "", "")
 
     cli, _ = make_cli(monkeypatch, responses=responses)
     manager.cli = cli
-    manager.create_dataset(job, staging)
-    manager.create_kernel(job, staging)
+    manager.create_dataset(job, dataset_staging)
+    manager.create_kernel(job, kernel_staging)
 
     assert job.state == "queued"
     assert job.kernel_ref == f"testuser/hybrid-a2-train-mydesign-{job.job_id[:12]}"
@@ -640,16 +654,26 @@ def test_run_streaming_times_out_without_hanging(tmp_path, monkeypatch):
 
 class _StubCli:
     """Minimal stand-in for KaggleCli when a test only needs to control
-    datasets_files()'s return value, without going through the full
-    subprocess-mocking machinery."""
-    def __init__(self, files_result: FakeCompleted):
+    datasets_files()'s (and optionally datasets_status()'s) return value,
+    without going through the full subprocess-mocking machinery. Status
+    defaults to "ready" so tests that only care about files() behavior don't
+    need to know about the settling loop's status-polling step."""
+    def __init__(self, files_result: FakeCompleted, status_result: Optional[FakeCompleted] = None):
         self._files_result = CliResult(
             ok=(files_result.returncode == 0), returncode=files_result.returncode,
             stdout=files_result.stdout, stderr=files_result.stderr,
         )
+        status_result = status_result or FakeCompleted(0, "ready", "")
+        self._status_result = CliResult(
+            ok=(status_result.returncode == 0), returncode=status_result.returncode,
+            stdout=status_result.stdout, stderr=status_result.stderr,
+        )
 
     def datasets_files(self, dataset_ref):
         return self._files_result
+
+    def datasets_status(self, dataset_ref, json_format=False):
+        return self._status_result
 
 
 def test_verify_dataset_payload_accepts_matching_complete_payload(tmp_path):
@@ -718,10 +742,13 @@ def test_verify_dataset_payload_rejects_when_ready_but_partial():
 
 
 def test_verify_dataset_payload_surfaces_files_command_failure():
+    """A files() call that NEVER succeeds within the settling window (not
+    just transiently) must still fail, with a clear timeout message -- the
+    retry window is bounded, not infinite."""
     manager = KaggleJobManager(Path("."), cli=_StubCli(FakeCompleted(1, "", "403 Forbidden")))
-    ok, error = manager.verify_dataset_payload("owner/slug", Path("/nonexistent"))
+    ok, error = manager.verify_dataset_payload("owner/slug", Path("/nonexistent"), timeout=0.05, interval=0.01)
     assert ok is False
-    assert "could not verify" in error.lower()
+    assert "could not be read back for verification" in error.lower()
 
 
 def test_create_dataset_never_creates_kernel_when_verification_fails(tmp_path, bundle_dir, monkeypatch):
@@ -731,6 +758,8 @@ def test_create_dataset_never_creates_kernel_when_verification_fails(tmp_path, b
     def responses(argv):
         if argv[1:3] == ["config", "view"]:
             return DEFAULT_CONFIG_VIEW
+        if argv[1:3] == ["datasets", "status"]:
+            return FakeCompleted(0, "ready", "")
         if argv[1:3] == ["datasets", "files"]:
             return FakeCompleted(0, "name,size,creationDate\ncloud_job.json,103,2026-01-01", "")
         return FakeCompleted(0, "", "")
@@ -761,10 +790,10 @@ def test_dataset_upload_is_never_automatically_retried(tmp_path, bundle_dir, mon
     cli, calls = make_cli(monkeypatch, responses=responses)
     manager = KaggleJobManager(tmp_path, cli=cli)
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
 
     with pytest.raises(KaggleTrainingError):
-        manager.create_dataset(job, staging)
+        manager.create_dataset(job, dataset_staging)
 
     create_calls = [c for c in calls if c[1:3] == ["datasets", "create"]]
     assert len(create_calls) == 1
@@ -833,13 +862,19 @@ def test_submit_async_persists_dataset_ref_before_long_upload_completes(tmp_path
         0, DEFAULT_CONFIG_VIEW.stdout if argv[1:3] == ["config", "view"] else "", "",
     ))
 
-    manager = KaggleJobManager(tmp_path)
+    # Short verify settling window: this test's fake CLI answers "datasets
+    # status"/"datasets files" with empty/unrecognized responses (it only
+    # cares about the upload phase), which would otherwise make the new
+    # settling loop retry for its full default timeout on a background
+    # thread that outlives this test's monkeypatch teardown -- letting a
+    # stray subprocess.run call reach the REAL kaggle CLI once unmocked.
+    manager = KaggleJobManager(tmp_path, dataset_verify_timeout_s=0.2, dataset_verify_interval_s=0.05)
     job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
 
     def run_create_dataset():
         try:
-            manager.create_dataset(job, staging)
+            manager.create_dataset(job, dataset_staging)
         except KaggleTrainingError:
             pass
 
@@ -854,3 +889,258 @@ def test_submit_async_persists_dataset_ref_before_long_upload_completes(tmp_path
 
     upload_may_finish.set()
     t.join(timeout=5)
+
+
+# --- dataset verification settling/retry loop (Kaggle eventual consistency) --
+#
+# A real production dataset (andrzejmarczewski/hybrid-a2-20260905t200558z-
+# ab2994879d66) proved `datasets files` can transiently 403 on the very first
+# call right after a genuinely successful `datasets create`, and that the
+# SAME dataset was fully readable and correct moments later. These tests
+# drive verify_dataset_payload() directly with a scripted fake CLI (no real
+# subprocess, no real waiting -- `interval` is always ~0) to prove the
+# settling loop tolerates that without weakening the exact-size check for a
+# genuinely incomplete/wrong payload.
+
+class _SequenceCli:
+    """A fake CLI whose datasets_status()/datasets_files() responses follow a
+    scripted sequence (the last entry repeats once exhausted), so a test can
+    say precisely "fail N times, then succeed" without any real subprocess or
+    real waiting. Call counts are recorded for bounded-retry assertions."""
+
+    def __init__(self, status_sequence=None, files_sequence=None):
+        self._status_seq = list(status_sequence or [FakeCompleted(0, "ready", "")])
+        self._files_seq = list(files_sequence or [FakeCompleted(0, "name,size,creationDate", "")])
+        self.status_calls = 0
+        self.files_calls = 0
+
+    @staticmethod
+    def _at(seq, count):
+        return seq[min(count, len(seq) - 1)]
+
+    @staticmethod
+    def _to_result(fake: FakeCompleted) -> CliResult:
+        return CliResult(ok=(fake.returncode == 0), returncode=fake.returncode, stdout=fake.stdout, stderr=fake.stderr)
+
+    def datasets_status(self, dataset_ref, json_format=False):
+        result = self._to_result(self._at(self._status_seq, self.status_calls))
+        self.status_calls += 1
+        return result
+
+    def datasets_files(self, dataset_ref):
+        result = self._to_result(self._at(self._files_seq, self.files_calls))
+        self.files_calls += 1
+        return result
+
+
+def _make_complete_staging(tmp_path: Path) -> Path:
+    staging = tmp_path / "verify_staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "input.wav").write_bytes(b"i" * 1000)
+    (staging / "hybrid_target.wav").write_bytes(b"t" * 2000)
+    (staging / "training_manifest.json").write_bytes(b"{}")
+    (staging / "cloud_job.json").write_bytes(b"{}")
+    return staging
+
+
+def _complete_files_csv(staging_dir: Path) -> str:
+    rows = ["name,size,creationDate"]
+    for name in REQUIRED_DATASET_FILES:
+        rows.append(f"{name},{(staging_dir / name).stat().st_size},2026-01-01 00:00:00")
+    return "\n".join(rows)
+
+
+def test_verify_retries_transient_403_then_succeeds(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = _complete_files_csv(staging)
+    cli = _SequenceCli(files_sequence=[FakeCompleted(1, "", "403 Client Error: Forbidden"), FakeCompleted(0, csv, "")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is True
+    assert error == ""
+    assert cli.files_calls == 2
+    assert job.dataset_verified_at is not None
+    log = manager.read_log_tail(job)
+    assert "403" in log
+    assert "verified" in log.lower()
+
+
+def test_verify_retries_transient_404_then_succeeds(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = _complete_files_csv(staging)
+    cli = _SequenceCli(files_sequence=[FakeCompleted(1, "", "404 Not Found"), FakeCompleted(0, csv, "")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is True
+    assert cli.files_calls == 2
+
+
+def test_verify_status_processing_then_ready_then_files_success(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = _complete_files_csv(staging)
+    cli = _SequenceCli(
+        status_sequence=[FakeCompleted(0, "processing", ""), FakeCompleted(0, "ready", "")],
+        files_sequence=[FakeCompleted(0, csv, "")],
+    )
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is True
+    assert cli.status_calls == 2
+    assert cli.files_calls == 1  # files is only attempted once status says ready
+    assert job.dataset_ready_at is not None
+
+
+def test_verify_status_ready_but_files_still_403_then_retries(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = _complete_files_csv(staging)
+    cli = _SequenceCli(
+        status_sequence=[FakeCompleted(0, "ready", "")],
+        files_sequence=[FakeCompleted(1, "", "403 Forbidden"), FakeCompleted(1, "", "403 Forbidden"), FakeCompleted(0, csv, "")],
+    )
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is True
+    assert cli.files_calls == 3
+    # status is only polled again while not yet "ready" -- once ready, only files is retried.
+    assert cli.status_calls == 1
+
+
+def test_verify_repeated_403_until_timeout_fails(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    cli = _SequenceCli(files_sequence=[FakeCompleted(1, "", "403 Forbidden")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=0.05, interval=0.01)
+    assert ok is False
+    assert "could not be read back for verification" in error.lower()
+    assert cli.files_calls >= 2  # actually retried, not just one attempt
+
+
+def test_verify_repeated_404_until_timeout_fails(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    cli = _SequenceCli(files_sequence=[FakeCompleted(1, "", "404 Not Found")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=0.05, interval=0.01)
+    assert ok is False
+    assert cli.files_calls >= 2
+
+
+def test_verify_readable_listing_missing_input_wav_fails_immediately(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = "name,size,creationDate\n" + "\n".join(
+        f"{name},{(staging / name).stat().st_size},2026-01-01"
+        for name in ("hybrid_target.wav", "training_manifest.json", "cloud_job.json")
+    )
+    cli = _SequenceCli(files_sequence=[FakeCompleted(0, csv, "")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is False
+    assert "input.wav" in error
+    assert cli.files_calls == 1  # readable-but-wrong fails immediately, never retried
+
+
+def test_verify_readable_listing_missing_hybrid_target_fails_immediately(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = "name,size,creationDate\n" + "\n".join(
+        f"{name},{(staging / name).stat().st_size},2026-01-01"
+        for name in ("input.wav", "training_manifest.json", "cloud_job.json")
+    )
+    cli = _SequenceCli(files_sequence=[FakeCompleted(0, csv, "")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is False
+    assert "hybrid_target.wav" in error
+    assert cli.files_calls == 1
+
+
+def test_verify_readable_listing_wrong_byte_size_fails_immediately(tmp_path):
+    staging = _make_complete_staging(tmp_path)
+    csv = "name,size,creationDate\n" + "\n".join(
+        f"{name},{999999 if name == 'input.wav' else (staging / name).stat().st_size},2026-01-01"
+        for name in REQUIRED_DATASET_FILES
+    )
+    cli = _SequenceCli(files_sequence=[FakeCompleted(0, csv, "")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d")
+
+    ok, error = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is False
+    assert "size mismatch" in error
+    assert cli.files_calls == 1  # readable-but-wrong fails immediately, never retried
+
+
+def test_verify_settling_never_starts_kernel_creation(tmp_path, bundle_dir, monkeypatch):
+    """End-to-end through _run_pipeline: a transient 403 that later resolves
+    must let the pipeline proceed to a real kernel push -- but only after
+    verification actually passes, never before."""
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
+    csv_holder = {"csv": None}
+
+    def responses(argv):
+        if argv[1:3] == ["config", "view"]:
+            return DEFAULT_CONFIG_VIEW
+        if argv[1:3] == ["datasets", "status"]:
+            return FakeCompleted(0, "ready", "")
+        if argv[1:3] == ["datasets", "files"]:
+            if csv_holder["csv"] is None:
+                csv_holder["csv"] = "seen"
+                return FakeCompleted(1, "", "403 Forbidden")
+            return _auto_datasets_files_response(dataset_staging)
+        return FakeCompleted(0, "", "")
+
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager.cli = cli
+
+    kernel_calls_before_verified = []
+
+    real_create_kernel = manager.create_kernel
+
+    def wrapped_create_kernel(job_arg, staging_arg):
+        assert job_arg.dataset_verified_at is not None, "kernel creation started before dataset verification completed"
+        return real_create_kernel(job_arg, staging_arg)
+
+    manager.create_kernel = wrapped_create_kernel
+    manager._run_pipeline(job, bundle_dir)
+
+    assert job.state == "queued"
+    assert job.dataset_verified_at is not None
+    files_calls = [c for c in calls if c[1:3] == ["datasets", "files"]]
+    assert len(files_calls) == 2  # bounded: one transient 403, one success -- not unbounded
+
+
+def test_verify_dataset_payload_job_state_stays_verifying_during_retries(tmp_path):
+    """job.state is set to "verifying_dataset" by create_dataset() before the
+    settling loop starts and stays there across retries -- confirmed here by
+    checking it's never mutated by verify_dataset_payload itself (only the
+    caller, create_dataset, transitions state), so UI polling mid-retry keeps
+    reporting the correct state."""
+    staging = _make_complete_staging(tmp_path)
+    csv = _complete_files_csv(staging)
+    cli = _SequenceCli(files_sequence=[FakeCompleted(1, "", "403 Forbidden"), FakeCompleted(0, csv, "")])
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j", design_id="d", state="verifying_dataset")
+    save_job(tmp_path, job)
+
+    ok, _ = manager.verify_dataset_payload("owner/ds", staging, job=job, timeout=5, interval=0.001)
+    assert ok is True
+    assert job.state == "verifying_dataset"  # unchanged by verify_dataset_payload itself
+
+    reloaded = load_job(tmp_path, "d", "j")
+    assert reloaded.state == "verifying_dataset"

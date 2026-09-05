@@ -67,6 +67,19 @@ FORBIDDEN_ACCELERATORS = {"NvidiaTeslaP100", "TPU"}
 # short-circuit aggressively.
 DATASET_UPLOAD_TIMEOUT_S = 1800
 
+# A real production dataset (andrzejmarczewski/hybrid-a2-20260905t200558z-
+# ab2994879d66) proved that `datasets create` exiting 0 can be immediately
+# followed by a transient 403 from `datasets files`/`datasets status` --
+# manually re-checking the SAME dataset moments later showed status "ready"
+# and a complete, correctly-sized file listing. That is Kaggle-side eventual
+# consistency after dataset creation, not a real permission or content
+# problem, so verification must tolerate a bounded settling window rather
+# than failing on the first transient response. This window is much shorter
+# than DATASET_UPLOAD_TIMEOUT_S above -- it's for post-create propagation,
+# not for the upload itself.
+DATASET_VERIFY_TIMEOUT_S = 120
+DATASET_VERIFY_INTERVAL_S = 3
+
 # `kernels push` returning exit code 0 is NOT sufficient evidence the kernel
 # actually exists on Kaggle's side -- a real production run observed a
 # "submitted" job whose kernel could never be resolved (wrong/bare slug).
@@ -122,6 +135,27 @@ def _parse_datasets_files_csv(text: str) -> dict[str, int]:
         except ValueError:
             continue
     return sizes
+
+
+def _parse_dataset_status(result: "CliResult") -> Optional[str]:
+    """Extracts a normalized status string (e.g. "ready") from a
+    `datasets_status` CliResult, whether it came back as `--format json`
+    (`{"status": "ready", ...}`) or plain text. Returns None only when the
+    call itself failed -- callers must not confuse "failed to check" with
+    "checked and not ready"."""
+    if not result.ok:
+        return None
+    text = result.combined.strip()
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and "status" in data:
+            return str(data["status"]).strip().lower()
+    except (json.JSONDecodeError, TypeError):
+        pass
+    lower = text.lower()
+    if "ready" in lower:
+        return "ready"
+    return lower or None
 
 
 @dataclass
@@ -320,8 +354,21 @@ class KaggleCli:
         potentially multi-minute upload."""
         return self.run_streaming(["datasets", "create", "-p", str(dataset_dir)], log_path, timeout=timeout)
 
-    def datasets_status(self, dataset_ref: str) -> CliResult:
-        return self._run(["datasets", "status", dataset_ref], timeout=30)
+    def datasets_status(self, dataset_ref: str, json_format: bool = False) -> CliResult:
+        args = ["datasets", "status", dataset_ref]
+        if json_format:
+            args += ["--format", "json"]
+        return self._run(args, timeout=30)
+
+    def supports_datasets_status_json(self) -> bool:
+        """Feature-detects `--format json` on `datasets status` via its own
+        --help text, so we never pass a flag an older installed CLI doesn't
+        recognize. Best-effort: any failure just means we fall back to
+        parsing plain-text status output."""
+        if not self.is_installed():
+            return False
+        result = self._run(["datasets", "status", "--help"], timeout=15)
+        return result.ok and "--format" in result.combined
 
     def datasets_files(self, dataset_ref: str) -> CliResult:
         """`kaggle datasets files <ref> -v` -- CSV listing of what actually
@@ -395,6 +442,9 @@ class KaggleJob:
     dataset_ref: Optional[str] = None
     kernel_ref: Optional[str] = None
     accelerator: str = ACCELERATOR
+    upload_completed_at: Optional[float] = None
+    dataset_ready_at: Optional[float] = None
+    dataset_verified_at: Optional[float] = None
     raw_kernel_status: Optional[str] = None
     output_nam_path: Optional[str] = None
     output_nam_sha256: Optional[str] = None
@@ -493,12 +543,17 @@ class KaggleJobManager:
         kernel_verify_attempts: int = KERNEL_VERIFY_ATTEMPTS,
         kernel_verify_delay_s: float = KERNEL_VERIFY_DELAY_S,
         dataset_upload_timeout_s: int = DATASET_UPLOAD_TIMEOUT_S,
+        dataset_verify_timeout_s: float = DATASET_VERIFY_TIMEOUT_S,
+        dataset_verify_interval_s: float = DATASET_VERIFY_INTERVAL_S,
     ):
         self.a2_output_dir = Path(a2_output_dir)
         self.cli = cli or KaggleCli()
         self.kernel_verify_attempts = kernel_verify_attempts
         self.kernel_verify_delay_s = kernel_verify_delay_s
         self.dataset_upload_timeout_s = dataset_upload_timeout_s
+        self.dataset_verify_timeout_s = dataset_verify_timeout_s
+        self.dataset_verify_interval_s = dataset_verify_interval_s
+        self._status_json_supported: Optional[bool] = None
 
     # -- status -------------------------------------------------------
 
@@ -519,33 +574,41 @@ class KaggleJobManager:
 
     # -- staging --------------------------------------------------------
 
-    def stage(self, job: KaggleJob, bundle_dir: Path) -> Path:
+    def stage(self, job: KaggleJob, bundle_dir: Path) -> tuple[Path, Path]:
+        """Returns (dataset_staging, kernel_staging) -- split so the private
+        DATASET (the actual training data: input.wav/hybrid_target.wav/
+        training_manifest.json/cloud_job.json) never bundles in the cloud
+        worker script, and the private KERNEL push never re-uploads the
+        training data it already gets via `dataset_sources` -- see
+        docs/kaggle_training.md."""
         job_dir = _job_dir(self.a2_output_dir, job.design_id, job.job_id)
-        staging = job_dir / "staging"
-        staging.mkdir(parents=True, exist_ok=True)
+        dataset_staging = job_dir / "dataset_staging"
+        kernel_staging = job_dir / "kernel_staging"
+        dataset_staging.mkdir(parents=True, exist_ok=True)
+        kernel_staging.mkdir(parents=True, exist_ok=True)
 
         bundle_dir = Path(bundle_dir)
         for name in STAGED_BUNDLE_FILES:
             src = bundle_dir / name
             if not src.is_file():
                 raise KaggleTrainingError(f"training bundle is missing required file: {src}")
-            shutil.copyfile(src, staging / name)
+            shutil.copyfile(src, dataset_staging / name)
 
         cloud_job = {
             "job_id": job.job_id,
             "design_id": job.design_id,
             "accelerator": job.accelerator,
         }
-        _atomic_write_json(staging / "cloud_job.json", cloud_job)
+        _atomic_write_json(dataset_staging / "cloud_job.json", cloud_job)
 
         cloud_script = Path(__file__).resolve().parent.parent / "cloud" / "kaggle" / "train_a2_cloud.py"
         if not cloud_script.is_file():
             raise KaggleTrainingError(f"cloud worker script missing: {cloud_script}")
-        shutil.copyfile(cloud_script, staging / cloud_script.name)
+        shutil.copyfile(cloud_script, kernel_staging / cloud_script.name)
 
         job.state = "uploading"
         save_job(self.a2_output_dir, job)
-        return staging
+        return dataset_staging, kernel_staging
 
     def create_dataset(self, job: KaggleJob, staging_dir: Path) -> None:
         # Kaggle requires dataset-metadata.json's "id" to be
@@ -597,30 +660,104 @@ class KaggleJobManager:
             save_job(self.a2_output_dir, job)
             raise KaggleTrainingError(job.error)
 
+        job.upload_completed_at = time.time()
         # `datasets create` exiting 0 (and even `datasets status == ready`)
         # is NOT sufficient evidence every intended file actually arrived --
         # a real production dataset reported "ready" with only 1 of 6 files
-        # present. Verify the exact remote payload before ever creating a
-        # kernel against it.
+        # present, and a separate real dataset (andrzejmarczewski/hybrid-a2-
+        # 20260905t200558z-ab2994879d66) proved the FIRST post-create
+        # `datasets files` call can transiently 403 even though the upload
+        # genuinely succeeded. Verify the exact remote payload -- tolerating
+        # a bounded settling window for that eventual consistency -- before
+        # ever creating a kernel against it.
         job.state = "verifying_dataset"
         save_job(self.a2_output_dir, job)
-        ok, error = self.verify_dataset_payload(dataset_ref, staging_dir)
+        ok, error = self.verify_dataset_payload(dataset_ref, staging_dir, job=job)
         if not ok:
             job.state = "failed"
             job.error = error
             save_job(self.a2_output_dir, job)
             raise KaggleTrainingError(job.error)
 
-    def verify_dataset_payload(self, dataset_ref: str, staging_dir: Path) -> tuple[bool, str]:
+    def verify_dataset_payload(
+        self,
+        dataset_ref: str,
+        staging_dir: Path,
+        job: Optional[KaggleJob] = None,
+        timeout: Optional[float] = None,
+        interval: Optional[float] = None,
+    ) -> tuple[bool, str]:
         """Confirms every file in REQUIRED_DATASET_FILES is actually present
-        remotely with a size matching the local staged copy. Comparing exact
-        sizes (not just presence) catches a partial/truncated upload that
-        still produced a listing entry."""
-        result = self.cli.datasets_files(dataset_ref)
-        if not result.ok:
-            return False, f"could not verify remote dataset contents: {result.stderr.strip() or result.stdout.strip()}"
+        remotely with a size matching the local staged copy, tolerating
+        Kaggle's post-create eventual consistency (see DATASET_VERIFY_*
+        constants and the create_dataset() comment above).
 
-        remote_sizes = _parse_datasets_files_csv(result.stdout)
+        Two very different failure classes, handled differently:
+          - CANNOT INSPECT YET (403/404/not-found/still-processing/empty
+            listing): retried within the bounded settling window.
+          - DATASET IS READABLE BUT WRONG (missing file, wrong size): failed
+            immediately, never retried -- a genuinely incomplete upload does
+            not become complete by waiting.
+
+        `job` is optional (existing direct-call tests omit it) -- when given,
+        attempts are appended to its Kaggle log and dataset_ready_at/
+        dataset_verified_at are stamped as they happen.
+        """
+        timeout = self.dataset_verify_timeout_s if timeout is None else timeout
+        interval = self.dataset_verify_interval_s if interval is None else interval
+        deadline = time.time() + timeout
+        attempt = 0
+        dataset_ready = False
+
+        while True:
+            attempt += 1
+
+            if not dataset_ready:
+                status_result = self.cli.datasets_status(dataset_ref, json_format=self._datasets_status_json_supported())
+                status_value = _parse_dataset_status(status_result)
+                if status_value == "ready":
+                    dataset_ready = True
+                    if job is not None and job.dataset_ready_at is None:
+                        job.dataset_ready_at = time.time()
+                        save_job(self.a2_output_dir, job)
+                    self._log_verify_attempt(job, attempt, "dataset status ready")
+                else:
+                    reason = (
+                        f"dataset still processing (status={status_value or 'unknown'})"
+                        if status_result.ok
+                        else f"dataset status check failed ({(status_result.stderr or status_result.stdout).strip() or 'no response'})"
+                    )
+                    if time.time() + interval > deadline:
+                        return False, self._verify_timeout_message(dataset_ref, timeout)
+                    self._log_verify_attempt(job, attempt, f"{reason}; retrying in {interval}s")
+                    time.sleep(interval)
+                    continue
+
+            files_result = self.cli.datasets_files(dataset_ref)
+            if files_result.ok:
+                remote_sizes = _parse_datasets_files_csv(files_result.stdout)
+                if remote_sizes:
+                    self._log_verify_attempt(job, attempt, "remote file listing available")
+                    ok, error = self._compare_required_files(dataset_ref, remote_sizes, staging_dir)
+                    if ok:
+                        self._log_verify_attempt(job, attempt, "verified " + ", ".join(
+                            f"{name} {remote_sizes.get(name)}" for name in REQUIRED_DATASET_FILES
+                        ))
+                        if job is not None:
+                            job.dataset_verified_at = time.time()
+                            save_job(self.a2_output_dir, job)
+                    return ok, error
+                reason = "remote file listing not available yet (empty)"
+            else:
+                reason = f"file listing not available yet ({(files_result.stderr or files_result.stdout).strip() or 'unknown error'})"
+
+            if time.time() + interval > deadline:
+                return False, self._verify_timeout_message(dataset_ref, timeout)
+            self._log_verify_attempt(job, attempt, f"{reason}; retrying in {interval}s")
+            time.sleep(interval)
+
+    @staticmethod
+    def _compare_required_files(dataset_ref: str, remote_sizes: dict[str, int], staging_dir: Path) -> tuple[bool, str]:
         missing: list[str] = []
         mismatched: list[str] = []
         for name in REQUIRED_DATASET_FILES:
@@ -644,6 +781,31 @@ class KaggleJobManager:
             "Kaggle dataset creation returned ready but training files are incomplete: "
             + "; ".join(parts) + f" (dataset={dataset_ref})"
         )
+
+    @staticmethod
+    def _verify_timeout_message(dataset_ref: str, timeout: float) -> str:
+        return (
+            f"Kaggle accepted the upload, but the private dataset ({dataset_ref}) could not be "
+            f"read back for verification after {timeout:.0f}s. No GPU kernel was started."
+        )
+
+    def _datasets_status_json_supported(self) -> bool:
+        if self._status_json_supported is None:
+            self._status_json_supported = bool(
+                hasattr(self.cli, "supports_datasets_status_json") and self.cli.supports_datasets_status_json()
+            )
+        return self._status_json_supported
+
+    def _log_verify_attempt(self, job: Optional[KaggleJob], attempt: int, message: str) -> None:
+        if job is None:
+            return
+        self._append_log(job, f"Dataset verification attempt {attempt}: {message}")
+
+    def _append_log(self, job: KaggleJob, text: str) -> None:
+        log_path = self._tail_log_path(job)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(text if text.endswith("\n") else text + "\n")
 
     def create_kernel(self, job: KaggleJob, staging_dir: Path) -> None:
         if job.dataset_ref is None:
@@ -751,9 +913,9 @@ class KaggleJobManager:
         The actually-long-running part of submission; called synchronously
         by `submit()` (tests, and callers that genuinely want to block) or
         from a background thread by `submit_async()`."""
-        staging = self.stage(job, bundle_dir)
-        self.create_dataset(job, staging)
-        self.create_kernel(job, staging)
+        dataset_staging, kernel_staging = self.stage(job, bundle_dir)
+        self.create_dataset(job, dataset_staging)
+        self.create_kernel(job, kernel_staging)
 
     def submit(self, design_id: str, bundle_dir: Path) -> KaggleJob:
         """Synchronous end-to-end submission -- blocks for the entire
