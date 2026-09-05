@@ -190,6 +190,27 @@
         <button id="btn-generate" class="btn btn-secondary btn-block">Generate Training Bundle</button>
         <div id="generate-status" class="info"></div>
         <div id="generate-result" class="generate-result" hidden></div>
+
+        <div id="a2-training-section" hidden>
+          <label class="field-label">Training</label>
+          <div class="radio-row">
+            <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Kaggle GPU <span class="hint">(recommended)</span></label>
+            <label><input type="radio" name="a2-backend" id="a2-backend-local" value="local"> Local</label>
+          </div>
+
+          <div id="kaggle-panel">
+            <div id="kaggle-status" class="info">Checking Kaggle connection...</div>
+            <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
+            <button id="btn-train-a2" class="btn btn-primary btn-block">Train A2</button>
+            <div id="kaggle-progress" class="info" hidden></div>
+            <div id="kaggle-result" class="generate-result" hidden></div>
+          </div>
+
+          <div id="local-panel" hidden>
+            <div class="info">Run locally in the dedicated training environment (see scripts/setup_a2_env.ps1):</div>
+            <div id="local-training-command" class="info"></div>
+          </div>
+        </div>
       </section>
 
     </main>

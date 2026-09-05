@@ -28,6 +28,12 @@ from hybrid.input_profiles import (
     get_profile,
     resolve_profile_gain_db,
 )
+from hybrid.kaggle_training import (
+    KaggleJobManager,
+    KaggleTrainingError,
+    find_active_job,
+    load_job,
+)
 from hybrid.nam_loader import load_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError
@@ -52,6 +58,8 @@ TRAINING_INPUT_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
 A2_OUTPUT_DIR = WORK_DIR / "a2"
 A2_OUTPUT_DIR.mkdir(exist_ok=True)
+
+_kaggle_manager = KaggleJobManager(A2_OUTPUT_DIR)
 
 app = Flask(__name__)
 
@@ -604,6 +612,107 @@ def api_generate():
         "warnings": bundle.warnings,
         "implemented": True,
     })
+
+
+@app.route("/api/kaggle/status", methods=["GET"])
+def api_kaggle_status():
+    """CLI/auth/quota status plus the most recent job for a design, if any --
+    see hybrid/kaggle_training.py. Never raises for a missing/unauthenticated
+    CLI -- reports that plainly instead."""
+    info = _kaggle_manager.status()
+    design_id = request.args.get("design_id")
+    if design_id:
+        job = find_active_job(A2_OUTPUT_DIR, design_id)
+        info["job"] = job.to_dict() if job else None
+    return jsonify(info)
+
+
+@app.route("/api/kaggle/auth/start", methods=["POST"])
+def api_kaggle_auth_start():
+    """Starts `kaggle auth login` as a non-blocking background process --
+    never a custom OAuth implementation, never reads/stores the resulting
+    credential (docs/kaggle_training.md)."""
+    if not _kaggle_manager.cli.is_installed():
+        return jsonify({"error": "Kaggle CLI is not installed. Run: pip install kaggle", "command": "pip install kaggle"}), 400
+    import subprocess
+    try:
+        subprocess.Popen(
+            [_kaggle_manager.cli.executable, "auth", "login"],
+            shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        started = True
+    except OSError as exc:
+        started = False
+        logger.warning("could not launch kaggle auth login: %s", exc)
+    return jsonify({
+        "started": started,
+        "command": "kaggle auth login",
+        "note": "If a browser window didn't open, run the command above yourself, then refresh /api/kaggle/status.",
+    })
+
+
+@app.route("/api/kaggle/train", methods=["POST"])
+def api_kaggle_train():
+    """Start a Kaggle GPU job for an already-generated training bundle.
+    Never recomputes the design/manifest -- reuses the bundle written by
+    POST /api/generate."""
+    data = request.get_json(force=True, silent=True) or {}
+    design_id = data.get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id is required (from a prior POST /api/generate response)"}), 400
+
+    bundle_dir = A2_OUTPUT_DIR / secure_filename(str(design_id))
+    manifest_path = bundle_dir / "training_manifest.json"
+    if not manifest_path.is_file():
+        return jsonify({"error": f"no generated training bundle found for design_id {design_id!r} -- call POST /api/generate first"}), 400
+
+    try:
+        job = _kaggle_manager.submit(design_id, bundle_dir)
+    except KaggleTrainingError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"job_id": job.job_id, "design_id": job.design_id, "state": job.state})
+
+
+@app.route("/api/kaggle/jobs/<job_id>", methods=["GET"])
+def api_kaggle_job_status(job_id: str):
+    design_id = request.args.get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id query parameter is required"}), 400
+    job = load_job(A2_OUTPUT_DIR, design_id, job_id)
+    if job is None:
+        return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
+    job = _kaggle_manager.refresh(job)
+    response = job.to_dict()
+    response["progress"] = _kaggle_manager.parse_progress(_kaggle_manager.read_log_tail(job))
+    return jsonify(response)
+
+
+@app.route("/api/kaggle/jobs/<job_id>/logs", methods=["GET"])
+def api_kaggle_job_logs(job_id: str):
+    design_id = request.args.get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id query parameter is required"}), 400
+    job = load_job(A2_OUTPUT_DIR, design_id, job_id)
+    if job is None:
+        return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
+    tail = _kaggle_manager.fetch_logs(job) if job.state not in ("complete", "failed") else _kaggle_manager.read_log_tail(job)
+    return jsonify({"log_tail": tail, "progress": _kaggle_manager.parse_progress(tail)})
+
+
+@app.route("/api/kaggle/jobs/<job_id>/cleanup", methods=["POST"])
+def api_kaggle_job_cleanup(job_id: str):
+    design_id = request.args.get("design_id") or (request.get_json(force=True, silent=True) or {}).get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id is required"}), 400
+    job = load_job(A2_OUTPUT_DIR, design_id, job_id)
+    if job is None:
+        return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
+    try:
+        job = _kaggle_manager.cleanup(job)
+    except KaggleTrainingError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(job.to_dict())
 
 
 if __name__ == "__main__":

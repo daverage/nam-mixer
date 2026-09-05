@@ -53,6 +53,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from hybrid.a2_training_settings import settings_for, user_metadata_kwargs  # noqa: E402
 from hybrid.receptive_field import (  # noqa: E402
     ReceptiveFieldUnavailable,
     assert_envelope_history_fits,
@@ -241,29 +242,20 @@ def _build_user_metadata(manifest: dict):
     """
     from nam.models.metadata import GearType, UserMetadata
 
-    amp_a_name = Path(manifest.get("amp_a", {}).get("filename", "Amp A")).stem
-    amp_b_name = Path(manifest.get("amp_b", {}).get("filename", "Amp B")).stem
-    calibration = manifest.get("calibration", {})
-
-    # Only report input_level_dbu when calibration was genuinely applied
-    # (both source models calibrated) -- never invent one for a Raw-fallback
-    # pair (docs/phase3.md section 9).
-    input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
-
+    # Shared with cloud/kaggle/train_a2_cloud.py -- see
+    # hybrid/a2_training_settings.py's user_metadata_kwargs docstring. Only
+    # the nam-specific enum (GearType.AMP) and tone_type/output_level_dbu
+    # omissions live here; everything else is the shared plain-dict logic.
     return UserMetadata(
-        name=f"Hybrid {amp_a_name} -> {amp_b_name}",
-        modeled_by="Hybrid NAM Builder",
         gear_type=GearType.AMP,
-        gear_make="Hybrid",
-        gear_model=f"{amp_a_name} -> {amp_b_name}",
         # tone_type deliberately left unset: this model's whole point is
         # that its tone changes with input level, so no single ToneType
         # value would be non-misleading.
-        input_level_dbu=input_level_dbu,
         # output_level_dbu deliberately left unset: the hybrid's output
         # level is a combination of both source models' outputs plus the
         # frozen B trim -- there's no single inherited physical value to
         # report here.
+        **user_metadata_kwargs(manifest),
     )
 
 
@@ -306,23 +298,30 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
               "override -- it selects CUDA/MPS/CPU automatically. Continuing with automatic selection.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    epochs = 1 if quick else 100
+    # Shared with cloud/kaggle/train_a2_cloud.py -- see
+    # hybrid/a2_training_settings.py. This is the parity mechanism that keeps
+    # local and Kaggle GPU training from silently drifting apart.
+    settings = settings_for(quick)
 
     result = core.train(
         input_path=str(input_path),
         output_path=str(target_path),
         train_path=str(output_dir),
-        epochs=epochs,
-        latency=0,  # docs/phase3.md section 16 -- synthetic latency is authoritatively 0, never auto-detected
+        epochs=settings.epochs,
+        latency=settings.latency,  # docs/phase3.md section 16 -- synthetic latency is authoritatively 0, never auto-detected
+        batch_size=settings.batch_size,
+        ny=settings.ny,
+        seed=settings.seed,
+        ignore_checks=settings.ignore_checks,
         # silent=True suppresses nam's interactive matplotlib plot windows
         # (latency-calibration plots, validation-ESR plot) -- with latency=0
         # already fixed there's nothing for a human to approve interactively,
         # and a blocking plt.show() here would hang a non-interactive/headless
         # run forever. docs/phase3.md section 31 explicitly requires
         # suppressing interactive plots.
-        silent=True,
+        silent=settings.silent,
         modelname="model",
-        fast_dev_run=quick,
+        fast_dev_run=settings.fast_dev_run,
     )
 
     if result is None or result.model is None:

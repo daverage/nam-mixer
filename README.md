@@ -147,12 +147,18 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
    (`hybrid/training_target.py`). Produces `input.wav`, `hybrid_target.wav`
    (+ `hybrid_target_raw.wav` for comparison), `hybrid.hybrid.json`, and
    `training_manifest.json` under `work/a2/<design_id>/`.
-6. Train a real A2 (PackedWaveNet) model on the bundle with
-   `scripts/train_a2.py` (needs a separate Torch/`neural-amp-modeler`
-   environment — see `requirements-training.txt` /
-   `scripts/setup_a2_env.ps1` — never the app's own Python environment),
-   which also validates the exported `.nam` by loading and rendering it
-   through the existing native NAMCore renderer.
+6. Train a real A2 (PackedWaveNet) model on the bundle, either:
+   - **Kaggle GPU** (recommended, one-click from the "Create A2" card after a
+     one-time `pip install kaggle && kaggle auth login` — see
+     `docs/kaggle_training.md`), which trains on a private Kaggle T4 GPU and
+     downloads/verifies the result automatically, or
+   - **Local**, with `scripts/train_a2.py` (needs a separate Torch/
+     `neural-amp-modeler` environment — see `requirements-training.txt` /
+     `scripts/setup_a2_env.ps1` — never the app's own Python environment).
+
+   Both paths validate the exported `.nam` identically: loading and
+   rendering it (Full and Lite) through the existing native NAMCore renderer
+   and comparing against the training target.
 
 ## Current limitations / experimental status
 

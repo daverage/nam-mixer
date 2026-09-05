@@ -3,3 +3,10 @@ numpy
 scipy
 soundfile
 pytest
+
+# Kaggle GPU training backend (hybrid/kaggle_training.py) -- lightweight,
+# no torch, safe in the normal torch-free runtime environment. Only the
+# `kaggle` CLI/executable is actually invoked (via subprocess); this repo
+# never imports the `kaggle` Python package itself. See docs/kaggle_training.md.
+kaggle>=2.2.4
+

@@ -667,8 +667,151 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
       ${data.warnings && data.warnings.length ? `<div class="warning-box">${data.warnings.join(" ")}</div>` : ""}
     `;
     setStatus("Training bundle ready.");
+
+    lastDesignId = data.design_id;
+    lastTrainingCommand = data.training_command;
+    document.getElementById("a2-training-section").hidden = false;
+    document.getElementById("local-training-command").textContent = lastTrainingCommand;
+    refreshKaggleStatus();
   } catch (err) {
     generateStatus.textContent = "Request failed: " + err;
     setStatus("Training bundle generation failed.", true);
   }
 });
+
+// --- Kaggle GPU training backend -----------------------------------------
+let lastDesignId = null;
+let lastTrainingCommand = "";
+let kaggleAuthenticated = false;
+let kaggleJobPollTimer = null;
+
+const kaggleStatusEl = document.getElementById("kaggle-status");
+const kaggleConnectBtn = document.getElementById("btn-kaggle-connect");
+const trainA2Btn = document.getElementById("btn-train-a2");
+const kaggleProgressEl = document.getElementById("kaggle-progress");
+const kaggleResultEl = document.getElementById("kaggle-result");
+const kaggleBackendRadio = document.getElementById("a2-backend-kaggle");
+const localBackendRadio = document.getElementById("a2-backend-local");
+const kagglePanel = document.getElementById("kaggle-panel");
+const localPanel = document.getElementById("local-panel");
+
+function updateBackendPanels() {
+  const useKaggle = kaggleBackendRadio.checked;
+  kagglePanel.hidden = !useKaggle;
+  localPanel.hidden = useKaggle;
+}
+kaggleBackendRadio.addEventListener("change", updateBackendPanels);
+localBackendRadio.addEventListener("change", updateBackendPanels);
+
+async function refreshKaggleStatus() {
+  try {
+    const resp = await fetch("/api/kaggle/status" + (lastDesignId ? `?design_id=${encodeURIComponent(lastDesignId)}` : ""));
+    const data = await resp.json();
+    if (!data.cli_installed) {
+      kaggleStatusEl.textContent = "Kaggle CLI not installed. Run: pip install kaggle";
+      kaggleConnectBtn.hidden = true;
+      kaggleAuthenticated = false;
+      trainA2Btn.disabled = true;
+      return;
+    }
+    if (!data.authenticated) {
+      kaggleStatusEl.textContent = `Kaggle CLI ${data.cli_version || ""} installed, not connected.`;
+      kaggleConnectBtn.hidden = false;
+      kaggleAuthenticated = false;
+      trainA2Btn.disabled = true;
+      return;
+    }
+    kaggleAuthenticated = true;
+    kaggleConnectBtn.hidden = true;
+    trainA2Btn.disabled = false;
+    const quota = data.quota_available ? (data.quota_raw || "available") : "unavailable";
+    kaggleStatusEl.textContent = `Connected ✓  CLI ${data.cli_version || "?"}  GPU: NVIDIA T4  Quota: ${quota}`;
+
+    if (data.job && data.job.state && !["complete", "failed"].includes(data.job.state)) {
+      pollKaggleJob(data.job.design_id, data.job.job_id);
+    }
+  } catch (err) {
+    kaggleStatusEl.textContent = "Could not check Kaggle status: " + err;
+  }
+}
+
+kaggleConnectBtn.addEventListener("click", async () => {
+  kaggleStatusEl.textContent = "Starting Kaggle authentication...";
+  try {
+    const resp = await fetch("/api/kaggle/auth/start", { method: "POST" });
+    const data = await resp.json();
+    kaggleStatusEl.textContent = data.started
+      ? "A Kaggle login flow was started. Complete it in your browser, then click Connect Kaggle again to refresh."
+      : `Run this yourself, then refresh: ${data.command}`;
+  } catch (err) {
+    kaggleStatusEl.textContent = "Could not start Kaggle auth: " + err;
+  }
+});
+
+trainA2Btn.addEventListener("click", async () => {
+  if (!lastDesignId) {
+    setStatus("Generate a training bundle first.", true);
+    return;
+  }
+  trainA2Btn.disabled = true;
+  kaggleProgressEl.hidden = false;
+  kaggleProgressEl.textContent = "Uploading training pair...";
+  kaggleResultEl.hidden = true;
+  try {
+    const resp = await fetch("/api/kaggle/train", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ design_id: lastDesignId }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      kaggleProgressEl.textContent = "Error: " + (data.error || "training request failed");
+      trainA2Btn.disabled = false;
+      return;
+    }
+    pollKaggleJob(lastDesignId, data.job_id);
+  } catch (err) {
+    kaggleProgressEl.textContent = "Request failed: " + err;
+    trainA2Btn.disabled = false;
+  }
+});
+
+function pollKaggleJob(designId, jobId) {
+  if (kaggleJobPollTimer) clearInterval(kaggleJobPollTimer);
+  kaggleProgressEl.hidden = false;
+
+  const poll = async () => {
+    try {
+      const resp = await fetch(`/api/kaggle/jobs/${encodeURIComponent(jobId)}?design_id=${encodeURIComponent(designId)}`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        kaggleProgressEl.textContent = "Error checking job: " + (data.error || "unknown error");
+        return;
+      }
+      const progressText = data.progress ? `epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "";
+      kaggleProgressEl.textContent = `${data.state}${progressText ? " — " + progressText : ""}`;
+
+      if (data.state === "complete") {
+        clearInterval(kaggleJobPollTimer);
+        trainA2Btn.disabled = false;
+        kaggleResultEl.hidden = false;
+        kaggleResultEl.innerHTML = `
+          <div><strong>Model:</strong> <code>${data.output_nam_path || "(unknown)"}</code></div>
+          <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
+        `;
+        setStatus("Kaggle A2 training complete.");
+      } else if (data.state === "failed") {
+        clearInterval(kaggleJobPollTimer);
+        trainA2Btn.disabled = false;
+        kaggleProgressEl.textContent = "Failed: " + (data.error || "unknown error");
+        setStatus("Kaggle A2 training failed.", true);
+      }
+    } catch (err) {
+      kaggleProgressEl.textContent = "Polling error: " + err;
+    }
+  };
+  poll();
+  kaggleJobPollTimer = setInterval(poll, 10000);
+}
+
+updateBackendPanels();

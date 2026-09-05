@@ -65,13 +65,16 @@ python -m pytest tests/test_blend.py::test_name -v  # single test
 The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`,
 `hybrid/nam_loader.py`, `hybrid/input_profiles.py`, `hybrid/calibration.py`,
-`hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`, and
-`hybrid/training_target.py` against synthetic signals only (the pipeline/
-training-target tests fake out `render()` via monkeypatch) — no torch or
-built native tool required. `tests/test_render.py` exercises real NAM
-inference and auto-skips unless `native/nam_render` has been built AND a real
-`.nam` file exists at `assets/nam_models/FenderSuperReverb1977_Clean.nam`
-(gitignored, user-provided). `tests/test_receptive_field.py` and part of
+`hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`,
+`hybrid/training_target.py`, `hybrid/a2_training_settings.py`, and
+`hybrid/kaggle_training.py` against synthetic signals only (the pipeline/
+training-target tests fake out `render()` via monkeypatch; the Kaggle tests
+mock the CLI at the `subprocess` boundary — see docs/kaggle_training.md) — no
+torch, built native tool, or real Kaggle credentials required. `tests/test_render.py`
+exercises real NAM inference and auto-skips unless `native/nam_render` has
+been built AND a real `.nam` file exists at
+`assets/nam_models/FenderSuperReverb1977_Clean.nam` (gitignored,
+user-provided). `tests/test_receptive_field.py` and part of
 `tests/test_train_a2.py` auto-skip/exercise their "unavailable" path unless a
 training environment (see `requirements-training.txt`) is actually installed
 -- see docs/phase3.md for the training-environment split.
@@ -143,6 +146,21 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     — NAM inference, applies input profile gain + calibration, computes the
     profile-adjusted envelope) and `build_hybrid()` (CHEAP — pure numpy
     reblend of an already-rendered `RenderedPair`).
+13. **`a2_training_settings.py`** is the single source of truth for A2
+    training hyperparameters (epochs/batch_size/ny/seed/latency) and the
+    official V3 input MD5, imported by both `scripts/train_a2.py` (local) and
+    `cloud/kaggle/train_a2_cloud.py` (Kaggle GPU) so the two trainers cannot
+    silently drift apart — see `tests/test_a2_training_settings.py`.
+14. **`kaggle_training.py`** is the Kaggle GPU training backend: a thin
+    `KaggleCli` subprocess wrapper (never `shell=True`, never reads/logs
+    credentials) plus `KaggleJobManager`, which stages an allow-listed subset
+    of an already-generated training bundle into a private per-job Kaggle
+    dataset+kernel, polls status without blocking Flask, downloads the
+    result, and re-validates it locally via the same NAMCore Full/Lite
+    render + ESR comparison `scripts/train_a2.py` uses for its own output —
+    see `docs/kaggle_training.md`. `/api/kaggle/*` in `app.py` is a thin
+    Flask layer over this module; `cloud/kaggle/train_a2_cloud.py` is the
+    self-contained script that actually runs inside the Kaggle kernel.
 
 `assets/di/` contains real recorded genre/style DI guitar/bass performances
 (sourced from the NAMtoClo project — see `assets/di/README.md`) used for
