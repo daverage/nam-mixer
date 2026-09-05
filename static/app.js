@@ -52,20 +52,26 @@ const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
 crossoverSlider.addEventListener("input", () => {
   crossoverValue.textContent = `${crossoverSlider.value} dBFS`;
+  scheduleBlendInfoUpdate();
 });
 
 const transitionSlider = document.getElementById("transition-slider");
 const transitionValue = document.getElementById("transition-value");
 transitionSlider.addEventListener("input", () => {
   transitionValue.textContent = `${transitionSlider.value} dB`;
+  scheduleBlendInfoUpdate();
 });
 
 document.querySelectorAll(".preset-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     transitionSlider.value = btn.dataset.value;
     transitionValue.textContent = `${btn.dataset.value} dB`;
+    scheduleBlendInfoUpdate();
   });
 });
+
+document.getElementById("auto-level-match").addEventListener("change", scheduleBlendInfoUpdate);
+document.getElementById("amp-b-trim").addEventListener("input", scheduleBlendInfoUpdate);
 
 async function notImplementedAction(url) {
   try {
@@ -85,6 +91,42 @@ const previewButtons = [
 const player = document.getElementById("player");
 const trimReadout = document.getElementById("trim-readout");
 const renderStatus = document.getElementById("render-status");
+
+let havePair = false;
+let blendInfoTimer = null;
+
+function scheduleBlendInfoUpdate() {
+  if (!havePair) return;
+  clearTimeout(blendInfoTimer);
+  blendInfoTimer = setTimeout(updateBlendInfo, 150);
+}
+
+async function updateBlendInfo() {
+  const body = {
+    crossover_dbfs: parseFloat(crossoverSlider.value),
+    transition_width_db: parseFloat(transitionSlider.value),
+    auto_level: document.getElementById("auto-level-match").checked,
+    manual_b_trim_db: parseFloat(document.getElementById("amp-b-trim").value) || 0.0,
+  };
+  try {
+    const resp = await fetch("/api/blend_info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      trimReadout.textContent = "Trim error: " + data.error;
+      return;
+    }
+    trimReadout.textContent =
+      `Auto match ${data.auto_trim_db.toFixed(1)} dB, ` +
+      `manual tweak ${data.manual_trim_db.toFixed(1)} dB, ` +
+      `effective trim ${data.effective_b_trim_db.toFixed(1)} dB`;
+  } catch (err) {
+    trimReadout.textContent = "Trim update failed: " + err;
+  }
+}
 
 document.getElementById("btn-render-pair").addEventListener("click", async () => {
   const amp_a_path = ampServerPaths.a;
@@ -110,6 +152,8 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
     }
     renderStatus.textContent = `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz.`;
     previewButtons.forEach((btn) => (btn.disabled = false));
+    havePair = true;
+    updateBlendInfo();
     setStatus("Amp pair rendered and cached -- sliders now only recompute the blend.");
   } catch (err) {
     renderStatus.textContent = "Request failed: " + err;

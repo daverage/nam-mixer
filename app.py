@@ -168,6 +168,51 @@ def api_render_pair():
     })
 
 
+def _parse_hybrid_params(data: dict):
+    """Shared crossover/transition/trim parsing for /api/preview and
+    /api/blend_info -- both drive the same build_hybrid() call."""
+    crossover_dbfs = float(data.get("crossover_dbfs", -22.0))
+    transition_width_db = float(data.get("transition_width_db", DEFAULT_TRANSITION_WIDTH_DB))
+    manual_b_trim_db = float(data.get("manual_b_trim_db", 0.0))
+    auto_level = bool(data.get("auto_level", True))
+    return crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level
+
+
+@app.route("/api/blend_info", methods=["POST"])
+def api_blend_info():
+    """Report the auto/manual/effective trim breakdown for the current
+    crossover/transition/trim settings, without generating any audio.
+
+    This is what lets the UI show a live "Auto match / Manual tweak /
+    Effective trim" readout as sliders move, rather than only after a
+    Preview Hybrid click -- build_hybrid() is cheap (no NAM inference), so
+    calling it on every slider `input` event is fine.
+    """
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    if pair is None:
+        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
+
+    data = request.get_json(force=True)
+    try:
+        crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
+    except (TypeError, ValueError):
+        return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+
+    result = build_hybrid(
+        pair,
+        crossover_dbfs=crossover_dbfs,
+        transition_width_db=transition_width_db,
+        auto_level=auto_level,
+        manual_b_trim_db=manual_b_trim_db,
+    )
+    return jsonify({
+        "auto_trim_db": result.auto_trim_db,
+        "manual_trim_db": result.manual_trim_db,
+        "effective_b_trim_db": result.effective_b_trim_db,
+        "alignment_offset_samples": result.alignment_offset_samples,
+    })
+
+
 @app.route("/api/preview", methods=["POST"])
 def api_preview():
     """Return audio (WAV bytes) for Amp A, Amp B, or the hybrid blend.
@@ -192,12 +237,9 @@ def api_preview():
         audio = pair.amp_b
     elif source == "hybrid":
         try:
-            crossover_dbfs = float(data.get("crossover_dbfs", -22.0))
-            transition_width_db = float(data.get("transition_width_db", DEFAULT_TRANSITION_WIDTH_DB))
-            manual_b_trim_db = float(data.get("manual_b_trim_db", 0.0))
+            crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
         except (TypeError, ValueError):
             return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
-        auto_level = bool(data.get("auto_level", True))
 
         result = build_hybrid(
             pair,
