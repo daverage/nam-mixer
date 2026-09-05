@@ -196,6 +196,10 @@ def api_render_pair():
     custom_input_gain_db = data.get("custom_input_gain_db")
     calibration_mode = data.get("calibration_mode", "auto")
     reference_input_level_dbu = float(data.get("reference_input_level_dbu", DEFAULT_REFERENCE_INPUT_LEVEL_DBU))
+    try:
+        test_gain_db = float(data.get("test_gain_db", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "test_gain_db must be a number"}), 400
 
     try:
         get_profile(instrument_type, input_profile_id)
@@ -233,6 +237,7 @@ def api_render_pair():
             instrument_type=instrument_type,
             input_profile_id=input_profile_id,
             input_profile_gain_db=input_profile_gain_db,
+            test_gain_db=test_gain_db,
             calibration_mode=calibration_mode,
             reference_input_level_dbu=reference_input_level_dbu,
         )
@@ -252,9 +257,9 @@ def api_render_pair():
     if pair.input_peak_dbfs >= PEAK_WARNING_THRESHOLD_DBFS:
         warnings.append(
             "This simulated input exceeds 0 dBFS relative to the reference DI. "
-            "The floating-point renderer can process it, but a real ADC using "
-            "this reference gain would have clipped. Treat this profile as a "
-            "stress test."
+            "The floating-point renderer can process it, but a real ADC at "
+            "this combined profile + test gain would have clipped. Treat "
+            "this as a stress test."
         )
 
     suggested_crossover = suggest_crossover_dbfs(pair.source_envelope_db)
@@ -269,6 +274,7 @@ def api_render_pair():
         "instrument_type": instrument_type,
         "input_profile": input_profile_id,
         "input_profile_gain_db": input_profile_gain_db,
+        "test_gain_db": test_gain_db,
 
         "input_peak_dbfs": pair.input_peak_dbfs,
 

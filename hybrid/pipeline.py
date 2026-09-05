@@ -47,6 +47,7 @@ class RenderedPair:
     instrument_type: str = "guitar"
     input_profile_id: str = "vintage_humbucker"
     input_profile_gain_db: float = 0.0
+    test_gain_db: float = 0.0
 
     calibration_mode: str = "raw"
     reference_input_level_dbu: float = DEFAULT_REFERENCE_INPUT_LEVEL_DBU
@@ -70,19 +71,33 @@ def render_pair(
     instrument_type: str = "guitar",
     input_profile_id: str = "vintage_humbucker",
     input_profile_gain_db: float = 0.0,
+    test_gain_db: float = 0.0,
     calibration_mode: str = "auto",
     reference_input_level_dbu: float = DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
     envelope_config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
 ) -> RenderedPair:
     """Render `dry` through both amp models. The expensive step -- call again
-    whenever amp_a, amp_b, dry, the input profile, or calibration settings
-    change; NOT on crossover/transition/trim slider moves.
+    whenever amp_a, amp_b, dry, the input profile, calibration, or test-gain
+    settings change; NOT on crossover/transition/trim slider moves.
 
     `input_profile_gain_db` is applied to `dry` BEFORE both NAM inference and
     crossover-envelope detection, so it represents a real change in how hard
     the (virtual) instrument is driving the signal chain -- unlike the
     deprecated test-only `dry_gain_db` on `build_hybrid`, which only shifted
     the envelope used for blending and never touched the actual audio.
+
+    `test_gain_db` is a SEPARATE, additional real gain applied the same way
+    (before both NAM renders and envelope detection), for deliberately
+    stress-testing the crossfade beyond whatever level a given DI clip's own
+    performance happens to reach -- the DI is a convenience audition
+    recording, not something engineered to exercise the amp's full level
+    range (see README "Why the genre/style DI files are included"). Unlike
+    `input_profile_gain_db`, it does NOT represent an instrument/pickup
+    identity and is deliberately excluded from `hybrid.design.HybridDesign`
+    provenance -- it is purely an audition aid. `source_envelope_db` (used
+    by the crossover-coverage table to explore hypothetical profiles) is
+    still computed from the fully raw, ungained `dry`, so dialing in a test
+    gain doesn't distort that separate analysis.
 
     If `calibration_mode="auto"` and both models report a calibrated
     `input_level_dbu`, an additional PER-MODEL calibration gain (the official
@@ -95,7 +110,7 @@ def render_pair(
     either source model's own recording calibration.
     """
     dry = np.asarray(dry, dtype=np.float32)
-    profiled_dry = (dry * db_to_amplitude(input_profile_gain_db)).astype(np.float32)
+    profiled_dry = (dry * db_to_amplitude(input_profile_gain_db + test_gain_db)).astype(np.float32)
 
     calib = resolve_calibration(
         calibration_mode, reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu
@@ -121,6 +136,7 @@ def render_pair(
         instrument_type=instrument_type,
         input_profile_id=input_profile_id,
         input_profile_gain_db=input_profile_gain_db,
+        test_gain_db=test_gain_db,
         calibration_mode=calib.mode,
         reference_input_level_dbu=reference_input_level_dbu,
         calibration_applied=calib.applied,

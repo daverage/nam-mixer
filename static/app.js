@@ -66,6 +66,8 @@ const customGainSlider = document.getElementById("custom-gain-slider");
 const customGainValue = document.getElementById("custom-gain-value");
 const calibrationModeSelect = document.getElementById("calibration-mode-select");
 const referenceDbuInput = document.getElementById("reference-dbu-input");
+const testGainSlider = document.getElementById("test-gain-slider");
+const testGainValue = document.getElementById("test-gain-value");
 const renderWarnings = document.getElementById("render-warnings");
 const suggestedCrossoverNote = document.getElementById("suggested-crossover-note");
 
@@ -97,10 +99,10 @@ function populateProfileSelect() {
   updateProfileDescription();
 }
 
-function markProfileStale() {
+function markProfileStale(reason) {
   if (havePair) {
     previewButtons.forEach((btn) => (btn.disabled = true));
-    renderStatus.textContent = "Input profile changed -- click Render Amps to update.";
+    renderStatus.textContent = `${reason || "Input profile changed"} -- click Render Amps to update.`;
   }
 }
 
@@ -121,6 +123,15 @@ customGainSlider.addEventListener("input", () => {
 });
 calibrationModeSelect.addEventListener("change", markProfileStale);
 referenceDbuInput.addEventListener("change", markProfileStale);
+
+// Real audio gain (unlike the deprecated preview-only dry_gain_db) -- see
+// hybrid/pipeline.py's render_pair() docstring. Does NOT affect the
+// coverage table (that's computed from the un-gained source envelope so it
+// can compare hypothetical profiles independently of this stress-test knob).
+testGainSlider.addEventListener("input", () => {
+  testGainValue.textContent = `${fmtSigned(testGainSlider.value)} dB`;
+  markProfileStale("Test gain changed");
+});
 
 // DI filenames beginning with "bass_" are a trivial, documented instrument
 // hint (see hybrid/input_profiles.py) -- used only as a default, never as a
@@ -501,6 +512,7 @@ renderPairBtn.addEventListener("click", async () => {
   const custom_input_gain_db = profile && profile.requires_custom_gain ? parseFloat(customGainSlider.value) : null;
   const calibration_mode = calibrationModeSelect.value;
   const reference_input_level_dbu = parseFloat(referenceDbuInput.value) || 12.0;
+  const test_gain_db = parseFloat(testGainSlider.value) || 0.0;
 
   renderPairBtn.disabled = true;
   renderStatus.textContent = "Rendering (running NAM inference twice)...";
@@ -513,7 +525,7 @@ renderPairBtn.addEventListener("click", async () => {
       body: JSON.stringify({
         amp_a_path, amp_b_path, di_file,
         instrument_type, input_profile_id, custom_input_gain_db,
-        calibration_mode, reference_input_level_dbu,
+        calibration_mode, reference_input_level_dbu, test_gain_db,
       }),
     });
     const data = await resp.json();

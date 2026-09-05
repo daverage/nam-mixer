@@ -72,6 +72,52 @@ def test_source_envelope_matches_raw_dry_regardless_of_profile_gain():
     np.testing.assert_allclose(pair.source_envelope_db, bounded_causal_envelope_db(dry, 48000))
 
 
+def test_test_gain_db_applies_real_additional_gain():
+    """test_gain_db is a SEPARATE, additive real-audio gain on top of the
+    input profile -- both amps must actually receive the combined level."""
+    dry = _dry(amplitude=0.1)
+    pair = render_pair(
+        _fake_model(), _fake_model(), dry, 48000,
+        input_profile_gain_db=3.0, test_gain_db=9.0, calibration_mode="raw",
+    )
+    ratio = np.max(np.abs(pair.amp_a)) / np.max(np.abs(dry))
+    assert ratio == pytest.approx(db_to_amplitude(3.0 + 9.0), rel=1e-6)
+    assert pair.test_gain_db == 9.0
+
+
+def test_test_gain_db_default_is_backward_compatible_zero():
+    dry = _dry()
+    with_default = render_pair(_fake_model(), _fake_model(), dry, 48000, input_profile_gain_db=4.0, calibration_mode="raw")
+    explicit_zero = render_pair(
+        _fake_model(), _fake_model(), dry, 48000,
+        input_profile_gain_db=4.0, test_gain_db=0.0, calibration_mode="raw",
+    )
+    np.testing.assert_allclose(with_default.amp_a, explicit_zero.amp_a)
+    assert with_default.test_gain_db == 0.0
+
+
+def test_test_gain_db_does_not_affect_source_envelope():
+    """The coverage table explores hypothetical profiles against the fully
+    raw source envelope -- dialing in a test gain must not distort that
+    separate, un-gained analysis."""
+    dry = _dry()
+    pair = render_pair(
+        _fake_model(), _fake_model(), dry, 48000,
+        input_profile_gain_db=0.0, test_gain_db=18.0, calibration_mode="raw",
+    )
+    np.testing.assert_allclose(pair.source_envelope_db, bounded_causal_envelope_db(dry, 48000))
+    # But it DOES move the actual crossfade-driving envelope.
+    assert not np.allclose(pair.envelope_db, pair.source_envelope_db)
+
+
+def test_test_gain_db_affects_input_peak_dbfs():
+    dry = _dry(amplitude=0.1)
+    quiet = render_pair(_fake_model(), _fake_model(), dry, 48000, calibration_mode="raw")
+    loud = render_pair(_fake_model(), _fake_model(), dry, 48000, test_gain_db=20.0, calibration_mode="raw")
+    assert loud.input_peak_dbfs > quiet.input_peak_dbfs
+    assert loud.input_peak_dbfs == pytest.approx(quiet.input_peak_dbfs + 20.0, abs=1e-4)
+
+
 def test_auto_calibration_applies_per_model_gain_both_calibrated():
     dry = _dry()
     pair = render_pair(

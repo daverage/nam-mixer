@@ -137,7 +137,12 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
 4. Preview Amp A alone, Amp B alone, and the hybrid blend against a chosen
    genre DI, using an input profile to simulate different pickups/output
    levels (DESIGN/preview context only — see "Input profile vs. crossover vs.
-   NAM calibration" above).
+   NAM calibration" above). The genre DI is a convenience audition
+   performance, not engineered to hit every level a real player might reach
+   — use **Test gain** (an additional real gain on top of the profile,
+   applied before both amps render) to deliberately push the level up/down
+   and stress-test the crossfade beyond whatever that clip's own dynamics
+   happen to cover. Both require clicking Render Amps (real NAM inference).
 5. **Create A2**: upload the official NAM training excitation, then "Generate
    Training Bundle" — this freezes everything from steps 2-4 into an
    immutable `HybridDesign` (`hybrid/design.py`) and blends the *official*

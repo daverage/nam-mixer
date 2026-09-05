@@ -93,6 +93,32 @@ def test_render_pair_cache_reflects_the_newest_profile_not_the_old_one(client, t
     assert audio_at_0db != audio_at_hot
 
 
+def test_render_pair_applies_test_gain_db_as_real_additional_gain(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+
+    resp0 = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, test_gain_db=0.0))
+    assert resp0.status_code == 200
+    data0 = resp0.get_json()
+    assert data0["test_gain_db"] == 0.0
+
+    resp1 = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, test_gain_db=12.0))
+    assert resp1.status_code == 200
+    data1 = resp1.get_json()
+    assert data1["test_gain_db"] == 12.0
+    assert data1["input_peak_dbfs"] > data0["input_peak_dbfs"]
+
+
+def test_render_pair_rejects_non_numeric_test_gain_db(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    resp = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, test_gain_db="loud"))
+    assert resp.status_code == 400
+    assert "test_gain_db" in resp.get_json()["error"]
+
+
 def test_rerendering_same_profile_repeatedly_does_not_stack_gain(client, tmp_path):
     """Calling /api/render_pair twice with the SAME profile must reproduce
     the exact same input_peak_dbfs each time -- proves the profile gain is
