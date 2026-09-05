@@ -115,6 +115,62 @@ def test_check_receptive_field_aborts_without_training_env(tmp_path):
         train_a2.check_receptive_field(manifest, 48000)
 
 
+def _write_nam_with_config(path, kernel_sizes, dilations):
+    raw = {
+        "architecture": "WaveNet",
+        "sample_rate": 48000.0,
+        "config": {"layers": [{"kernel_sizes": kernel_sizes, "dilations": dilations}]},
+    }
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
+
+
+def test_check_receptive_field_uses_max_across_envelope_and_amp_branches(tmp_path, monkeypatch):
+    """docs/phase3.md review: the complete dependency is
+    max(envelope, Amp A, Amp B) since the branches run in parallel -- prove
+    check_receptive_field actually computes that max and passes IT (not just
+    the envelope) to the A2 fits-check."""
+    # Envelope: 80ms @ 48kHz = 3840 samples. Amp A: small RF. Amp B: RF
+    # larger than the envelope -- must become the effective max.
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 1 + 2*1 = 3 samples
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [6, 6], [100, 200])  # RF = 1 + 5*100 + 5*200 = 1501 samples... too small
+    # Make Amp B's RF clearly exceed the 3840-sample envelope history.
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [6] * 5, [1, 100, 500, 1000, 2000])
+
+    manifest = {
+        "design": {"envelope_max_history_ms": 80.0},
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+    }
+
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        class FakeRF:
+            receptive_field_samples = samples + 1000
+            submodel_names = ["fake"]
+        return FakeRF()
+
+    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+
+    train_a2.check_receptive_field(manifest, 48000)
+
+    envelope_samples = int(round(80.0 / 1000.0 * 48000))
+    amp_b_rf = train_a2.compute_source_nam_receptive_field(train_a2.load_nam(amp_b))
+    assert amp_b_rf > envelope_samples
+    assert captured["samples"] == amp_b_rf
+
+
+def test_check_receptive_field_warns_but_continues_when_amp_path_missing(tmp_path, monkeypatch):
+    manifest = {"design": {"envelope_max_history_ms": 80.0}}  # no amp_a/amp_b paths
+    monkeypatch.setattr(
+        train_a2, "assert_envelope_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": samples + 1, "submodel_names": ["x"]})(),
+    )
+    train_a2.check_receptive_field(manifest, 48000)  # must not raise
+
+
 def test_validate_exported_nam_runs_native_render(tmp_path, monkeypatch):
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"

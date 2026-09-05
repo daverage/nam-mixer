@@ -63,17 +63,77 @@ def _layer_array_receptive_field(layer_array_cfg: dict) -> int:
 
 
 def _net_receptive_field(net_cfg: dict) -> int:
-    """Receptive field of one WaveNet `config` block (a `layers_configs`
-    list). Multiple entries would be stacked in series (each consuming the
+    """Receptive field of one WaveNet `config` block (a list of layer-array
+    configs). Multiple entries would be stacked in series (each consuming the
     previous one's output as input), so their individual context
-    requirements ADD, minus the 1-sample overlap counted in each "+1" term;
-    the real installed config only ever has one entry, but this stays
-    general rather than assuming that won't change."""
-    layer_arrays = net_cfg["layers_configs"]
+    requirements ADD, minus the 1-sample overlap counted in each "+1" term.
+
+    Accepts either key name actually seen in the wild: the training
+    package's packed config uses `layers_configs`
+    (nam.train._resources/config_model_packed.json), while an exported
+    source `.nam` file's own WaveNet block uses `layers` (see
+    compute_source_nam_receptive_field's docstring) -- same per-layer
+    kernel_sizes/dilations schema either way.
+    """
+    layer_arrays = net_cfg.get("layers_configs", net_cfg.get("layers"))
+    if layer_arrays is None:
+        raise ReceptiveFieldUnavailable(f"WaveNet config has neither 'layers_configs' nor 'layers': keys={list(net_cfg.keys())}")
     total = 1
     for layer_array_cfg in layer_arrays:
         total += _layer_array_receptive_field(layer_array_cfg) - 1
     return total
+
+
+def _model_receptive_field(model: dict) -> int:
+    """Receptive field of one parsed `.nam` model dict (or a nested one, for
+    a `SlimmableContainer`'s per-submodel `model` block), dispatching on its
+    own `architecture` field -- the same field `hybrid.nam_loader.NamModel`
+    exposes.
+
+    Verified against a real captured `.nam` file (SlimmableContainer wrapping
+    two WaveNet submodels): `config.submodels` is a list of
+    `{"max_value": <float>, "model": {"architecture": "WaveNet", "config": {"layers": [...]}}}`
+    entries -- a DIFFERENT shape from the training package's packed A2
+    config (see module docstring), despite both ultimately being dilated
+    WaveNet stacks, so this is intentionally a separate code path from
+    `_iter_submodel_configs`/`compute_a2_receptive_field` above rather than a
+    shared one.
+    """
+    architecture = model.get("architecture")
+    config = model.get("config", {})
+    if architecture in ("WaveNet", "PackedWaveNet"):
+        return _net_receptive_field(config)
+    if architecture == "SlimmableContainer":
+        submodels = config.get("submodels")
+        if not submodels:
+            raise ReceptiveFieldUnavailable(f"SlimmableContainer config has no 'submodels': keys={list(config.keys())}")
+        best = 0
+        for entry in submodels:
+            nested = entry.get("model", entry)
+            best = max(best, _model_receptive_field(nested))
+        return best
+    raise ReceptiveFieldUnavailable(
+        f"Don't know how to compute the receptive field of architecture {architecture!r} -- "
+        "add a case to hybrid.receptive_field._model_receptive_field for it."
+    )
+
+
+def compute_source_nam_receptive_field(nam_model) -> int:
+    """Receptive field (in samples) of an arbitrary source `.nam` capture
+    (e.g. Amp A/Amp B) -- NOT the training package's A2 config. Needed
+    because a hybrid target's total dry-input dependency is
+    `max(envelope history, Amp A receptive field, Amp B receptive field)`,
+    not the envelope history alone: the two amp branches run in parallel
+    with the crossover envelope on the same dry input (docs/phase3.md
+    review) -- see `hybrid.pipeline.render_pair`.
+
+    Takes a `hybrid.nam_loader.NamModel` (or anything with a `.raw` dict
+    attribute / a plain raw dict itself). Requires no torch and no
+    `neural-amp-modeler` install -- pure JSON-schema math, same as
+    `compute_a2_receptive_field`.
+    """
+    raw = getattr(nam_model, "raw", nam_model)
+    return _model_receptive_field(raw)
 
 
 @dataclass
@@ -151,15 +211,33 @@ def assert_envelope_history_fits(
     sample_rate: int,
     margin_fraction: float = 0.0,
 ) -> A2ReceptiveField:
-    """Raise ValueError if the crossover envelope's declared maximum
-    dry-input history does not fit comfortably inside the actual installed
-    A2's receptive field (with `margin_fraction` extra headroom required on
-    top). Returns the computed A2ReceptiveField on success so callers can log
-    it. Raises ReceptiveFieldUnavailable if the training environment isn't
-    installed here at all -- see that class's docstring."""
+    """Raise ValueError only if `envelope_history_samples` (already the max
+    across whatever PARALLEL branches feed the target -- see
+    `hybrid.pipeline.render_pair`/scripts/train_a2.py's `check_receptive_field`:
+    Amp A, Amp B, and the crossover envelope all consume the same dry input
+    independently, so their temporal requirements do NOT add, they take the
+    max) exceeds the actual installed A2's receptive field.
+
+    `required == receptive_field_samples` (an EXACT fit, zero temporal
+    margin) is PERMITTED, not treated as a failure -- a memoryless
+    per-sample blend (the crossfade itself) adds no extra history on top of
+    whatever the slowest parallel branch already needs, so exactly matching
+    the receptive field is representable, just with no slack left for
+    anything else. Only `required > available` is a genuine "the A2
+    physically cannot see far enough back" failure. Note this checks
+    TEMPORAL reach only, not whether the network has enough capacity to
+    actually learn the composite function within that reach -- that's an
+    empirical training/validation question, not something this function can
+    answer.
+
+    Returns the computed A2ReceptiveField on success so callers can log it
+    (check `required == rf.receptive_field_samples` themselves to warn about
+    zero margin). Raises ReceptiveFieldUnavailable if the training
+    environment isn't installed here at all -- see that class's docstring.
+    """
     rf = compute_a2_receptive_field()
     required = int(envelope_history_samples * (1.0 + margin_fraction))
-    if required >= rf.receptive_field_samples:
+    if required > rf.receptive_field_samples:
         raise ValueError(
             f"Crossover envelope history ({envelope_history_samples} samples, "
             f"{envelope_history_samples / sample_rate * 1000:.1f} ms at {sample_rate} Hz, "

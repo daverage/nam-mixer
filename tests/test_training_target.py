@@ -25,6 +25,11 @@ def identity_render(monkeypatch):
     def fake_render(model, audio, sample_rate):
         return np.asarray(audio, dtype=np.float32).copy()
     monkeypatch.setattr(training_target, "render", fake_render)
+    # Bypass the official-V3-file MD5 check for these synthetic fixtures --
+    # dedicated tests below exercise the real check against
+    # OFFICIAL_V3_INPUT_MD5 directly. We don't ship the real ~27MB official
+    # file as a test fixture.
+    monkeypatch.setattr(training_target, "_md5_file", lambda path: training_target.OFFICIAL_V3_INPUT_MD5)
 
 
 def _write_nam(path, input_level_dbu=None):
@@ -85,6 +90,37 @@ def test_validate_training_input_accepts_good_file(tmp_path):
     audio, info = validate_training_input(path)
     assert info.sample_rate == 48000
     assert info.frame_count == len(audio)
+
+
+def test_validate_training_input_rejects_non_v3_file(tmp_path, monkeypatch):
+    """With the real MD5 check active (undoing the autouse bypass), a
+    correctly-formatted (mono, 48kHz) but non-official file must still be
+    rejected -- docs/phase3.md review: 'any recognized input' is not enough,
+    it must be V3 specifically."""
+    monkeypatch.undo()  # remove the autouse identity_render/_md5_file bypass for this test
+    import hybrid.training_target as training_target
+    monkeypatch.setattr(training_target, "render", lambda model, audio, sr: np.asarray(audio, dtype=np.float32).copy())
+
+    path = _write_training_input(tmp_path / "in.wav")
+    with pytest.raises(TrainingInputError, match="official NAM v3.0.0"):
+        validate_training_input(path)
+
+
+def test_validate_training_input_accepts_real_md5_match(tmp_path, monkeypatch):
+    """The acceptance path with the real check active: a file whose actual
+    MD5 equals OFFICIAL_V3_INPUT_MD5 (simulated here via monkeypatching the
+    constant to this fixture's real hash, since we don't ship the real
+    27MB official file) is accepted."""
+    monkeypatch.undo()
+    import hybrid.training_target as training_target
+    monkeypatch.setattr(training_target, "render", lambda model, audio, sr: np.asarray(audio, dtype=np.float32).copy())
+
+    path = _write_training_input(tmp_path / "in.wav")
+    real_md5 = training_target._md5_file(path)
+    monkeypatch.setattr(training_target, "OFFICIAL_V3_INPUT_MD5", real_md5)
+
+    audio, info = validate_training_input(path)
+    assert info.md5 == real_md5
     assert len(info.sha256) == 64
 
 
@@ -216,7 +252,27 @@ def test_generate_training_bundle_applies_only_fixed_peak_ceiling_when_hot(tmp_p
 
     assert bundle.safety.gain_reduction_db > 0
     target, _ = sf.read(bundle.hybrid_target_path, dtype="float32")
-    assert np.max(np.abs(target)) <= 10 ** (-3.0 / 20.0) + 1e-6
+    assert np.max(np.abs(target)) <= 10 ** (training_target.A2_TARGET_PEAK_CEILING_DBFS / 20.0) + 1e-6
+
+
+def test_generate_training_bundle_leaves_target_untouched_when_already_safe(tmp_path):
+    """docs/phase3.md review section 4: a target that never reaches 0 dBFS
+    must be left COMPLETELY unchanged, not massaged down to some arbitrary
+    fixed ceiling like the old -3 dBFS default."""
+    amp_a = _write_nam(tmp_path / "a.nam")
+    amp_b = _write_nam(tmp_path / "b.nam")
+
+    training_input_path = tmp_path / "input.wav"
+    audio = np.full(48000, 0.1, dtype=np.float32)  # peak ~ -20 dBFS, nowhere near 0
+    sf.write(training_input_path, audio, 48000, subtype="FLOAT")
+
+    design = _design(amp_a, amp_b)
+    bundle = generate_training_bundle(design, training_input_path, tmp_path / "bundle")
+
+    assert bundle.safety.gain_reduction_db == 0.0
+    raw, _ = sf.read(bundle.hybrid_target_raw_path, dtype="float32")
+    final, _ = sf.read(bundle.hybrid_target_path, dtype="float32")
+    np.testing.assert_array_equal(raw, final)
 
 
 def test_generate_training_bundle_rejects_mismatched_sample_rate(tmp_path):

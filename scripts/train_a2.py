@@ -53,7 +53,11 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from hybrid.receptive_field import ReceptiveFieldUnavailable, assert_envelope_history_fits  # noqa: E402
+from hybrid.receptive_field import (  # noqa: E402
+    ReceptiveFieldUnavailable,
+    assert_envelope_history_fits,
+    compute_source_nam_receptive_field,
+)
 from hybrid.render import NamRenderError, render  # noqa: E402
 from hybrid.nam_loader import load_nam  # noqa: E402
 
@@ -164,25 +168,105 @@ def load_and_validate_manifest(manifest_path: Path) -> dict:
 
 
 def check_receptive_field(manifest: dict, sample_rate: int) -> None:
+    """The complete dry-input dependency of a hybrid target is
+    max(envelope history, Amp A receptive field, Amp B receptive field) --
+    Amp A/B run on the same dry input IN PARALLEL with the crossover
+    envelope (see hybrid.pipeline.render_pair), so their own receptive
+    fields matter here too, not just the envelope's. Checking only the
+    envelope would miss a source amp that itself needs more history than
+    the new A2 can represent.
+    """
     max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
     if max_history_ms is None:
         print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
         return
-    history_samples = int(round(max_history_ms / 1000.0 * sample_rate))
+    envelope_samples = int(round(max_history_ms / 1000.0 * sample_rate))
+
+    branch_samples = {"envelope": envelope_samples}
+    for label, key in (("Amp A", "amp_a"), ("Amp B", "amp_b")):
+        amp_path = manifest.get(key, {}).get("path")
+        if not amp_path:
+            print(f"WARNING: manifest has no {key}.path -- skipping {label}'s receptive-field check.")
+            continue
+        try:
+            model = load_nam(amp_path)
+            branch_samples[label] = compute_source_nam_receptive_field(model)
+        except (OSError, ValueError, ReceptiveFieldUnavailable) as exc:
+            print(f"WARNING: could not compute {label}'s receptive field ({amp_path}): {exc}")
+
+    worst_label = max(branch_samples, key=branch_samples.get)
+    worst_samples = branch_samples[worst_label]
+    print("Target dependency by branch (parallel, so the effective total is the max):")
+    for label, samples in branch_samples.items():
+        print(f"  {label:<12} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'effective max':<12} {worst_samples:>6} samples ({worst_samples / sample_rate * 1000:6.1f} ms) [{worst_label}]")
+
     try:
-        rf = assert_envelope_history_fits(history_samples, sample_rate, margin_fraction=0.0)
-        print(
-            f"Receptive field OK: envelope history {history_samples} samples "
-            f"({max_history_ms:.1f} ms) fits inside A2 receptive field "
-            f"{rf.receptive_field_samples} samples (submodels={rf.submodel_names})."
-        )
+        # branch_samples are PARALLEL (Amp A, Amp B, and the crossover
+        # envelope all consume the same dry input independently, and the
+        # final per-sample blend is memoryless), so the temporal requirement
+        # is their MAX, not their sum -- an exact fit (required ==
+        # available) is representable with zero slack, not a failure. See
+        # assert_envelope_history_fits's docstring.
+        rf = assert_envelope_history_fits(worst_samples, sample_rate, margin_fraction=0.0)
+        margin_samples = rf.receptive_field_samples - worst_samples
+        margin_ms = margin_samples / sample_rate * 1000
+        if margin_samples == 0:
+            print(
+                f"Receptive field: EXACT FIT -- effective max dependency {worst_samples} samples "
+                f"exactly equals the A2 receptive field {rf.receptive_field_samples} samples "
+                f"(submodels={rf.submodel_names}). Zero temporal margin. Training permitted -- this "
+                "checks temporal reach only, not whether the network has enough capacity to actually "
+                "learn the composite (two source amps + level-dependent crossfade) function within "
+                "that reach; that is exactly what this experiment is meant to determine."
+            )
+        else:
+            print(
+                f"Receptive field OK: effective max dependency {worst_samples} samples fits inside A2 "
+                f"receptive field {rf.receptive_field_samples} samples (submodels={rf.submodel_names}), "
+                f"margin {margin_ms:.1f} ms."
+            )
     except ReceptiveFieldUnavailable as exc:
         raise TrainingAbort(str(exc)) from exc
     except ValueError as exc:
         raise TrainingAbort(f"REFUSING to train: {exc}") from exc
 
 
-def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path, quick: bool, device: str) -> Path:
+def _build_user_metadata(manifest: dict):
+    """NAM `UserMetadata` for the final export, built from the manifest --
+    see docs/phase3.md review section 5. Only called after `nam.train.core`
+    has already been imported successfully, so `nam.models.metadata` is
+    guaranteed importable too.
+    """
+    from nam.models.metadata import GearType, UserMetadata
+
+    amp_a_name = Path(manifest.get("amp_a", {}).get("filename", "Amp A")).stem
+    amp_b_name = Path(manifest.get("amp_b", {}).get("filename", "Amp B")).stem
+    calibration = manifest.get("calibration", {})
+
+    # Only report input_level_dbu when calibration was genuinely applied
+    # (both source models calibrated) -- never invent one for a Raw-fallback
+    # pair (docs/phase3.md section 9).
+    input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
+
+    return UserMetadata(
+        name=f"Hybrid {amp_a_name} -> {amp_b_name}",
+        modeled_by="Hybrid NAM Builder",
+        gear_type=GearType.AMP,
+        gear_make="Hybrid",
+        gear_model=f"{amp_a_name} -> {amp_b_name}",
+        # tone_type deliberately left unset: this model's whole point is
+        # that its tone changes with input level, so no single ToneType
+        # value would be non-misleading.
+        input_level_dbu=input_level_dbu,
+        # output_level_dbu deliberately left unset: the hybrid's output
+        # level is a combination of both source models' outputs plus the
+        # frozen B trim -- there's no single inherited physical value to
+        # report here.
+    )
+
+
+def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path, quick: bool, device: str, manifest: dict) -> Path:
     """Call the official current neural-amp-modeler simplified A2 trainer:
     `nam.train.core.train()`.
 
@@ -229,7 +313,13 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
         train_path=str(output_dir),
         epochs=epochs,
         latency=0,  # docs/phase3.md section 16 -- synthetic latency is authoritatively 0, never auto-detected
-        silent=False,
+        # silent=True suppresses nam's interactive matplotlib plot windows
+        # (latency-calibration plots, validation-ESR plot) -- with latency=0
+        # already fixed there's nothing for a human to approve interactively,
+        # and a blocking plt.show() here would hang a non-interactive/headless
+        # run forever. docs/phase3.md section 31 explicitly requires
+        # suppressing interactive plots.
+        silent=True,
         modelname="model",
         fast_dev_run=quick,
     )
@@ -242,9 +332,19 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
             "with ignore_checks."
         )
 
+    # Export following the same pattern as nam.train.colab.run()/gui --
+    # attach the official TrainingMetadata (from this run's TrainOutput) plus
+    # our own UserMetadata, rather than a bare export that discards both.
+    from nam.train.metadata import TRAINING_KEY
+
     export_dir = output_dir / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
-    result.model.net.export(export_dir, basename="model")
+    result.model.net.export(
+        export_dir,
+        basename="model",
+        user_metadata=_build_user_metadata(manifest),
+        other_metadata={TRAINING_KEY: result.metadata.model_dump()},
+    )
 
     nam_path = export_dir / "model.nam"
     if not nam_path.is_file():
@@ -335,7 +435,7 @@ def main(argv=None) -> int:
         if args.quick:
             print("--quick: running a fast development smoke test, NOT the final model.")
 
-        nam_path = _run_official_trainer(input_path, target_path, output_dir, args.quick, args.device)
+        nam_path = _run_official_trainer(input_path, target_path, output_dir, args.quick, args.device, manifest)
         print(f"Trainer produced: {nam_path}")
 
         full_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=False)

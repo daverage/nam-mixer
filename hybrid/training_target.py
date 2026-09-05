@@ -43,11 +43,35 @@ from .input_profiles import db_to_amplitude
 from .metadata import HybridMetadata
 from .nam_loader import NamModel, load_nam
 from .render import render
-from .safety import DEFAULT_TARGET_PEAK_DBFS, apply_peak_ceiling, check_audio
+from .safety import apply_peak_ceiling, check_audio
 
 REQUIRED_TRAINING_INPUT_SAMPLE_RATE = 48000
 
+# The A2 trainer's own hard requirement is only that the target not clip
+# (max(|y|) < 1.0, i.e. < 0 dBFS) -- and it already normalizes training
+# output internally (to -18 dBFS RMS) before reversing that normalization on
+# export, so there's no training-quality reason to force every hot target
+# down to some fixed "safe" ceiling like -3 dBFS (docs/phase3.md review
+# section 4). We therefore only ever apply the MINIMUM whole-file attenuation
+# needed to bring a clipping/near-clipping target just under 0 dBFS -- a
+# target that never reaches this ceiling is left completely untouched, so
+# the trained model reproduces our hybrid's actual level as faithfully as
+# possible rather than an arbitrarily quieter copy of it.
+A2_TARGET_PEAK_CEILING_DBFS = -0.2
+
 HYBRID_BUILDER_VERSION = "phase3-a2-v1"
+
+# The official NAM v3.0.0 training/reamp input file, identified by its MD5 --
+# the same value nam.train.core._detect_input_version uses internally to
+# strong-match it (verified live against the real installed
+# neural-amp-modeler==0.13.0, see requirements-training.txt). We require V3
+# SPECIFICALLY, not merely "any recognized official input": the current
+# official simplified trainer's own data checks are calibrated around V3's
+# validation-signal layout (two ~9s repeated passages at the head/tail) and
+# explicitly fail for other versions unless force-ignored -- which we never
+# do (docs/phase3.md section 17). See
+# https://github.com/sdatkinson/neural-amp-modeler for how to obtain it.
+OFFICIAL_V3_INPUT_MD5 = "36cd1af62985c2fac3e654333e36431e"
 
 
 class TrainingInputError(ValueError):
@@ -58,6 +82,14 @@ class TrainingInputError(ValueError):
 
 def _sha256_file(path: str | Path) -> str:
     h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _md5_file(path: str | Path) -> str:
+    h = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
@@ -116,10 +148,12 @@ def _detect_nam_input_version(path: Path) -> str:
 
 
 def validate_training_input(path: str | Path) -> tuple[np.ndarray, TrainingInputInfo]:
-    """Load and validate the official NAM training input WAV: must exist, be
-    mono, and be at `REQUIRED_TRAINING_INPUT_SAMPLE_RATE`. Does not resample
-    or downmix -- a file that fails this is the wrong file, not something to
-    silently coerce.
+    """Load and validate the official NAM V3 training input WAV: must exist,
+    be mono, be at `REQUIRED_TRAINING_INPUT_SAMPLE_RATE`, and MD5-match the
+    official v3.0.0 file exactly (`OFFICIAL_V3_INPUT_MD5`) -- see that
+    constant's docstring for why V3 specifically, not "any recognized
+    version". Does not resample or downmix -- a file that fails this is the
+    wrong file, not something to silently coerce.
     """
     path = Path(path)
     if not path.is_file():
@@ -135,11 +169,22 @@ def validate_training_input(path: str | Path) -> tuple[np.ndarray, TrainingInput
     if not np.all(np.isfinite(audio)):
         raise TrainingInputError(f"training input contains non-finite samples: {path}")
 
+    md5 = _md5_file(path)
+    if md5 != OFFICIAL_V3_INPUT_MD5:
+        raise TrainingInputError(
+            f"training input does not match the official NAM v3.0.0 input file "
+            f"(expected MD5 {OFFICIAL_V3_INPUT_MD5}, got {md5} for {path}). Hybrid A2 generation "
+            "requires the official V3 training input specifically -- see "
+            "OFFICIAL_V3_INPUT_MD5's docstring and "
+            "https://github.com/sdatkinson/neural-amp-modeler for how to obtain it."
+        )
+
     info = TrainingInputInfo(
         path=str(path),
         sample_rate=sample_rate,
         frame_count=len(audio),
         sha256=_sha256_file(path),
+        md5=md5,
         detected_version=_detect_nam_input_version(path),
     )
     return audio, info
@@ -296,7 +341,7 @@ def generate_training_bundle(
     design: HybridDesign,
     official_input_path: str | Path,
     output_directory: str | Path,
-    target_peak_dbfs: float = DEFAULT_TARGET_PEAK_DBFS,
+    target_peak_dbfs: float = A2_TARGET_PEAK_CEILING_DBFS,
     envelope_config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
 ) -> TrainingBundle:
     """Generate a self-contained, reproducible A2 training bundle from a

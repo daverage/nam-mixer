@@ -28,6 +28,9 @@ def identity_render(monkeypatch):
         return np.asarray(audio, dtype=np.float32).copy()
     monkeypatch.setattr(pipeline, "render", fake_render)
     monkeypatch.setattr(training_target, "render", fake_render)
+    # Bypass the official-V3-file MD5 check for synthetic training-input
+    # fixtures in these tests -- we don't ship the real ~27MB official file.
+    monkeypatch.setattr(training_target, "_md5_file", lambda path: training_target.OFFICIAL_V3_INPUT_MD5)
 
 
 @pytest.fixture
