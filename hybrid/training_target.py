@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,10 +62,6 @@ def _sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def _sha256_array(arr: np.ndarray) -> str:
-    return hashlib.sha256(np.ascontiguousarray(arr).tobytes()).hexdigest()
 
 
 def _git_commit() -> Optional[str]:
@@ -371,16 +368,28 @@ def generate_training_bundle(
     metadata_out = output_directory / "hybrid.hybrid.json"
     manifest_out = output_directory / "training_manifest.json"
 
-    sf.write(input_out, official_input.astype(np.float32), input_info.sample_rate, subtype="FLOAT")
+    # Byte-for-byte copy, NOT a re-encode: the official trainer's own input-
+    # version detection (nam.train.core._detect_input_version) strong-matches
+    # by hashing the file's exact bytes, and training_manifest.json's
+    # training_input.sha256 is computed from the ORIGINAL file (see
+    # validate_training_input above) -- re-writing it through soundfile as
+    # float32 would silently change both the byte-for-byte content and the
+    # hash, breaking the very provenance check scripts/train_a2.py relies on.
+    shutil.copyfile(official_input_path, input_out)
     sf.write(raw_out, hybrid_raw.astype(np.float32), input_info.sample_rate, subtype="FLOAT")
     sf.write(final_out, hybrid_final.astype(np.float32), input_info.sample_rate, subtype="FLOAT")
 
+    # Hash the WRITTEN FILES, not the in-memory arrays: scripts/train_a2.py
+    # (and anyone else checking provenance) can only ever re-hash the file on
+    # disk, and _sha256_array's raw array bytes don't include the WAV
+    # container -- hashing the array here would silently record a hash that
+    # can never be reproduced by re-hashing hybrid_target.wav itself.
     safety_report = TargetSafetyReport(
         raw_peak_dbfs=raw_peak_dbfs,
         final_peak_dbfs=final_peak_dbfs,
         gain_reduction_db=gain_reduction_db,
-        raw_sha256=_sha256_array(hybrid_raw.astype(np.float32)),
-        final_sha256=_sha256_array(hybrid_final.astype(np.float32)),
+        raw_sha256=_sha256_file(raw_out),
+        final_sha256=_sha256_file(final_out),
     )
 
     with open(metadata_out, "w", encoding="utf-8") as f:
