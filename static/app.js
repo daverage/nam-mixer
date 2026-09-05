@@ -145,6 +145,7 @@ populateProfileSelect();
 
 const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
+const DEFAULT_CROSSOVER_DBFS = crossoverSlider.value;
 crossoverSlider.addEventListener("input", () => {
   crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
   scheduleUpdate();
@@ -531,17 +532,20 @@ document.getElementById("btn-render-pair").addEventListener("click", async () =>
     suggestedCrossoverNote.innerHTML = "";
     if (data.suggested_crossover_dbfs !== null && data.suggested_crossover_dbfs !== undefined) {
       const suggested = data.suggested_crossover_dbfs;
-      suggestedCrossoverNote.append(`Suggested crossover: ${suggested.toFixed(1)} dBFS (from this DI's active-signal level) `);
-      const useBtn = document.createElement("button");
-      useBtn.type = "button";
-      useBtn.className = "link-btn";
-      useBtn.textContent = "Use suggested";
-      useBtn.addEventListener("click", () => {
-        crossoverSlider.value = suggested.toFixed(1);
-        crossoverValue.textContent = `${suggested.toFixed(1)} dBFS`;
+      crossoverSlider.value = suggested.toFixed(1);
+      crossoverValue.textContent = `${suggested.toFixed(1)} dBFS`;
+      suggestedCrossoverNote.textContent =
+        `Crossover set to ${suggested.toFixed(1)} dBFS, suggested from this DI's active-signal level. `;
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "link-btn";
+      resetBtn.textContent = `Reset to ${parseFloat(DEFAULT_CROSSOVER_DBFS).toFixed(1)}`;
+      resetBtn.addEventListener("click", () => {
+        crossoverSlider.value = DEFAULT_CROSSOVER_DBFS;
+        crossoverValue.textContent = `${parseFloat(DEFAULT_CROSSOVER_DBFS).toFixed(1)} dBFS`;
         scheduleUpdate();
       });
-      suggestedCrossoverNote.appendChild(useBtn);
+      suggestedCrossoverNote.appendChild(resetBtn);
     }
 
     previewButtons.forEach((btn) => (btn.disabled = false));
