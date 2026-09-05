@@ -26,3 +26,4 @@ h2 { font-size: 0.95rem; margin: 0 0 0.5rem 0; text-transform: uppercase; letter
 input[type="range"] { width: 70%; vertical-align: middle; }
 button { margin: 0.15rem; }
 .preset-btn { font-size: 0.75rem; }
+#player { display: block; width: 100%; margin-top: 0.5rem; }
