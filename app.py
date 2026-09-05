@@ -15,6 +15,7 @@ from pathlib import Path
 
 import soundfile as sf
 from flask import Flask, Response, jsonify, render_template, request
+from werkzeug.utils import secure_filename
 
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.nam_loader import load_nam
@@ -29,6 +30,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DI_DIR = BASE_DIR / "assets" / "di"
 WORK_DIR = BASE_DIR / "work"
 WORK_DIR.mkdir(exist_ok=True)
+NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
+NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = Flask(__name__)
 
@@ -50,14 +53,41 @@ def index():
     )
 
 
+@app.route("/api/nam/upload", methods=["POST"])
+def api_nam_upload():
+    """Accept a .nam file picked in the browser, save it under work/uploaded_nam/,
+    and return its parsed metadata plus the server-side path to use as
+    amp_a_path/amp_b_path in /api/render_pair.
+
+    Saved by original filename (sanitized) -- re-uploading the same filename
+    overwrites the previous copy, which is fine since these are just a working
+    copy of a file the user already has, not the source of truth.
+    """
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "no file uploaded"}), 400
+    filename = secure_filename(upload.filename)
+    if not filename.lower().endswith(".nam"):
+        return jsonify({"error": "expected a .nam file"}), 400
+
+    dest = NAM_UPLOAD_DIR / filename
+    upload.save(dest)
+    try:
+        model = load_nam(dest)
+    except (OSError, ValueError) as exc:
+        dest.unlink(missing_ok=True)
+        return jsonify({"error": f"not a valid .nam file: {exc}"}), 400
+
+    return jsonify({**model.summary(), "path": str(dest)})
+
+
 @app.route("/api/nam/inspect", methods=["POST"])
 def api_nam_inspect():
     """Given a server-side path to a .nam file, return its parsed metadata.
 
-    NOTE: for this proof-of-concept, the UI passes a filesystem path (this app
-    is meant to run locally next to the user's own .nam files) rather than
-    uploading the file, to keep the skeleton small. A real upload flow can
-    replace this later without changing hybrid/nam_loader.py.
+    Used internally after /api/nam/upload resolves a browser-picked file to a
+    server-side path; can also be called directly if you'd rather point at a
+    .nam file already sitting on the machine running the server.
     """
     data = request.get_json(force=True)
     nam_path = data.get("path", "")

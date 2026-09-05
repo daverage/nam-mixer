@@ -7,39 +7,45 @@ function setStatus(msg, isError) {
   statusEl.style.color = isError ? "#b00" : "#666";
 }
 
-async function loadNam(pathInputId, infoElId) {
-  const path = document.getElementById(pathInputId).value.trim();
+// Resolved server-side paths for the uploaded .nam files, keyed by "a"/"b" --
+// filled in once each upload completes, read by the Render Amps handler.
+const ampServerPaths = { a: null, b: null };
+
+async function uploadNam(slot, fileInputId, infoElId) {
+  const fileInput = document.getElementById(fileInputId);
   const infoEl = document.getElementById(infoElId);
-  if (!path) {
-    setStatus("Enter a .nam file path first.", true);
+  const file = fileInput.files[0];
+  ampServerPaths[slot] = null;
+  if (!file) {
+    infoEl.textContent = "";
     return;
   }
+  infoEl.textContent = `Uploading ${file.name}...`;
+  const formData = new FormData();
+  formData.append("file", file);
   try {
-    const resp = await fetch("/api/nam/inspect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
+    const resp = await fetch("/api/nam/upload", { method: "POST", body: formData });
     const data = await resp.json();
     if (!resp.ok) {
       infoEl.textContent = "Error: " + data.error;
-      setStatus("Failed to load " + path, true);
+      setStatus("Failed to load " + file.name, true);
       return;
     }
+    ampServerPaths[slot] = data.path;
     infoEl.textContent =
-      `architecture=${data.architecture} sample_rate=${data.sample_rate} ` +
+      `${file.name} -- architecture=${data.architecture} sample_rate=${data.sample_rate} ` +
       `[${data.calibration_status}]`;
-    setStatus("Loaded " + path);
+    setStatus("Loaded " + file.name);
   } catch (err) {
     setStatus("Request failed: " + err, true);
   }
 }
 
-document.getElementById("btn-load-a").addEventListener("click", () =>
-  loadNam("amp-a-path", "amp-a-info")
+document.getElementById("amp-a-file").addEventListener("change", () =>
+  uploadNam("a", "amp-a-file", "amp-a-info")
 );
-document.getElementById("btn-load-b").addEventListener("click", () =>
-  loadNam("amp-b-path", "amp-b-info")
+document.getElementById("amp-b-file").addEventListener("change", () =>
+  uploadNam("b", "amp-b-file", "amp-b-info")
 );
 
 const crossoverSlider = document.getElementById("crossover-slider");
@@ -81,11 +87,11 @@ const trimReadout = document.getElementById("trim-readout");
 const renderStatus = document.getElementById("render-status");
 
 document.getElementById("btn-render-pair").addEventListener("click", async () => {
-  const amp_a_path = document.getElementById("amp-a-path").value.trim();
-  const amp_b_path = document.getElementById("amp-b-path").value.trim();
+  const amp_a_path = ampServerPaths.a;
+  const amp_b_path = ampServerPaths.b;
   const di_file = document.getElementById("di-selector").value;
   if (!amp_a_path || !amp_b_path || !di_file) {
-    setStatus("Enter both amp paths and pick a DI clip first.", true);
+    setStatus("Choose both Amp A and Amp B .nam files and pick a DI clip first.", true);
     return;
   }
   renderStatus.textContent = "Rendering (running NAM inference twice)...";
