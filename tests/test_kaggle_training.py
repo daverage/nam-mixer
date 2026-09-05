@@ -4,6 +4,8 @@ no Kaggle quota consumed -- see docs/kaggle_training.md.
 """
 import json
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -37,28 +39,86 @@ class FakeCompleted:
 DEFAULT_CONFIG_VIEW = FakeCompleted(0, "Configuration values from C:\\Users\\x\\.kaggle\n- username: testuser\n- auth_method: OAUTH\n", "")
 
 
+class FakePopenResult:
+    """Fakes just enough of subprocess.Popen for KaggleCli.run_streaming:
+    .stdout.readline() yields the response's combined output line-by-line,
+    then "" (EOF); .wait()/.kill() report the response's returncode."""
+
+    def __init__(self, response):
+        combined = (response.stdout or "") + (response.stderr or "")
+        self._lines = combined.splitlines(keepends=True)
+        self._idx = 0
+        self._returncode = response.returncode
+        self.stdout = self
+
+    def readline(self):
+        if self._idx >= len(self._lines):
+            return ""
+        line = self._lines[self._idx]
+        self._idx += 1
+        return line
+
+    def wait(self, timeout=None):
+        return self._returncode
+
+    def kill(self):
+        pass
+
+
+def _auto_datasets_files_response(directory: Path) -> FakeCompleted:
+    """Auto-generates a `datasets files -v`-shaped CSV response reflecting
+    whatever files actually exist in `directory` -- matches real Kaggle
+    behavior for a genuinely complete upload, so tests that don't care about
+    verification specifically don't need to hand-construct a matching CSV."""
+    rows = ["name,size,creationDate"]
+    if directory.is_dir():
+        for p in sorted(directory.iterdir()):
+            if p.is_file():
+                rows.append(f"{p.name},{p.stat().st_size},2026-01-01 00:00:00.000000")
+    return FakeCompleted(0, "\n".join(rows), "")
+
+
 def make_cli(monkeypatch, executable="/usr/bin/kaggle", responses=None):
     """responses: dict mapping a tuple of argv (after the executable) to a
     FakeCompleted, or a callable(argv) -> FakeCompleted. `config view`
     defaults to reporting username "testuser" (needed by create_dataset's
-    KaggleCli.username() call) unless a dict `responses` overrides it."""
+    KaggleCli.username() call); `datasets files` defaults to reflecting
+    whatever the most recent `datasets create -p <dir>` call actually staged
+    (see _auto_datasets_files_response) -- both unless a dict `responses`
+    overrides them. Mocks both subprocess.run (short calls) and
+    subprocess.Popen (KaggleCli.run_streaming, used for dataset upload)."""
     responses = responses or {}
     calls = []
+    state = {"last_dataset_dir": None}
 
-    def fake_run(argv, shell, capture_output, text, timeout):
-        assert shell is False, "must never invoke the Kaggle CLI via a shell"
-        assert isinstance(argv, list)
-        calls.append(argv)
+    def _lookup(argv):
         key = tuple(argv[1:])
+        if key[:2] == ("datasets", "create") and "-p" in argv:
+            state["last_dataset_dir"] = Path(argv[argv.index("-p") + 1])
         if callable(responses):
             return responses(argv)
         if key in responses:
             return responses[key]
         if key == ("config", "view"):
             return DEFAULT_CONFIG_VIEW
+        if key[:2] == ("datasets", "files") and state["last_dataset_dir"] is not None:
+            return _auto_datasets_files_response(state["last_dataset_dir"])
         return FakeCompleted(returncode=0, stdout="", stderr="")
 
+    def fake_run(argv, shell, capture_output, text, timeout):
+        assert shell is False, "must never invoke the Kaggle CLI via a shell"
+        assert isinstance(argv, list)
+        calls.append(argv)
+        return _lookup(argv)
+
+    def fake_popen(argv, shell, stdout, stderr, text, bufsize):
+        assert shell is False, "must never invoke the Kaggle CLI via a shell"
+        assert isinstance(argv, list)
+        calls.append(argv)
+        return FakePopenResult(_lookup(argv))
+
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     cli = KaggleCli(executable=executable)
     return cli, calls
 
@@ -206,7 +266,7 @@ def test_create_dataset_is_always_private(tmp_path, bundle_dir, monkeypatch):
     # a bare slug crashes with IndexError, so id must be "username/slug".
     assert metadata["id"] == f"testuser/{metadata['title']}"
     assert 6 <= len(metadata["title"]) <= 50
-    assert job.state == "waiting_for_dataset"
+    assert job.state == "verifying_dataset"
 
 
 def test_create_dataset_fails_cleanly_without_username(tmp_path, bundle_dir, monkeypatch):
@@ -247,7 +307,7 @@ def test_create_kernel_is_always_private_and_t4(tmp_path, bundle_dir, monkeypatc
     assert push_call
     assert "--accelerator" in push_call[0]
     assert push_call[0][push_call[0].index("--accelerator") + 1] == ACCELERATOR
-    assert job.state == "submitted"
+    assert job.state == "queued"
 
 
 def test_create_kernel_id_and_ref_are_username_qualified(tmp_path, bundle_dir, monkeypatch):
@@ -281,16 +341,19 @@ def test_create_kernel_fails_when_push_succeeds_but_status_never_resolves(tmp_pa
     kernel exists -- this is exactly the production bug's failure mode:
     Kaggle silently never created/resolved the kernel. The job must be
     marked failed, never left "submitted"."""
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=2)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+
     def responses(argv):
         if argv[1:3] == ["kernels", "status"]:
             return FakeCompleted(1, "", "Permission 'kernels.get' was denied")
+        if argv[1:3] == ["datasets", "files"]:
+            return _auto_datasets_files_response(staging)
         return FakeCompleted(0, "" if argv[1] != "config" else DEFAULT_CONFIG_VIEW.stdout, "")
 
-    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=2)
     cli, calls = make_cli(monkeypatch, responses=responses)
     manager.cli = cli
-    job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
     manager.create_dataset(job, staging)
 
     with pytest.raises(KaggleTrainingError, match="did not create/resolve the kernel"):
@@ -307,6 +370,9 @@ def test_create_kernel_succeeds_when_status_resolves_on_second_attempt(tmp_path,
     after push without that being a real failure, as long as it resolves
     within the bounded retry window."""
     attempt_count = {"n": 0}
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=3)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
 
     def responses(argv):
         if argv[1:3] == ["kernels", "status"]:
@@ -316,17 +382,16 @@ def test_create_kernel_succeeds_when_status_resolves_on_second_attempt(tmp_path,
             return FakeCompleted(0, "queued", "")
         if argv[1:3] == ["config", "view"]:
             return DEFAULT_CONFIG_VIEW
+        if argv[1:3] == ["datasets", "files"]:
+            return _auto_datasets_files_response(staging)
         return FakeCompleted(0, "", "")
 
-    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=3)
     cli, _ = make_cli(monkeypatch, responses=responses)
     manager.cli = cli
-    job = KaggleJob(job_id="abc123", design_id="mydesign")
-    staging = manager.stage(job, bundle_dir)
     manager.create_dataset(job, staging)
     manager.create_kernel(job, staging)
 
-    assert job.state == "submitted"
+    assert job.state == "queued"
     assert job.kernel_ref == f"testuser/hybrid-a2-train-mydesign-{job.job_id[:12]}"
 
 
@@ -348,7 +413,7 @@ def test_submit_rejects_second_concurrent_job(tmp_path, bundle_dir, monkeypatch)
     cli, _ = make_cli(monkeypatch)
     manager = KaggleJobManager(tmp_path, cli=cli)
     job1 = manager.submit("mydesign", bundle_dir)
-    assert job1.state == "submitted"
+    assert job1.state == "queued"
     with pytest.raises(KaggleTrainingError, match="already in progress"):
         manager.submit("mydesign", bundle_dir)
 
@@ -511,3 +576,281 @@ def test_parse_progress_returns_none_when_unparseable():
     assert KaggleJobManager.parse_progress("no useful lines here") is None
     assert KaggleJobManager.parse_progress("") is None
     assert KaggleJobManager.parse_progress(None) is None
+
+
+# --- streaming subprocess (run_streaming) --------------------------------
+
+def test_run_streaming_writes_lines_incrementally_to_log(tmp_path, monkeypatch):
+    response = FakeCompleted(0, "line one\nline two\nline three\n", "")
+    cli, calls = make_cli(monkeypatch, responses=lambda argv: response)
+    log_path = tmp_path / "kaggle.log"
+    result = cli.run_streaming(["datasets", "create", "-p", str(tmp_path)], log_path, timeout=30)
+    assert result.ok
+    assert result.returncode == 0
+    logged = log_path.read_text()
+    assert "line one" in logged and "line two" in logged and "line three" in logged
+    assert calls  # went through Popen, not subprocess.run
+
+
+def test_run_streaming_redacts_secrets_in_log(tmp_path, monkeypatch):
+    response = FakeCompleted(0, "auth token=SHOULDNOTLEAK\n", "")
+    cli, _ = make_cli(monkeypatch, responses=lambda argv: response)
+    log_path = tmp_path / "kaggle.log"
+    cli.run_streaming(["datasets", "create", "-p", str(tmp_path)], log_path, timeout=30)
+    assert "SHOULDNOTLEAK" not in log_path.read_text()
+
+
+def test_run_streaming_times_out_without_hanging(tmp_path, monkeypatch):
+    """Simulates a child that produces output forever without ever exiting
+    (the real-world equivalent of Kaggle's bounded-but-very-long resumable-
+    upload retry loop under persistent network trouble) -- run_streaming
+    must still return within a bounded time, never hang indefinitely."""
+    class NeverEndingPopen:
+        def __init__(self, argv, shell, stdout, stderr, text, bufsize):
+            self.stdout = self
+            self._killed = False
+
+        def readline(self):
+            if self._killed:
+                return ""
+            time.sleep(0.05)
+            return "still going...\n"
+
+        def wait(self, timeout=None):
+            return -9 if self._killed else 0
+
+        def kill(self):
+            self._killed = True
+
+    monkeypatch.setattr(subprocess, "Popen", NeverEndingPopen)
+    cli = KaggleCli(executable="/usr/bin/kaggle")
+    log_path = tmp_path / "kaggle.log"
+
+    start = time.time()
+    result = cli.run_streaming(["datasets", "create", "-p", str(tmp_path)], log_path, timeout=0.3)
+    elapsed = time.time() - start
+
+    assert not result.ok
+    assert "timed out" in result.stderr
+    assert elapsed < 5.0  # bounded, not hung -- generous margin for CI jitter
+    assert "still going" in log_path.read_text()  # partial output was still captured
+
+
+# --- dataset payload verification (mandatory before kernel creation) ----
+
+class _StubCli:
+    """Minimal stand-in for KaggleCli when a test only needs to control
+    datasets_files()'s return value, without going through the full
+    subprocess-mocking machinery."""
+    def __init__(self, files_result: FakeCompleted):
+        self._files_result = CliResult(
+            ok=(files_result.returncode == 0), returncode=files_result.returncode,
+            stdout=files_result.stdout, stderr=files_result.stderr,
+        )
+
+    def datasets_files(self, dataset_ref):
+        return self._files_result
+
+
+def test_verify_dataset_payload_accepts_matching_complete_payload(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    for name, content in (("input.wav", b"a" * 100), ("hybrid_target.wav", b"b" * 200),
+                          ("training_manifest.json", b"{}"), ("cloud_job.json", b"{}")):
+        (staging / name).write_bytes(content)
+
+    csv_text = "name,size,creationDate\n" + "\n".join(
+        f"{name},{ (staging / name).stat().st_size },2026-01-01 00:00:00"
+        for name in ("input.wav", "hybrid_target.wav", "training_manifest.json", "cloud_job.json")
+    )
+    manager = KaggleJobManager(tmp_path, cli=_StubCli(FakeCompleted(0, csv_text, "")))
+    ok, error = manager.verify_dataset_payload("owner/slug", staging)
+    assert ok is True
+    assert error == ""
+
+
+def test_verify_dataset_payload_rejects_missing_file():
+    csv_text = "name,size,creationDate\ncloud_job.json,103,2026-01-01 00:00:00"
+    manager = KaggleJobManager(Path("."), cli=_StubCli(FakeCompleted(0, csv_text, "")))
+    ok, error = manager.verify_dataset_payload("owner/slug", Path("/nonexistent"))
+    assert ok is False
+    assert "input.wav" in error
+    assert "hybrid_target.wav" in error
+    assert "training_manifest.json" in error
+
+
+def test_verify_dataset_payload_rejects_wrong_remote_size(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "input.wav").write_bytes(b"a" * 1000)
+    (staging / "hybrid_target.wav").write_bytes(b"b" * 2000)
+    (staging / "training_manifest.json").write_bytes(b"{}")
+    (staging / "cloud_job.json").write_bytes(b"{}")
+
+    # input.wav reported with a truncated remote size -- a partial upload
+    # that still produced a listing entry, exactly the incident this check
+    # exists for.
+    csv_text = (
+        "name,size,creationDate\n"
+        "input.wav,16384,2026-01-01 00:00:00\n"
+        "hybrid_target.wav,2000,2026-01-01 00:00:00\n"
+        "training_manifest.json,2,2026-01-01 00:00:00\n"
+        "cloud_job.json,2,2026-01-01 00:00:00\n"
+    )
+    manager = KaggleJobManager(tmp_path, cli=_StubCli(FakeCompleted(0, csv_text, "")))
+    ok, error = manager.verify_dataset_payload("owner/slug", staging)
+    assert ok is False
+    assert "input.wav" in error
+    assert "1000" in error and "16384" in error
+
+
+def test_verify_dataset_payload_rejects_when_ready_but_partial():
+    """The exact real-world incident: `datasets status` reported "ready" for
+    a dataset containing only cloud_job.json -- 5 of 6 files never arrived.
+    `datasets files -v`-based verification must still reject this."""
+    csv_text = "name,size,creationDate\ncloud_job.json,103,2026-09-05 19:46:45.585000"
+    manager = KaggleJobManager(Path("."), cli=_StubCli(FakeCompleted(0, csv_text, "")))
+    ok, error = manager.verify_dataset_payload(
+        "andrzejmarczewski/hybrid-a2-20260905t192736z-87206825efe1", Path("/nonexistent"),
+    )
+    assert ok is False
+    assert "missing" in error.lower()
+
+
+def test_verify_dataset_payload_surfaces_files_command_failure():
+    manager = KaggleJobManager(Path("."), cli=_StubCli(FakeCompleted(1, "", "403 Forbidden")))
+    ok, error = manager.verify_dataset_payload("owner/slug", Path("/nonexistent"))
+    assert ok is False
+    assert "could not verify" in error.lower()
+
+
+def test_create_dataset_never_creates_kernel_when_verification_fails(tmp_path, bundle_dir, monkeypatch):
+    """Kernel creation must never even be attempted when the dataset payload
+    fails verification -- checked here by asserting no "kernels" subcommand
+    ever appears in the recorded calls when driving the full pipeline."""
+    def responses(argv):
+        if argv[1:3] == ["config", "view"]:
+            return DEFAULT_CONFIG_VIEW
+        if argv[1:3] == ["datasets", "files"]:
+            return FakeCompleted(0, "name,size,creationDate\ncloud_job.json,103,2026-01-01", "")
+        return FakeCompleted(0, "", "")
+
+    manager = KaggleJobManager(tmp_path)
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager.cli = cli
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+
+    with pytest.raises(KaggleTrainingError, match="training files are incomplete"):
+        manager._run_pipeline(job, bundle_dir)
+
+    assert job.state == "failed"
+    assert not any(c[1] == "kernels" for c in calls)
+
+
+def test_dataset_upload_is_never_automatically_retried(tmp_path, bundle_dir, monkeypatch):
+    """A deliberate design decision (see docs/kaggle_training.md): on upload
+    failure we fail clearly and preserve diagnostics rather than blindly
+    retrying and risking multiple orphaned partial datasets. Locks that in."""
+    def responses(argv):
+        if argv[1:3] == ["config", "view"]:
+            return DEFAULT_CONFIG_VIEW
+        if argv[1:3] == ["datasets", "create"]:
+            return FakeCompleted(1, "", "network error")
+        return FakeCompleted(0, "", "")
+
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+
+    with pytest.raises(KaggleTrainingError):
+        manager.create_dataset(job, staging)
+
+    create_calls = [c for c in calls if c[1:3] == ["datasets", "create"]]
+    assert len(create_calls) == 1
+    assert job.state == "failed"
+    assert job.dataset_ref is not None  # the intended ref stays on record for diagnosis
+
+
+# --- background worker (submit_async) ------------------------------------
+
+def test_submit_async_returns_immediately_without_waiting_for_pipeline(tmp_path, bundle_dir, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+
+    pipeline_started = threading.Event()
+    pipeline_may_finish = threading.Event()
+
+    def slow_pipeline(job, bundle_dir_arg):
+        pipeline_started.set()
+        pipeline_may_finish.wait(timeout=5)
+        job.state = "queued"
+        save_job(tmp_path, job)
+
+    monkeypatch.setattr(manager, "_run_pipeline", slow_pipeline)
+
+    start = time.time()
+    job = manager.submit_async("mydesign", bundle_dir)
+    elapsed = time.time() - start
+
+    assert elapsed < 1.0, "submit_async must return before the pipeline finishes"
+    assert pipeline_started.wait(timeout=2), "background thread never started the pipeline"
+    assert job.state == "preparing"  # pre-checks only; pipeline hasn't run yet
+
+    pipeline_may_finish.set()
+    for _ in range(50):
+        reloaded = load_job(tmp_path, "mydesign", job.job_id)
+        if reloaded.state == "queued":
+            break
+        time.sleep(0.05)
+    assert reloaded.state == "queued"
+
+
+def test_submit_async_persists_dataset_ref_before_long_upload_completes(tmp_path, bundle_dir, monkeypatch):
+    """dataset_ref must be readable via job.json WHILE the upload is still
+    in flight, not only after it finishes -- proves the "persist before
+    upload" ordering end-to-end through the real create_dataset() path."""
+    upload_started = threading.Event()
+    upload_may_finish = threading.Event()
+
+    class SlowPopen:
+        def __init__(self, argv, shell, stdout, stderr, text, bufsize):
+            self.stdout = self
+            upload_started.set()
+
+        def readline(self):
+            upload_may_finish.wait(timeout=5)
+            return ""
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(subprocess, "Popen", SlowPopen)
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: FakeCompleted(
+        0, DEFAULT_CONFIG_VIEW.stdout if argv[1:3] == ["config", "view"] else "", "",
+    ))
+
+    manager = KaggleJobManager(tmp_path)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    staging = manager.stage(job, bundle_dir)
+
+    def run_create_dataset():
+        try:
+            manager.create_dataset(job, staging)
+        except KaggleTrainingError:
+            pass
+
+    t = threading.Thread(target=run_create_dataset, daemon=True)
+    t.start()
+    assert upload_started.wait(timeout=2)
+
+    reloaded = load_job(tmp_path, "mydesign", job.job_id)
+    assert reloaded.dataset_ref is not None
+    assert reloaded.dataset_ref.startswith("testuser/")
+    assert reloaded.state == "uploading_dataset"
+
+    upload_may_finish.set()
+    t.join(timeout=5)

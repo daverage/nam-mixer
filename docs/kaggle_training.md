@@ -21,25 +21,76 @@ entirely the Kaggle CLI's own business (`~/.kaggle/kaggle.json` /
 
 ## What "Train A2" actually does
 
-1. Stages **only** `input.wav`, `hybrid_target.wav`, and
-   `training_manifest.json` (already produced by "Generate Training Bundle")
-   into a job-specific staging directory -- never your source `.nam` files or
-   any preview DI.
-2. Creates a **unique, private** Kaggle dataset from that staging directory.
-3. Creates a **unique, private** Kaggle kernel (a Python script, not a
-   notebook) requesting an `NvidiaTeslaT4` accelerator, and pushes it.
-4. Polls the kernel's status without blocking the Flask server.
-5. Once the kernel finishes, downloads the exported `.nam` and
-   `training_result.json`.
-6. Runs the exact same local verification the local trainer runs on its own
+`POST /api/kaggle/train` returns almost immediately (job state `preparing`)
+-- the actual work runs on a background thread
+(`KaggleJobManager.submit_async`), never inline in the Flask request. A real
+production upload was observed taking several minutes under real network
+conditions (see "Why the upload can take minutes" below); blocking the
+request for that long left the dev server unresponsive with no way to show
+progress, and any interruption (Flask restart, machine sleep) lost the job's
+state entirely. Poll `GET /api/kaggle/jobs/<job_id>` for progress; every step
+below persists to `job.json` immediately, so a restart mid-upload only loses
+the ability to keep watching that one attempt live, never the record of what
+happened.
+
+1. Stages **only** `input.wav`, `hybrid_target.wav`, `training_manifest.json`,
+   and `cloud_job.json` (already produced by "Generate Training Bundle") into
+   a job-specific staging directory -- never your source `.nam` files or any
+   preview DI. State: `preparing`.
+2. Computes the dataset's `owner/slug` reference and **persists it to
+   `job.json` before the upload even starts** -- this is the intended
+   reference, not proof the dataset exists yet, but it means the reference is
+   never lost even if the upload is later interrupted. Uploads to a **unique,
+   private** Kaggle dataset, streaming the CLI's own progress output into
+   `work/a2/<design_id>/kaggle/<job_id>/logs/kaggle.log` line-by-line as it
+   happens (never `subprocess.run(capture_output=True)`, which would give no
+   visibility until the whole upload finishes). State: `uploading_dataset`.
+3. **Mandatory remote verification** -- `kaggle datasets status == ready` is
+   NOT trusted as proof the upload is complete (a real incident showed Kaggle
+   reporting "ready" for a dataset containing only 1 of 5 intended files).
+   Calls `kaggle datasets files <ref> -v` and confirms every required file is
+   present with a size matching the local staged copy. If anything is
+   missing or truncated, the job fails with a specific error listing exactly
+   what's wrong, and the dataset is left in place for diagnosis (never
+   auto-deleted, never blindly retried under a new slug). State:
+   `verifying_dataset`.
+4. Only after verification passes: creates a **unique, private** Kaggle
+   kernel (a Python script, not a notebook) requesting an `NvidiaTeslaT4`
+   accelerator, and pushes it. State: `creating_kernel`.
+5. `kernels push` exiting 0 is also not trusted alone -- confirms the kernel
+   actually resolves via `kaggle kernels status <ref>` (bounded retry for
+   Kaggle-side eventual consistency) before ever considering it submitted.
+   State: `verifying_kernel`, then `queued`.
+6. Polls the kernel's status without blocking Flask (`running`).
+7. Once the kernel finishes, downloads the exported `.nam` and
+   `training_result.json` (`downloading`).
+8. Runs the exact same local verification the local trainer runs on its own
    output: parses the `.nam`, renders the official training input through it
    with the native NAMCore renderer (Full and Lite submodels), and compares
-   against `hybrid_target.wav`. A job only reaches "complete" after this
-   passes -- a cloud "success" that fails local verification is reported as
-   failed, with the Kaggle dataset/kernel left in place for debugging.
-7. Optionally cleans up the private dataset/kernel once you're satisfied
+   against `hybrid_target.wav` (`validating`). A job only reaches `complete`
+   after this passes -- a cloud "success" that fails local verification is
+   reported as `failed`, with the Kaggle dataset/kernel left in place for
+   debugging.
+9. Optionally cleans up the private dataset/kernel once you're satisfied
    (`POST /api/kaggle/jobs/<job_id>/cleanup`) -- never deletes the downloaded
    local `.nam`, even if cleanup itself fails.
+
+### Why the upload can take minutes
+
+Root-cause investigation of a real stuck-upload incident (direct CLI
+reproduction, reading the installed `kaggle` package's
+`ResumableUploadContext` source) found the upload mechanism itself works
+correctly (repeatable ~22-25s uploads of the full ~64MB payload on a good
+connection) -- but Kaggle's own client-side retry logic is bounded yet can
+legitimately run long under real transient network conditions (up to 10
+resumable-upload attempts, each with its own HTTP-level retry with
+exponential backoff). This is why the upload timeout
+(`DATASET_UPLOAD_TIMEOUT_S`, 30 minutes) is generous and why progress is
+streamed live rather than waited-out silently -- that retry behavior is
+legitimate, not a hang to short-circuit aggressively. It is NOT caused by
+`subprocess.run(capture_output=True)`, WAV-specific handling, or multi-file
+upload being unreliable -- all specifically ruled out by direct reproduction
+against the real account.
 
 Training hyperparameters (epochs=100, batch_size=16, ny=8192, seed=0,
 latency=0) are defined once in `hybrid/a2_training_settings.py` and shared by
@@ -85,7 +136,19 @@ kaggle kernels logs <owner>/<kernel-slug>
   itself is the authoritative check.
 - **A job is stuck "already in progress"** -- only one active Kaggle job per
   design is supported. Wait for it to finish/fail, or check
-  `work/a2/<design_id>/kaggle/<job_id>/job.json` directly.
+  `work/a2/<design_id>/kaggle/<job_id>/job.json` directly. A job stuck by a
+  bug in a previous version of this app (e.g. an unresolvable kernel
+  reference) is automatically detected and failed the next time it's
+  refreshed or a new submission is attempted for that design -- it will
+  never block forever.
+
+### Job states
+
+`preparing` -> `uploading_dataset` -> `verifying_dataset` -> `creating_kernel`
+-> `verifying_kernel` -> `queued` -> `running` -> `downloading` ->
+`validating` -> `complete` (or `failed` from any step). `cleanup_pending`/
+`cleaned` describe the separate post-completion cleanup step, not training
+progress.
 
 ## Manual end-to-end smoke test (not part of `pytest tests/`)
 

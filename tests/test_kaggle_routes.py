@@ -59,7 +59,7 @@ def test_train_surfaces_manager_error_distinctly(client, tmp_path, monkeypatch):
 
     def fake_submit(design_id, bundle_dir_arg):
         raise KaggleTrainingError("Kaggle CLI is not authenticated. Run: kaggle auth login")
-    monkeypatch.setattr(app_module._kaggle_manager, "submit", fake_submit)
+    monkeypatch.setattr(app_module._kaggle_manager, "submit_async", fake_submit)
 
     resp = client.post("/api/kaggle/train", json={"design_id": "mydesign"})
     assert resp.status_code == 400
@@ -73,7 +73,7 @@ def test_train_success_returns_job_id(client, tmp_path, monkeypatch):
     (bundle_dir / "training_manifest.json").write_text("{}")
 
     monkeypatch.setattr(
-        app_module._kaggle_manager, "submit",
+        app_module._kaggle_manager, "submit_async",
         lambda design_id, bundle_dir_arg: KaggleJob(job_id="abc123", design_id=design_id, state="submitted"),
     )
     resp = client.post("/api/kaggle/train", json={"design_id": "mydesign"})

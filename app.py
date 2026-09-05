@@ -661,7 +661,17 @@ def api_kaggle_auth_start():
 def api_kaggle_train():
     """Start a Kaggle GPU job for an already-generated training bundle.
     Never recomputes the design/manifest -- reuses the bundle written by
-    POST /api/generate."""
+    POST /api/generate.
+
+    Returns as soon as the (fast) CLI/auth pre-checks pass -- the actual
+    stage/upload/verify/kernel pipeline runs on a background thread
+    (KaggleJobManager.submit_async), NOT inline in this request. A real
+    production upload was observed taking several minutes under real
+    network conditions (see docs/kaggle_training.md); blocking this request
+    for that long left the Flask dev server unresponsive with no way for
+    the UI to show progress, and any interruption lost the job's state
+    entirely. Poll GET /api/kaggle/jobs/<job_id> for progress.
+    """
     data = request.get_json(force=True, silent=True) or {}
     design_id = data.get("design_id")
     if not design_id:
@@ -673,7 +683,7 @@ def api_kaggle_train():
         return jsonify({"error": f"no generated training bundle found for design_id {design_id!r} -- call POST /api/generate first"}), 400
 
     try:
-        job = _kaggle_manager.submit(design_id, bundle_dir)
+        job = _kaggle_manager.submit_async(design_id, bundle_dir)
     except KaggleTrainingError as exc:
         return jsonify({"error": str(exc)}), 400
 

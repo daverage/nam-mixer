@@ -26,12 +26,16 @@ Security invariants enforced throughout:
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -47,6 +51,22 @@ from .validation import compute_esr_metrics
 ACCELERATOR = "NvidiaTeslaT4"
 FORBIDDEN_ACCELERATORS = {"NvidiaTeslaP100", "TPU"}
 
+# `kaggle datasets create` for the real ~64MB training payload was observed
+# to hang for 10+ minutes in production with no error surfaced -- root-cause
+# investigation (direct CLI reproduction, inspecting the installed kaggle
+# package's ResumableUploadContext) found the upload mechanism itself works
+# correctly on this machine/network (repeatable ~22s uploads of the full
+# payload), but Kaggle's own client-side retry loop is bounded yet can still
+# run very long under real transient network conditions (up to
+# MAX_UPLOAD_RESUME_ATTEMPTS=10 resumable-upload attempts, each with its own
+# HTTP-level Retry(total=10, backoff_factor=0.5)) -- and our old fully
+# synchronous, un-streamed subprocess.run(capture_output=True) gave zero
+# visibility while that ran and left the job frozen with no error if the
+# Flask process was interrupted mid-upload. This timeout is generous
+# specifically because that retry behavior is legitimate, not a hang to
+# short-circuit aggressively.
+DATASET_UPLOAD_TIMEOUT_S = 1800
+
 # `kernels push` returning exit code 0 is NOT sufficient evidence the kernel
 # actually exists on Kaggle's side -- a real production run observed a
 # "submitted" job whose kernel could never be resolved (wrong/bare slug).
@@ -59,6 +79,12 @@ KERNEL_VERIFY_DELAY_S = 5
 # else is ever copied out of a design's bundle dir, in particular never
 # assets/nam_models/*.nam or any preview DI (see docs/kaggle_training.md).
 STAGED_BUNDLE_FILES = ("input.wav", "hybrid_target.wav", "training_manifest.json")
+
+# The files that MUST actually exist in the remote dataset, with sizes
+# matching the local staged copies, before a kernel is ever created against
+# it. `datasets status == ready` is NOT sufficient evidence of this -- see
+# KaggleCli.datasets_files's docstring for the real incident that proved it.
+REQUIRED_DATASET_FILES = (*STAGED_BUNDLE_FILES, "cloud_job.json")
 
 # Bounded so a Flask route never returns an unbounded log file.
 LOG_TAIL_LINES = 200
@@ -77,6 +103,25 @@ def _safe_slug(text: str, max_len: int = 40) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(text)).strip("-").lower()
     slug = re.sub(r"-{2,}", "-", slug)
     return (slug or "job")[:max_len].strip("-") or "job"
+
+
+def _parse_datasets_files_csv(text: str) -> dict[str, int]:
+    """Parses `kaggle datasets files <ref> -v`'s CSV output
+    (`name,size,creationDate` header + one row per file) into
+    {filename: size_in_bytes}. Never raises on a malformed/empty row --
+    verification callers treat a name that fails to parse as absent."""
+    sizes: dict[str, int] = {}
+    reader = csv.DictReader(io.StringIO(text.strip()))
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        size_str = (row.get("size") or "").strip()
+        if not name:
+            continue
+        try:
+            sizes[name] = int(size_str)
+        except ValueError:
+            continue
+    return sizes
 
 
 @dataclass
@@ -117,13 +162,15 @@ class KaggleCli:
     def is_installed(self) -> bool:
         return self.executable is not None
 
-    def _run(self, args: list[str], timeout: Optional[int] = None) -> CliResult:
+    def _build_argv(self, args: list[str]) -> list[str]:
         if not self.is_installed():
             # Fall back to `python -m kaggle` in case the console script
             # isn't on PATH but the package is importable in this interpreter.
-            argv = [sys.executable, "-m", "kaggle", *args]
-        else:
-            argv = [self.executable, *args]
+            return [sys.executable, "-m", "kaggle", *args]
+        return [self.executable, *args]
+
+    def _run(self, args: list[str], timeout: Optional[int] = None) -> CliResult:
+        argv = self._build_argv(args)
         try:
             proc = subprocess.run(
                 argv,
@@ -142,6 +189,76 @@ class KaggleCli:
             stdout=_redact(proc.stdout or ""),
             stderr=_redact(proc.stderr or ""),
         )
+
+    def run_streaming(self, args: list[str], log_path: Path, timeout: int) -> CliResult:
+        """For long operations (dataset upload) -- streams combined
+        stdout+stderr line-by-line into `log_path` as they arrive, instead of
+        `_run`'s capture_output=True (which only returns output after the
+        whole process exits, giving zero visibility during a multi-minute
+        upload and no way to show elapsed progress).
+
+        stderr is merged into stdout (never a second pipe) specifically to
+        avoid the classic two-pipe deadlock; a background reader thread
+        drains the single pipe into a queue so the timeout can be checked
+        even during a period of total silence from the child (readline()
+        alone would block past the timeout if the child produced no output
+        at all -- Windows pipes have no select()-based readline-with-timeout).
+        """
+        argv = self._build_argv(args)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            proc = subprocess.Popen(
+                argv, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            )
+        except FileNotFoundError as exc:
+            raise KaggleCliUnavailable(f"kaggle CLI not found: {exc}") from exc
+
+        line_queue: "queue.Queue[Optional[str]]" = queue.Queue()
+
+        def _reader() -> None:
+            try:
+                for line in iter(proc.stdout.readline, ""):
+                    line_queue.put(line)
+            finally:
+                line_queue.put(None)  # sentinel: stream closed
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+
+        start = time.time()
+        lines: list[str] = []
+        timed_out = False
+        with open(log_path, "a", encoding="utf-8") as logf:
+            while True:
+                remaining = timeout - (time.time() - start)
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    line = line_queue.get(timeout=min(remaining, 1.0))
+                except queue.Empty:
+                    continue
+                if line is None:
+                    break
+                redacted = _redact(line)
+                logf.write(redacted)
+                logf.flush()
+                lines.append(redacted)
+
+        if timed_out:
+            proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            return CliResult(ok=False, returncode=-1, stdout="".join(lines), stderr=f"timed out after {timeout}s")
+
+        try:
+            returncode = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            returncode = -1
+        return CliResult(ok=(returncode == 0), returncode=returncode, stdout="".join(lines), stderr="")
 
     def version(self) -> Optional[str]:
         if not self.is_installed():
@@ -196,8 +313,24 @@ class KaggleCli:
     def datasets_create(self, dataset_dir: Path) -> CliResult:
         return self._run(["datasets", "create", "-p", str(dataset_dir)], timeout=600)
 
+    def datasets_create_streaming(self, dataset_dir: Path, log_path: Path, timeout: int = DATASET_UPLOAD_TIMEOUT_S) -> CliResult:
+        """Like `datasets_create`, but streams progress into `log_path` as it
+        happens instead of returning only once the whole upload finishes --
+        see `run_streaming`'s docstring for why this matters for a
+        potentially multi-minute upload."""
+        return self.run_streaming(["datasets", "create", "-p", str(dataset_dir)], log_path, timeout=timeout)
+
     def datasets_status(self, dataset_ref: str) -> CliResult:
         return self._run(["datasets", "status", dataset_ref], timeout=30)
+
+    def datasets_files(self, dataset_ref: str) -> CliResult:
+        """`kaggle datasets files <ref> -v` -- CSV listing of what actually
+        landed remotely. Never trust `datasets_status`'s "ready" alone: a
+        real production incident showed Kaggle reporting "ready" for a
+        dataset that contained only 1 of 6 intended files (the upload never
+        reached the point of comparing against the client's actual intent),
+        so this is the mandatory follow-up check."""
+        return self._run(["datasets", "files", dataset_ref, "-v"], timeout=30)
 
     def datasets_delete(self, dataset_ref: str) -> CliResult:
         return self._run(["datasets", "delete", dataset_ref, "--yes"], timeout=60)
@@ -228,11 +361,16 @@ class KaggleCli:
 # --- Job state machine -----------------------------------------------------
 
 JOB_STATES = (
-    "preparing", "uploading", "waiting_for_dataset", "submitted", "queued",
-    "running", "downloading", "validating", "complete", "failed",
-    "cleanup_pending", "cleaned",
+    "preparing", "uploading_dataset", "verifying_dataset", "creating_kernel",
+    "verifying_kernel", "queued", "running", "downloading", "validating",
+    "complete", "failed", "cleanup_pending", "cleaned",
 )
 TERMINAL_STATES = ("complete", "failed")
+# Note: a job.json written by a pre-rewrite version of this module may still
+# have state "uploading"/"waiting_for_dataset"/"submitted" -- every check
+# below tests `state not in TERMINAL_STATES` (never an exact new-state
+# match), so those old values keep behaving as non-terminal without needing
+# a migration table.
 
 # Kaggle's own kernel statuses, mapped defensively -- anything unrecognized
 # falls back to "running" rather than raising, per docs/kaggle_training.md
@@ -280,11 +418,25 @@ def _job_dir(a2_output_dir: Path, design_id: str, job_id: str) -> Path:
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
+    """job.json is now genuinely written from a background worker thread
+    while Flask GET routes read it concurrently (see submit_async) --
+    os.replace can transiently fail on Windows with PermissionError if
+    another handle has the destination open at that exact instant. Retry a
+    few times with a tiny backoff rather than letting a real state update
+    get lost to a race that resolves itself within milliseconds."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, path)
+    last_exc: Optional[OSError] = None
+    for attempt in range(5):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(0.02 * (attempt + 1))
+    raise last_exc
 
 
 def save_job(a2_output_dir: Path, job: KaggleJob) -> None:
@@ -340,11 +492,13 @@ class KaggleJobManager:
         cli: Optional[KaggleCli] = None,
         kernel_verify_attempts: int = KERNEL_VERIFY_ATTEMPTS,
         kernel_verify_delay_s: float = KERNEL_VERIFY_DELAY_S,
+        dataset_upload_timeout_s: int = DATASET_UPLOAD_TIMEOUT_S,
     ):
         self.a2_output_dir = Path(a2_output_dir)
         self.cli = cli or KaggleCli()
         self.kernel_verify_attempts = kernel_verify_attempts
         self.kernel_verify_delay_s = kernel_verify_delay_s
+        self.dataset_upload_timeout_s = dataset_upload_timeout_s
 
     # -- status -------------------------------------------------------
 
@@ -409,6 +563,18 @@ class KaggleJobManager:
             raise KaggleTrainingError(job.error)
         dataset_ref = f"{username}/{slug}"
 
+        # Persist the INTENDED dataset reference before the actual upload
+        # even starts -- this is a deterministic reference, not proof the
+        # dataset exists yet, but it means a Flask restart or crash mid-
+        # upload doesn't lose track of what to look for/clean up. Root-cause
+        # investigation of a real production incident found this upload can
+        # legitimately take several minutes under real network conditions
+        # (Kaggle's own resumable-upload retry logic), so `state` reflects
+        # that this may run for a while, not that anything has gone wrong.
+        job.dataset_ref = dataset_ref
+        job.state = "uploading_dataset"
+        save_job(self.a2_output_dir, job)
+
         dataset_metadata = {
             "title": slug,
             "id": dataset_ref,
@@ -416,20 +582,75 @@ class KaggleJobManager:
         }
         _atomic_write_json(staging_dir / "dataset-metadata.json", dataset_metadata)
 
-        result = self.cli.datasets_create(staging_dir)
+        log_path = self._tail_log_path(job)
+        # Streamed (not capture_output=True) so the job log shows real
+        # progress during a long upload instead of nothing until it exits --
+        # see KaggleCli.run_streaming's docstring.
+        result = self.cli.datasets_create_streaming(staging_dir, log_path, timeout=self.dataset_upload_timeout_s)
         if not result.ok:
             job.state = "failed"
-            job.error = f"dataset upload failed: {result.stderr.strip() or result.stdout.strip()}"
+            timed_out = "timed out" in (result.stderr or "")
+            job.error = (
+                f"dataset upload {'timed out' if timed_out else 'failed'}: "
+                f"{result.stderr.strip() or result.stdout.strip()[-500:]}"
+            )
             save_job(self.a2_output_dir, job)
             raise KaggleTrainingError(job.error)
 
-        job.dataset_ref = dataset_ref
-        job.state = "waiting_for_dataset"
+        # `datasets create` exiting 0 (and even `datasets status == ready`)
+        # is NOT sufficient evidence every intended file actually arrived --
+        # a real production dataset reported "ready" with only 1 of 6 files
+        # present. Verify the exact remote payload before ever creating a
+        # kernel against it.
+        job.state = "verifying_dataset"
         save_job(self.a2_output_dir, job)
+        ok, error = self.verify_dataset_payload(dataset_ref, staging_dir)
+        if not ok:
+            job.state = "failed"
+            job.error = error
+            save_job(self.a2_output_dir, job)
+            raise KaggleTrainingError(job.error)
+
+    def verify_dataset_payload(self, dataset_ref: str, staging_dir: Path) -> tuple[bool, str]:
+        """Confirms every file in REQUIRED_DATASET_FILES is actually present
+        remotely with a size matching the local staged copy. Comparing exact
+        sizes (not just presence) catches a partial/truncated upload that
+        still produced a listing entry."""
+        result = self.cli.datasets_files(dataset_ref)
+        if not result.ok:
+            return False, f"could not verify remote dataset contents: {result.stderr.strip() or result.stdout.strip()}"
+
+        remote_sizes = _parse_datasets_files_csv(result.stdout)
+        missing: list[str] = []
+        mismatched: list[str] = []
+        for name in REQUIRED_DATASET_FILES:
+            local_path = staging_dir / name
+            local_size = local_path.stat().st_size if local_path.is_file() else None
+            remote_size = remote_sizes.get(name)
+            if remote_size is None:
+                missing.append(name)
+            elif local_size is not None and remote_size != local_size:
+                mismatched.append(f"{name} (local {local_size}B, remote {remote_size}B)")
+
+        if not missing and not mismatched:
+            return True, ""
+
+        parts = []
+        if missing:
+            parts.append("missing " + ", ".join(missing))
+        if mismatched:
+            parts.append("size mismatch: " + ", ".join(mismatched))
+        return False, (
+            "Kaggle dataset creation returned ready but training files are incomplete: "
+            + "; ".join(parts) + f" (dataset={dataset_ref})"
+        )
 
     def create_kernel(self, job: KaggleJob, staging_dir: Path) -> None:
         if job.dataset_ref is None:
             raise KaggleTrainingError("cannot create kernel before a dataset exists for this job")
+
+        job.state = "creating_kernel"
+        save_job(self.a2_output_dir, job)
 
         # Kaggle requires kernel-metadata.json's "id" to be
         # "<username>/<slug>" too -- a bare slug silently resolves to
@@ -472,9 +693,11 @@ class KaggleJobManager:
         # `kernels push` exiting 0 is NOT sufficient evidence the kernel
         # actually exists -- verify it resolves (with bounded retry for
         # Kaggle-side eventual consistency) before ever calling this job
-        # "submitted". Never leave state=="submitted" for an unresolved
+        # "queued". Never leave it looking submitted for an unresolved
         # kernel -- the dataset/staging are preserved either way for
         # diagnosis (we never delete them here).
+        job.state = "verifying_kernel"
+        save_job(self.a2_output_dir, job)
         if not self._verify_kernel_exists(kernel_ref):
             job.state = "failed"
             job.error = (
@@ -486,7 +709,7 @@ class KaggleJobManager:
             raise KaggleTrainingError(job.error)
 
         job.kernel_ref = kernel_ref
-        job.state = "submitted"
+        job.state = "queued"
         save_job(self.a2_output_dir, job)
 
     def _verify_kernel_exists(self, kernel_ref: str) -> bool:
@@ -497,7 +720,10 @@ class KaggleJobManager:
                 time.sleep(self.kernel_verify_delay_s)
         return False
 
-    def submit(self, design_id: str, bundle_dir: Path) -> KaggleJob:
+    def _precheck_and_reserve_job(self, design_id: str) -> KaggleJob:
+        """Shared by `submit`/`submit_async`: CLI/auth checks, resolving a
+        stuck existing job, and reserving a fresh job_id -- all fast/cheap,
+        safe to run synchronously inside the Flask request."""
         if not self.cli.is_installed():
             raise KaggleTrainingError("Kaggle CLI is not installed. Run: pip install kaggle")
         if not self.cli.is_authenticated():
@@ -505,10 +731,11 @@ class KaggleJobManager:
 
         existing = find_active_job(self.a2_output_dir, design_id)
         if existing is not None and existing.state not in TERMINAL_STATES:
-            # Give a stuck job (e.g. one left "submitted" by the pre-fix
-            # bare-kernel-slug bug) a chance to resolve to failed via the
-            # same migration path refresh() uses, rather than letting a job
-            # that was never real block this design forever.
+            # Give a stuck job (e.g. one left mid-upload by an interrupted
+            # previous attempt, or "submitted" by the pre-fix bare-kernel-
+            # slug bug) a chance to resolve to failed via the same migration
+            # path refresh() uses, rather than letting a job that was never
+            # real block this design forever.
             existing = self.refresh(existing)
             if existing.state not in TERMINAL_STATES:
                 raise KaggleTrainingError(
@@ -517,12 +744,50 @@ class KaggleJobManager:
 
         job = KaggleJob(job_id=uuid.uuid4().hex[:12], design_id=design_id)
         save_job(self.a2_output_dir, job)
-        try:
-            staging = self.stage(job, bundle_dir)
-            self.create_dataset(job, staging)
-            self.create_kernel(job, staging)
-        except KaggleTrainingError:
-            raise
+        return job
+
+    def _run_pipeline(self, job: KaggleJob, bundle_dir: Path) -> None:
+        """stage -> upload dataset -> verify -> create kernel -> verify.
+        The actually-long-running part of submission; called synchronously
+        by `submit()` (tests, and callers that genuinely want to block) or
+        from a background thread by `submit_async()`."""
+        staging = self.stage(job, bundle_dir)
+        self.create_dataset(job, staging)
+        self.create_kernel(job, staging)
+
+    def submit(self, design_id: str, bundle_dir: Path) -> KaggleJob:
+        """Synchronous end-to-end submission -- blocks for the entire
+        upload. Kept for tests and any caller that genuinely wants to wait;
+        the Flask route uses `submit_async` instead so a slow/flaky Kaggle
+        upload (see docs/kaggle_training.md -- a real production run took
+        several minutes under real network conditions) never blocks the
+        request thread."""
+        job = self._precheck_and_reserve_job(design_id)
+        self._run_pipeline(job, bundle_dir)
+        return job
+
+    def submit_async(self, design_id: str, bundle_dir: Path) -> KaggleJob:
+        """Returns immediately (job in state "preparing"/"uploading_dataset")
+        once CLI/auth pre-checks pass; the actual stage/upload/verify/kernel
+        pipeline runs on a background thread. A plain daemon thread is
+        acceptable here -- this is a single-user local app (see
+        docs/kaggle_training.md), not a multi-tenant server -- but every
+        step still persists job state to disk immediately, so a Flask
+        restart mid-upload loses only the ability to keep watching that one
+        upload live, never the record of what happened."""
+        job = self._precheck_and_reserve_job(design_id)
+
+        def _worker() -> None:
+            try:
+                self._run_pipeline(job, bundle_dir)
+            except KaggleTrainingError:
+                pass  # already persisted (state=="failed" + job.error) by the failing step
+            except Exception as exc:  # noqa: BLE001 -- a background thread's exception has nowhere else to go
+                job.state = "failed"
+                job.error = f"unexpected error during Kaggle submission: {exc}"
+                save_job(self.a2_output_dir, job)
+
+        threading.Thread(target=_worker, daemon=True, name=f"kaggle-submit-{job.job_id}").start()
         return job
 
     # -- polling ----------------------------------------------------------
