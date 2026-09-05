@@ -173,3 +173,33 @@ project fixtures like `assets/di/*.wav`.
   responsibly guess fixed dB values yet.
 
 At the end of each major change, commit and push the repo
+
+## Codebase-memory MCP index
+
+This repo is indexed in the `codebase-memory-mcp` knowledge graph as project
+`C-Users-daver-Documents-GitHub-hybrid-nam-builder`. That index is a snapshot
+pinned to a commit, not something that updates itself — treat it the same way
+as `git status`/`git log`: cheap to check, easy to go stale.
+
+- **At the start of a session** (or before relying on `search_graph`,
+  `trace_path`, `get_architecture`, etc. for this repo), call
+  `mcp__codebase-memory-mcp__index_status` for this project and compare its
+  `git.head_sha` against the repo's actual current `HEAD`. If they differ,
+  the graph is stale for whatever changed since.
+- **After any commit that changes code structure** (new/renamed/deleted
+  functions, files, or modules — not just docs/comments), re-run
+  `mcp__codebase-memory-mcp__index_repository` with
+  `repo_path: C:\Users\daver\Documents\GitHub\hybrid-nam-builder` to refresh
+  it. A quick way to check first whether it's worth re-indexing:
+  `mcp__codebase-memory-mcp__detect_changes` against the last-indexed SHA.
+- Prefer the graph tools (`search_graph`, `trace_path`, `get_code_snippet`,
+  `query_graph`) for structural questions about this codebase over plain
+  grep once the index is confirmed fresh; fall back to grep for literal/text
+  search or when `index_status` shows the index is stale and a re-index
+  isn't warranted yet.
+- This is separate from Claude's own persistent memory system (the
+  `user`/`feedback`/`project`/`reference` files under
+  `~/.claude/projects/.../memory/`) — keep using that too. The MCP graph
+  captures code *structure*; the memory files capture user preferences,
+  project context, and standing feedback that no re-index will ever recover.
+  Save to both where relevant; don't treat one as a substitute for the other.
