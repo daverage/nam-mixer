@@ -73,19 +73,6 @@
           <div class="info">The virtual analogue level assumed to correspond to digital full scale (NAM plugin default: +12 dBu). Not a pickup output value.</div>
         </details>
 
-        <div class="slider-row">
-          <label for="test-gain-slider">Test gain</label>
-          <span id="test-gain-value" class="value-chip">+0.0 dB</span>
-        </div>
-        <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
-        <div class="info">
-          An additional REAL gain applied on top of the input profile above,
-          before both amps render -- this DI clip's own dynamics may never
-          naturally reach the crossover; use this to deliberately push the
-          level up/down and stress-test the response. Requires Render Amps
-          (changes the actual audio, unlike the old preview-only slider).
-        </div>
-
         <button id="btn-render-pair" class="btn btn-primary btn-block">Render Amps</button>
         <div id="render-status" class="info"></div>
         <div id="render-warnings" class="warning-box" hidden></div>
@@ -147,6 +134,19 @@
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
         <audio id="player" controls></audio>
+
+        <div class="slider-row">
+          <label for="test-gain-slider">Push amp input (test gain)</label>
+          <span id="test-gain-value" class="value-chip">+0.0 dB</span>
+        </div>
+        <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
+        <div id="test-gain-status" class="info">
+          An additional REAL gain applied on top of the input profile, before
+          both amps render -- this DI clip's own dynamics may never naturally
+          reach the crossover; drag to stress-test the response. Automatically
+          re-renders (real NAM inference, briefly) and refreshes what's
+          playing -- no separate Render Amps click needed.
+        </div>
       </section>
 
       <section class="card">

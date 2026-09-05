@@ -128,9 +128,36 @@ referenceDbuInput.addEventListener("change", markProfileStale);
 // hybrid/pipeline.py's render_pair() docstring. Does NOT affect the
 // coverage table (that's computed from the un-gained source envelope so it
 // can compare hypothetical profiles independently of this stress-test knob).
+//
+// Unlike the other expensive/render-triggering controls above, this one
+// auto-renders on its own (debounced) instead of requiring a manual "Render
+// Amps" click -- it lives in the Listen card specifically so pushing the
+// input level and hearing the result feels like one continuous action, even
+// though each step is still a real (briefly non-instant) NAM re-render.
+const testGainStatus = document.getElementById("test-gain-status");
+const TEST_GAIN_DEBOUNCE_MS = 600;
+let testGainRenderTimer = null;
+
 testGainSlider.addEventListener("input", () => {
   testGainValue.textContent = `${fmtSigned(testGainSlider.value)} dB`;
-  markProfileStale("Test gain changed");
+  if (!havePair) return; // nothing rendered yet -- Render Amps sets the baseline first
+  if (testGainRenderTimer) clearTimeout(testGainRenderTimer);
+  testGainStatus.textContent = "Will re-render shortly...";
+  testGainRenderTimer = setTimeout(async () => {
+    previewButtons.forEach((btn) => (btn.disabled = true));
+    testGainStatus.textContent = "Pushing amp input (running NAM inference twice)...";
+    try {
+      const data = await doRenderPair();
+      applyRenderResult(data, { applySuggestedCrossover: false });
+      testGainStatus.textContent = `Updated -- input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
+      if (lastPreviewSource) {
+        await preview(lastPreviewSource); // refresh whatever's currently loaded/playing
+      }
+    } catch (err) {
+      testGainStatus.textContent = "Error: " + err.message;
+      setStatus("Test-gain re-render failed.", true);
+    }
+  }, TEST_GAIN_DEBOUNCE_MS);
 });
 
 // DI filenames beginning with "bass_" are a trivial, documented instrument
@@ -497,13 +524,16 @@ player.addEventListener("ended", () => drawJourney());
 window.addEventListener("resize", () => drawJourney());
 
 const renderPairBtn = document.getElementById("btn-render-pair");
-renderPairBtn.addEventListener("click", async () => {
+
+// The actual expensive call (real NAM inference) -- shared by the manual
+// "Render Amps" button and the auto-triggered test-gain re-render below.
+// Throws with a user-facing message on any failure.
+async function doRenderPair() {
   const amp_a_path = ampServerPaths.a;
   const amp_b_path = ampServerPaths.b;
   const di_file = document.getElementById("di-selector").value;
   if (!amp_a_path || !amp_b_path || !di_file) {
-    setStatus("Choose both Amp A and Amp B .nam files and pick a DI clip first.", true);
-    return;
+    throw new Error("Choose both Amp A and Amp B .nam files and pick a DI clip first.");
   }
 
   const profile = currentProfile();
@@ -514,35 +544,35 @@ renderPairBtn.addEventListener("click", async () => {
   const reference_input_level_dbu = parseFloat(referenceDbuInput.value) || 12.0;
   const test_gain_db = parseFloat(testGainSlider.value) || 0.0;
 
-  renderPairBtn.disabled = true;
-  renderStatus.textContent = "Rendering (running NAM inference twice)...";
-  renderWarnings.hidden = true;
-  previewButtons.forEach((btn) => (btn.disabled = true));
-  try {
-    const resp = await fetch("/api/render_pair", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amp_a_path, amp_b_path, di_file,
-        instrument_type, input_profile_id, custom_input_gain_db,
-        calibration_mode, reference_input_level_dbu, test_gain_db,
-      }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      renderStatus.textContent = "Error: " + data.error;
-      setStatus("Render failed.", true);
-      return;
-    }
-    renderStatus.textContent =
-      `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz -- ` +
-      `input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
+  const resp = await fetch("/api/render_pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      amp_a_path, amp_b_path, di_file,
+      instrument_type, input_profile_id, custom_input_gain_db,
+      calibration_mode, reference_input_level_dbu, test_gain_db,
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    throw new Error(data.error || "Render failed.");
+  }
+  return data;
+}
 
-    if (data.warnings && data.warnings.length) {
-      renderWarnings.hidden = false;
-      renderWarnings.textContent = data.warnings.join(" ");
-    }
+// Applies a successful render's side effects. `applySuggestedCrossover` is
+// false for the automatic test-gain re-render -- jumping the crossover
+// slider every time you nudge the test-gain control would fight the whole
+// point of stress-testing a design you already settled on.
+function applyRenderResult(data, { applySuggestedCrossover }) {
+  if (data.warnings && data.warnings.length) {
+    renderWarnings.hidden = false;
+    renderWarnings.textContent = data.warnings.join(" ");
+  } else {
+    renderWarnings.hidden = true;
+  }
 
+  if (applySuggestedCrossover) {
     suggestedCrossoverNote.innerHTML = "";
     if (data.suggested_crossover_dbfs !== null && data.suggested_crossover_dbfs !== undefined) {
       const suggested = data.suggested_crossover_dbfs;
@@ -561,22 +591,39 @@ renderPairBtn.addEventListener("click", async () => {
       });
       suggestedCrossoverNote.appendChild(resetBtn);
     }
+  }
 
-    previewButtons.forEach((btn) => (btn.disabled = false));
-    havePair = true;
-    updateTrimReadout();
-    updateJourney();
-    updateCoverage();
+  previewButtons.forEach((btn) => (btn.disabled = false));
+  havePair = true;
+  updateTrimReadout();
+  updateJourney();
+  updateCoverage();
+}
+
+renderPairBtn.addEventListener("click", async () => {
+  renderPairBtn.disabled = true;
+  renderStatus.textContent = "Rendering (running NAM inference twice)...";
+  renderWarnings.hidden = true;
+  previewButtons.forEach((btn) => (btn.disabled = true));
+  try {
+    const data = await doRenderPair();
+    applyRenderResult(data, { applySuggestedCrossover: true });
+    renderStatus.textContent =
+      `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz -- ` +
+      `input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
     setStatus("Amp pair rendered and cached -- sliders now only recompute the blend.");
   } catch (err) {
-    renderStatus.textContent = "Request failed: " + err;
+    renderStatus.textContent = "Error: " + err.message;
     setStatus("Render failed.", true);
   } finally {
     renderPairBtn.disabled = false;
   }
 });
 
+let lastPreviewSource = null;
+
 async function preview(source) {
+  lastPreviewSource = source;
   const body = source === "hybrid" ? { source, ...hybridParamsBody() } : { source };
   try {
     const resp = await fetch("/api/preview", {
