@@ -80,6 +80,53 @@ def test_build_hybrid_dry_gain_db_shifts_envelope_and_pushes_toward_amp_b():
     assert loud.blend_curve.max() > 0.5
 
 
+def _two_region_pair(n=20000, sample_rate=48000):
+    """A pair where the dry signal is quiet in the first half and loud in the
+    second half, and Amp B's rendered loudness relative to Amp A is DIFFERENT
+    in each half (10x in the quiet half, 1x -- i.e. matched -- in the loud
+    half). This makes it possible to tell which half of the recording
+    auto-level-match actually measured from."""
+    dry = np.concatenate([
+        np.full(n // 2, 0.01, dtype=np.float32),   # quiet half: envelope ~ -40 dBFS
+        np.full(n - n // 2, 0.56, dtype=np.float32),  # loud half: envelope ~ -5 dBFS
+    ])
+    amp_a = np.full(n, 1.0, dtype=np.float32)
+    amp_b = np.concatenate([
+        np.full(n // 2, 10.0, dtype=np.float32),   # quiet half: Amp B 10x hotter than Amp A
+        np.full(n - n // 2, 1.0, dtype=np.float32),  # loud half: Amp B matches Amp A
+    ])
+    envelope_db = rms_envelope_db(dry, sample_rate)
+    return RenderedPair(dry=dry, amp_a=amp_a, amp_b=amp_b, envelope_db=envelope_db, sample_rate=sample_rate)
+
+
+def test_auto_trim_ignores_dry_gain_db_and_measures_the_real_input_level():
+    """Auto-level-match must always measure Amp A/B's loudness at the REAL
+    crossover input level, never at the dry_gain_db-shifted one -- otherwise
+    sweeping the test-only input gain would silently change which stretch of
+    the recording gets used for level matching, producing a trim that has
+    nothing to do with how the amps actually sound at that input level (see
+    the build_hybrid docstring)."""
+    pair = _two_region_pair()
+
+    # crossover_dbfs=-5 sits in the LOUD half in real terms, where Amp A/B
+    # are matched (0 dB trim expected) regardless of dry_gain_db.
+    no_gain = build_hybrid(pair, crossover_dbfs=-5.0, transition_width_db=2.0, auto_level=True)
+    with_gain = build_hybrid(
+        pair, crossover_dbfs=-5.0, transition_width_db=2.0, auto_level=True, dry_gain_db=35.0
+    )
+
+    assert no_gain.auto_trim_db == with_gain.auto_trim_db
+    assert abs(no_gain.auto_trim_db) < 0.5
+
+    # Sanity check: at dry_gain_db=35 the BLEND (not the trim) does move,
+    # since the shifted envelope is what should drive the crossfade.
+    quiet_blend = build_hybrid(pair, crossover_dbfs=-5.0, transition_width_db=2.0, auto_level=True)
+    loud_blend = build_hybrid(
+        pair, crossover_dbfs=-5.0, transition_width_db=2.0, auto_level=True, dry_gain_db=35.0
+    )
+    assert not np.allclose(quiet_blend.blend_curve, loud_blend.blend_curve)
+
+
 def test_build_hybrid_is_cheap_to_call_repeatedly_on_same_pair():
     """Different crossover points on the same RenderedPair shouldn't require
     re-rendering -- this is the whole point of splitting render_pair out."""

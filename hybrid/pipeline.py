@@ -85,13 +85,23 @@ def build_hybrid(
     trim is the user's tweak from there, and the two combine rather than one
     replacing the other.
 
-    `dry_gain_db` is a TEST-ONLY control: it shifts the cached envelope by a
-    constant (dB(x * g) = dB(x) + 20*log10(g), so this is an exact, O(n) shift
-    -- no need to re-run rms_envelope_db) to let you push the crossover
-    trigger up/down without needing a louder/quieter DI take. It does NOT
-    re-render either amp at a hotter input, so it's for exercising the
-    blend/threshold logic, not for previewing how the amps would actually
-    respond to a different input level.
+    `dry_gain_db` is a TEST-ONLY control: it shifts the envelope that drives
+    the crossfade by a constant (dB(x * g) = dB(x) + 20*log10(g), so this is
+    an exact, O(n) shift -- no need to re-run rms_envelope_db) to let you push
+    the crossover trigger up/down without needing a louder/quieter DI take.
+    It does NOT re-render either amp at a hotter input, so it's for
+    exercising the blend/threshold logic, not for previewing how the amps
+    would actually respond to a different input level.
+
+    Deliberately NOT used for auto-level-match's region selection, only for
+    the blend weight: `compute_crossover_trim` always measures loudness
+    against `pair.envelope_db` (the real, un-shifted envelope), so the
+    suggested trim reflects the amps' actual behavior at the real
+    `crossover_dbfs` input level and stays stable while `dry_gain_db` is
+    swept -- using the shifted envelope there would instead measure loudness
+    from whatever coincidentally-quiet-or-loud stretch of the real recording
+    the shift maps onto, which has nothing to do with how loud the amps
+    genuinely are at that input level.
     """
     envelope_db = pair.envelope_db + dry_gain_db
 
@@ -101,7 +111,7 @@ def build_hybrid(
     auto_trim_db = 0.0
     if auto_level:
         level_match_result = compute_crossover_trim(
-            envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
+            pair.envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
         )
         auto_trim_db = level_match_result.suggested_b_trim_db
 
