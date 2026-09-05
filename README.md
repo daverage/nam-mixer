@@ -119,21 +119,28 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
 
 ## Current limitations / experimental status
 
-- **NAM inference is not wired in yet.** `hybrid/render.py` defines the
-  interface the rest of the pipeline is built against, but actually running a
-  `.nam` file through the network requires mapping its `architecture`/`config`/
-  `weights` onto the `neural-amp-modeler` package's model classes correctly —
-  see that module's docstring for exactly what's needed and why it wasn't
-  guessed at. Until that's done, you can't yet render or preview a live
-  Fender → JCM800 hybrid.
+- **NAM inference is implemented, via a native tool, not torch.**
+  `hybrid/render.py` shells out to `nam_render` (`native/nam_render/`), a
+  small C++ CLI built against
+  [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore)
+  (the same inference core the official NAM plugin uses). This avoids
+  depending on the Python `neural-amp-modeler`/torch package for inference
+  entirely, and avoids guessing at the `.nam` → model-class mapping, since
+  NAMCore's own `nam::get_dsp()` loader is the reference implementation. See
+  `native/nam_render/README.md` for how to build it. `hybrid/render.py` can
+  now render real `.nam` files end-to-end; what's still missing is wiring
+  that into `app.py`'s `/api/preview`/`/api/generate` routes (currently
+  still return HTTP 501 — see below).
 - `.nam` file **parsing and calibration metadata** (`input_level_dbu`/
   `output_level_dbu` where present) IS implemented (`hybrid/nam_loader.py`) —
   older/uncalibrated files are read fine, just reported as
   "Calibration metadata unavailable" rather than rejected.
 - The envelope follower, blend/crossfade math, level-match trim calculation,
   alignment correction, and safety/peak-ceiling logic are all implemented and
-  unit-tested (`hybrid/*.py`, `tests/`) against synthetic signals, but have not
-  yet been exercised against real NAM renders end-to-end.
+  unit-tested (`hybrid/*.py`, `tests/`) against synthetic signals. `render.py`
+  has been smoke-tested against real Fender/JCM800 `.nam` captures, but the
+  full pipeline (render → level-match → blend) hasn't been exercised
+  end-to-end with real renders yet.
 - **A/B alignment (`hybrid/align.py`) is optional and disabled by default**
   (`align_to_reference(..., enabled=False)`). It cross-correlates Amp A's
   render directly against Amp B's render, which can misread a genuine
@@ -170,13 +177,15 @@ hybrid-nam-builder/
 ├── requirements.txt
 ├── hybrid/                -- core library (no Flask/UI dependencies)
 │   ├── nam_loader.py       -- parse .nam files + calibration metadata
-│   ├── render.py           -- NAM inference interface (NOT YET IMPLEMENTED)
+│   ├── render.py           -- NAM inference (shells out to native/nam_render)
 │   ├── envelope.py         -- dry-input level/envelope extraction
 │   ├── level_match.py      -- crossover-region auto level-match trim
-│   ├── align.py            -- sample-offset detection/correction
+│   ├── align.py            -- sample-offset detection/correction (optional, off by default)
 │   ├── blend.py            -- the dynamic crossfade itself
 │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
 │   └── metadata.py         -- hybrid provenance metadata (JSON sidecar)
+├── native/nam_render/      -- C++ NAM inference tool (NeuralAmpModelerCore), see its README
+├── assets/nam_models/      -- user's own .nam amp captures (gitignored)
 ├── assets/di/              -- genre/style DI library + its own README
 ├── templates/, static/     -- minimal HTML/CSS/JS UI (no build step)
 ├── tests/                  -- unit tests for the hybrid/ modules
@@ -198,9 +207,15 @@ python -m pytest tests/
 
 The test suite covers `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`, and
-`hybrid/nam_loader.py` against synthetic signals and does not require torch or
-`neural-amp-modeler` to be installed (those are only needed once `render.py` is
-implemented and for actually running `app.py`'s eventual inference routes).
+`hybrid/nam_loader.py` against synthetic signals and does not require torch,
+`neural-amp-modeler`, or the native `nam_render` tool to be built.
+`tests/test_render.py` exercises real NAM inference and is skipped
+automatically unless both `native/nam_render` has been built (see its
+README) and a real `.nam` file is present at
+`assets/nam_models/FenderSuperReverb1977_Clean.nam`. `torch`/
+`neural-amp-modeler` in `requirements.txt` are not needed for inference at
+all now (that's handled by `native/nam_render`) — they remain there for the
+future A2 training step.
 
 ## Relationship to NAMtoClo
 

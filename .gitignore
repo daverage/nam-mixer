@@ -12,3 +12,7 @@ venv/
 *.egg-info/
 
 .DS_Store
+
+# Native nam_render build output (fetched/compiled locally, see
+# native/nam_render/README.md).
+native/nam_render/build/

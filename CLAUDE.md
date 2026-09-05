@@ -11,13 +11,17 @@ input level), with the eventual goal of training a fresh NAM model on the result
 blended audio. See README.md for the full concept, rationale, and current
 limitations — it is detailed and should be read before making architectural changes.
 
-**Key thing to know before touching this repo:** NAM inference itself
-(`hybrid/render.py`) is deliberately NOT implemented yet — see that module's
-docstring for why (the `.nam` on-disk schema → `neural-amp-modeler` model class
-mapping was not guessed at without a way to verify it). `/api/preview` and
-`/api/generate` in `app.py` return HTTP 501 as a result. Do not silently "fill in"
-`render()` with a guessed mapping; implementing it properly requires verifying
-against a known-good reference render per the steps in the module docstring.
+**Key thing to know before touching this repo:** NAM inference
+(`hybrid/render.py`) is implemented via a native C++ tool, not the Python
+`neural-amp-modeler`/torch package. `render()` shells out to `nam_render`
+(built from `native/nam_render/`, which links
+[NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore) —
+see `native/nam_render/README.md` to build it), avoiding both the torch
+dependency and any risk of guessing wrong at the `.nam` on-disk schema, since
+NAMCore's own loader is authoritative. `app.py`'s `/api/preview` and
+`/api/generate` still return HTTP 501 — `render()` itself works, but the full
+pipeline (render both amps → level-match → blend) isn't wired into the Flask
+routes yet.
 
 ## Commands
 
@@ -31,9 +35,17 @@ python -m pytest tests/test_blend.py::test_name -v  # single test
 
 The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`, and
-`hybrid/nam_loader.py` against synthetic signals only — it does **not** require
-torch/neural-amp-modeler to be installed. Those two packages are only needed to
-run `app.py` and (once implemented) actual NAM inference.
+`hybrid/nam_loader.py` against synthetic signals only — no torch or built
+native tool required. `tests/test_render.py` exercises real NAM inference and
+auto-skips unless `native/nam_render` has been built AND a real `.nam` file
+exists at `assets/nam_models/FenderSuperReverb1977_Clean.nam` (gitignored,
+user-provided).
+
+```bash
+cmake -B native/nam_render/build -S native/nam_render
+cmake --build native/nam_render/build --config Release --target nam_render
+```
+builds the native inference tool — see `native/nam_render/README.md`.
 
 `scripts/analyze_di.py` regenerates `assets/di/_analysis.json` (measured
 characteristics of the bundled DI fixtures).
@@ -48,9 +60,11 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
    `input_level_dbu`/`output_level_dbu` calibration metadata when present (older
    files without it are read fine, just report "unavailable" rather than erroring).
 2. **`render.py`** is the seam between a parsed `NamModel` and actual audio —
-   currently a stub (see above). `blend.py` and `app.py` are written against its
-   intended contract (mono float32 in/out, same length, sample-rate-preserving)
-   so wiring in real inference should be a drop-in change.
+   shells out to the native `nam_render` tool (see above). Contract: mono
+   float32 in/out, same length, sample-rate-preserving; raises
+   `NamRenderError` if the tool is missing or fails (e.g. sample-rate mismatch
+   between `audio` and what the model expects — resampling is the caller's
+   job, not `render()`'s).
 3. **`envelope.py`** computes `level = envelope(dry_input)` — the per-sample dBFS
    envelope of the *original dry signal* (not either amp's output) that drives
    the crossfade. This is deliberate: the dry signal is the one thing that's the
