@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+import hybrid.kaggle_training as kaggle_training
 from hybrid.kaggle_training import (
     ACCELERATOR,
     FORBIDDEN_ACCELERATORS,
@@ -23,6 +24,7 @@ from hybrid.kaggle_training import (
     KaggleJob,
     KaggleJobManager,
     KaggleTrainingError,
+    _job_dir,
     _redact,
     _safe_slug,
     find_active_job,
@@ -111,13 +113,13 @@ def make_cli(monkeypatch, executable="/usr/bin/kaggle", responses=None):
             return _auto_datasets_files_response(state["last_dataset_dir"])
         return FakeCompleted(returncode=0, stdout="", stderr="")
 
-    def fake_run(argv, shell, capture_output, text, timeout):
+    def fake_run(argv, shell, capture_output, text, timeout, encoding=None, errors=None):
         assert shell is False, "must never invoke the Kaggle CLI via a shell"
         assert isinstance(argv, list)
         calls.append(argv)
         return _lookup(argv)
 
-    def fake_popen(argv, shell, stdout, stderr, text, bufsize):
+    def fake_popen(argv, shell, stdout, stderr, text, bufsize, encoding=None, errors=None):
         assert shell is False, "must never invoke the Kaggle CLI via a shell"
         assert isinstance(argv, list)
         calls.append(argv)
@@ -620,7 +622,7 @@ def test_run_streaming_times_out_without_hanging(tmp_path, monkeypatch):
     upload retry loop under persistent network trouble) -- run_streaming
     must still return within a bounded time, never hang indefinitely."""
     class NeverEndingPopen:
-        def __init__(self, argv, shell, stdout, stderr, text, bufsize):
+        def __init__(self, argv, shell, stdout, stderr, text, bufsize, encoding=None, errors=None):
             self.stdout = self
             self._killed = False
 
@@ -843,7 +845,7 @@ def test_submit_async_persists_dataset_ref_before_long_upload_completes(tmp_path
     upload_may_finish = threading.Event()
 
     class SlowPopen:
-        def __init__(self, argv, shell, stdout, stderr, text, bufsize):
+        def __init__(self, argv, shell, stdout, stderr, text, bufsize, encoding=None, errors=None):
             self.stdout = self
             upload_started.set()
 
@@ -1144,3 +1146,373 @@ def test_verify_dataset_payload_job_state_stays_verifying_during_retries(tmp_pat
 
     reloaded = load_job(tmp_path, "d", "j")
     assert reloaded.state == "verifying_dataset"
+
+
+# --- kernel output download (the `--file-pattern` regex incident) -------
+#
+# A real production job (andrzejmarczewski/hybrid-a2-train-20260905t202635z-
+# e919ae705ff4) completed training on Kaggle (KernelWorkerStatus.COMPLETE)
+# but the app itself failed with "Invalid regex pattern '*.nam|*.json':
+# nothing to repeat at position 0" -- Kaggle's `--file-pattern` is a REGEX,
+# not a shell glob, and that string was never valid regex. Production now
+# downloads the whole (small) kernel output directory and filters locally.
+
+def _write_nam(path: Path) -> Path:
+    path.write_text(json.dumps({"architecture": "WaveNet", "sample_rate": 48000.0}), encoding="utf-8")
+    return path
+
+
+def _fake_render(model, audio, sr, **kwargs):
+    return np.asarray(audio, dtype=np.float32).copy()
+
+
+class _DownloadStubCli:
+    """Stand-in for KaggleCli implementing only what
+    _download_and_validate()/retry_download() actually call. Records every
+    kernels_output() call (in particular: whether a file_pattern was ever
+    passed) without touching the filesystem -- tests populate the output
+    directory directly to simulate what a real `kaggle kernels output -p
+    <dir>` download would have written. datasets_create/kernels_push raise
+    if ever called, since recovery must never re-create either."""
+
+    def __init__(self, kernel_status_text="andrzejmarczewski/foo has status \"KernelWorkerStatus.COMPLETE\"",
+                 kernel_status_ok=True, output_ok=True, output_error="",
+                 nam_name="hybrid_a2.nam", training_result=None, extra_files=None,
+                 write_despite_failure=False):
+        self.kernel_status_text = kernel_status_text
+        self.kernel_status_ok = kernel_status_ok
+        self.output_ok = output_ok
+        self.output_error = output_error
+        self.nam_name = nam_name
+        self.training_result = training_result if training_result is not None else {"success": True}
+        self.extra_files = extra_files
+        self.write_despite_failure = write_despite_failure
+        self.kernels_output_calls: list[dict] = []
+
+    def kernels_status(self, kernel_ref):
+        return CliResult(ok=self.kernel_status_ok, returncode=0 if self.kernel_status_ok else 1,
+                          stdout=self.kernel_status_text, stderr="")
+
+    def kernels_output(self, kernel_ref, out_dir, file_pattern=None):
+        self.kernels_output_calls.append({"kernel_ref": kernel_ref, "out_dir": Path(out_dir), "file_pattern": file_pattern})
+        if not self.output_ok:
+            if self.write_despite_failure:
+                # Reproduces the real Kaggle-CLI-on-Windows incident: every
+                # file is written successfully, but the CLI process still
+                # exits non-zero due to its own internal unicode-printing
+                # crash after the download finished.
+                _populate_output(Path(out_dir), nam_name=self.nam_name, training_result=self.training_result,
+                                  extra_files=self.extra_files)
+            return CliResult(ok=False, returncode=1, stdout="", stderr=self.output_error)
+        # Simulates what a real `kaggle kernels output -p <dir>` download
+        # would have written -- called AFTER _download_and_validate's own
+        # pre-clear of `out_dir`, exactly like the real CLI would populate
+        # an empty directory.
+        _populate_output(Path(out_dir), nam_name=self.nam_name, training_result=self.training_result,
+                          extra_files=self.extra_files)
+        return CliResult(ok=True, returncode=0, stdout="", stderr="")
+
+    def datasets_create(self, *a, **k):
+        raise AssertionError("recovery must never create a new dataset")
+
+    def datasets_create_streaming(self, *a, **k):
+        raise AssertionError("recovery must never create a new dataset")
+
+    def kernels_push(self, *a, **k):
+        raise AssertionError("recovery must never push a new kernel")
+
+
+def _populate_output(output_dir: Path, nam_name="hybrid_a2.nam", training_result=None, extra_files=None):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_nam(output_dir / nam_name)
+    if training_result is not None:
+        (output_dir / "training_result.json").write_text(json.dumps(training_result), encoding="utf-8")
+    for name, content in (extra_files or {}).items():
+        path = output_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+
+
+def _output_dir_for(tmp_path: Path, design_id: str, job_id: str) -> Path:
+    return _job_dir(tmp_path, design_id, job_id) / "output"
+
+
+def _write_bundle_wavs(a2_output_dir: Path, design_id: str, n: int = 1000, sr: int = 48000) -> None:
+    """validate_downloaded_model() reads the design's own input.wav/
+    hybrid_target.wav (as bundle_dir / "input.wav" next to the job's kaggle/
+    subdirectory) to compare against -- these must exist for
+    _download_and_validate()/retry_download() to reach local validation."""
+    bundle_dir = a2_output_dir / design_id
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    audio = np.zeros(n, dtype=np.float32)
+    sf.write(bundle_dir / "input.wav", audio, sr, subtype="FLOAT")
+    sf.write(bundle_dir / "hybrid_target.wav", audio, sr, subtype="FLOAT")
+
+
+def test_kernels_output_never_passes_the_invalid_glob_pattern(monkeypatch, tmp_path):
+    """Reproduces the real incident: `_download_and_validate` must call
+    kernels_output() with no file_pattern at all -- never the glob-shaped
+    string that broke production."""
+    cli = _DownloadStubCli(training_result={"success": True})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="e919ae705ff4", design_id="mydesign", state="downloading",
+                     kernel_ref="testuser/some-kernel")
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, "mydesign")
+
+    manager._download_and_validate(job)
+
+    assert len(cli.kernels_output_calls) == 1
+    assert cli.kernels_output_calls[0]["file_pattern"] is None
+
+
+def test_kernels_output_rejects_glob_shaped_pattern_as_invalid_regex(tmp_path):
+    """If file_pattern support is ever used again, it must be validated as a
+    REAL regex up front -- `*.nam|*.json` (a glob, not a regex) must never
+    reach the Kaggle CLI, since that's exactly what broke production."""
+    cli = KaggleCli(executable="/usr/bin/kaggle")
+    with pytest.raises(ValueError, match="not a valid regex"):
+        cli.kernels_output("owner/kernel", tmp_path, file_pattern="*.nam|*.json")
+
+
+def test_kernels_output_accepts_a_real_regex_pattern(monkeypatch, tmp_path):
+    cli, calls = make_cli(monkeypatch)
+    cli.kernels_output("owner/kernel", tmp_path, file_pattern=r".*\.nam$")
+    assert calls[0] == ["/usr/bin/kaggle", "kernels", "output", "owner/kernel", "-p", str(tmp_path),
+                         "--file-pattern", r".*\.nam$"]
+
+
+def test_download_and_validate_discovers_nam_and_training_result(monkeypatch, tmp_path):
+    cli = _DownloadStubCli(nam_name="hybrid_a2.nam", training_result={"success": True, "epochs": 100})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, "d1")
+
+    manager._download_and_validate(job)
+
+    assert job.state == "complete"
+    assert job.output_nam_path is not None
+    assert Path(job.output_nam_path).name == "hybrid_a2.nam"
+    assert job.training_result == {"success": True, "epochs": 100}
+    assert job.local_validation is not None
+    assert job.local_validation["full"]["rendered_ok"] is True
+    assert job.local_validation["lite"]["rendered_ok"] is True
+
+
+def test_download_and_validate_unrelated_files_do_not_interfere(monkeypatch, tmp_path):
+    """A real kernel output directory also contains lightning_logs/,
+    checkpoint files, and a training log -- none of that should confuse
+    discovery of the one .nam and one training_result.json that matter."""
+    cli = _DownloadStubCli(
+        nam_name="hybrid_a2.nam", training_result={"success": True},
+        extra_files={
+            "hybrid-a2-train-job.log": "",
+            "a2_output/packed_best.json": "{}",
+            "a2_output/packed_best_submodel_0.ckpt": b"\x00" * 16,
+            "a2_output/lightning_logs/version_0/events.out": b"\x00",
+        },
+    )
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, "d1")
+
+    manager._download_and_validate(job)
+
+    assert job.state == "complete"
+    assert Path(job.output_nam_path).name == "hybrid_a2.nam"
+
+
+def test_download_and_validate_missing_nam_fails_clearly(tmp_path):
+    def _write_result_only(kernel_ref, out_dir, file_pattern=None):
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "training_result.json").write_text(json.dumps({"success": True}), encoding="utf-8")
+        return CliResult(ok=True, returncode=0, stdout="", stderr="")
+
+    cli = type("Cli", (), {"kernels_output": staticmethod(_write_result_only)})()
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+
+    manager._download_and_validate(job)
+
+    assert job.state == "failed"
+    assert "no .nam file" in job.error
+
+
+def test_download_and_validate_download_failure_still_fails_clearly(tmp_path):
+    """The exact real incident, reproduced directly: kernels_output()
+    failing with the CLI's own regex-rejection error must still surface as a
+    clear job failure -- proves the failure path itself (pre-fix behavior)
+    without needing the real Kaggle CLI."""
+    cli = _DownloadStubCli(output_ok=False, output_error="Invalid regex pattern '*.nam|*.json': nothing to repeat at position 0")
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+
+    manager._download_and_validate(job)
+
+    assert job.state == "failed"
+    assert "output download failed" in job.error
+
+
+def test_download_and_validate_tolerates_nonzero_exit_when_files_were_written(monkeypatch, tmp_path):
+    """A real recovery of a genuinely completed job hit exactly this: the
+    installed Kaggle CLI wrote every output file successfully (byte-for-byte
+    identical to a from-scratch download, confirmed via SHA256) but still
+    exited non-zero, crashing internally with `'charmap' codec can't encode
+    characters...` while printing its own progress on a Windows console
+    whose codepage can't represent every character it prints. The exit code
+    is not trustworthy here; what actually landed on disk is."""
+    cli = _DownloadStubCli(
+        output_ok=False, write_despite_failure=True,
+        output_error="'charmap' codec can't encode characters in position 519-558: character maps to <undefined>",
+        training_result={"success": True},
+    )
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, "d1")
+
+    manager._download_and_validate(job)
+
+    assert job.state == "complete"
+    assert job.error is None
+    assert Path(job.output_nam_path).name == "hybrid_a2.nam"
+    log = manager.read_log_tail(job)
+    assert "non-fatal" in log.lower()
+
+
+def test_download_and_validate_nonzero_exit_with_nothing_written_still_fails(tmp_path):
+    """The tolerance above must not become a blanket "ignore all CLI
+    failures" -- a download that reports failure AND wrote nothing at all is
+    still a real, immediate failure."""
+    cli = _DownloadStubCli(output_ok=False, write_despite_failure=False, output_error="403 Forbidden")
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+
+    manager._download_and_validate(job)
+
+    assert job.state == "failed"
+    assert "output download failed" in job.error
+
+
+def test_download_and_validate_clears_stale_partial_output_first(monkeypatch, tmp_path):
+    """A previous failed/interrupted download attempt could leave a stale
+    .nam or json behind on disk -- _download_and_validate must clear the
+    output directory BEFORE invoking kernels_output, so a stale file can
+    never be mistaken for the current attempt's result even if kernels_
+    output itself doesn't happen to overwrite/remove it."""
+    manager = KaggleJobManager(tmp_path)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    output_dir = _output_dir_for(tmp_path, "d1", "j1")
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, "d1")
+
+    # Stale leftover from a previous attempt, sitting in the output dir
+    # BEFORE this download attempt starts.
+    _populate_output(output_dir, nam_name="stale_old_model.nam", training_result={"success": True})
+    assert (output_dir / "stale_old_model.nam").is_file()
+
+    # This attempt's kernels_output writes only the fresh, correct file --
+    # it does NOT know about (and would not remove) the stale one itself;
+    # only _download_and_validate's own pre-clear can be responsible for it
+    # being gone afterward.
+    def _write_fresh_output(kernel_ref, out_dir, file_pattern=None):
+        _populate_output(Path(out_dir), nam_name="hybrid_a2.nam", training_result={"success": True})
+        return CliResult(ok=True, returncode=0, stdout="", stderr="")
+
+    manager.cli = type("Cli", (), {"kernels_output": staticmethod(_write_fresh_output)})()
+    manager._download_and_validate(job)
+
+    assert job.state == "complete"
+    assert not (output_dir / "stale_old_model.nam").is_file()
+    assert (output_dir / "hybrid_a2.nam").is_file()
+
+
+# --- recovery: completed kernel, failed local download -------------------
+
+def _failed_download_job(design_id="mydesign", job_id="j1") -> KaggleJob:
+    return KaggleJob(
+        job_id=job_id, design_id=design_id, state="failed",
+        dataset_ref=f"testuser/hybrid-a2-{design_id}-{job_id}",
+        kernel_ref=f"testuser/hybrid-a2-train-{design_id}-{job_id}",
+        error="output download failed: Invalid regex pattern '*.nam|*.json': nothing to repeat at position 0",
+    )
+
+
+def test_retry_download_recovers_completed_job_without_new_kernel_or_dataset(monkeypatch, tmp_path):
+    cli = _DownloadStubCli(training_result={"success": True})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = _failed_download_job()
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, job.design_id)
+
+    recovered = manager.retry_download(job)
+
+    assert recovered.state == "complete"
+    assert recovered.error is None
+    assert recovered.local_validation is not None
+    assert recovered.local_validation["full"]["rendered_ok"] is True
+    assert recovered.local_validation["lite"]["rendered_ok"] is True
+    # datasets_create/kernels_push raise on _DownloadStubCli if ever called --
+    # reaching `complete` here already proves neither was invoked.
+
+
+def test_retry_download_transitions_failed_downloading_validating_complete(monkeypatch, tmp_path):
+    seen_states: list[str] = []
+    cli = _DownloadStubCli(training_result={"success": True})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = _failed_download_job()
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, job.design_id)
+
+    real_save_job = kaggle_training.save_job
+    def recording_save_job(a2_output_dir, j):
+        seen_states.append(j.state)
+        return real_save_job(a2_output_dir, j)
+    monkeypatch.setattr(kaggle_training, "save_job", recording_save_job)
+
+    manager.retry_download(job)
+
+    assert seen_states[0] == "downloading"
+    assert "validating" in seen_states
+    assert seen_states[-1] == "complete"
+
+
+def test_retry_download_refuses_when_remote_kernel_not_complete(tmp_path):
+    cli = _DownloadStubCli(kernel_status_text="andrzejmarczewski/foo has status \"KernelWorkerStatus.RUNNING\"")
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = _failed_download_job()
+
+    with pytest.raises(KaggleTrainingError, match="not reporting a completed status"):
+        manager.retry_download(job)
+    assert job.state == "failed"  # never moved to downloading
+    assert not cli.kernels_output_calls
+
+
+def test_retry_download_refuses_non_failed_job(tmp_path):
+    cli = _DownloadStubCli()
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = _failed_download_job()
+    job.state = "running"
+
+    with pytest.raises(KaggleTrainingError, match="can only recover"):
+        manager.retry_download(job)
+
+
+def test_retry_download_refuses_job_with_no_kernel_ref(tmp_path):
+    cli = _DownloadStubCli()
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = _failed_download_job()
+    job.kernel_ref = None
+
+    with pytest.raises(KaggleTrainingError, match="no kernel_ref"):
+        manager.retry_download(job)

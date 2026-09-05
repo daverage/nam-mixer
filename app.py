@@ -723,6 +723,26 @@ def api_kaggle_job_logs(job_id: str):
     return jsonify({"log_tail": tail, "progress": _kaggle_manager.parse_progress(tail)})
 
 
+@app.route("/api/kaggle/jobs/<job_id>/recover", methods=["POST"])
+def api_kaggle_job_recover(job_id: str):
+    """Recovers a job whose Kaggle training genuinely completed but whose
+    local output download/validation failed for an unrelated reason (e.g.
+    the `--file-pattern` regex bug) -- never re-uploads the dataset, never
+    re-pushes the kernel, never re-runs training. See
+    KaggleJobManager.retry_download."""
+    design_id = request.args.get("design_id") or (request.get_json(force=True, silent=True) or {}).get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id is required"}), 400
+    job = load_job(A2_OUTPUT_DIR, design_id, job_id)
+    if job is None:
+        return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
+    try:
+        job = _kaggle_manager.retry_download(job)
+    except KaggleTrainingError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(job.to_dict())
+
+
 @app.route("/api/kaggle/jobs/<job_id>/cleanup", methods=["POST"])
 def api_kaggle_job_cleanup(job_id: str):
     design_id = request.args.get("design_id") or (request.get_json(force=True, silent=True) or {}).get("design_id")

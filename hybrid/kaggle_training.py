@@ -211,6 +211,15 @@ class KaggleCli:
                 shell=False,
                 capture_output=True,
                 text=True,
+                # A real `kernels output` download failed with
+                # "'charmap' codec can't encode/decode..." -- `text=True`
+                # without an explicit encoding decodes with the OS's default
+                # locale encoding, which on Windows is a legacy codepage
+                # (e.g. cp1252) that cannot represent every character
+                # Kaggle's CLI prints (checkmarks, etc). UTF-8 with
+                # replacement never raises on unexpected bytes.
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout or self.timeout,
             )
         except FileNotFoundError as exc:
@@ -243,6 +252,7 @@ class KaggleCli:
         try:
             proc = subprocess.Popen(
                 argv, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                encoding="utf-8", errors="replace",
             )
         except FileNotFoundError as exc:
             raise KaggleCliUnavailable(f"kaggle CLI not found: {exc}") from exc
@@ -396,8 +406,25 @@ class KaggleCli:
         return self._run(["kernels", "logs", kernel_ref], timeout=60)
 
     def kernels_output(self, kernel_ref: str, out_dir: Path, file_pattern: Optional[str] = None) -> CliResult:
+        """Downloads a kernel's output files. `file_pattern` is passed
+        straight to Kaggle's own `--file-pattern`, which Kaggle documents and
+        implements as a REGULAR EXPRESSION, not a shell glob -- a real
+        production job failed with `Invalid regex pattern '*.nam|*.json':
+        nothing to repeat at position 0` because that string is a glob, not
+        valid regex (a bare leading `*` has nothing to repeat). Validating
+        it here catches that class of mistake immediately instead of only at
+        the Kaggle API boundary. Production code should prefer omitting
+        `file_pattern` entirely (see `_download_and_validate`) and filtering
+        the small, fully-downloaded output locally instead."""
         args = ["kernels", "output", kernel_ref, "-p", str(out_dir)]
         if file_pattern:
+            try:
+                re.compile(file_pattern)
+            except re.error as exc:
+                raise ValueError(
+                    f"file_pattern {file_pattern!r} is not a valid regex -- Kaggle's "
+                    f"--file-pattern is a REGEX, not a shell glob ({exc})"
+                ) from exc
             args += ["--file-pattern", file_pattern]
         return self._run(args, timeout=600)
 
@@ -1045,14 +1072,48 @@ class KaggleJobManager:
     def _download_and_validate(self, job: KaggleJob) -> None:
         job_dir = _job_dir(self.a2_output_dir, job.design_id, job.job_id)
         output_dir = job_dir / "output"
+        # A real production job failed here with `Invalid regex pattern
+        # '*.nam|*.json': nothing to repeat at position 0` -- Kaggle's
+        # `--file-pattern` is a REGEX, not a shell glob, and that string was
+        # never valid regex. The kernel output for this app is always tiny
+        # compared to the training dataset, so there is no real cost to
+        # downloading it in full and filtering locally afterwards -- that
+        # removes the CLI-regex compatibility/failure point entirely rather
+        # than just fixing the one pattern. Clear any partial output from a
+        # previous failed/interrupted download attempt first so stale files
+        # can never be mistaken for this attempt's result.
+        if output_dir.is_dir():
+            shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        result = self.cli.kernels_output(job.kernel_ref, output_dir, file_pattern="*.nam|*.json")
+        result = self.cli.kernels_output(job.kernel_ref, output_dir)
+        downloaded_something = output_dir.is_dir() and any(output_dir.rglob("*"))
         if not result.ok:
-            job.state = "failed"
-            job.error = f"output download failed: {result.stderr.strip() or result.stdout.strip()}"
-            save_job(self.a2_output_dir, job)
-            return
+            if downloaded_something:
+                # A real recovery of a genuinely completed job hit exactly
+                # this: `kernels output` wrote every file successfully (byte-
+                # for-byte identical to a from-scratch download, confirmed
+                # via SHA256) but still exited non-zero, because the
+                # installed Kaggle CLI crashes internally with `'charmap'
+                # codec can't encode characters...` while printing its own
+                # progress output on a Windows console whose codepage can't
+                # represent every character it prints -- a bug in the CLI's
+                # own output handling, unrelated to whether the download
+                # itself succeeded. The exit code is therefore not a
+                # trustworthy signal here; what's actually on disk is. A
+                # download that reports failure with literally nothing
+                # written is still a real, immediate failure below.
+                self._append_log(
+                    job,
+                    "kernels output exited non-zero but files were written to disk -- "
+                    f"treating as a non-fatal CLI-side error and continuing: "
+                    f"{(result.stderr.strip() or result.stdout.strip())[:300]}",
+                )
+            else:
+                job.state = "failed"
+                job.error = f"output download failed: {result.stderr.strip() or result.stdout.strip()}"
+                save_job(self.a2_output_dir, job)
+                return
 
         job.state = "validating"
         save_job(self.a2_output_dir, job)
@@ -1095,6 +1156,44 @@ class KaggleJobManager:
         job.output_nam_sha256 = validation["sha256"]
         job.state = "complete"
         save_job(self.a2_output_dir, job)
+
+    # -- recovery -----------------------------------------------------
+
+    def retry_download(self, job: KaggleJob) -> KaggleJob:
+        """Recovers a job whose Kaggle training genuinely COMPLETED but whose
+        LOCAL output download/validation failed for a reason that has
+        nothing to do with the training run itself (the `--file-pattern`
+        regex bug being the real incident this exists for). Never
+        re-uploads the dataset, never re-pushes the kernel, never re-runs
+        training -- a completed remote kernel's output is downloaded and
+        re-validated exactly as `refresh()` would have done the first time.
+
+        Only usable on a job that is 'failed' and still has a kernel_ref;
+        refuses if the remote kernel doesn't actually report a completed
+        status, since retrying a download for a kernel that never finished
+        (or errored) would just reproduce a different failure with a
+        misleading "recovery" label."""
+        if job.kernel_ref is None:
+            raise KaggleTrainingError(
+                "cannot recover this job -- it has no kernel_ref, so no training run to recover output from"
+            )
+        if job.state != "failed":
+            raise KaggleTrainingError(f"can only recover a job in state 'failed' (job is {job.state!r})")
+
+        status_result = self.cli.kernels_status(job.kernel_ref)
+        raw = status_result.combined.strip()
+        if not status_result.ok or "complete" not in raw.lower():
+            raise KaggleTrainingError(
+                f"cannot recover: Kaggle kernel {job.kernel_ref} is not reporting a completed status "
+                f"(status: {raw or 'no response'}) -- this only recovers a job whose training genuinely finished"
+            )
+
+        job.raw_kernel_status = raw
+        job.error = None
+        job.state = "downloading"
+        save_job(self.a2_output_dir, job)
+        self._download_and_validate(job)
+        return job
 
     # -- cleanup ------------------------------------------------------
 

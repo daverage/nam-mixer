@@ -83,8 +83,18 @@ happened.
    Kaggle-side eventual consistency) before ever considering it submitted.
    State: `verifying_kernel`, then `queued`.
 6. Polls the kernel's status without blocking Flask (`running`).
-7. Once the kernel finishes, downloads the exported `.nam` and
-   `training_result.json` (`downloading`).
+7. Once the kernel finishes, downloads the ENTIRE kernel output directory
+   (`downloading`), then locates `*.nam`/`training_result.json` locally.
+   A real production job failed here with `Invalid regex pattern
+   '*.nam|*.json': nothing to repeat at position 0` -- Kaggle's
+   `--file-pattern` flag is a **regular expression**, not a shell glob, and
+   that string was never valid regex. The kernel output for this app is
+   tiny compared to the training dataset, so production download omits
+   `file_pattern` entirely and filters locally instead of trying to get a
+   CLI-side regex right -- `KaggleCli.kernels_output`'s optional
+   `file_pattern` parameter still validates via `re.compile` if a caller
+   ever does pass one, so this class of mistake fails fast instead of only
+   at the Kaggle API boundary.
 8. Runs the exact same local verification the local trainer runs on its own
    output: parses the `.nam`, renders the official training input through it
    with the native NAMCore renderer (Full and Lite submodels), and compares
@@ -95,6 +105,21 @@ happened.
 9. Optionally cleans up the private dataset/kernel once you're satisfied
    (`POST /api/kaggle/jobs/<job_id>/cleanup`) -- never deletes the downloaded
    local `.nam`, even if cleanup itself fails.
+
+### Recovering a job that trained successfully but failed on download
+
+If Kaggle actually finished training (kernel status `COMPLETE`) but the LOCAL
+download/validation step failed for a reason unrelated to training itself
+(the `--file-pattern` incident above being the real-world example),
+`POST /api/kaggle/jobs/<job_id>/recover?design_id=<design_id>`
+(`KaggleJobManager.retry_download`) re-downloads and re-validates that
+completed kernel's output **without ever recreating the dataset, kernel, or
+training run**. It refuses unless the job is currently `failed` and the
+remote kernel actually reports a completed status -- retrying a download for
+a kernel that never finished would just produce a different, misleadingly-
+labeled failure. Safe to retry: it clears any partial previous local output
+directory before re-downloading, so a half-written prior attempt can never
+leave stale files behind to confuse `.nam`/`training_result.json` discovery.
 
 ### Why the upload can take minutes
 
