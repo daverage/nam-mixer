@@ -2,102 +2,142 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hybrid NAM Builder</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <h1>HYBRID NAM BUILDER <span class="experimental">EXPERIMENTAL</span></h1>
+  <header class="topbar">
+    <h1>Hybrid NAM Builder <span class="badge">Experimental</span></h1>
+    <p class="tagline">Dynamic, input-level-driven crossfade between two NAM amp captures.</p>
+  </header>
 
-  <section>
-    <h2>AMP A</h2>
-    <input type="file" id="amp-a-file" accept=".nam">
-    <div id="amp-a-info" class="info"></div>
-  </section>
+  <div class="layout">
+    <aside class="col col-setup">
 
-  <section>
-    <h2>AMP B</h2>
-    <input type="file" id="amp-b-file" accept=".nam">
-    <div id="amp-b-info" class="info"></div>
-  </section>
+      <section class="card">
+        <h2><span class="step">1</span> Amps &amp; input</h2>
 
-  <section>
-    <h2>LEVEL MATCH</h2>
-    <label><input type="checkbox" id="auto-level-match" checked> Auto level match</label>
-    <div>
-      Amp A trim: <input type="number" id="amp-a-trim" value="0.0" step="0.1"> dB
-    </div>
-    <div>
-      Amp B manual tweak: <input type="number" id="amp-b-trim" value="0.0" step="0.1"> dB
-      <span id="amp-b-trim-note" class="info">(added on top of the auto match below -- 0 dB means use auto match as-is)</span>
-    </div>
-  </section>
+        <div class="amp-grid">
+          <div class="amp-slot">
+            <label class="amp-label"><span class="dot dot-a"></span>Amp A</label>
+            <input type="file" id="amp-a-file" accept=".nam" class="file-input">
+            <div id="amp-a-info" class="info"></div>
+          </div>
+          <div class="amp-slot">
+            <label class="amp-label"><span class="dot dot-b"></span>Amp B</label>
+            <input type="file" id="amp-b-file" accept=".nam" class="file-input">
+            <div id="amp-b-info" class="info"></div>
+          </div>
+        </div>
 
-  <section>
-    <h2>CROSSOVER</h2>
-    <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22">
-    <span id="crossover-value">-22.0 dBFS</span>
-  </section>
+        <label class="field-label" for="di-selector">Preview DI clip</label>
+        <select id="di-selector" class="select-input">
+          {% for f in di_files %}
+            <option value="{{ f }}">{{ f }}</option>
+          {% endfor %}
+        </select>
+        <div class="info">See <code>assets/di/README.md</code> for what each clip is good for.</div>
 
-  <section>
-    <h2>TRANSITION</h2>
-    <input type="range" id="transition-slider" min="2" max="18" step="0.5" value="{{ default_transition_width_db }}">
-    <span id="transition-value">{{ default_transition_width_db }} dB</span>
-    <div class="info">
-      Presets (dB):
-      {% for name, value in transition_presets.items() %}
-        <button class="preset-btn" data-value="{{ value }}">{{ name.replace('_', ' ') }} ({{ value }})</button>
-      {% endfor %}
-    </div>
-  </section>
+        <button id="btn-render-pair" class="btn btn-primary btn-block">Render Amps</button>
+        <div id="render-status" class="info"></div>
+      </section>
 
-  <section>
-    <h2>PREVIEW DI</h2>
-    <select id="di-selector">
-      {% for f in di_files %}
-        <option value="{{ f }}">{{ f }}</option>
-      {% endfor %}
-    </select>
-    <div class="info">See <code>assets/di/README.md</code> for what each clip is good for.</div>
-  </section>
+      <section class="card">
+        <h2><span class="step">2</span> Crossover &amp; transition</h2>
 
-  <section>
-    <h2>TEST INPUT GAIN</h2>
-    <input type="range" id="dry-gain-slider" min="-24" max="24" step="0.5" value="0">
-    <span id="dry-gain-value">0.0 dB</span>
-    <div class="info">
-      Shifts the crossover trigger only (as if you played louder/softer) --
-      does NOT re-amp the audio, so it's for exercising the transition logic
-      when the chosen DI clip never naturally reaches the crossover point.
-    </div>
-  </section>
+        <div class="slider-row">
+          <label for="crossover-slider">Crossover point</label>
+          <span id="crossover-value" class="value-chip">-22.0 dBFS</span>
+        </div>
+        <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
 
-  <section>
-    <button id="btn-render-pair">Render Amps</button>
-    <span id="render-status" class="info"></span>
-  </section>
+        <div class="slider-row">
+          <label for="transition-slider">Transition width</label>
+          <span id="transition-value" class="value-chip">{{ default_transition_width_db }} dB</span>
+        </div>
+        <input type="range" id="transition-slider" min="2" max="18" step="0.5" value="{{ default_transition_width_db }}" class="slider slider-transition">
+        <div class="preset-row">
+          {% for name, value in transition_presets.items() %}
+            <button class="preset-btn" data-value="{{ value }}">{{ name.replace('_', ' ') }}</button>
+          {% endfor %}
+        </div>
+      </section>
 
-  <section>
-    <button id="btn-preview-a" disabled>Preview Amp A</button>
-    <button id="btn-preview-hybrid" disabled>Preview Hybrid</button>
-    <button id="btn-preview-b" disabled>Preview Amp B</button>
-    <div id="trim-readout" class="info"></div>
-    <audio id="player" controls></audio>
-  </section>
+      <section class="card">
+        <h2><span class="step">3</span> Level match</h2>
 
-  <section>
-    <h2>THE JOURNEY BETWEEN AMPS</h2>
-    <canvas id="journey-canvas" width="900" height="220"></canvas>
-    <div class="info">
-      Top: dry input envelope (dBFS) over time, with the crossover band
-      shaded. Bottom: the resulting mix -- blue is Amp A, orange is Amp B.
-    </div>
-  </section>
+        <label class="checkbox-row">
+          <input type="checkbox" id="auto-level-match" checked>
+          Auto level match Amp B to Amp A near the crossover
+        </label>
 
-  <section>
-    <button id="btn-generate">Generate Hybrid Target</button>
-  </section>
+        <div class="slider-row">
+          <label for="amp-b-trim">Amp B manual tweak</label>
+          <span id="amp-b-trim-value" class="value-chip">+0.0 dB</span>
+        </div>
+        <input type="range" id="amp-b-trim" min="-24" max="24" step="0.1" value="0" class="slider slider-trim">
+        <div class="info">Added on top of the auto match -- 0&nbsp;dB means use the auto match as-is.</div>
 
-  <div id="status" class="info"></div>
+        <div id="trim-readout" class="trim-readout" aria-live="polite"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="step">4</span> Test input gain</h2>
+        <div class="slider-row">
+          <label for="dry-gain-slider">Simulated input level</label>
+          <span id="dry-gain-value" class="value-chip">+0.0 dB</span>
+        </div>
+        <input type="range" id="dry-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
+        <div class="info">
+          Shifts when the crossfade triggers, as if you played louder or
+          softer -- it does <strong>not</strong> re-amp the audio, so use it
+          to test the transition logic when this DI clip never naturally
+          reaches the crossover point.
+        </div>
+      </section>
+
+    </aside>
+
+    <main class="col col-main">
+
+      <section class="card">
+        <h2>Listen</h2>
+        <div class="preview-row">
+          <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
+          <button id="btn-preview-hybrid" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
+          <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
+        </div>
+        <audio id="player" controls></audio>
+      </section>
+
+      <section class="card">
+        <h2>The journey between amps</h2>
+        <div class="legend">
+          <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
+          <span class="legend-item"><i class="swatch swatch-band"></i>Transition band</span>
+          <span class="legend-item"><i class="swatch swatch-threshold"></i>Crossover point</span>
+          <span class="legend-item"><i class="swatch dot-a"></i>Amp A</span>
+          <span class="legend-item"><i class="swatch dot-b"></i>Amp B</span>
+          <span class="legend-item"><i class="swatch swatch-playhead"></i>Playback position</span>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="journey-canvas"></canvas>
+          <div id="journey-tooltip" class="journey-tooltip" hidden></div>
+        </div>
+        <div id="journey-empty" class="info">Render an amp pair to see the crossfade journey here.</div>
+      </section>
+
+      <section class="card card-muted">
+        <h2>Generate hybrid training target</h2>
+        <button id="btn-generate" class="btn btn-secondary">Generate Hybrid Target</button>
+        <div class="info">Not implemented yet -- see <code>hybrid/render.py</code>.</div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="status" class="status-bar"></div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

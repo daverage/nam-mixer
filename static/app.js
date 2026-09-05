@@ -4,7 +4,7 @@ const statusEl = document.getElementById("status");
 
 function setStatus(msg, isError) {
   statusEl.textContent = msg;
-  statusEl.style.color = isError ? "#b00" : "#666";
+  statusEl.style.color = isError ? "#c0362c" : "";
 }
 
 // Resolved server-side paths for the uploaded .nam files, keyed by "a"/"b" --
@@ -33,8 +33,7 @@ async function uploadNam(slot, fileInputId, infoElId) {
     }
     ampServerPaths[slot] = data.path;
     infoEl.textContent =
-      `${file.name} -- architecture=${data.architecture} sample_rate=${data.sample_rate} ` +
-      `[${data.calibration_status}]`;
+      `${file.name} -- ${data.architecture}, ${data.sample_rate} Hz, ${data.calibration_status}`;
     setStatus("Loaded " + file.name);
   } catch (err) {
     setStatus("Request failed: " + err, true);
@@ -51,7 +50,7 @@ document.getElementById("amp-b-file").addEventListener("change", () =>
 const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
 crossoverSlider.addEventListener("input", () => {
-  crossoverValue.textContent = `${crossoverSlider.value} dBFS`;
+  crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
   scheduleUpdate();
 });
 
@@ -70,13 +69,24 @@ document.querySelectorAll(".preset-btn").forEach((btn) => {
   });
 });
 
+function fmtSigned(x) {
+  const v = parseFloat(x);
+  return (v >= 0 ? "+" : "") + v.toFixed(1);
+}
+
 document.getElementById("auto-level-match").addEventListener("change", scheduleUpdate);
-document.getElementById("amp-b-trim").addEventListener("input", scheduleUpdate);
+
+const ampBTrimSlider = document.getElementById("amp-b-trim");
+const ampBTrimValue = document.getElementById("amp-b-trim-value");
+ampBTrimSlider.addEventListener("input", () => {
+  ampBTrimValue.textContent = `${fmtSigned(ampBTrimSlider.value)} dB`;
+  scheduleUpdate();
+});
 
 const dryGainSlider = document.getElementById("dry-gain-slider");
 const dryGainValue = document.getElementById("dry-gain-value");
 dryGainSlider.addEventListener("input", () => {
-  dryGainValue.textContent = `${dryGainSlider.value} dB`;
+  dryGainValue.textContent = `${fmtSigned(dryGainSlider.value)} dB`;
   scheduleUpdate();
 });
 
@@ -99,16 +109,20 @@ const player = document.getElementById("player");
 const trimReadout = document.getElementById("trim-readout");
 const renderStatus = document.getElementById("render-status");
 const journeyCanvas = document.getElementById("journey-canvas");
+const journeyTooltip = document.getElementById("journey-tooltip");
+const journeyEmpty = document.getElementById("journey-empty");
 
 let havePair = false;
 let updateTimer = null;
+let lastJourneyData = null;
+let lastSourcePlayed = null;
 
 function hybridParamsBody() {
   return {
     crossover_dbfs: parseFloat(crossoverSlider.value),
     transition_width_db: parseFloat(transitionSlider.value),
     auto_level: document.getElementById("auto-level-match").checked,
-    manual_b_trim_db: parseFloat(document.getElementById("amp-b-trim").value) || 0.0,
+    manual_b_trim_db: parseFloat(ampBTrimSlider.value) || 0.0,
     dry_gain_db: parseFloat(dryGainSlider.value) || 0.0,
   };
 }
@@ -135,9 +149,9 @@ async function updateTrimReadout() {
       return;
     }
     trimReadout.textContent =
-      `Auto match ${data.auto_trim_db.toFixed(1)} dB, ` +
-      `manual tweak ${data.manual_trim_db.toFixed(1)} dB, ` +
-      `effective trim ${data.effective_b_trim_db.toFixed(1)} dB`;
+      `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  ` +
+      `manual tweak ${fmtSigned(data.manual_trim_db)} dB  ·  ` +
+      `effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
   } catch (err) {
     trimReadout.textContent = "Trim update failed: " + err;
   }
@@ -152,46 +166,112 @@ async function updateJourney() {
     });
     const data = await resp.json();
     if (!resp.ok) return;
-    drawJourney(data);
+    lastJourneyData = data;
+    journeyEmpty.hidden = true;
+    drawJourney();
   } catch (err) {
     // Visualization is a debug aid, not critical path -- fail quietly.
   }
 }
 
-function drawJourney(data) {
-  const ctx = journeyCanvas.getContext("2d");
+// ---- Journey chart: envelope + crossover band/threshold + A<->B mix strip,
+// with axis labels, a legend-matched color scheme, a hover readout, and a
+// playhead synced to whatever is actually playing in the <audio> element.
+
+const CHART = {
+  marginLeft: 40,
+  marginBottom: 20,
+  marginTop: 6,
+  mixHeight: 34,
+  gap: 8,
+  dbMin: -60,
+  dbMax: 0,
+  colorA: [51, 102, 204],
+  colorB: [230, 126, 34],
+};
+
+function resizeCanvasForDPR() {
+  const rect = journeyCanvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (journeyCanvas.width !== w || journeyCanvas.height !== h) {
+    journeyCanvas.width = w;
+    journeyCanvas.height = h;
+  }
+}
+
+function chartGeometry() {
+  const dpr = window.devicePixelRatio || 1;
   const W = journeyCanvas.width;
   const H = journeyCanvas.height;
-  ctx.clearRect(0, 0, W, H);
+  const ml = CHART.marginLeft * dpr;
+  const mb = CHART.marginBottom * dpr;
+  const mt = CHART.marginTop * dpr;
+  const mixH = CHART.mixHeight * dpr;
+  const gap = CHART.gap * dpr;
+  const envTop = mt;
+  const envBottom = H - mb - mixH - gap;
+  const mixTop = envBottom + gap;
+  const mixBottom = H - mb;
+  const plotLeft = ml;
+  const plotRight = W;
+  return { dpr, W, H, envTop, envBottom, mixTop, mixBottom, plotLeft, plotRight };
+}
+
+function drawJourney() {
+  resizeCanvasForDPR();
+  const data = lastJourneyData;
+  const ctx = journeyCanvas.getContext("2d");
+  const g = chartGeometry();
+  ctx.clearRect(0, 0, g.W, g.H);
+  if (!data || data.times.length < 2) return;
 
   const n = data.times.length;
-  if (n < 2) return;
+  const duration = data.times[n - 1];
+  const plotWidth = g.plotRight - g.plotLeft;
+  const xAt = (i) => g.plotLeft + (i / (n - 1)) * plotWidth;
+  const xAtTime = (t) => g.plotLeft + (duration > 0 ? t / duration : 0) * plotWidth;
+  const envYAt = (db) => {
+    const clamped = Math.max(CHART.dbMin, Math.min(CHART.dbMax, db));
+    const frac = (clamped - CHART.dbMin) / (CHART.dbMax - CHART.dbMin);
+    return g.envBottom - frac * (g.envBottom - g.envTop);
+  };
 
-  const envTop = 0;
-  const envHeight = H * 0.6;
-  const mixTop = envHeight + 10;
-  const mixHeight = H - mixTop;
+  const dpr = g.dpr;
 
-  const dbMin = -60, dbMax = 0;
-  const xAt = (i) => (i / (n - 1)) * W;
-  const envYAt = (db) => envTop + envHeight * (1 - (Math.max(dbMin, Math.min(dbMax, db)) - dbMin) / (dbMax - dbMin));
+  // -- dB axis gridlines + labels --
+  ctx.strokeStyle = "rgba(128,128,128,0.18)";
+  ctx.fillStyle = "rgba(128,128,128,0.8)";
+  ctx.font = `${11 * dpr}px sans-serif`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let db = CHART.dbMax; db >= CHART.dbMin; db -= 20) {
+    const y = envYAt(db);
+    ctx.beginPath();
+    ctx.moveTo(g.plotLeft, y);
+    ctx.lineTo(g.plotRight, y);
+    ctx.stroke();
+    ctx.fillText(`${db}`, g.plotLeft - 6 * dpr, y);
+  }
 
-  // Shade the crossover transition band on the envelope panel.
+  // -- crossover transition band + threshold line --
   const lo = data.crossover_dbfs - data.transition_width_db / 2.0;
   const hi = data.crossover_dbfs + data.transition_width_db / 2.0;
-  ctx.fillStyle = "rgba(150, 100, 200, 0.15)";
-  ctx.fillRect(0, envYAt(hi), W, envYAt(lo) - envYAt(hi));
-  ctx.strokeStyle = "rgba(150, 100, 200, 0.6)";
-  ctx.setLineDash([4, 3]);
+  ctx.fillStyle = "rgba(122, 92, 255, 0.15)";
+  ctx.fillRect(g.plotLeft, envYAt(hi), plotWidth, envYAt(lo) - envYAt(hi));
+  ctx.strokeStyle = "rgba(122, 92, 255, 0.7)";
+  ctx.setLineDash([5 * dpr, 4 * dpr]);
+  ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath();
-  ctx.moveTo(0, envYAt(data.crossover_dbfs));
-  ctx.lineTo(W, envYAt(data.crossover_dbfs));
+  ctx.moveTo(g.plotLeft, envYAt(data.crossover_dbfs));
+  ctx.lineTo(g.plotRight, envYAt(data.crossover_dbfs));
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Envelope trace.
-  ctx.strokeStyle = "#444";
-  ctx.lineWidth = 1.5;
+  // -- envelope trace --
+  ctx.strokeStyle = getComputedStyle(document.body).color;
+  ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath();
   data.envelope_db.forEach((db, i) => {
     const x = xAt(i), y = envYAt(db);
@@ -200,27 +280,81 @@ function drawJourney(data) {
   });
   ctx.stroke();
 
-  // Mix panel: filled area, color interpolated between Amp A (blue) and
-  // Amp B (orange) by the blend weight at each point.
-  const colorA = [51, 102, 204];
-  const colorB = [230, 126, 34];
+  // -- mix strip: color interpolated between Amp A and Amp B by blend weight --
   for (let i = 0; i < n - 1; i++) {
     const t = data.blend_weight[i];
-    const r = Math.round(colorA[0] + (colorB[0] - colorA[0]) * t);
-    const g = Math.round(colorA[1] + (colorB[1] - colorA[1]) * t);
-    const b = Math.round(colorA[2] + (colorB[2] - colorA[2]) * t);
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
-    ctx.fillRect(xAt(i), mixTop, xAt(i + 1) - xAt(i) + 1, mixHeight);
+    const r = Math.round(CHART.colorA[0] + (CHART.colorB[0] - CHART.colorA[0]) * t);
+    const gr = Math.round(CHART.colorA[1] + (CHART.colorB[1] - CHART.colorA[1]) * t);
+    const b = Math.round(CHART.colorA[2] + (CHART.colorB[2] - CHART.colorA[2]) * t);
+    ctx.fillStyle = `rgb(${r},${gr},${b})`;
+    ctx.fillRect(xAt(i), g.mixTop, xAt(i + 1) - xAt(i) + 1, g.mixBottom - g.mixTop);
   }
-
-  // Mix panel labels.
   ctx.fillStyle = "#fff";
-  ctx.font = "11px sans-serif";
-  ctx.fillText("A", 4, mixTop + mixHeight / 2 + 4);
-  ctx.textAlign = "right";
-  ctx.fillText("B", W - 4, mixTop + mixHeight / 2 + 4);
+  ctx.font = `${11 * dpr}px sans-serif`;
+  ctx.textBaseline = "middle";
   ctx.textAlign = "left";
+  ctx.fillText("A", g.plotLeft + 5 * dpr, (g.mixTop + g.mixBottom) / 2);
+  ctx.textAlign = "right";
+  ctx.fillText("B", g.plotRight - 5 * dpr, (g.mixTop + g.mixBottom) / 2);
+
+  // -- time axis labels --
+  ctx.fillStyle = "rgba(128,128,128,0.8)";
+  ctx.font = `${11 * dpr}px sans-serif`;
+  ctx.textBaseline = "top";
+  const ticks = [0, 0.25, 0.5, 0.75, 1.0];
+  ticks.forEach((f) => {
+    const t = f * duration;
+    const x = xAtTime(t);
+    ctx.textAlign = f === 0 ? "left" : f === 1 ? "right" : "center";
+    ctx.fillText(`${t.toFixed(1)}s`, x, g.mixBottom + 4 * dpr);
+  });
+
+  // -- playhead, synced to the <audio> element's actual playback position --
+  if (!player.paused && !player.ended && player.duration && lastSourcePlayed) {
+    const frac = player.currentTime / player.duration;
+    const x = g.plotLeft + frac * plotWidth;
+    ctx.strokeStyle = "#c0362c";
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(x, g.envTop);
+    ctx.lineTo(x, g.mixBottom);
+    ctx.stroke();
+  }
 }
+
+// Hover tooltip: nearest sample's time/envelope/mix.
+journeyCanvas.addEventListener("mousemove", (evt) => {
+  if (!lastJourneyData) return;
+  const rect = journeyCanvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const g = chartGeometry();
+  const xCss = evt.clientX - rect.left;
+  const xCanvas = xCss * dpr;
+  const plotWidth = g.plotRight - g.plotLeft;
+  if (xCanvas < g.plotLeft || xCanvas > g.plotRight) {
+    journeyTooltip.hidden = true;
+    return;
+  }
+  const n = lastJourneyData.times.length;
+  const frac = (xCanvas - g.plotLeft) / plotWidth;
+  const idx = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+  const t = lastJourneyData.times[idx];
+  const db = lastJourneyData.envelope_db[idx];
+  const mix = lastJourneyData.blend_weight[idx];
+  journeyTooltip.hidden = false;
+  journeyTooltip.style.left = `${xCss}px`;
+  journeyTooltip.textContent =
+    `t=${t.toFixed(2)}s  env=${db.toFixed(1)} dBFS  mix=${Math.round(mix * 100)}% B`;
+});
+journeyCanvas.addEventListener("mouseleave", () => {
+  journeyTooltip.hidden = true;
+});
+
+player.addEventListener("timeupdate", () => { if (lastSourcePlayed) drawJourney(); });
+player.addEventListener("play", () => drawJourney());
+player.addEventListener("pause", () => drawJourney());
+player.addEventListener("ended", () => drawJourney());
+window.addEventListener("resize", () => drawJourney());
 
 document.getElementById("btn-render-pair").addEventListener("click", async () => {
   const amp_a_path = ampServerPaths.a;
@@ -273,10 +407,12 @@ async function preview(source) {
       const auto = resp.headers.get("X-Auto-Trim-Db");
       const manual = resp.headers.get("X-Manual-Trim-Db");
       const effective = resp.headers.get("X-Effective-Trim-Db");
-      trimReadout.textContent = `Auto match ${auto} dB, manual tweak ${manual} dB, effective trim ${effective} dB`;
+      trimReadout.textContent =
+        `Auto match ${fmtSigned(auto)} dB  ·  manual tweak ${fmtSigned(manual)} dB  ·  effective trim ${fmtSigned(effective)} dB`;
     }
     const blob = await resp.blob();
     player.src = URL.createObjectURL(blob);
+    lastSourcePlayed = source;
     player.play();
     setStatus(`Playing ${source.toUpperCase()}.`);
   } catch (err) {
