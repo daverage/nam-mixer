@@ -786,6 +786,22 @@ document.querySelectorAll('input[name="a2-epoch-preset"]').forEach((el) => {
   el.addEventListener("change", updateLocalTrainingCommand);
 });
 
+// A completed job's .nam used to be shown only as a bare server-side path
+// (e.g. work/a2/<design>/kaggle/<job>/output/a2_output/export/hybrid_a2.nam)
+// -- unusable for a user who isn't on the machine running Flask. A direct
+// download link (backed by GET /api/kaggle/jobs/<id>/download) is the actual
+// easy path to the file; the full path is kept below it for reference.
+function renderKaggleDownloadResult(designId, jobId, data) {
+  kaggleResultEl.hidden = false;
+  const downloadUrl = `/api/kaggle/jobs/${encodeURIComponent(jobId)}/download?design_id=${encodeURIComponent(designId)}`;
+  const namFilename = (data.output_nam_path || "").split(/[\\/]/).pop() || "model.nam";
+  kaggleResultEl.innerHTML = `
+    <a href="${downloadUrl}" download class="btn btn-primary btn-block">Download ${namFilename}</a>
+    <div class="hint" title="${data.output_nam_path || ""}">Full path: <code>${data.output_nam_path || "(unknown)"}</code></div>
+    <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
+  `;
+}
+
 // State label, elapsed-since-submit, and a progress bar/log tail when
 // available -- a bare repeating "running" string with no other signal made
 // it look stuck even while training was progressing normally.
@@ -862,6 +878,11 @@ async function refreshKaggleStatus() {
     trainA2Btn.disabled = !!activeJob;
     if (activeJob) {
       pollKaggleJob(data.job.design_id, data.job.job_id);
+    } else if (data.job && data.job.state === "complete") {
+      // Re-show the download link for a job that already finished before
+      // this page load (e.g. after a refresh) -- otherwise the only way to
+      // get the .nam back would be to re-run training.
+      renderKaggleDownloadResult(data.job.design_id, data.job.job_id, data.job);
     }
     return true;
   } catch (err) {
@@ -978,11 +999,7 @@ function pollKaggleJob(designId, jobId) {
         clearInterval(kaggleJobPollTimer);
         clearInterval(kaggleTickTimer);
         trainA2Btn.disabled = false;
-        kaggleResultEl.hidden = false;
-        kaggleResultEl.innerHTML = `
-          <div><strong>Model:</strong> <code>${data.output_nam_path || "(unknown)"}</code></div>
-          <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
-        `;
+        renderKaggleDownloadResult(designId, jobId, data);
         setStatus("Kaggle A2 training complete.");
       } else if (data.state === "failed") {
         clearInterval(kaggleJobPollTimer);

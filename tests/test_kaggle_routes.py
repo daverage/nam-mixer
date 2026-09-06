@@ -189,3 +189,62 @@ def test_cleanup_surfaces_error_distinctly(client, tmp_path, monkeypatch):
     resp = client.post("/api/kaggle/jobs/j1/cleanup", json={"design_id": "mydesign"})
     assert resp.status_code == 400
     assert "not finished" in resp.get_json()["error"]
+
+
+# --- GET /api/kaggle/jobs/<job_id>/download -------------------------------
+
+def test_download_requires_design_id(client):
+    resp = client.get("/api/kaggle/jobs/j1/download")
+    assert resp.status_code == 400
+    assert "design_id" in resp.get_json()["error"]
+
+
+def test_download_unknown_job_404(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    resp = client.get("/api/kaggle/jobs/doesnotexist/download?design_id=mydesign")
+    assert resp.status_code == 404
+
+
+def test_download_rejects_incomplete_job(client, tmp_path, monkeypatch):
+    from hybrid.kaggle_training import save_job
+
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="running")
+    save_job(tmp_path, job)
+
+    resp = client.get("/api/kaggle/jobs/j1/download?design_id=mydesign")
+    assert resp.status_code == 400
+    assert "no downloadable model" in resp.get_json()["error"]
+
+
+def test_download_rejects_complete_job_with_missing_recorded_path(client, tmp_path, monkeypatch):
+    """Defensive: even a 'complete' job must not crash if its recorded .nam
+    somehow no longer exists on disk (moved/deleted out of band)."""
+    from hybrid.kaggle_training import save_job
+
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="complete",
+                     output_nam_path=str(tmp_path / "gone.nam"))
+    save_job(tmp_path, job)
+
+    resp = client.get("/api/kaggle/jobs/j1/download?design_id=mydesign")
+    assert resp.status_code == 404
+    assert "no longer exists" in resp.get_json()["error"]
+
+
+def test_download_serves_the_recorded_nam_file(client, tmp_path, monkeypatch):
+    from hybrid.kaggle_training import save_job
+
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    nam_path = tmp_path / "output" / "hybrid_a2.nam"
+    nam_path.parent.mkdir(parents=True, exist_ok=True)
+    nam_content = b'{"architecture": "WaveNet"}'
+    nam_path.write_bytes(nam_content)
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="complete", output_nam_path=str(nam_path))
+    save_job(tmp_path, job)
+
+    resp = client.get("/api/kaggle/jobs/j1/download?design_id=mydesign")
+    assert resp.status_code == 200
+    assert resp.data == nam_content
+    assert "attachment" in resp.headers.get("Content-Disposition", "")
+    assert "mydesign.nam" in resp.headers.get("Content-Disposition", "")

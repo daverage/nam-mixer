@@ -102,6 +102,14 @@ happened.
    after this passes -- a cloud "success" that fails local verification is
    reported as `failed`, with the Kaggle dataset/kernel left in place for
    debugging.
+
+   Once `complete`, the UI shows a direct **Download** button
+   (`GET /api/kaggle/jobs/<job_id>/download?design_id=<design_id>`) instead
+   of only printing the server-side path -- the `.nam` normally lands
+   several directories deep (`work/a2/<design_id>/kaggle/<job_id>/output/...`),
+   which isn't something a user should have to go find on the machine
+   running Flask. The route only ever serves the exact path this app itself
+   already recorded on `job.output_nam_path`, never a caller-supplied one.
 9. Optionally cleans up the private dataset/kernel once you're satisfied
    (`POST /api/kaggle/jobs/<job_id>/cleanup`) -- never deletes the downloaded
    local `.nam`, even if cleanup itself fails.

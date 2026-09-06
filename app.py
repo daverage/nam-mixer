@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import soundfile as sf
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
@@ -727,6 +727,31 @@ def api_kaggle_job_logs(job_id: str):
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
     tail = _kaggle_manager.fetch_logs(job) if job.state not in ("complete", "failed") else _kaggle_manager.read_log_tail(job)
     return jsonify({"log_tail": tail, "progress": _kaggle_manager.parse_progress(tail)})
+
+
+@app.route("/api/kaggle/jobs/<job_id>/download", methods=["GET"])
+def api_kaggle_job_download(job_id: str):
+    """Serves the trained .nam directly as a browser download, so the user
+    doesn't have to locate it on the server's filesystem themselves (it
+    normally lands several directories deep under
+    work/a2/<design_id>/kaggle/<job_id>/output/...). Only ever serves the
+    exact path this app itself already recorded on job.output_nam_path for
+    a completed job -- never a caller-supplied path."""
+    design_id = request.args.get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id query parameter is required"}), 400
+    job = load_job(A2_OUTPUT_DIR, design_id, job_id)
+    if job is None:
+        return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
+    if job.state != "complete" or not job.output_nam_path:
+        return jsonify({"error": f"job {job_id!r} has no downloadable model yet (state={job.state})"}), 400
+
+    nam_path = Path(job.output_nam_path)
+    if not nam_path.is_file():
+        return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
+
+    download_name = f"{secure_filename(str(design_id))}.nam"
+    return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 
 @app.route("/api/kaggle/jobs/<job_id>/recover", methods=["POST"])
