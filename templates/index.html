@@ -69,13 +69,13 @@
             provide it, otherwise raw digital level is used for both.
           </div>
           <label class="field-label" for="reference-dbu-input">Reference level (dBu)</label>
-          <input type="number" id="reference-dbu-input" value="{{ default_reference_input_level_dbu }}" step="0.5" class="select-input">
-          <div class="info">The virtual analogue level assumed to correspond to digital full scale (NAM plugin default: +12 dBu). Not a pickup output value.</div>
+          <input type="number" id="reference-dbu-input" value="{{ default_reference_input_level_dbu }}" step="0.5" class="select-input" aria-describedby="reference-dbu-info">
+          <div id="reference-dbu-info" class="info">The virtual analogue level assumed to correspond to digital full scale (NAM plugin default: +12 dBu). Not a pickup output value.</div>
         </details>
 
         <button id="btn-render-pair" class="btn btn-primary btn-block">Render Amps</button>
-        <div id="render-status" class="info"></div>
-        <div id="render-warnings" class="warning-box" hidden></div>
+        <div id="render-status" class="info" aria-live="polite"></div>
+        <div id="render-warnings" class="warning-box" hidden aria-live="assertive"></div>
       </section>
 
       <script id="input-profiles-data" type="application/json">
@@ -99,7 +99,7 @@
         <input type="range" id="transition-slider" min="2" max="18" step="0.5" value="{{ default_transition_width_db }}" class="slider slider-transition">
         <div class="preset-row">
           {% for name, value in transition_presets.items() %}
-            <button class="preset-btn" data-value="{{ value }}">{{ name.replace('_', ' ') }}</button>
+            <button type="button" class="preset-btn" data-value="{{ value }}" aria-pressed="false">{{ name.replace('_', ' ') }}</button>
           {% endfor %}
         </div>
       </section>
@@ -113,7 +113,7 @@
         </label>
 
         <div class="slider-row">
-          <label for="amp-b-trim">Amp B manual tweak</label>
+          <label for="amp-b-trim">Amp B gain trim</label>
           <span id="amp-b-trim-value" class="value-chip">+0.0 dB</span>
         </div>
         <input type="range" id="amp-b-trim" min="-24" max="24" step="0.1" value="0" class="slider slider-trim">
@@ -126,8 +126,10 @@
 
     <main class="col col-main">
 
+      <div class="group-label">Diagnostics -- explore before you commit to a design</div>
+
       <section class="card">
-        <h2>Listen</h2>
+        <h2><span class="step">4</span> Listen</h2>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
           <button id="btn-preview-hybrid" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
@@ -136,11 +138,11 @@
         <audio id="player" controls></audio>
 
         <div class="slider-row">
-          <label for="test-gain-slider">Push amp input (test gain)</label>
+          <label for="test-gain-slider">Test gain (push amp input)</label>
           <span id="test-gain-value" class="value-chip">+0.0 dB</span>
         </div>
         <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
-        <div id="test-gain-status" class="info">
+        <div id="test-gain-status" class="info" aria-live="polite">
           An additional REAL gain applied on top of the input profile, before
           both amps render -- this DI clip's own dynamics may never naturally
           reach the crossover; drag to stress-test the response. Automatically
@@ -150,7 +152,7 @@
       </section>
 
       <section class="card">
-        <h2>The journey between amps</h2>
+        <h2><span class="step">5</span> The journey between amps</h2>
         <div class="legend">
           <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
           <span class="legend-item"><i class="swatch swatch-band"></i>Transition band</span>
@@ -160,22 +162,23 @@
           <span class="legend-item"><i class="swatch swatch-playhead"></i>Playback position</span>
         </div>
         <div class="canvas-wrap">
-          <canvas id="journey-canvas"></canvas>
+          <canvas id="journey-canvas" role="img" aria-label="Crossfade journey chart. Render an amp pair to populate it."></canvas>
           <div id="journey-tooltip" class="journey-tooltip" hidden></div>
         </div>
         <div id="journey-empty" class="info">Render an amp pair to see the crossfade journey here.</div>
       </section>
 
       <section class="card">
-        <h2>Expected crossover coverage</h2>
+        <h2><span class="step">6</span> Expected crossover coverage</h2>
         <div class="info">
           For each input profile, the share of ACTIVE playing time (silence
           excluded) that would land mostly in Amp A, in transition, or mostly
           in Amp B at the current crossover settings -- a reachability check,
           not a claim about how it will sound. Updates instantly; does not
-          re-render the amps.
+          re-render the amps. The row matching your current input profile is
+          highlighted.
         </div>
-        <div id="coverage-warning" class="warning-box" hidden></div>
+        <div id="coverage-warning" class="warning-box" hidden aria-live="assertive"></div>
         <div class="table-wrap">
           <table id="coverage-table" class="coverage-table" hidden>
             <thead>
@@ -187,8 +190,10 @@
         <div id="coverage-empty" class="info">Render an amp pair to see coverage for each input profile.</div>
       </section>
 
-      <section class="card card-muted">
-        <h2><span class="step">5</span> Create A2</h2>
+      <div class="group-label">Export -- produces your training deliverable</div>
+
+      <section class="card">
+        <h2><span class="step">7</span> Create A2</h2>
         <div class="info">
           Freezes the CURRENT crossover/transition/trim into an immutable
           design, then blends the official NAM training excitation through
@@ -198,11 +203,11 @@
 
         <label class="field-label" for="training-input-file">Official NAM training input (48&nbsp;kHz mono WAV)</label>
         <input type="file" id="training-input-file" accept=".wav" class="file-input">
-        <div id="training-input-status" class="info">Checking...</div>
+        <div id="training-input-status" class="info" aria-live="polite">Checking...</div>
 
-        <button id="btn-generate" class="btn btn-secondary btn-block">Generate Training Bundle</button>
-        <div id="generate-status" class="info"></div>
-        <div id="generate-result" class="generate-result" hidden></div>
+        <button id="btn-generate" class="btn btn-primary btn-block">Generate Training Bundle</button>
+        <div id="generate-status" class="info" aria-live="polite"></div>
+        <div id="generate-result" class="generate-result" hidden aria-live="polite"></div>
 
         <div id="a2-training-section" hidden>
           <label class="field-label">Training quality</label>
@@ -220,13 +225,13 @@
 
           <div id="kaggle-panel">
             <div class="status-row">
-              <div id="kaggle-status" class="info">Checking Kaggle connection...</div>
+              <div id="kaggle-status" class="info" aria-live="polite">Checking Kaggle connection...</div>
               <button id="btn-kaggle-refresh" type="button" class="link-btn">Refresh</button>
             </div>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
             <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train A2</button>
             <div id="kaggle-progress-box" class="generate-result" hidden>
-              <div id="kaggle-progress-line"><strong id="kaggle-progress-state">--</strong></div>
+              <div id="kaggle-progress-line"><strong id="kaggle-progress-state" aria-live="polite">--</strong></div>
               <div id="kaggle-progress-bar-track" class="progress-track" hidden><div id="kaggle-progress-bar-fill" class="progress-fill"></div></div>
               <div id="kaggle-progress-meta" class="hint"></div>
               <details id="kaggle-log-details">
@@ -234,7 +239,7 @@
                 <pre id="kaggle-log-tail" class="log-tail"></pre>
               </details>
             </div>
-            <div id="kaggle-result" class="generate-result" hidden></div>
+            <div id="kaggle-result" class="generate-result" hidden aria-live="polite"></div>
           </div>
 
           <div id="local-panel" hidden>

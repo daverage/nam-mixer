@@ -145,6 +145,7 @@ testGainSlider.addEventListener("input", () => {
   testGainStatus.textContent = "Will re-render shortly...";
   testGainRenderTimer = setTimeout(async () => {
     previewButtons.forEach((btn) => (btn.disabled = true));
+    player.classList.add("player-busy");
     testGainStatus.textContent = "Pushing amp input (running NAM inference twice)...";
     try {
       const data = await doRenderPair();
@@ -156,6 +157,8 @@ testGainSlider.addEventListener("input", () => {
     } catch (err) {
       testGainStatus.textContent = "Error: " + err.message;
       setStatus("Test-gain re-render failed.", true);
+    } finally {
+      player.classList.remove("player-busy");
     }
   }, TEST_GAIN_DEBOUNCE_MS);
 });
@@ -196,13 +199,23 @@ transitionSlider.addEventListener("input", () => {
   scheduleUpdate();
 });
 
-document.querySelectorAll(".preset-btn").forEach((btn) => {
+const presetButtons = document.querySelectorAll(".preset-btn");
+function syncPresetButtonStates() {
+  presetButtons.forEach((btn) => {
+    const active = parseFloat(btn.dataset.value) === parseFloat(transitionSlider.value);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+presetButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     transitionSlider.value = btn.dataset.value;
     transitionValue.textContent = `${btn.dataset.value} dB`;
+    syncPresetButtonStates();
     scheduleUpdate();
   });
 });
+transitionSlider.addEventListener("input", syncPresetButtonStates);
+syncPresetButtonStates();
 
 document.getElementById("auto-level-match").addEventListener("change", scheduleUpdate);
 
@@ -276,9 +289,7 @@ async function updateTrimReadout() {
       return;
     }
     trimReadout.textContent =
-      `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  ` +
-      `manual tweak ${fmtSigned(data.manual_trim_db)} dB  ·  ` +
-      `effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
+      `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
   } catch (err) {
     trimReadout.textContent = "Trim update failed: " + err;
   }
@@ -329,6 +340,9 @@ async function updateCoverage() {
       tr.appendChild(cell(`${Math.round(row.amp_a_fraction * 100)}%`));
       tr.appendChild(cell(`${Math.round(row.transition_fraction * 100)}%`));
       tr.appendChild(cell(`${Math.round(row.amp_b_fraction * 100)}%`));
+      if (row.profile_id === profileSelect.value) {
+        tr.classList.add("current-profile");
+      }
       coverageTbody.appendChild(tr);
     });
     coverageTable.hidden = false;
@@ -393,6 +407,17 @@ function drawJourney() {
   const g = chartGeometry();
   ctx.clearRect(0, 0, g.W, g.H);
   if (!data || data.times.length < 2) return;
+
+  const n0 = data.times.length;
+  const meanMixPct = Math.round(
+    (data.blend_weight.reduce((a, b) => a + b, 0) / n0) * 100
+  );
+  journeyCanvas.setAttribute(
+    "aria-label",
+    `Crossfade journey over ${data.times[n0 - 1].toFixed(1)} seconds. ` +
+      `Crossover at ${data.crossover_dbfs.toFixed(1)} dBFS with a ${data.transition_width_db} dB transition band. ` +
+      `Averages ${meanMixPct}% toward Amp B across the clip.`
+  );
 
   const n = data.times.length;
   const duration = data.times[n - 1];
@@ -638,10 +663,9 @@ async function preview(source) {
     }
     if (source === "hybrid") {
       const auto = resp.headers.get("X-Auto-Trim-Db");
-      const manual = resp.headers.get("X-Manual-Trim-Db");
       const effective = resp.headers.get("X-Effective-Trim-Db");
       trimReadout.textContent =
-        `Auto match ${fmtSigned(auto)} dB  ·  manual tweak ${fmtSigned(manual)} dB  ·  effective trim ${fmtSigned(effective)} dB`;
+        `Auto match ${fmtSigned(auto)} dB  ·  effective trim ${fmtSigned(effective)} dB`;
     }
     const blob = await resp.blob();
     player.src = URL.createObjectURL(blob);
@@ -724,12 +748,22 @@ generateBtn.addEventListener("click", async () => {
     }
     generateStatus.textContent = `Bundle generated: ${data.design_id}`;
     generateResult.hidden = false;
+    const newWarningsText = data.warnings ? data.warnings.join(" ") : "";
+    const alreadyShownAbove =
+      newWarningsText && !renderWarnings.hidden && renderWarnings.textContent === newWarningsText;
+    const warningsHtml = newWarningsText
+      ? `<div class="warning-box">${
+          alreadyShownAbove
+            ? "Same calibration caveat shown above in Amps &amp; Input applies to this bundle."
+            : newWarningsText
+        }</div>`
+      : "";
     generateResult.innerHTML = `
       <div><strong>Bundle:</strong> <code>${data.bundle_dir}</code></div>
       <div><strong>Target:</strong> <code>${data.target_path}</code> (peak ${data.safety_report.final_peak_dbfs.toFixed(1)} dBFS, safety reduction ${data.safety_report.gain_reduction_db.toFixed(2)} dB)</div>
       <div><strong>Calibration:</strong> ${data.calibration_summary.effective_mode} (requested ${data.calibration_summary.requested_mode})</div>
       <div><strong>Train it with:</strong> <code>${data.training_command}</code></div>
-      ${data.warnings && data.warnings.length ? `<div class="warning-box">${data.warnings.join(" ")}</div>` : ""}
+      ${warningsHtml}
     `;
     setStatus("Training bundle ready.");
 
