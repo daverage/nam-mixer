@@ -125,6 +125,35 @@ h2 {
   gap: 0.5rem;
 }
 
+.cost-badge {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.cost-badge-expensive {
+  background: rgba(224, 133, 20, 0.15);
+  color: #b5690a;
+}
+@media (prefers-color-scheme: dark) {
+  .cost-badge-expensive { background: rgba(255, 179, 71, 0.18); color: #ffb347; }
+}
+.cost-badge-auto {
+  background: rgba(122, 92, 255, 0.15);
+  color: var(--hybrid);
+}
+.cost-badge-instant {
+  background: rgba(60, 160, 100, 0.15);
+  color: #2f9e5c;
+}
+@media (prefers-color-scheme: dark) {
+  .cost-badge-instant { background: rgba(90, 210, 140, 0.16); color: #5ad28c; }
+}
+
 .step {
   display: inline-flex;
   align-items: center;
@@ -293,6 +322,15 @@ input[type="range"].slider::-moz-range-thumb {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-block { width: 100%; margin-top: 0.9rem; }
 .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+.btn-render-stale {
+  box-shadow: 0 0 0 3px rgba(224, 133, 20, 0.35);
+  animation: render-stale-pulse 1.6s ease-in-out infinite;
+}
+@keyframes render-stale-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(224, 133, 20, 0.25); }
+  50% { box-shadow: 0 0 0 5px rgba(224, 133, 20, 0.45); }
+}
 .btn-secondary { background: transparent; }
 
 .preview-row { display: flex; gap: 0.6rem; margin-bottom: 0.85rem; }

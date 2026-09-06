@@ -21,7 +21,7 @@
     <aside class="col col-setup">
 
       <section class="card">
-        <h2><span class="step">1</span> Amps &amp; input</h2>
+        <h2><span class="step">1</span> Amps &amp; input <span class="cost-badge cost-badge-expensive" title="Changing anything here re-runs real NAM inference on both amps">⚡ needs Render Amps</span></h2>
 
         <div class="amp-grid">
           <div class="amp-slot">
@@ -88,7 +88,7 @@
       </script>
 
       <section class="card" id="hybrid-panel-crossover" data-mode-panel="hybrid">
-        <h2><span class="step">2</span> Crossover &amp; transition</h2>
+        <h2><span class="step">2</span> Crossover &amp; transition <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <div class="slider-row">
           <label for="crossover-slider">Crossover point</label>
@@ -110,7 +110,7 @@
       </section>
 
       <section class="card" id="blend-panel-mix" data-mode-panel="blend" hidden>
-        <h2><span class="step">2</span> Fixed mix</h2>
+        <h2><span class="step">2</span> Fixed mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <div class="slider-row">
           <label for="mix-slider">Amp A / Amp B mix</label>
@@ -124,7 +124,7 @@
       </section>
 
       <section class="card">
-        <h2><span class="step">3</span> Level match</h2>
+        <h2><span class="step">3</span> Level match <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <label class="checkbox-row">
           <input type="checkbox" id="auto-level-match" checked>
@@ -157,7 +157,7 @@
         <audio id="player" controls></audio>
 
         <div class="slider-row">
-          <label for="test-gain-slider">Test gain (push amp input)</label>
+          <label for="test-gain-slider">Test gain (push amp input) <span class="cost-badge cost-badge-auto" title="Changes the actual amp input -- re-renders automatically a moment after you stop dragging">↻ auto re-renders</span></label>
           <span id="test-gain-value" class="value-chip">+0.0 dB</span>
         </div>
         <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
@@ -171,7 +171,7 @@
       </section>
 
       <section class="card" id="cab-panel">
-        <h2><span class="step">5</span> Cabinet IR <span class="hint">(shared, optional)</span></h2>
+        <h2><span class="step">5</span> Cabinet IR <span class="hint">(shared, optional)</span> <span class="cost-badge cost-badge-instant" title="Uploading/toggling the cab never re-runs NAM inference">✓ instant</span></h2>
 
         <label class="field-label" for="cab-file">Cabinet IR (WAV)</label>
         <input type="file" id="cab-file" accept=".wav" class="file-input">

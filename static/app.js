@@ -224,30 +224,41 @@ function populateProfileSelect() {
   updateProfileDescription();
 }
 
+// Anything that changes what the two amps actually receive (amp files, DI
+// clip, instrument/profile/custom-gain, calibration mode, reference level)
+// invalidates the cached RenderedPair -- see hybrid/pipeline.py's
+// render_pair() docstring for the authoritative list. This makes that
+// staleness impossible to miss: preview buttons disable, the Render Amps
+// button gets a pulsing highlight, and the status line names WHAT changed
+// (not a generic "input profile changed" for every case).
 function markProfileStale(reason) {
   if (havePair) {
     previewButtons.forEach((btn) => (btn.disabled = true));
-    renderStatus.textContent = `${reason || "Input profile changed"} -- click Render Amps to update.`;
+    renderPairBtn.classList.add("btn-render-stale");
+    renderStatus.textContent = `${reason || "A setting that affects amp rendering changed"} -- click Render Amps to update.`;
   }
 }
 
+document.getElementById("amp-a-file").addEventListener("change", () => markProfileStale("Amp A changed"));
+document.getElementById("amp-b-file").addEventListener("change", () => markProfileStale("Amp B changed"));
+
 instrumentSelect.addEventListener("change", () => {
   populateProfileSelect();
-  markProfileStale();
+  markProfileStale("Instrument changed");
   updateCoverage();
 });
 profileSelect.addEventListener("change", () => {
   updateProfileDescription();
-  markProfileStale();
+  markProfileStale("Input profile changed");
   updateCoverage();
 });
 customGainSlider.addEventListener("input", () => {
   customGainValue.textContent = `${fmtSigned(customGainSlider.value)} dB`;
-  markProfileStale();
+  markProfileStale("Custom input gain changed");
   updateCoverage();
 });
-calibrationModeSelect.addEventListener("change", markProfileStale);
-referenceDbuInput.addEventListener("change", markProfileStale);
+calibrationModeSelect.addEventListener("change", () => markProfileStale("Calibration mode changed"));
+referenceDbuInput.addEventListener("change", () => markProfileStale("Reference level changed"));
 
 // Real audio gain (unlike the deprecated preview-only dry_gain_db) -- see
 // hybrid/pipeline.py's render_pair() docstring. Does NOT affect the
@@ -303,7 +314,7 @@ function applyInstrumentHintFromDi() {
 
 diSelector.addEventListener("change", () => {
   applyInstrumentHintFromDi();
-  markProfileStale();
+  markProfileStale("DI clip changed");
 });
 
 applyInstrumentHintFromDi();
@@ -753,6 +764,7 @@ async function doRenderPair() {
 // slider every time you nudge the test-gain control would fight the whole
 // point of stress-testing a design you already settled on.
 function applyRenderResult(data, { applySuggestedCrossover }) {
+  renderPairBtn.classList.remove("btn-render-stale");
   if (data.warnings && data.warnings.length) {
     renderWarnings.hidden = false;
     renderWarnings.textContent = data.warnings.join(" ");
