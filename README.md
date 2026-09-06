@@ -165,6 +165,43 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
    rendering it (Full and Lite) through the existing native NAMCore renderer
    and comparing against the training target.
 
+## Design modes: Dynamic Hybrid vs. Fixed Blend, and the shared Cabinet stage
+
+The workflow above describes **Dynamic Hybrid** mode, the original/default
+mode. A second mode, **Fixed Blend**, is available as a separate tab in the
+UI:
+
+- **Dynamic Hybrid** (`hybrid/blend.py`, `hybrid/design.py`,
+  `hybrid/training_target.py`): changes from Amp A toward Amp B according to
+  playing level, via the crossover/transition envelope described above.
+- **Fixed Blend** (`hybrid/fixed_blend.py`, `hybrid/blend_training_target.py`):
+  always combines the two amp responses at one constant, user-chosen ratio
+  (`result = A * (1 - mix_b) + B * mix_b`), independent of playing level —
+  no crossover envelope at all. Its own auto level-match uses the DI's
+  ACTIVE playing material (silence excluded) rather than a crossover band,
+  since there's no crossover region to match around (see
+  `hybrid.fixed_blend.compute_active_trim`).
+
+Both tabs share Amp A/Amp B, the preview DI, input profile/calibration,
+render, test gain, the Listen controls, the Cabinet IR stage, the official
+training input, A2 quality, and training — switching tabs never re-runs NAM
+inference; the already-rendered `RenderedPair` (`hybrid/pipeline.py`) is
+reused by whichever mode you're auditioning.
+
+A third, mode-independent stage — **Cabinet IR** (`hybrid/cab_ir.py`) — sits
+AFTER the amp combination in either mode: an ordinary causal FIR convolution,
+optionally auditioned in preview only, or "baked" into the generated A2
+training target. Preview-only and baked processing always go through the
+exact same `apply_cab_ir` function, so what you hear in preview with "Use cab
+in preview" checked is exactly what gets trained if you also check "Bake cab
+into A2". Baking a cabinet IR adds `len(ir) - 1` samples of *serial* temporal
+dependency on top of whatever the two source amps (and, for Hybrid, the
+crossover envelope) already need — see `hybrid/receptive_field.py`'s
+`combine_required_history`/`cab_fir_serial_history_samples` — and generation
+is refused with an explicit message (rather than silently truncating the IR
+or training an unrepresentable target) if that total exceeds the destination
+A2's actual receptive field.
+
 ## Current limitations / experimental status
 
 - **NAM inference is implemented, via a native tool, not torch.**
@@ -232,6 +269,11 @@ hybrid-nam-builder/
 │   ├── level_match.py      -- crossover-region auto level-match trim
 │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
 │   ├── blend.py            -- the dynamic crossfade itself
+│   ├── fixed_blend.py      -- Fixed Blend design mode (fixed-ratio combination)
+│   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
+│   ├── training_target.py         -- Dynamic Hybrid A2 training-target generation
+│   ├── blend_training_target.py   -- Fixed Blend A2 training-target generation
+│   ├── receptive_field.py -- mode/cab-aware temporal-dependency accounting
 │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
 │   └── metadata.py         -- hybrid provenance metadata (JSON sidecar)
 ├── native/nam_render/      -- C++ NAM inference tool (NeuralAmpModelerCore), see its README

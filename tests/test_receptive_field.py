@@ -19,6 +19,8 @@ from hybrid.receptive_field import (
     _model_receptive_field,
     _net_receptive_field,
     assert_envelope_history_fits,
+    cab_fir_serial_history_samples,
+    combine_required_history,
     compute_a2_receptive_field,
     compute_source_nam_receptive_field,
 )
@@ -154,3 +156,47 @@ def test_assert_envelope_history_fits_accepts_comfortable_margin(monkeypatch):
     monkeypatch.setattr(receptive_field, "compute_a2_receptive_field", lambda: _fake_a2_rf(1000))
     rf = assert_envelope_history_fits(500, 48000)
     assert rf.receptive_field_samples == 1000
+
+
+# -- docs/blend-mode.md "RECEPTIVE FIELD" -----------------------------------
+
+def test_cab_fir_serial_history_samples_is_length_minus_one():
+    assert cab_fir_serial_history_samples(1) == 0
+    assert cab_fir_serial_history_samples(500) == 499
+    assert cab_fir_serial_history_samples(0) == 0
+
+
+def test_combine_required_history_hybrid_takes_max_of_three_parallel_branches():
+    record = combine_required_history("hybrid", amp_a_samples=100, amp_b_samples=300, envelope_samples=200)
+    assert record["base_required_samples"] == 300
+    assert record["total_required_samples"] == 300
+    assert record["branch_samples"] == {"amp_a": 100, "amp_b": 300, "envelope": 200}
+
+
+def test_combine_required_history_blend_ignores_envelope_branch():
+    record = combine_required_history("blend", amp_a_samples=100, amp_b_samples=300, envelope_samples=99999)
+    assert "envelope" not in record["branch_samples"]
+    assert record["base_required_samples"] == 300
+    assert record["total_required_samples"] == 300
+
+
+def test_combine_required_history_blend_requires_no_envelope_argument():
+    record = combine_required_history("blend", amp_a_samples=100, amp_b_samples=50, envelope_samples=None)
+    assert record["base_required_samples"] == 100
+
+
+def test_combine_required_history_hybrid_requires_envelope_samples():
+    with pytest.raises(ValueError):
+        combine_required_history("hybrid", amp_a_samples=100, amp_b_samples=50, envelope_samples=None)
+
+
+def test_combine_required_history_adds_baked_cab_serially_not_as_parallel_max():
+    record = combine_required_history("blend", amp_a_samples=100, amp_b_samples=300, envelope_samples=None, cab_fir_samples=50)
+    assert record["base_required_samples"] == 300
+    assert record["cab_fir_serial_samples"] == 50
+    assert record["total_required_samples"] == 350
+
+
+def test_combine_required_history_rejects_unknown_mode():
+    with pytest.raises(ValueError):
+        combine_required_history("bogus", amp_a_samples=1, amp_b_samples=1, envelope_samples=None)

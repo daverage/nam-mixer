@@ -171,6 +171,108 @@ def test_check_receptive_field_warns_but_continues_when_amp_path_missing(tmp_pat
     train_a2.check_receptive_field(manifest, 48000)  # must not raise
 
 
+def test_check_receptive_field_blend_mode_ignores_envelope_and_uses_amp_max(tmp_path, monkeypatch):
+    """docs/blend-mode.md: Blend mode's base dependency is max(Amp A, Amp B)
+    only -- no envelope branch at all, even if envelope_max_history_ms were
+    (incorrectly) present in the manifest."""
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # small RF
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [6] * 3, [1, 10, 100])  # larger RF
+
+    manifest = {
+        "mode": "blend",
+        "design": {"envelope_max_history_ms": 999999.0},  # must be ignored for Blend
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+    }
+
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
+
+    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+    train_a2.check_receptive_field(manifest, 48000)
+
+    amp_b_rf = train_a2.compute_source_nam_receptive_field(train_a2.load_nam(amp_b))
+    assert captured["samples"] == amp_b_rf  # NOT inflated by the bogus envelope_max_history_ms
+
+
+def test_check_receptive_field_adds_baked_cab_serially(tmp_path, monkeypatch):
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 3
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])  # RF = 3
+
+    manifest = {
+        "mode": "blend",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "cab": {"baked": True, "fir_history_samples": 500},
+    }
+
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
+
+    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+    train_a2.check_receptive_field(manifest, 48000)
+    assert captured["samples"] == 3 + 500  # base max (3) + serial cab FIR (500)
+
+
+def test_check_receptive_field_preview_only_cab_adds_nothing(tmp_path, monkeypatch):
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
+
+    manifest = {
+        "mode": "blend",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "cab": {"baked": False, "fir_history_samples": 500},  # preview-only
+    }
+
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
+
+    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+    train_a2.check_receptive_field(manifest, 48000)
+    assert captured["samples"] == 3  # cab not baked -- zero added
+
+
+def test_check_receptive_field_over_capacity_baked_cab_fails_clearly(tmp_path, monkeypatch):
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
+
+    manifest = {
+        "mode": "blend",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "cab": {"baked": True, "fir_history_samples": 5000},
+    }
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        raise ValueError(f"required {samples} exceeds available 100")
+    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+
+    with pytest.raises(train_a2.TrainingAbort, match="baking"):
+        train_a2.check_receptive_field(manifest, 48000)
+
+
+def test_check_receptive_field_exact_fit_boundary_still_permitted(tmp_path, monkeypatch):
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 3
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])  # RF = 3
+    manifest = {"mode": "blend", "amp_a": {"path": str(amp_a)}, "amp_b": {"path": str(amp_b)}}
+
+    monkeypatch.setattr(
+        train_a2, "assert_envelope_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": samples, "submodel_names": ["x"]})(),
+    )
+    train_a2.check_receptive_field(manifest, 48000)  # exact fit -- must not raise
+
+
 def test_validate_exported_nam_runs_native_render(tmp_path, monkeypatch):
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"

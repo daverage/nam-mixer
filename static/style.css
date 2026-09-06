@@ -60,6 +60,29 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
   margin-left: 0.35rem;
 }
 
+.mode-tabs {
+  max-width: 1100px;
+  margin: 0 auto 1.25rem;
+  display: flex;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.mode-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}
+.mode-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.mode-tab:hover:not(.active) { color: var(--text); }
+
 .layout {
   max-width: 1100px;
   margin: 0 auto;

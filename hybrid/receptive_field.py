@@ -35,6 +35,7 @@ from __future__ import annotations
 import importlib.resources
 import json
 from dataclasses import dataclass
+from typing import Optional
 
 
 class ReceptiveFieldUnavailable(RuntimeError):
@@ -204,6 +205,67 @@ def compute_a2_receptive_field() -> A2ReceptiveField:
     return A2ReceptiveField(
         receptive_field_samples=best_samples, submodel_names=names, config_path=path, raw_config=raw,
     )
+
+
+def cab_fir_serial_history_samples(fir_length_samples: int) -> int:
+    """Additional temporal-dependency samples a BAKED cabinet FIR of
+    `fir_length_samples` taps adds on top of whatever the Hybrid/Blend
+    combination already needs -- see docs/blend-mode.md "RECEPTIVE FIELD".
+
+    The FIR runs AFTER the amp combination, so it's a SERIAL dependency, not
+    a parallel one like Amp A/Amp B/the crossover envelope: producing one
+    output sample of the cabbed signal needs `fir_length_samples` samples of
+    the (already combined) pre-cab signal, which in turn each need their own
+    `base_required_history` -- hence `base + (L - 1)`, not `max(base, L)`.
+    A preview-only (non-baked) cab adds zero training-time dependency since
+    it never touches the target that gets trained on.
+    """
+    return max(0, int(fir_length_samples) - 1)
+
+
+def combine_required_history(
+    mode: str,
+    amp_a_samples: int,
+    amp_b_samples: int,
+    envelope_samples: Optional[int],
+    cab_fir_samples: int = 0,
+) -> dict:
+    """Combine the per-branch dependency samples of a generated target into
+    one required-history record, mode-aware -- see docs/blend-mode.md
+    "RECEPTIVE FIELD -- IMPORTANT":
+
+        Hybrid (parallel):  base = max(Amp A, Amp B, envelope)
+        Blend  (parallel):  base = max(Amp A, Amp B)              -- no envelope
+        + baked cab (serial): total = base + (cab_fir_samples - 1 already
+          folded into cab_fir_samples by the caller via
+          `cab_fir_serial_history_samples`)
+
+    Returns a plain dict (not a dataclass) so it serializes directly into
+    manifest JSON without extra plumbing; both `hybrid.training_target` and
+    `hybrid.blend_training_target` build the "receptive_field" manifest
+    section from this same function so local/Kaggle checks can never
+    silently diverge in how they combine branches.
+    """
+    if mode not in ("hybrid", "blend"):
+        raise ValueError(f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')")
+
+    branch_samples = {"amp_a": int(amp_a_samples), "amp_b": int(amp_b_samples)}
+    if mode == "hybrid":
+        if envelope_samples is None:
+            raise ValueError("envelope_samples is required for mode='hybrid'")
+        branch_samples["envelope"] = int(envelope_samples)
+
+    base_required_samples = max(branch_samples.values())
+    cab_fir_samples = max(0, int(cab_fir_samples))
+    total_required_samples = base_required_samples + cab_fir_samples
+
+    return {
+        "mode": mode,
+        "branch_samples": branch_samples,
+        "base_required_samples": base_required_samples,
+        "cab_fir_serial_samples": cab_fir_samples,
+        "total_required_samples": total_required_samples,
+    }
 
 
 def assert_envelope_history_fits(

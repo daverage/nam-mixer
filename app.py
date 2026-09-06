@@ -20,9 +20,12 @@ from werkzeug.utils import secure_filename
 
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
+from hybrid.blend_training_target import generate_blend_training_bundle
+from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
 from hybrid.design import freeze_design
+from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
@@ -54,6 +57,8 @@ WORK_DIR = BASE_DIR / "work"
 WORK_DIR.mkdir(exist_ok=True)
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
+CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
+CAB_UPLOAD_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_DIR = WORK_DIR / "training_input"
 TRAINING_INPUT_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
@@ -160,6 +165,94 @@ def api_nam_inspect():
     except (OSError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(model.summary())
+
+
+@app.route("/api/cab/upload", methods=["POST"])
+def api_cab_upload():
+    """Accept a cabinet IR WAV picked in the browser, save it under
+    work/uploaded_cab/, and return its parsed metadata plus the server-side
+    path used by /api/preview and /api/generate's cab params -- see
+    hybrid/cab_ir.py and docs/blend-mode.md "CAB UPLOAD / STORAGE".
+
+    Prepares the IR against the currently-rendered pair's sample rate (if
+    any) purely to report prepared/trimmed info back to the UI -- this is
+    NOT what gets used for the actual official-input bake at generation
+    time (hybrid.training_target.maybe_bake_cab re-prepares against the
+    training input's own sample rate; see that function's docstring for why
+    the tap count can differ).
+    """
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "no file uploaded"}), 400
+    filename = secure_filename(upload.filename)
+    if not filename.lower().endswith(".wav"):
+        return jsonify({"error": "expected a .wav file"}), 400
+
+    dest = CAB_UPLOAD_DIR / filename
+    upload.save(dest)
+
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    preview_sample_rate = pair.sample_rate if pair is not None else None
+
+    response = {"filename": filename, "path": str(dest)}
+    try:
+        if preview_sample_rate is not None:
+            prepared = get_prepared_cab_ir(dest, preview_sample_rate)
+        else:
+            # No pair rendered yet -- prepare against the file's own native
+            # rate just to validate/describe it; preview will re-prepare
+            # against the real target rate once a pair exists.
+            import soundfile as _sf
+
+            info = _sf.info(str(dest))
+            prepared = get_prepared_cab_ir(dest, info.samplerate)
+        response.update({
+            "original_sample_rate": prepared.original_sample_rate,
+            "original_channels": prepared.original_channels,
+            "original_frame_count": prepared.original_frame_count,
+            "duration_s": prepared.original_frame_count / prepared.original_sample_rate,
+            "sha256": prepared.sha256,
+            "prepared_sample_rate": prepared.sample_rate,
+            "prepared_frame_count": prepared.prepared_frame_count,
+            "leading_samples_trimmed": prepared.leading_samples_trimmed,
+        })
+    except CabIrError as exc:
+        dest.unlink(missing_ok=True)
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(response)
+
+
+def _parse_cab_params(data: dict, pair_sample_rate: int):
+    """Shared cab-preview parsing for /api/preview (source=a/b/hybrid/blend).
+    Returns a `PreparedCabIr` or None. Cab is a SHARED, mode-independent
+    post-amp stage -- see docs/blend-mode.md "SHARED CABINET IR STAGE"."""
+    cab_path = data.get("cab_path")
+    cab_enabled = bool(data.get("cab_preview_enabled", False))
+    if not cab_path or not cab_enabled:
+        return None
+    return get_prepared_cab_ir(cab_path, pair_sample_rate)
+
+
+def _resolve_cab_design(data: dict, pair_sample_rate: int):
+    """Build a `CabDesign` for provenance/freezing from generate-request
+    params, or None if no cab is selected. Mirrors _parse_cab_params but
+    also records `baked` -- see hybrid/cab_ir.py's CabDesign."""
+    cab_path = data.get("cab_path")
+    if not cab_path:
+        return None
+    preview_enabled = bool(data.get("cab_preview_enabled", False))
+    baked = bool(data.get("cab_baked", False))
+    if baked:
+        # Baking without preview is never allowed (docs/blend-mode.md "CAB
+        # UI": "If Bake cab into A2 is enabled, automatically ensure Use cab
+        # in preview is also enabled") -- enforced server-side too, not just
+        # in the UI, so provenance can never record a baked-but-unaudited cab.
+        preview_enabled = True
+    prepared = get_prepared_cab_ir(cab_path, pair_sample_rate)
+    return cab_design_from_prepared(
+        prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled, baked=baked,
+    )
 
 
 def _load_di(di_file: str):
@@ -357,6 +450,16 @@ def api_profile_coverage():
     return jsonify({"coverage": coverage, "reachability_warning": reachability_warning})
 
 
+def _parse_blend_params(data: dict):
+    """Fixed Blend equivalent of _parse_hybrid_params -- mix_b/manual trim/
+    auto_level only, no crossover/transition (Blend has no envelope, see
+    hybrid/fixed_blend.py)."""
+    mix_b = max(0.0, min(1.0, float(data.get("mix_b", 0.5))))
+    manual_b_trim_db = float(data.get("manual_b_trim_db", 0.0))
+    auto_level = bool(data.get("auto_level", True))
+    return mix_b, manual_b_trim_db, auto_level
+
+
 def _parse_hybrid_params(data: dict):
     """Shared crossover/transition/trim parsing for /api/preview,
     /api/blend_info, and /api/blend_curve -- all drive the same
@@ -404,6 +507,55 @@ def api_blend_info():
         "effective_b_trim_db": result.effective_b_trim_db,
         "alignment_offset_samples": result.alignment_offset_samples,
     })
+
+
+@app.route("/api/mix_info", methods=["POST"])
+def api_mix_info():
+    """Mode-aware trim/mix readout, for both design modes -- the generic
+    replacement for /api/blend_info now that "Blend" is a real design mode
+    (see docs/blend-mode.md "API": /api/blend_info is kept as a
+    backwards-compatible Hybrid-only alias, never removed). Cheap for both
+    modes -- no NAM inference, safe on every slider move.
+    """
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    if pair is None:
+        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
+
+    data = request.get_json(force=True)
+    mode = data.get("mode", "hybrid")
+    if mode == "blend":
+        try:
+            mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
+        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db)
+        return jsonify({
+            "mode": "blend",
+            "mix_b": result.mix_b,
+            "mix_a": 1.0 - result.mix_b,
+            "auto_trim_db": result.auto_trim_db,
+            "manual_trim_db": result.manual_trim_db,
+            "effective_b_trim_db": result.effective_b_trim_db,
+            "alignment_offset_samples": result.alignment_offset_samples,
+        })
+    elif mode == "hybrid":
+        try:
+            crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+        result = build_hybrid(
+            pair, crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
+            auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+        )
+        return jsonify({
+            "mode": "hybrid",
+            "auto_trim_db": result.auto_trim_db,
+            "manual_trim_db": result.manual_trim_db,
+            "effective_b_trim_db": result.effective_b_trim_db,
+            "alignment_offset_samples": result.alignment_offset_samples,
+        })
+    else:
+        return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')"}), 400
 
 
 @app.route("/api/blend_curve", methods=["POST"])
@@ -454,12 +606,17 @@ def api_blend_curve():
 
 @app.route("/api/preview", methods=["POST"])
 def api_preview():
-    """Return audio (WAV bytes) for Amp A, Amp B, or the hybrid blend.
+    """Return audio (WAV bytes) for Amp A, Amp B, the Hybrid crossfade, or
+    the Fixed Blend mix.
 
-    Cheap for `source="hybrid"`: reuses the RenderedPair cached by
-    /api/render_pair and calls build_hybrid() only -- no NAM inference here,
-    so this is safe to call on every crossover/transition/trim slider move.
-    Applies preview_safety_limiter (playback safety net only -- never used on
+    Cheap for `source="hybrid"`/`source="blend"`: reuses the RenderedPair
+    cached by /api/render_pair and only recombines already-rendered audio --
+    no NAM inference here, so this is safe to call on every crossover/
+    transition/trim/mix slider move. If `cab_preview_enabled` and `cab_path`
+    are given, the SAME shared cab is applied to Amp A, Amp B, AND the
+    Hybrid/Blend result (see docs/blend-mode.md "CAB PREVIEW SEMANTICS") so
+    A/Result/B comparisons stay fair -- applied AFTER the amp combination,
+    BEFORE preview_safety_limiter (playback safety net only -- never used on
     a training target, see hybrid/safety.py).
     """
     pair: RenderedPair | None = _rendered_pair_cache["pair"]
@@ -494,8 +651,31 @@ def api_preview():
             "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
             "X-Alignment-Offset-Samples": str(result.alignment_offset_samples),
         }
+    elif source == "blend":
+        try:
+            mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
+
+        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db)
+        audio = result.blend
+        headers = {
+            "X-Mix-B": f"{result.mix_b:.4f}",
+            "X-Auto-Trim-Db": f"{result.auto_trim_db:.3f}",
+            "X-Manual-Trim-Db": f"{result.manual_trim_db:.3f}",
+            "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
+            "X-Alignment-Offset-Samples": str(result.alignment_offset_samples),
+        }
     else:
-        return jsonify({"error": f"unknown source: {source!r} (expected a, b, or hybrid)"}), 400
+        return jsonify({"error": f"unknown source: {source!r} (expected a, b, hybrid, or blend)"}), 400
+
+    try:
+        cab = _parse_cab_params(data, pair.sample_rate)
+    except CabIrError as exc:
+        return jsonify({"error": f"cab preview error: {exc}"}), 400
+    if cab is not None:
+        from hybrid.cab_ir import apply_cab_ir
+        audio = apply_cab_ir(audio.astype("float32"), cab)
 
     audio = preview_safety_limiter(audio.astype("float32"))
     buf = io.BytesIO()
@@ -544,9 +724,11 @@ def api_training_input_upload():
 
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
-    """Freeze the currently-auditioned HybridDesign and generate a real,
-    reproducible A2 training bundle from it -- see hybrid/design.py and
-    hybrid/training_target.py. Requires a rendered/auditioned amp pair
+    """Freeze the currently-auditioned design (Hybrid or Blend, `mode` in the
+    request body, defaulting to "hybrid" for backward compatibility) and
+    generate a real, reproducible A2 training bundle from it -- see
+    hybrid/design.py, hybrid/fixed_blend.py, hybrid/training_target.py, and
+    hybrid/blend_training_target.py. Requires a rendered/auditioned amp pair
     (POST /api/render_pair) and an uploaded official NAM training input
     (POST /api/training_input/upload) -- never trains on the preview/genre DI.
     """
@@ -564,41 +746,70 @@ def api_generate():
         }), 400
 
     data = request.get_json(force=True)
+    mode = data.get("mode", "hybrid")
+    if mode not in ("hybrid", "blend"):
+        return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')"}), 400
+
     try:
-        crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
-    except (TypeError, ValueError):
-        return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
-
-    # Alignment is never exposed as a UI control (see freeze_design/build_hybrid
-    # call sites) -- it stays off, matching every other build_hybrid() call in
-    # this app.
-    result = build_hybrid(
-        pair,
-        crossover_dbfs=crossover_dbfs,
-        transition_width_db=transition_width_db,
-        auto_level=auto_level,
-        manual_b_trim_db=manual_b_trim_db,
-        align_enabled=False,
-    )
-
-    design = freeze_design(
-        pair, result,
-        amp_a_path=amp_a_path, amp_b_path=amp_b_path,
-        crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
-        alignment_enabled=False, design_di_file=di_file,
-    )
+        cab = _resolve_cab_design(data, pair.sample_rate)
+    except CabIrError as exc:
+        return jsonify({"error": f"cab error: {exc}"}), 400
 
     design_id = str(data.get("design_id") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     bundle_dir = A2_OUTPUT_DIR / design_id
 
-    try:
-        design.write_json(bundle_dir / "hybrid_design.json")
-        bundle = generate_training_bundle(design, TRAINING_INPUT_PATH, bundle_dir)
-    except (TrainingInputError, OSError, ValueError) as exc:
-        return jsonify({"error": str(exc)}), 400
+    if mode == "blend":
+        try:
+            mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
+
+        # Alignment is never exposed as a UI control, matching Hybrid mode.
+        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db, align_enabled=False)
+        design = freeze_blend_design(
+            pair, result,
+            amp_a_path=amp_a_path, amp_b_path=amp_b_path,
+            alignment_enabled=False, design_di_file=di_file, cab=cab,
+        )
+        try:
+            design.write_json(bundle_dir / "blend_design.json")
+            bundle = generate_blend_training_bundle(design, TRAINING_INPUT_PATH, bundle_dir)
+        except (TrainingInputError, CabIrError, OSError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
+    else:
+        try:
+            crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+
+        # Alignment is never exposed as a UI control (see freeze_design/build_hybrid
+        # call sites) -- it stays off, matching every other build_hybrid() call in
+        # this app.
+        result = build_hybrid(
+            pair,
+            crossover_dbfs=crossover_dbfs,
+            transition_width_db=transition_width_db,
+            auto_level=auto_level,
+            manual_b_trim_db=manual_b_trim_db,
+            align_enabled=False,
+        )
+
+        design = freeze_design(
+            pair, result,
+            amp_a_path=amp_a_path, amp_b_path=amp_b_path,
+            crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
+            alignment_enabled=False, design_di_file=di_file, cab=cab,
+        )
+
+        try:
+            design.write_json(bundle_dir / "hybrid_design.json")
+            bundle = generate_training_bundle(design, TRAINING_INPUT_PATH, bundle_dir)
+        except (TrainingInputError, CabIrError, OSError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
 
     return jsonify({
         "design_id": design_id,
+        "mode": mode,
         "bundle_dir": str(bundle.bundle_dir),
         "input_path": str(bundle.input_path),
         "target_path": str(bundle.hybrid_target_path),
@@ -615,6 +826,7 @@ def api_generate():
             "amp_a_gain_db": design.amp_a_calibration_gain_db,
             "amp_b_gain_db": design.amp_b_calibration_gain_db,
         },
+        "cab_summary": design.cab.to_dict() if design.cab else None,
         "training_command": f"python scripts/train_a2.py {bundle.training_manifest_path}",
         "epoch_presets": A2_EPOCH_PRESETS,
         "default_epoch_preset": DEFAULT_EPOCH_PRESET,

@@ -9,8 +9,13 @@
 <body>
   <header class="topbar">
     <h1>Hybrid NAM Builder <span class="badge">Experimental</span></h1>
-    <p class="tagline">Dynamic, input-level-driven crossfade between two NAM amp captures.</p>
+    <p class="tagline">Create dynamic input-driven hybrids or fixed blends from two NAM captures.</p>
   </header>
+
+  <div class="mode-tabs" role="tablist" aria-label="Design mode">
+    <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" role="tab" aria-selected="true">Dynamic Hybrid</button>
+    <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" role="tab" aria-selected="false">Fixed Blend</button>
+  </div>
 
   <div class="layout">
     <aside class="col col-setup">
@@ -82,7 +87,7 @@
         {{ {"guitar": guitar_profiles, "bass": bass_profiles} | tojson }}
       </script>
 
-      <section class="card">
+      <section class="card" id="hybrid-panel-crossover" data-mode-panel="hybrid">
         <h2><span class="step">2</span> Crossover &amp; transition</h2>
 
         <div class="slider-row">
@@ -104,12 +109,26 @@
         </div>
       </section>
 
+      <section class="card" id="blend-panel-mix" data-mode-panel="blend" hidden>
+        <h2><span class="step">2</span> Fixed mix</h2>
+
+        <div class="slider-row">
+          <label for="mix-slider">Amp A / Amp B mix</label>
+          <span id="mix-value" class="value-chip">Amp A 50% / Amp B 50%</span>
+        </div>
+        <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+        <div class="info">
+          A fixed ratio, independent of playing level -- no crossover envelope.
+          0% is 100% Amp A, 100% is 100% Amp B.
+        </div>
+      </section>
+
       <section class="card">
         <h2><span class="step">3</span> Level match</h2>
 
         <label class="checkbox-row">
           <input type="checkbox" id="auto-level-match" checked>
-          Auto level match Amp B to Amp A near the crossover
+          <span id="auto-level-match-label">Auto level match Amp B to Amp A near the crossover</span>
         </label>
 
         <div class="slider-row">
@@ -132,7 +151,7 @@
         <h2><span class="step">4</span> Listen</h2>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
-          <button id="btn-preview-hybrid" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
+          <button id="btn-preview-mix" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
         <audio id="player" controls></audio>
@@ -151,50 +170,71 @@
         </div>
       </section>
 
-      <section class="card">
-        <h2><span class="step">5</span> The journey between amps</h2>
-        <div class="legend">
-          <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
-          <span class="legend-item"><i class="swatch swatch-band"></i>Transition band</span>
-          <span class="legend-item"><i class="swatch swatch-threshold"></i>Crossover point</span>
-          <span class="legend-item"><i class="swatch dot-a"></i>Amp A</span>
-          <span class="legend-item"><i class="swatch dot-b"></i>Amp B</span>
-          <span class="legend-item"><i class="swatch swatch-playhead"></i>Playback position</span>
-        </div>
-        <div class="canvas-wrap">
-          <canvas id="journey-canvas" role="img" aria-label="Crossfade journey chart. Render an amp pair to populate it."></canvas>
-          <div id="journey-tooltip" class="journey-tooltip" hidden></div>
-        </div>
-        <div id="journey-empty" class="info">Render an amp pair to see the crossfade journey here.</div>
+      <section class="card" id="cab-panel">
+        <h2><span class="step">5</span> Cabinet IR <span class="hint">(shared, optional)</span></h2>
+
+        <label class="field-label" for="cab-file">Cabinet IR (WAV)</label>
+        <input type="file" id="cab-file" accept=".wav" class="file-input">
+        <div id="cab-info" class="info"></div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="cab-preview-enabled" disabled>
+          Use cab in preview
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="cab-baked" disabled>
+          Bake cab into A2
+        </label>
+
+        <div id="cab-status" class="info" aria-live="polite">Cab: off</div>
       </section>
 
-      <section class="card">
-        <h2><span class="step">6</span> Expected crossover coverage</h2>
-        <div class="info">
-          For each input profile, the share of ACTIVE playing time (silence
-          excluded) that would land mostly in Amp A, in transition, or mostly
-          in Amp B at the current crossover settings -- a reachability check,
-          not a claim about how it will sound. Updates instantly; does not
-          re-render the amps. The row matching your current input profile is
-          highlighted.
-        </div>
-        <div id="coverage-warning" class="warning-box" hidden aria-live="assertive"></div>
-        <div class="table-wrap">
-          <table id="coverage-table" class="coverage-table" hidden>
-            <thead>
-              <tr><th>Input profile</th><th>Amp A</th><th>Transition</th><th>Amp B</th></tr>
-            </thead>
-            <tbody id="coverage-tbody"></tbody>
-          </table>
-        </div>
-        <div id="coverage-empty" class="info">Render an amp pair to see coverage for each input profile.</div>
-      </section>
+      <div id="hybrid-only-diagnostics" data-mode-panel="hybrid">
+        <section class="card">
+          <h2><span class="step">6</span> The journey between amps</h2>
+          <div class="legend">
+            <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
+            <span class="legend-item"><i class="swatch swatch-band"></i>Transition band</span>
+            <span class="legend-item"><i class="swatch swatch-threshold"></i>Crossover point</span>
+            <span class="legend-item"><i class="swatch dot-a"></i>Amp A</span>
+            <span class="legend-item"><i class="swatch dot-b"></i>Amp B</span>
+            <span class="legend-item"><i class="swatch swatch-playhead"></i>Playback position</span>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="journey-canvas" role="img" aria-label="Crossfade journey chart. Render an amp pair to populate it."></canvas>
+            <div id="journey-tooltip" class="journey-tooltip" hidden></div>
+          </div>
+          <div id="journey-empty" class="info">Render an amp pair to see the crossfade journey here.</div>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">7</span> Expected crossover coverage</h2>
+          <div class="info">
+            For each input profile, the share of ACTIVE playing time (silence
+            excluded) that would land mostly in Amp A, in transition, or mostly
+            in Amp B at the current crossover settings -- a reachability check,
+            not a claim about how it will sound. Updates instantly; does not
+            re-render the amps. The row matching your current input profile is
+            highlighted.
+          </div>
+          <div id="coverage-warning" class="warning-box" hidden aria-live="assertive"></div>
+          <div class="table-wrap">
+            <table id="coverage-table" class="coverage-table" hidden>
+              <thead>
+                <tr><th>Input profile</th><th>Amp A</th><th>Transition</th><th>Amp B</th></tr>
+              </thead>
+              <tbody id="coverage-tbody"></tbody>
+            </table>
+          </div>
+          <div id="coverage-empty" class="info">Render an amp pair to see coverage for each input profile.</div>
+        </section>
+      </div>
 
       <div class="group-label">Export -- produces your training deliverable</div>
 
       <section class="card">
-        <h2><span class="step">7</span> Create A2</h2>
-        <div class="info">
+        <h2><span class="step">8</span> <span id="create-a2-title">Create Hybrid A2</span></h2>
+        <div class="info" id="create-a2-description">
           Freezes the CURRENT crossover/transition/trim into an immutable
           design, then blends the official NAM training excitation through
           it (unmodified by the input profile above -- that's a

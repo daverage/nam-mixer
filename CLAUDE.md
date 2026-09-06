@@ -2,6 +2,37 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Design modes
+
+The app has two design modes, both sharing Amp A/B, the preview DI, input
+profile/calibration, render, test gain, Listen controls, the Cabinet IR
+stage, official training input, A2 quality, and training -- switching modes
+never re-runs NAM inference (see `hybrid/pipeline.py`'s `RenderedPair`,
+reused by both):
+
+- **Dynamic Hybrid** (the original/default mode): `hybrid/blend.py` +
+  `hybrid/design.py` + `hybrid/training_target.py` -- level-driven crossfade,
+  unchanged maths from before Fixed Blend existed.
+- **Fixed Blend**: `hybrid/fixed_blend.py` + `hybrid/blend_training_target.py`
+  -- Amp A/Amp B combined at one constant user-chosen ratio
+  (`result = A*(1-mix_b) + B*mix_b`), independent of playing level, no
+  crossover envelope. Its own auto level-match
+  (`hybrid.fixed_blend.compute_active_trim`) uses the DI's ACTIVE playing
+  material (via `hybrid.coverage.active_signal_mask`), not a crossover band.
+
+A third, mode-independent stage, **Cabinet IR** (`hybrid/cab_ir.py`), sits
+AFTER the amp combination in either mode: ordinary causal FIR convolution,
+optionally preview-only or "baked" into the generated A2 target via the same
+`apply_cab_ir` function in both cases. A baked cab adds `len(ir) - 1` samples
+of SERIAL temporal dependency on top of whatever the amps (+ envelope, for
+Hybrid) already need -- see `hybrid.receptive_field.combine_required_history`
+-- and generation/training is refused with an explicit message, never
+silently truncated, if that exceeds the destination A2's receptive field.
+`scripts/train_a2.py`'s `check_receptive_field` and
+`cloud/kaggle/train_a2_cloud.py`'s (duplicated, self-contained per that
+module's docstring) `check_receptive_field` both enforce this from the
+generated manifest's `mode`/`cab`/`receptive_field` fields.
+
 ## What this is
 
 Hybrid NAM Builder is an experimental proof-of-concept tool for building a dynamic,
@@ -66,11 +97,13 @@ The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`,
 `hybrid/nam_loader.py`, `hybrid/input_profiles.py`, `hybrid/calibration.py`,
 `hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`,
-`hybrid/training_target.py`, `hybrid/a2_training_settings.py`, and
-`hybrid/kaggle_training.py` against synthetic signals only (the pipeline/
-training-target tests fake out `render()` via monkeypatch; the Kaggle tests
-mock the CLI at the `subprocess` boundary — see docs/kaggle_training.md) — no
-torch, built native tool, or real Kaggle credentials required. `tests/test_render.py`
+`hybrid/training_target.py`, `hybrid/a2_training_settings.py`,
+`hybrid/kaggle_training.py`, `hybrid/fixed_blend.py`,
+`hybrid/blend_training_target.py`, and `hybrid/cab_ir.py` against synthetic
+signals only (the pipeline/training-target tests fake out `render()` via
+monkeypatch; the Kaggle tests mock the CLI at the `subprocess` boundary —
+see docs/kaggle_training.md) — no torch, built native tool, or real Kaggle
+credentials required. `tests/test_render.py`
 exercises real NAM inference and auto-skips unless `native/nam_render` has
 been built AND a real `.nam` file exists at
 `assets/nam_models/FenderSuperReverb1977_Clean.nam` (gitignored,
@@ -161,6 +194,38 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     see `docs/kaggle_training.md`. `/api/kaggle/*` in `app.py` is a thin
     Flask layer over this module; `cloud/kaggle/train_a2_cloud.py` is the
     self-contained script that actually runs inside the Kaggle kernel.
+15. **`fixed_blend.py`** is the Fixed Blend design mode: `build_fixed_blend`
+    (cheap, pure-numpy fixed-ratio combination of an already-rendered
+    `RenderedPair`), `compute_active_trim` (active-playing-material auto
+    level-match, NOT the crossover-band one `hybrid.level_match` uses), and
+    `BlendDesign`/`freeze_blend_design` (the Fixed Blend analogue of
+    `hybrid.design.HybridDesign`/`freeze_design`).
+16. **`blend_training_target.py`** is Fixed Blend's A2 target generator --
+    the counterpart to `training_target.generate_training_bundle`, reusing
+    its shared helpers (`validate_training_input`, `TrainingInputError`,
+    `TargetSafetyReport`, `maybe_bake_cab`, `compute_receptive_field_record`,
+    hashing) so the two modes' bundles stay structurally identical; only the
+    combination step (fixed mix vs. level-driven crossfade) and the
+    manifest's `design`/`mode` section differ.
+17. **`cab_ir.py`** is the shared Cabinet IR stage used by BOTH modes,
+    applied AFTER the amp combination: `load_and_prepare_cab_ir`/
+    `get_prepared_cab_ir` (mono downmix, leading-silence trim, resample,
+    cached by content hash) and `apply_cab_ir` (causal FIR convolution,
+    truncated to the source length) are the exact same functions used for
+    live preview and for baking into a training target -- never two
+    subtly-different code paths. `CabDesign` (frozen, attached as an
+    optional `cab` field on both `HybridDesign` and `BlendDesign`) carries
+    preview/baked provenance.
+18. **`receptive_field.py`**'s `combine_required_history` is the mode-aware
+    (Hybrid includes the crossover-envelope branch; Blend doesn't) combiner
+    that also folds in a baked cab's `cab_fir_serial_history_samples` --
+    SERIAL (`base + (L-1)`), not another parallel branch, since the FIR runs
+    after the amp combination. `scripts/train_a2.py`'s
+    `check_receptive_field` and the duplicated, self-contained equivalent in
+    `cloud/kaggle/train_a2_cloud.py` both gate training on this from the
+    manifest's `mode`/`cab`/`receptive_field` fields, aborting with an
+    explicit message (never silently truncating the IR) if a baked cab's
+    added history exceeds the destination A2's actual receptive field.
 
 `assets/di/` contains real recorded genre/style DI guitar/bass performances
 (sourced from the NAMtoClo project — see `assets/di/README.md`) used for

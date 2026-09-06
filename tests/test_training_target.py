@@ -283,3 +283,52 @@ def test_generate_training_bundle_rejects_mismatched_sample_rate(tmp_path):
 
     with pytest.raises(TrainingInputError):
         generate_training_bundle(design, training_input, tmp_path / "bundle")
+
+
+def test_manifest_records_mode_hybrid_and_no_cab_by_default(tmp_path):
+    amp_a = _write_nam(tmp_path / "a.nam")
+    amp_b = _write_nam(tmp_path / "b.nam")
+    training_input = _write_training_input(tmp_path / "input.wav")
+    design = _design(amp_a, amp_b)
+    bundle = generate_training_bundle(design, training_input, tmp_path / "bundle")
+    assert bundle.manifest["mode"] == "hybrid"
+    assert bundle.manifest["cab"] == {"selected": False}
+    assert bundle.manifest["receptive_field"]["mode"] == "hybrid"
+
+
+def test_baked_cab_alters_hybrid_target_but_preview_only_does_not(tmp_path):
+    """docs/blend-mode.md acceptance criteria 10/11: preview and bake use the
+    same core cab processing, and a preview-only cab must never alter the
+    generated training target -- only baking does."""
+    from hybrid.cab_ir import cab_design_from_prepared, load_and_prepare_cab_ir
+
+    amp_a = _write_nam(tmp_path / "a.nam")
+    amp_b = _write_nam(tmp_path / "b.nam")
+    training_input = _write_training_input(tmp_path / "input.wav")
+
+    ir_path = tmp_path / "ir.wav"
+    ir = np.zeros(10, dtype=np.float32)
+    ir[0] = 0.7
+    ir[1] = 0.3
+    sf.write(ir_path, ir, 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, target_sample_rate=48000)
+
+    baked_cab = cab_design_from_prepared(prepared, original_filename="ir.wav", preview_enabled=True, baked=True)
+    preview_cab = cab_design_from_prepared(prepared, original_filename="ir.wav", preview_enabled=True, baked=False)
+
+    design_no_cab = _design(amp_a, amp_b)
+    design_baked = _design(amp_a, amp_b, cab=baked_cab)
+    design_preview = _design(amp_a, amp_b, cab=preview_cab)
+
+    bundle_no_cab = generate_training_bundle(design_no_cab, training_input, tmp_path / "no_cab")
+    bundle_baked = generate_training_bundle(design_baked, training_input, tmp_path / "baked")
+    bundle_preview = generate_training_bundle(design_preview, training_input, tmp_path / "preview")
+
+    t_no_cab, _ = sf.read(bundle_no_cab.hybrid_target_raw_path, dtype="float32")
+    t_baked, _ = sf.read(bundle_baked.hybrid_target_raw_path, dtype="float32")
+    t_preview, _ = sf.read(bundle_preview.hybrid_target_raw_path, dtype="float32")
+
+    assert not np.allclose(t_no_cab, t_baked, atol=1e-6)
+    np.testing.assert_allclose(t_no_cab, t_preview, atol=1e-6)
+    assert bundle_baked.manifest["cab"]["baked"] is True
+    assert bundle_baked.manifest["receptive_field"]["cab_fir_serial_samples"] == prepared.prepared_frame_count - 1

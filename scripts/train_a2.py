@@ -176,21 +176,28 @@ def load_and_validate_manifest(manifest_path: Path) -> dict:
 
 
 def check_receptive_field(manifest: dict, sample_rate: int) -> None:
-    """The complete dry-input dependency of a hybrid target is
-    max(envelope history, Amp A receptive field, Amp B receptive field) --
-    Amp A/B run on the same dry input IN PARALLEL with the crossover
-    envelope (see hybrid.pipeline.render_pair), so their own receptive
-    fields matter here too, not just the envelope's. Checking only the
-    envelope would miss a source amp that itself needs more history than
-    the new A2 can represent.
-    """
-    max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
-    if max_history_ms is None:
-        print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
-        return
-    envelope_samples = int(round(max_history_ms / 1000.0 * sample_rate))
+    """The complete dry-input dependency of a generated target is, mode-aware
+    (see docs/blend-mode.md "RECEPTIVE FIELD -- IMPORTANT"):
 
-    branch_samples = {"envelope": envelope_samples}
+        Hybrid: max(envelope history, Amp A RF, Amp B RF) [+ (cab FIR - 1) if baked]
+        Blend:  max(Amp A RF, Amp B RF)                   [+ (cab FIR - 1) if baked]
+
+    Amp A/B run on the same dry input IN PARALLEL with the crossover
+    envelope (Hybrid only -- see hybrid.pipeline.render_pair), so their own
+    receptive fields matter here too, not just the envelope's; a baked
+    cabinet FIR runs AFTER that combination, so it's a SERIAL addition, not
+    another parallel branch (see hybrid.receptive_field.combine_required_history).
+    """
+    mode = manifest.get("mode", "hybrid")
+
+    branch_samples = {}
+    if mode == "hybrid":
+        max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
+        if max_history_ms is None:
+            print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
+            return
+        branch_samples["envelope"] = int(round(max_history_ms / 1000.0 * sample_rate))
+
     for label, key in (("Amp A", "amp_a"), ("Amp B", "amp_b")):
         amp_path = manifest.get(key, {}).get("path")
         if not amp_path:
@@ -202,41 +209,61 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> None:
         except (OSError, ValueError, ReceptiveFieldUnavailable) as exc:
             print(f"WARNING: could not compute {label}'s receptive field ({amp_path}): {exc}")
 
-    worst_label = max(branch_samples, key=branch_samples.get)
-    worst_samples = branch_samples[worst_label]
-    print("Target dependency by branch (parallel, so the effective total is the max):")
+    if not branch_samples:
+        print("WARNING: no branch dependency could be determined -- skipping receptive-field check.")
+        return
+
+    cab = manifest.get("cab") or {}
+    cab_fir_samples = 0
+    if cab.get("baked") and cab.get("fir_history_samples"):
+        cab_fir_samples = int(cab["fir_history_samples"])
+
+    base_required = max(branch_samples.values())
+    worst_samples = base_required + cab_fir_samples
+
+    print(f"Target dependency by branch (mode={mode}, parallel branches take the max):")
     for label, samples in branch_samples.items():
         print(f"  {label:<12} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
-    print(f"  {'effective max':<12} {worst_samples:>6} samples ({worst_samples / sample_rate * 1000:6.1f} ms) [{worst_label}]")
+    print(f"  {'base max':<12} {base_required:>6} samples ({base_required / sample_rate * 1000:6.1f} ms)")
+    if cab_fir_samples:
+        print(f"  {'+ cab FIR':<12} {cab_fir_samples:>6} samples ({cab_fir_samples / sample_rate * 1000:6.1f} ms) [serial, baked cab]")
+    print(f"  {'total':<12} {worst_samples:>6} samples ({worst_samples / sample_rate * 1000:6.1f} ms)")
 
     try:
-        # branch_samples are PARALLEL (Amp A, Amp B, and the crossover
-        # envelope all consume the same dry input independently, and the
-        # final per-sample blend is memoryless), so the temporal requirement
-        # is their MAX, not their sum -- an exact fit (required ==
-        # available) is representable with zero slack, not a failure. See
-        # assert_envelope_history_fits's docstring.
+        # base branches are PARALLEL (they consume the same dry input
+        # independently, and the per-sample amp combination is memoryless),
+        # so their temporal requirement is a MAX, not a sum; a baked cab FIR
+        # runs AFTER that combination and so is SERIAL/additive on top -- see
+        # assert_envelope_history_fits's/combine_required_history's docstrings.
+        # An exact fit (required == available) is representable with zero
+        # slack, not a failure.
         rf = assert_envelope_history_fits(worst_samples, sample_rate, margin_fraction=0.0)
         margin_samples = rf.receptive_field_samples - worst_samples
         margin_ms = margin_samples / sample_rate * 1000
         if margin_samples == 0:
             print(
-                f"Receptive field: EXACT FIT -- effective max dependency {worst_samples} samples "
+                f"Receptive field: EXACT FIT -- total dependency {worst_samples} samples "
                 f"exactly equals the A2 receptive field {rf.receptive_field_samples} samples "
                 f"(submodels={rf.submodel_names}). Zero temporal margin. Training permitted -- this "
                 "checks temporal reach only, not whether the network has enough capacity to actually "
-                "learn the composite (two source amps + level-dependent crossfade) function within "
-                "that reach; that is exactly what this experiment is meant to determine."
+                "learn the composite function within that reach; that is exactly what this "
+                "experiment is meant to determine."
             )
         else:
             print(
-                f"Receptive field OK: effective max dependency {worst_samples} samples fits inside A2 "
+                f"Receptive field OK: total dependency {worst_samples} samples fits inside A2 "
                 f"receptive field {rf.receptive_field_samples} samples (submodels={rf.submodel_names}), "
                 f"margin {margin_ms:.1f} ms."
             )
     except ReceptiveFieldUnavailable as exc:
         raise TrainingAbort(str(exc)) from exc
     except ValueError as exc:
+        if cab_fir_samples:
+            raise TrainingAbort(
+                f"REFUSING to train: {exc}\nThe cab works fine for preview, but baking this "
+                "particular IR after these source NAMs exceeds the destination A2's temporal "
+                "history. Disable baking (preview-only cab remains available) or use a shorter IR."
+            ) from exc
         raise TrainingAbort(f"REFUSING to train: {exc}") from exc
 
 
@@ -248,12 +275,28 @@ def _build_user_metadata(manifest: dict):
     """
     from nam.models.metadata import GearType, UserMetadata
 
+    # docs/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
+    # gear type when baking a cab, IF the installed package actually has one
+    # -- never invent an unsupported enum value. Checked dynamically against
+    # whatever GearType members are ACTUALLY installed rather than hardcoding
+    # a guessed name.
+    gear_type = GearType.AMP
+    cab = manifest.get("cab") or {}
+    if cab.get("baked"):
+        for candidate_name in ("AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
+            candidate = getattr(GearType, candidate_name, None)
+            if candidate is not None:
+                gear_type = candidate
+                break
+        # else: no such member exists in this installed version -- keep
+        # GearType.AMP and rely on our own manifest.cab record for accuracy.
+
     # Shared with cloud/kaggle/train_a2_cloud.py -- see
     # hybrid/a2_training_settings.py's user_metadata_kwargs docstring. Only
-    # the nam-specific enum (GearType.AMP) and tone_type/output_level_dbu
+    # the nam-specific enum (gear_type) and tone_type/output_level_dbu
     # omissions live here; everything else is the shared plain-dict logic.
     return UserMetadata(
-        gear_type=GearType.AMP,
+        gear_type=gear_type,
         # tone_type deliberately left unset: this model's whole point is
         # that its tone changes with input level, so no single ToneType
         # value would be non-misleading.

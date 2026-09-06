@@ -194,6 +194,85 @@ def validate_inputs(bundle_dir: Path) -> dict:
     }
 
 
+def check_receptive_field(manifest: dict, sample_rate: int) -> None:
+    """Mode-aware receptive-field gate, duplicated from
+    scripts/train_a2.py's check_receptive_field (see this module's docstring
+    for why this script duplicates rather than imports hybrid/ code). Reads
+    ONLY the manifest -- this script never receives the source .nam files
+    (see docs/blend-mode.md "TRAINING / KAGGLE": source NAMs/cab IRs are not
+    uploaded to Kaggle), so branch samples come from
+    manifest["receptive_field"]["branch_samples"], computed locally at
+    generation time by hybrid.training_target.compute_receptive_field_record.
+
+    Validated against the packed A2 config of the neural-amp-modeler version
+    actually installed in THIS kernel (ensure_nam_installed() must have run
+    first) -- the same JSON schema hybrid/receptive_field.py parses, read
+    directly here since importing hybrid/ isn't available in this sandbox.
+    """
+    rf_record = manifest.get("receptive_field")
+    if not rf_record:
+        print("WARNING: manifest has no receptive_field record -- skipping receptive-field check.")
+        return
+
+    branch_samples = {k: v for k, v in (rf_record.get("branch_samples") or {}).items() if v is not None}
+    if not branch_samples:
+        print("WARNING: receptive_field.branch_samples is empty/unavailable -- skipping receptive-field check.")
+        return
+
+    cab = manifest.get("cab") or {}
+    cab_fir_samples = int(cab["fir_history_samples"]) if cab.get("baked") and cab.get("fir_history_samples") else 0
+
+    base_required = max(branch_samples.values())
+    total_required = base_required + cab_fir_samples
+
+    mode = manifest.get("mode", "hybrid")
+    print(f"Target dependency by branch (mode={mode}, parallel branches take the max):")
+    for label, samples in branch_samples.items():
+        print(f"  {label:<12} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'base max':<12} {base_required:>6} samples ({base_required / sample_rate * 1000:6.1f} ms)")
+    if cab_fir_samples:
+        print(f"  {'+ cab FIR':<12} {cab_fir_samples:>6} samples ({cab_fir_samples / sample_rate * 1000:6.1f} ms) [serial, baked cab]")
+    print(f"  {'total':<12} {total_required:>6} samples ({total_required / sample_rate * 1000:6.1f} ms)")
+
+    import importlib.resources
+
+    try:
+        resource = importlib.resources.files("nam.train._resources").joinpath("config_model_packed.json")
+        raw_config = json.loads(resource.read_text(encoding="utf-8"))
+        submodels = raw_config["net"]["config"]["submodels"]
+        best_samples = 0
+        names = []
+        for entry in submodels:
+            names.append(entry["name"])
+            layer_arrays = entry["config"].get("layers_configs", entry["config"].get("layers"))
+            total = 1
+            for layer_cfg in layer_arrays:
+                kernel_sizes, dilations = layer_cfg["kernel_sizes"], layer_cfg["dilations"]
+                total += sum((int(k) - 1) * int(d) for k, d in zip(kernel_sizes, dilations))
+            best_samples = max(best_samples, total)
+    except Exception as exc:  # noqa: BLE001 -- report, never guess at the config shape
+        raise CloudTrainingError(f"could not determine installed A2's receptive field: {exc}") from exc
+
+    if total_required > best_samples:
+        message = (
+            f"REFUSING to train: total dependency {total_required} samples exceeds the installed "
+            f"A2's receptive field {best_samples} samples (submodels={names})."
+        )
+        if cab_fir_samples:
+            message += (
+                " The cab works fine for preview, but baking this particular IR after these source "
+                "NAMs exceeds the destination A2's temporal history. Disable baking and re-generate, "
+                "or use a shorter IR."
+            )
+        raise CloudTrainingError(message)
+
+    margin = best_samples - total_required
+    if margin == 0:
+        print(f"Receptive field: EXACT FIT -- {total_required} samples == {best_samples} samples. Zero margin, training permitted.")
+    else:
+        print(f"Receptive field OK: {total_required} samples fits inside {best_samples} samples, margin {margin / sample_rate * 1000:.1f} ms.")
+
+
 def user_metadata_kwargs(manifest: dict) -> dict:
     """Identical logic to hybrid/a2_training_settings.py's
     user_metadata_kwargs -- duplicated here per this module's
@@ -203,11 +282,22 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     amp_b_name = Path(manifest.get("amp_b", {}).get("filename", "Amp B")).stem
     calibration = manifest.get("calibration", {})
     input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
+
+    mode = manifest.get("mode", "hybrid")
+    if mode == "blend":
+        mix_b = manifest.get("design", {}).get("mix_b")
+        ratio = f" {round((1 - mix_b) * 100)}-{round(mix_b * 100)}" if mix_b is not None else ""
+        name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
+        gear_model = f"{amp_a_name} + {amp_b_name}{ratio}"
+    else:
+        name = f"Hybrid {amp_a_name} -> {amp_b_name}"
+        gear_model = f"{amp_a_name} -> {amp_b_name}"
+
     return {
-        "name": f"Hybrid {amp_a_name} -> {amp_b_name}",
+        "name": name,
         "modeled_by": "Hybrid NAM Builder",
-        "gear_make": "Hybrid",
-        "gear_model": f"{amp_a_name} -> {amp_b_name}",
+        "gear_make": "Hybrid" if mode == "hybrid" else "Blend",
+        "gear_model": gear_model,
         "input_level_dbu": input_level_dbu,
     }
 
@@ -223,6 +313,8 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
 
     with open(bundle_dir / "training_manifest.json", "r", encoding="utf-8") as f:
         manifest = json.load(f)
+
+    check_receptive_field(manifest, REQUIRED_SAMPLE_RATE)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -248,7 +340,18 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
 
     export_dir = output_dir / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
-    user_metadata = UserMetadata(gear_type=GearType.AMP, **user_metadata_kwargs(manifest))
+    # docs/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
+    # gear type when baking a cab, IF the installed package actually has one
+    # -- mirrors scripts/train_a2.py's _build_user_metadata, duplicated here
+    # per this module's self-containment rule (see module docstring).
+    gear_type = GearType.AMP
+    if (manifest.get("cab") or {}).get("baked"):
+        for candidate_name in ("AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
+            candidate = getattr(GearType, candidate_name, None)
+            if candidate is not None:
+                gear_type = candidate
+                break
+    user_metadata = UserMetadata(gear_type=gear_type, **user_metadata_kwargs(manifest))
     result.model.net.export(
         export_dir,
         basename="hybrid_a2",

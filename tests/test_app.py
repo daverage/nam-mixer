@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 import app as app_module
+import hybrid.blend_training_target as blend_training_target
 import hybrid.pipeline as pipeline
 import hybrid.training_target as training_target
 
@@ -28,6 +29,7 @@ def identity_render(monkeypatch):
         return np.asarray(audio, dtype=np.float32).copy()
     monkeypatch.setattr(pipeline, "render", fake_render)
     monkeypatch.setattr(training_target, "render", fake_render)
+    monkeypatch.setattr(blend_training_target, "render", fake_render)
     # Bypass the official-V3-file MD5 check for synthetic training-input
     # fixtures in these tests -- we don't ship the real ~27MB official file.
     monkeypatch.setattr(training_target, "_md5_file", lambda path: training_target.OFFICIAL_V3_INPUT_MD5)
@@ -291,3 +293,154 @@ def test_generate_end_to_end_produces_bundle(client, isolated_training_paths, tm
     # and generation never re-applies ANY profile gain to the training input.
     assert manifest["design"]["pickup_profile_applied_to_training_input"] is False
     assert manifest["design"]["frozen_effective_b_trim_db"] == pytest.approx(1.5)
+    assert manifest["mode"] == "hybrid"  # omitted mode defaults to Hybrid
+
+
+def test_mix_info_defaults_to_hybrid_mode(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+    resp = client.post("/api/mix_info", json={"crossover_dbfs": -20.0, "transition_width_db": 8.0})
+    assert resp.status_code == 200
+    assert resp.get_json()["mode"] == "hybrid"
+
+
+def test_mix_info_blend_mode_accepts_mix_b(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+    resp = client.post("/api/mix_info", json={"mode": "blend", "mix_b": 0.75})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["mode"] == "blend"
+    assert data["mix_b"] == pytest.approx(0.75)
+    assert data["mix_a"] == pytest.approx(0.25)
+
+
+def test_preview_blend_source_accepts_mix_and_is_independent_of_crossover_params(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    resp = client.post("/api/preview", json={"source": "blend", "mix_b": 0.2, "auto_level": False})
+    assert resp.status_code == 200
+    assert resp.headers.get("X-Mix-B") is not None
+    assert float(resp.headers["X-Mix-B"]) == pytest.approx(0.2)
+
+
+def test_preview_invalid_mix_b_is_clamped(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    resp = client.post("/api/preview", json={"source": "blend", "mix_b": 5.0, "auto_level": False})
+    assert resp.status_code == 200
+    assert float(resp.headers["X-Mix-B"]) == pytest.approx(1.0)
+
+
+def test_cab_upload_validation_rejects_non_wav(client, tmp_path):
+    bogus = tmp_path / "not_a_wav.txt"
+    bogus.write_text("nope")
+    with open(bogus, "rb") as f:
+        resp = client.post("/api/cab/upload", data={"file": (f, "cab.txt")}, content_type="multipart/form-data")
+    assert resp.status_code == 400
+
+
+def test_cab_upload_validation_rejects_silent_ir(client, tmp_path):
+    import soundfile as sf
+    silent = tmp_path / "silent.wav"
+    sf.write(silent, np.zeros(1000, dtype=np.float32), 48000, subtype="FLOAT")
+    with open(silent, "rb") as f:
+        resp = client.post("/api/cab/upload", data={"file": (f, "cab.wav")}, content_type="multipart/form-data")
+    assert resp.status_code == 400
+
+
+def test_cab_upload_accepts_valid_ir(client, tmp_path):
+    import soundfile as sf
+    ir = tmp_path / "ir.wav"
+    ir_data = np.zeros(200, dtype=np.float32)
+    ir_data[0] = 1.0
+    sf.write(ir, ir_data, 48000, subtype="FLOAT")
+    with open(ir, "rb") as f:
+        resp = client.post("/api/cab/upload", data={"file": (f, "cab.wav")}, content_type="multipart/form-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["original_sample_rate"] == 48000
+    assert "path" in data
+
+
+def test_preview_with_cab_applies_same_ir_to_a_result_and_b(client, tmp_path):
+    import soundfile as sf
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    ir_path = tmp_path / "ir.wav"
+    ir_data = np.zeros(10, dtype=np.float32)
+    ir_data[0] = 0.5
+    ir_data[1] = 0.5
+    sf.write(ir_path, ir_data, 48000, subtype="FLOAT")
+
+    for source in ("a", "b", "hybrid"):
+        resp = client.post("/api/preview", json={
+            "source": source, "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+            "cab_path": str(ir_path), "cab_preview_enabled": True,
+        })
+        assert resp.status_code == 200, (source, resp.get_json() if resp.data else resp.status_code)
+
+
+def test_generate_blend_mode_produces_bundle_with_mode_blend(client, isolated_training_paths, tmp_path):
+    training_path, a2_dir = isolated_training_paths
+    _write_training_wav(training_path)
+
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    resp = client.post("/api/generate", json={"mode": "blend", "mix_b": 0.4, "auto_level": False, "manual_b_trim_db": 0.5})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["mode"] == "blend"
+    assert Path(data["target_path"]).is_file()
+
+    with open(data["manifest_path"]) as f:
+        manifest = jsonlib.load(f)
+    assert manifest["mode"] == "blend"
+    assert manifest["design"]["mix_b"] == pytest.approx(0.4)
+
+
+def test_generate_baked_cab_records_provenance(client, isolated_training_paths, tmp_path):
+    import soundfile as sf
+    training_path, a2_dir = isolated_training_paths
+    _write_training_wav(training_path)
+
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    ir_path = tmp_path / "ir.wav"
+    ir_data = np.zeros(10, dtype=np.float32)
+    ir_data[0] = 0.6
+    ir_data[1] = 0.4
+    sf.write(ir_path, ir_data, 48000, subtype="FLOAT")
+
+    resp = client.post("/api/generate", json={
+        "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_baked": True,
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["cab_summary"]["baked"] is True
+    assert data["cab_summary"]["sha256"]
+
+    with open(data["manifest_path"]) as f:
+        manifest = jsonlib.load(f)
+    assert manifest["cab"]["baked"] is True
+    assert manifest["cab"]["selected"] is True

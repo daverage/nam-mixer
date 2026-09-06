@@ -31,6 +31,7 @@ import soundfile as sf
 
 from .align import align_to_reference
 from .blend import CrossoverConfig, blend
+from .cab_ir import CabDesign, CabIrError, apply_cab_ir, get_prepared_cab_ir
 from .calibration import CalibrationResult, resolve_calibration
 from .design import HybridDesign
 from .envelope import (
@@ -42,6 +43,7 @@ from .envelope import (
 from .input_profiles import db_to_amplitude
 from .metadata import HybridMetadata
 from .nam_loader import NamModel, load_nam
+from .receptive_field import combine_required_history, compute_source_nam_receptive_field
 from .render import render
 from .safety import apply_peak_ceiling, check_audio
 
@@ -205,9 +207,9 @@ class TrainingBundle:
     input_path: Path
     hybrid_target_raw_path: Path
     hybrid_target_path: Path
-    hybrid_metadata_path: Path
+    hybrid_metadata_path: Optional[Path]
     training_manifest_path: Path
-    design: HybridDesign
+    design: object
     safety: TargetSafetyReport
     training_input_info: TrainingInputInfo
     warnings: list[str]
@@ -254,10 +256,12 @@ def build_training_manifest(
     envelope_config: BoundedEnvelopeConfig,
     warnings: list[str],
     training_env: Optional[dict] = None,
+    receptive_field: Optional[dict] = None,
 ) -> dict:
     return {
         "hybrid_builder_version": HYBRID_BUILDER_VERSION,
         "git_commit": _git_commit(),
+        "mode": "hybrid",
         "amp_a": {
             "filename": Path(design.amp_a_path).name,
             "path": design.amp_a_path,
@@ -333,8 +337,100 @@ def build_training_manifest(
             "training_settings": None,
             "device": None,
         },
+        "cab": design.cab.to_dict() if design.cab else {"selected": False},
+        "receptive_field": receptive_field,
         "warnings": warnings,
     }
+
+
+def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int) -> np.ndarray:
+    """Apply the shared cabinet IR to `audio` if-and-only-if `cab.baked` --
+    used by both Hybrid and Blend target generation (see
+    hybrid.blend_training_target). Must run BEFORE safety/peak-ceiling
+    processing (docs/blend-mode.md "CAB PREVIEW SEMANTICS" / "SHARED
+    CABINET IR STAGE"). No-op (returns `audio` unchanged) if no cab is
+    baked -- this keeps existing no-cab Hybrid generation byte-for-byte
+    unchanged.
+    """
+    if cab is None or not cab.baked:
+        return audio
+    if not cab.ir_working_path:
+        raise TrainingInputError("cab is marked baked but has no ir_working_path recorded in the design")
+    try:
+        prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+        return apply_cab_ir(audio, prepared)
+    except CabIrError as exc:
+        raise TrainingInputError(f"failed to bake cabinet IR into training target: {exc}") from exc
+
+
+def compute_receptive_field_record(
+    mode: str,
+    amp_a: NamModel,
+    amp_b: NamModel,
+    sample_rate: int,
+    cab: Optional[CabDesign],
+    envelope_max_history_ms: Optional[float] = None,
+) -> dict:
+    """Best-effort required-history record for the manifest -- see
+    hybrid.receptive_field.combine_required_history. Only needs the source
+    `.nam` files (pure JSON-schema math, no torch/neural-amp-modeler
+    required -- see hybrid/receptive_field.py), so this can always be
+    computed at generation time in the plain Flask environment; validating
+    it against the actually-installed A2's real receptive field happens
+    later, in scripts/train_a2.py (local) or the Kaggle cloud worker, which
+    run in the dedicated training environment (see CLAUDE.md).
+
+    Never raises: an amp whose receptive field can't be determined (e.g. an
+    unrecognized/synthetic architecture in a test fixture) is recorded as
+    `null` with an explanatory note rather than aborting generation --
+    scripts/train_a2.py's own check_receptive_field is what actually gates
+    training and already handles this the same way.
+    """
+    from .receptive_field import ReceptiveFieldUnavailable
+
+    unavailable_notes: list[str] = []
+
+    def _rf(model: NamModel, label: str) -> Optional[int]:
+        try:
+            return compute_source_nam_receptive_field(model)
+        except ReceptiveFieldUnavailable as exc:
+            unavailable_notes.append(f"{label}: {exc}")
+            return None
+
+    amp_a_samples = _rf(amp_a, "amp_a")
+    amp_b_samples = _rf(amp_b, "amp_b")
+
+    envelope_samples = None
+    if mode == "hybrid":
+        if envelope_max_history_ms is None:
+            raise ValueError("envelope_max_history_ms is required for mode='hybrid'")
+        envelope_samples = int(round(envelope_max_history_ms / 1000.0 * sample_rate))
+
+    cab_fir_samples = 0
+    if cab is not None and cab.baked and cab.ir_working_path:
+        # Recompute the tap count AT THE TRAINING SAMPLE RATE -- the
+        # audition-time `cab.fir_history_samples` was prepared against
+        # whatever sample rate the preview DI happened to be at, which need
+        # not match the official training input's rate, and a resample
+        # changes the tap count. Cached, so this doesn't re-read/resample
+        # the IR file if generation already prepared it via maybe_bake_cab.
+        try:
+            prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+            cab_fir_samples = max(0, prepared.prepared_frame_count - 1)
+        except CabIrError:
+            cab_fir_samples = cab.fir_history_samples or 0
+
+    if amp_a_samples is None or amp_b_samples is None:
+        return {
+            "mode": mode,
+            "branch_samples": {"amp_a": amp_a_samples, "amp_b": amp_b_samples, "envelope": envelope_samples},
+            "base_required_samples": None,
+            "cab_fir_serial_samples": cab_fir_samples,
+            "total_required_samples": None,
+            "unavailable": "; ".join(unavailable_notes),
+        }
+
+    return combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples)
 
 
 def generate_training_bundle(
@@ -397,6 +493,17 @@ def generate_training_bundle(
             f"{len(official_input)} -- input/target must be exactly sample-aligned"
         )
 
+    # Baked cab (if any) runs AFTER the Hybrid combination, BEFORE safety --
+    # see docs/blend-mode.md "SHARED CABINET IR STAGE"/"CAB PREVIEW SEMANTICS".
+    # No-op for every pre-Blend-mode design (design.cab is None), preserving
+    # existing no-cab Hybrid output exactly.
+    hybrid_raw = maybe_bake_cab(hybrid_raw, design.cab, input_info.sample_rate)
+
+    receptive_field = compute_receptive_field_record(
+        "hybrid", amp_a, amp_b, input_info.sample_rate, design.cab,
+        envelope_max_history_ms=bounded_envelope_max_history_ms(envelope_config),
+    )
+
     safety_check = check_audio(hybrid_raw)
     if safety_check.has_nan_or_inf:
         raise TrainingInputError("generated hybrid target contains NaN/Inf -- aborting")
@@ -445,7 +552,7 @@ def generate_training_bundle(
         amp_a_sha256=amp_a_sha, amp_b_sha256=amp_b_sha,
         calibration=calib, training_input=input_info, safety=safety_report,
         alignment_offset_samples=alignment_offset, envelope_config=envelope_config,
-        warnings=warnings,
+        warnings=warnings, receptive_field=receptive_field,
     )
     with open(manifest_out, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

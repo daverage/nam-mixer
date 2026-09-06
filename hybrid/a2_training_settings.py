@@ -122,11 +122,21 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     # (docs/phase3.md section 9).
     input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
 
+    mode = manifest.get("mode", "hybrid")
+    if mode == "blend":
+        mix_b = manifest.get("design", {}).get("mix_b")
+        ratio = f" {round((1 - mix_b) * 100)}-{round(mix_b * 100)}" if mix_b is not None else ""
+        name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
+        gear_model = f"{amp_a_name} + {amp_b_name}{ratio}"
+    else:
+        name = f"Hybrid {amp_a_name} -> {amp_b_name}"
+        gear_model = f"{amp_a_name} -> {amp_b_name}"
+
     return {
-        "name": f"Hybrid {amp_a_name} -> {amp_b_name}",
+        "name": name,
         "modeled_by": "Hybrid NAM Builder",
-        "gear_make": "Hybrid",
-        "gear_model": f"{amp_a_name} -> {amp_b_name}",
+        "gear_make": "Hybrid" if mode == "hybrid" else "Blend",
+        "gear_model": gear_model,
         # tone_type/output_level_dbu deliberately absent -- see
         # scripts/train_a2.py's _build_user_metadata docstring for why.
         "input_level_dbu": input_level_dbu,

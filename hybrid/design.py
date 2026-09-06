@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from .blend import DEFAULT_TRANSITION_WIDTH_DB
+from .cab_ir import CabDesign
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 
 
@@ -67,8 +68,17 @@ class HybridDesign:
 
     design_di_file: Optional[str] = None  # provenance only -- NOT the training input
 
+    mode: str = "hybrid"
+
+    # Shared Cabinet IR stage, mode-independent -- see hybrid/cab_ir.py.
+    # `None` (the default) means "no cab selected", identical to every
+    # pre-Blend-mode design and fully backward compatible with previously
+    # written hybrid_design.json files that predate this field.
+    cab: Optional[CabDesign] = None
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        return d
 
     def write_json(self, path: str | Path) -> Path:
         path = Path(path)
@@ -81,6 +91,9 @@ class HybridDesign:
     def read_json(path: str | Path) -> "HybridDesign":
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        cab = data.get("cab")
+        if isinstance(cab, dict):
+            data = {**data, "cab": CabDesign(**cab)}
         return HybridDesign(**data)
 
 
@@ -95,6 +108,7 @@ def freeze_design(
     design_di_file: Optional[str] = None,
     blend_algorithm: str = "smoothstep-linear",
     envelope_config=None,
+    cab: Optional[CabDesign] = None,
 ) -> HybridDesign:
     """Build a `HybridDesign` from a `RenderedPair`/`HybridResult` the user
     actually auditioned. This is the ONLY intended way to construct a real
@@ -134,4 +148,5 @@ def freeze_design(
         envelope_release_range_db=envelope_config.release_range_db,
         envelope_max_history_ms=bounded_envelope_max_history_ms(envelope_config),
         design_di_file=design_di_file,
+        cab=cab,
     )

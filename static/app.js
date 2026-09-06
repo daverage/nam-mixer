@@ -2,6 +2,57 @@
 
 const statusEl = document.getElementById("status");
 
+// ---- Design mode tabs (Dynamic Hybrid / Fixed Blend) ----
+// Tabs are DESIGN MODES, not separate applications -- Amp A/B, the preview
+// DI, input profile/calibration, render, test gain, Listen controls, the
+// Cabinet IR stage, official training input, A2 quality, and training all
+// stay SHARED between tabs (see docs/blend-mode.md). Only the crossover/
+// transition/level-match controls, the journey/coverage diagnostics, and
+// the Create A2 wording differ per mode. Switching tabs never re-renders.
+let currentMode = "hybrid";
+const modeTabs = document.querySelectorAll(".mode-tab");
+const modePanels = document.querySelectorAll("[data-mode-panel]");
+const btnPreviewMix = document.getElementById("btn-preview-mix");
+const autoLevelMatchLabel = document.getElementById("auto-level-match-label");
+const createA2Title = document.getElementById("create-a2-title");
+const createA2Description = document.getElementById("create-a2-description");
+
+const HYBRID_LEVEL_MATCH_LABEL = "Auto level match Amp B to Amp A near the crossover";
+const BLEND_LEVEL_MATCH_LABEL = "Auto level match Amp B to Amp A over active playing";
+const HYBRID_A2_DESCRIPTION =
+  "Freezes the CURRENT crossover/transition/trim into an immutable design, " +
+  "then blends the official NAM training excitation through it (unmodified " +
+  "by the input profile above -- that's a design/preview-only control, see docs/phase3.md).";
+const BLEND_A2_DESCRIPTION =
+  "Freezes the CURRENT fixed mix/trim into an immutable design, then combines " +
+  "the official NAM training excitation through both amps at that same ratio " +
+  "(unmodified by the input profile above -- that's a design/preview-only control).";
+
+function applyModeVisibility() {
+  modePanels.forEach((el) => {
+    el.hidden = el.dataset.modePanel !== currentMode;
+  });
+  btnPreviewMix.textContent = currentMode === "blend" ? "Blend" : "Hybrid";
+  autoLevelMatchLabel.textContent = currentMode === "blend" ? BLEND_LEVEL_MATCH_LABEL : HYBRID_LEVEL_MATCH_LABEL;
+  createA2Title.textContent = currentMode === "blend" ? "Create Blend A2" : "Create Hybrid A2";
+  createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
+}
+
+modeTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    currentMode = tab.dataset.mode;
+    modeTabs.forEach((t) => {
+      t.classList.toggle("active", t === tab);
+      t.setAttribute("aria-selected", t === tab ? "true" : "false");
+    });
+    applyModeVisibility();
+    // Switching modes never re-renders NAM inference -- just recompute the
+    // (already-rendered) mix/journey/coverage panels for the new mode.
+    scheduleUpdate();
+  });
+});
+applyModeVisibility();
+
 function setStatus(msg, isError) {
   statusEl.textContent = msg;
   statusEl.style.color = isError ? "#c0362c" : "";
@@ -51,6 +102,80 @@ document.getElementById("amp-a-file").addEventListener("change", () =>
 document.getElementById("amp-b-file").addEventListener("change", () =>
   uploadNam("b", "amp-b-file", "amp-b-info")
 );
+
+// ---- Shared Cabinet IR stage (both design modes) ----
+// See docs/blend-mode.md "SHARED CABINET IR STAGE"/"CAB UI". The cab sits
+// AFTER the amp combination and is applied identically to Amp A/Result/Amp B
+// previews (fair comparisons) -- see hybrid/cab_ir.py and app.py's
+// _parse_cab_params/_resolve_cab_design.
+let cabServerPath = null;
+const cabFileInput = document.getElementById("cab-file");
+const cabInfoEl = document.getElementById("cab-info");
+const cabPreviewEnabled = document.getElementById("cab-preview-enabled");
+const cabBaked = document.getElementById("cab-baked");
+const cabStatusEl = document.getElementById("cab-status");
+
+function updateCabStatus() {
+  if (!cabServerPath) {
+    cabStatusEl.textContent = "Cab: off";
+  } else if (cabBaked.checked) {
+    cabStatusEl.textContent = "Cab: baked -- exported A2 will include this cabinet";
+  } else if (cabPreviewEnabled.checked) {
+    cabStatusEl.textContent = "Cab: preview only -- exported A2 remains amp/head only";
+  } else {
+    cabStatusEl.textContent = "Cab: off";
+  }
+}
+
+cabFileInput.addEventListener("change", async () => {
+  const file = cabFileInput.files[0];
+  cabServerPath = null;
+  cabPreviewEnabled.checked = false;
+  cabBaked.checked = false;
+  cabPreviewEnabled.disabled = true;
+  cabBaked.disabled = true;
+  if (!file) {
+    cabInfoEl.textContent = "";
+    updateCabStatus();
+    return;
+  }
+  cabInfoEl.textContent = `Uploading ${file.name}...`;
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const resp = await fetch("/api/cab/upload", { method: "POST", body: formData });
+    const data = await resp.json();
+    if (!resp.ok) {
+      cabInfoEl.textContent = "Error: " + data.error;
+      updateCabStatus();
+      return;
+    }
+    cabServerPath = data.path;
+    cabPreviewEnabled.disabled = false;
+    cabBaked.disabled = false;
+    const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
+    cabInfoEl.textContent =
+      `${file.name} -- ${data.original_sample_rate} Hz, ${data.original_channels}ch, ${durationS}s` +
+      (data.leading_samples_trimmed ? ` (${data.leading_samples_trimmed} leading samples trimmed)` : "");
+  } catch (err) {
+    cabInfoEl.textContent = "Upload failed: " + err;
+  }
+  updateCabStatus();
+});
+
+cabPreviewEnabled.addEventListener("change", () => {
+  if (!cabPreviewEnabled.checked) cabBaked.checked = false; // bake requires preview
+  updateCabStatus();
+  if (lastPreviewSource) preview(lastPreviewSource);
+});
+cabBaked.addEventListener("change", () => {
+  // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
+  // is also enabled" -- docs/blend-mode.md "CAB UI".
+  if (cabBaked.checked) cabPreviewEnabled.checked = true;
+  updateCabStatus();
+  if (lastPreviewSource) preview(lastPreviewSource);
+});
+updateCabStatus();
 
 // ---- Input profile controls (instrument / profile / custom gain / calibration) ----
 // Selecting a different profile changes the actual signal fed to both NAMs,
@@ -217,6 +342,18 @@ presetButtons.forEach((btn) => {
 transitionSlider.addEventListener("input", syncPresetButtonStates);
 syncPresetButtonStates();
 
+const mixSlider = document.getElementById("mix-slider");
+const mixValue = document.getElementById("mix-value");
+function updateMixValueLabel() {
+  const b = parseInt(mixSlider.value, 10);
+  mixValue.textContent = `Amp A ${100 - b}% / Amp B ${b}%`;
+}
+mixSlider.addEventListener("input", () => {
+  updateMixValueLabel();
+  scheduleUpdate();
+});
+updateMixValueLabel();
+
 document.getElementById("auto-level-match").addEventListener("change", scheduleUpdate);
 
 const ampBTrimSlider = document.getElementById("amp-b-trim");
@@ -238,7 +375,7 @@ async function notImplementedAction(url) {
 
 const previewButtons = [
   document.getElementById("btn-preview-a"),
-  document.getElementById("btn-preview-hybrid"),
+  document.getElementById("btn-preview-mix"),
   document.getElementById("btn-preview-b"),
 ];
 const player = document.getElementById("player");
@@ -266,22 +403,48 @@ function hybridParamsBody() {
   };
 }
 
+function blendParamsBody() {
+  return {
+    mix_b: parseInt(mixSlider.value, 10) / 100.0,
+    auto_level: document.getElementById("auto-level-match").checked,
+    manual_b_trim_db: parseFloat(ampBTrimSlider.value) || 0.0,
+  };
+}
+
+// Mode-aware params for whichever mode tab is active -- shared by
+// /api/mix_info, /api/preview (source=hybrid/blend), and /api/generate.
+function currentModeParamsBody() {
+  return currentMode === "blend"
+    ? { mode: "blend", ...blendParamsBody() }
+    : { mode: "hybrid", ...hybridParamsBody() };
+}
+
+function cabParamsBody() {
+  const enabled = cabPreviewEnabled.checked && !!cabServerPath;
+  return {
+    cab_path: enabled ? cabServerPath : null,
+    cab_preview_enabled: enabled,
+  };
+}
+
 function scheduleUpdate() {
   if (!havePair) return;
   clearTimeout(updateTimer);
   updateTimer = setTimeout(() => {
     updateTrimReadout();
-    updateJourney();
-    updateCoverage();
+    if (currentMode === "hybrid") {
+      updateJourney();
+      updateCoverage();
+    }
   }, 150);
 }
 
 async function updateTrimReadout() {
   try {
-    const resp = await fetch("/api/blend_info", {
+    const resp = await fetch("/api/mix_info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(hybridParamsBody()),
+      body: JSON.stringify(currentModeParamsBody()),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -647,9 +810,13 @@ renderPairBtn.addEventListener("click", async () => {
 
 let lastPreviewSource = null;
 
-async function preview(source) {
+async function preview(requestedSource) {
+  // "mix" means "whichever design mode's combined result is active" --
+  // resolves to source=hybrid or source=blend depending on the current tab.
+  const source = requestedSource === "mix" ? currentMode : requestedSource;
   lastPreviewSource = source;
-  const body = source === "hybrid" ? { source, ...hybridParamsBody() } : { source };
+  const modeParams = source === "hybrid" || source === "blend" ? currentModeParamsBody() : {};
+  const body = { source, ...modeParams, ...cabParamsBody() };
   try {
     const resp = await fetch("/api/preview", {
       method: "POST",
@@ -661,7 +828,7 @@ async function preview(source) {
       setStatus(data.error || "Preview failed.", true);
       return;
     }
-    if (source === "hybrid") {
+    if (source === "hybrid" || source === "blend") {
       const auto = resp.headers.get("X-Auto-Trim-Db");
       const effective = resp.headers.get("X-Effective-Trim-Db");
       trimReadout.textContent =
@@ -669,7 +836,7 @@ async function preview(source) {
     }
     const blob = await resp.blob();
     player.src = URL.createObjectURL(blob);
-    lastSourcePlayed = source;
+    lastSourcePlayed = requestedSource;
     player.play();
     setStatus(`Playing ${source.toUpperCase()}.`);
   } catch (err) {
@@ -678,7 +845,7 @@ async function preview(source) {
 }
 
 document.getElementById("btn-preview-a").addEventListener("click", () => preview("a"));
-document.getElementById("btn-preview-hybrid").addEventListener("click", () => preview("hybrid"));
+document.getElementById("btn-preview-mix").addEventListener("click", () => preview("mix"));
 document.getElementById("btn-preview-b").addEventListener("click", () => preview("b"));
 const trainingInputFile = document.getElementById("training-input-file");
 const trainingInputStatus = document.getElementById("training-input-status");
@@ -738,7 +905,12 @@ generateBtn.addEventListener("click", async () => {
     const resp = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(hybridParamsBody()),
+      body: JSON.stringify({
+        ...currentModeParamsBody(),
+        cab_path: cabServerPath || null,
+        cab_preview_enabled: cabPreviewEnabled.checked,
+        cab_baked: cabBaked.checked,
+      }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -758,10 +930,14 @@ generateBtn.addEventListener("click", async () => {
             : newWarningsText
         }</div>`
       : "";
+    const cabLine = data.cab_summary
+      ? `<div><strong>Cab:</strong> ${data.cab_summary.baked ? "baked into this A2" : "not baked (preview only)"} -- ${data.cab_summary.original_filename}</div>`
+      : "";
     generateResult.innerHTML = `
       <div><strong>Bundle:</strong> <code>${data.bundle_dir}</code></div>
       <div><strong>Target:</strong> <code>${data.target_path}</code> (peak ${data.safety_report.final_peak_dbfs.toFixed(1)} dBFS, safety reduction ${data.safety_report.gain_reduction_db.toFixed(2)} dB)</div>
       <div><strong>Calibration:</strong> ${data.calibration_summary.effective_mode} (requested ${data.calibration_summary.requested_mode})</div>
+      ${cabLine}
       <div><strong>Train it with:</strong> <code>${data.training_command}</code></div>
       ${warningsHtml}
     `;
