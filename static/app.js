@@ -1021,7 +1021,13 @@ document.querySelectorAll('input[name="a2-epoch-preset"]').forEach((el) => {
 function renderKaggleDownloadResult(designId, jobId, data) {
   kaggleResultEl.hidden = false;
   const downloadUrl = `/api/kaggle/jobs/${encodeURIComponent(jobId)}/download?design_id=${encodeURIComponent(designId)}`;
-  const namFilename = (data.output_nam_path || "").split(/[\\/]/).pop() || "model.nam";
+  // Use the EXACT filename the server will actually save the download as
+  // (`data.download_filename`, computed identically in app.py's
+  // _job_dict_for_client) -- NOT the internal `hybrid_a2.nam` export
+  // basename baked inside the Kaggle kernel (data.output_nam_path's own
+  // basename), which previously made the button's label lie about what
+  // file the browser would actually save.
+  const namFilename = data.download_filename || "model.nam";
   kaggleResultEl.innerHTML = `
     <a href="${downloadUrl}" download class="btn btn-primary btn-block">Download ${namFilename}</a>
     <div class="hint" title="${data.output_nam_path || ""}">Full path: <code>${data.output_nam_path || "(unknown)"}</code></div>

@@ -846,6 +846,18 @@ def api_generate():
     })
 
 
+def _job_dict_for_client(job) -> dict:
+    """job.to_dict() plus `download_filename` -- the EXACT filename
+    GET /api/kaggle/jobs/<id>/download will actually save the file as
+    (`{secure_filename(design_id)}.nam`), computed the same way here so the
+    UI's download button/link can never show a different name (e.g. the
+    internal `hybrid_a2.nam` export basename baked inside the Kaggle kernel,
+    job.output_nam_path's own basename) than what the browser actually saves."""
+    data = job.to_dict()
+    data["download_filename"] = f"{secure_filename(str(job.design_id))}.nam"
+    return data
+
+
 @app.route("/api/kaggle/status", methods=["GET"])
 def api_kaggle_status():
     """CLI/auth/quota status plus the most recent job for a design, if any --
@@ -855,7 +867,7 @@ def api_kaggle_status():
     design_id = request.args.get("design_id")
     if design_id:
         job = find_active_job(A2_OUTPUT_DIR, design_id)
-        info["job"] = job.to_dict() if job else None
+        info["job"] = _job_dict_for_client(job) if job else None
     return jsonify(info)
 
 
@@ -934,7 +946,7 @@ def api_kaggle_job_status(job_id: str):
     # /jobs/<id>/logs first, so the UI looked stuck even while training was
     # progressing normally.
     tail = _kaggle_manager.fetch_logs(job) if job.state not in ("complete", "failed") else _kaggle_manager.read_log_tail(job)
-    response = job.to_dict()
+    response = _job_dict_for_client(job)
     response["progress"] = _kaggle_manager.parse_progress(tail)
     response["log_tail"] = "\n".join(tail.splitlines()[-20:])
     return jsonify(response)
@@ -994,7 +1006,7 @@ def api_kaggle_job_recover(job_id: str):
         job = _kaggle_manager.retry_download(job)
     except KaggleTrainingError as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify(job.to_dict())
+    return jsonify(_job_dict_for_client(job))
 
 
 @app.route("/api/kaggle/jobs/<job_id>/cleanup", methods=["POST"])
@@ -1009,7 +1021,7 @@ def api_kaggle_job_cleanup(job_id: str):
         job = _kaggle_manager.cleanup(job)
     except KaggleTrainingError as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify(job.to_dict())
+    return jsonify(_job_dict_for_client(job))
 
 
 if __name__ == "__main__":

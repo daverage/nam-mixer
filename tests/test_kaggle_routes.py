@@ -191,6 +191,51 @@ def test_cleanup_surfaces_error_distinctly(client, tmp_path, monkeypatch):
     assert "not finished" in resp.get_json()["error"]
 
 
+def test_job_status_download_filename_matches_what_download_endpoint_serves(client, tmp_path, monkeypatch):
+    """Regression: the job dict returned to the UI must carry the EXACT
+    filename GET /api/kaggle/jobs/<id>/download will save the file as, not
+    the unrelated internal `hybrid_a2.nam` export basename baked inside the
+    Kaggle kernel -- the UI's download button used to display that internal
+    name while the browser actually saved a differently-named file."""
+    from hybrid.kaggle_training import save_job
+
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    nam_path = tmp_path / "hybrid_a2.nam"  # internal Kaggle kernel export basename
+    nam_path.write_bytes(b"fake nam contents")
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="complete", output_nam_path=str(nam_path))
+    save_job(tmp_path, job)
+
+    monkeypatch.setattr(app_module._kaggle_manager, "refresh", lambda j: j)
+    monkeypatch.setattr(app_module._kaggle_manager, "read_log_tail", lambda j, n=200: "")
+
+    status_resp = client.get("/api/kaggle/jobs/j1?design_id=mydesign")
+    assert status_resp.status_code == 200
+    download_filename = status_resp.get_json()["download_filename"]
+    assert download_filename != "hybrid_a2.nam"  # must NOT be the internal export basename
+
+    download_resp = client.get("/api/kaggle/jobs/j1/download?design_id=mydesign")
+    assert download_resp.status_code == 200
+    content_disposition = download_resp.headers.get("Content-Disposition", "")
+    assert download_filename in content_disposition
+
+
+def test_kaggle_status_job_dict_also_carries_download_filename(client, tmp_path, monkeypatch):
+    from hybrid.kaggle_training import save_job
+
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    job = KaggleJob(job_id="j1", design_id="mydesign", state="complete", output_nam_path=str(tmp_path / "hybrid_a2.nam"))
+    save_job(tmp_path, job)
+    monkeypatch.setattr(app_module._kaggle_manager, "status", lambda: {
+        "cli_installed": True, "cli_version": "1.0", "authenticated": True,
+        "accelerator": "NvidiaTeslaT4", "quota_available": True, "quota_error": None,
+    })
+
+    resp = client.get("/api/kaggle/status?design_id=mydesign")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["job"]["download_filename"] == "mydesign.nam"
+
+
 # --- GET /api/kaggle/jobs/<job_id>/download -------------------------------
 
 def test_download_requires_design_id(client):
