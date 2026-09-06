@@ -192,15 +192,31 @@ A third, mode-independent stage — **Cabinet IR** (`hybrid/cab_ir.py`) — sits
 AFTER the amp combination in either mode: an ordinary causal FIR convolution,
 optionally auditioned in preview only, or "baked" into the generated A2
 training target. Preview-only and baked processing always go through the
-exact same `apply_cab_ir` function, so what you hear in preview with "Use cab
-in preview" checked is exactly what gets trained if you also check "Bake cab
-into A2". Baking a cabinet IR adds `len(ir) - 1` samples of *serial* temporal
-dependency on top of whatever the two source amps (and, for Hybrid, the
-crossover envelope) already need — see `hybrid/receptive_field.py`'s
-`combine_required_history`/`cab_fir_serial_history_samples` — and generation
-is refused with an explicit message (rather than silently truncating the IR
-or training an unrepresentable target) if that total exceeds the destination
-A2's actual receptive field.
+exact same `apply_cab_ir` function on the COMPLETE prepared IR (never a
+shortened one), so what you hear in preview with "Use cab in preview"
+checked is exactly what gets trained if you also check "Bake cab into A2".
+
+**Receptive-field policy: hard core check vs. advisory cabinet check.**
+Amp A/Amp B (+, for Hybrid, the bounded crossover envelope) are the CORE
+dependency — this must fit inside the destination A2's actual receptive
+field, or generation/training is refused exactly as before. A baked cabinet
+adds `len(ir) - 1` samples of *serial* temporal dependency ON TOP of that
+core (see `hybrid/receptive_field.py`'s `combine_required_history`), and
+this FORMAL total is always calculated and reported — but it is only
+advisory: since we're training an A2 to *approximate* the rendered teacher
+target rather than compiling its signal graph exactly, a baked cab whose
+formal total exceeds the A2's receptive field does NOT block training. It
+means the A2 will learn an approximation of the post-cab response within its
+available temporal capacity, and `scripts/train_a2.py`/the Kaggle cloud
+worker print a "CABINET APPROXIMATION" notice explaining exactly that —
+validate the result by listening and by checking the printed ESR/RMS
+metrics against the baked target. The exact same full-length IR is used for
+preview and for baking in either case; only the training-time gating differs.
+
+Because raw WAV/FIR length is a poor proxy for how much of a captured IR is
+actually audible signal, the Cabinet card also reports cumulative-energy
+diagnostics (e.g. "99.9% energy by: 42.7 ms" for a nominally-500ms IR) —
+purely informational, never used to shorten the actual convolution.
 
 ## Current limitations / experimental status
 

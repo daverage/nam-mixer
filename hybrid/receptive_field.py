@@ -232,19 +232,42 @@ def combine_required_history(
 ) -> dict:
     """Combine the per-branch dependency samples of a generated target into
     one required-history record, mode-aware -- see docs/blend-mode.md
-    "RECEPTIVE FIELD -- IMPORTANT":
+    "IMPORTANT CONCEPTUAL POLICY":
 
-        Hybrid (parallel):  base = max(Amp A, Amp B, envelope)
-        Blend  (parallel):  base = max(Amp A, Amp B)              -- no envelope
-        + baked cab (serial): total = base + (cab_fir_samples - 1 already
-          folded into cab_fir_samples by the caller via
+        Hybrid (parallel):  hard core = max(Amp A, Amp B, envelope)
+        Blend  (parallel):  hard core = max(Amp A, Amp B)         -- no envelope
+        + baked cab (serial): formal total = hard core + cab_fir_samples
+          (already the L-1 serial-history count, via
           `cab_fir_serial_history_samples`)
+
+    IMPORTANT POLICY DISTINCTION (see docs/blend-mode.md's cabinet
+    approximation policy): `hard_required_samples` is the CORE Hybrid/Blend
+    dependency -- Amp A/Amp B (+ envelope for Hybrid) alone, with NO cab
+    contribution. This is the value that MUST fit inside the destination
+    A2's actual receptive field, or generation/training is refused exactly
+    as before this policy existed.
+
+    `formal_total_required_samples` additionally folds in a baked cab's
+    serial FIR history. It is calculated and reported honestly, but must
+    NEVER by itself gate training -- a baked cab whose formal total exceeds
+    the A2's receptive field means the A2 will LEARN AN APPROXIMATION of the
+    post-cab response within its available temporal capacity, not that
+    training is invalid. See `scripts/train_a2.py`'s/the Kaggle cloud
+    worker's `check_receptive_field` for where that distinction is actually
+    enforced.
 
     Returns a plain dict (not a dataclass) so it serializes directly into
     manifest JSON without extra plumbing; both `hybrid.training_target` and
     `hybrid.blend_training_target` build the "receptive_field" manifest
     section from this same function so local/Kaggle checks can never
     silently diverge in how they combine branches.
+
+    Legacy keys `base_required_samples`/`total_required_samples` are kept,
+    numerically identical to `hard_required_samples`/
+    `formal_total_required_samples`, for manifests/readers written before
+    this policy existed -- they must NEVER be read as the new hard gate
+    (some old code/tests did exactly that, which is the bug this policy
+    fixes; see docs/blend-mode.md).
     """
     if mode not in ("hybrid", "blend"):
         raise ValueError(f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')")
@@ -255,30 +278,41 @@ def combine_required_history(
             raise ValueError("envelope_samples is required for mode='hybrid'")
         branch_samples["envelope"] = int(envelope_samples)
 
-    base_required_samples = max(branch_samples.values())
+    hard_required_samples = max(branch_samples.values())
     cab_fir_samples = max(0, int(cab_fir_samples))
-    total_required_samples = base_required_samples + cab_fir_samples
+    formal_total_required_samples = hard_required_samples + cab_fir_samples
 
     return {
         "mode": mode,
         "branch_samples": branch_samples,
-        "base_required_samples": base_required_samples,
+        "hard_required_samples": hard_required_samples,
         "cab_fir_serial_samples": cab_fir_samples,
-        "total_required_samples": total_required_samples,
+        "formal_total_required_samples": formal_total_required_samples,
+        # Legacy aliases -- see docstring. Do not use for the hard gate.
+        "base_required_samples": hard_required_samples,
+        "total_required_samples": formal_total_required_samples,
     }
 
 
-def assert_envelope_history_fits(
-    envelope_history_samples: int,
+def assert_required_history_fits(
+    required_history_samples: int,
     sample_rate: int,
     margin_fraction: float = 0.0,
 ) -> A2ReceptiveField:
-    """Raise ValueError only if `envelope_history_samples` (already the max
+    """Raise ValueError only if `required_history_samples` (already the max
     across whatever PARALLEL branches feed the target -- see
     `hybrid.pipeline.render_pair`/scripts/train_a2.py's `check_receptive_field`:
     Amp A, Amp B, and the crossover envelope all consume the same dry input
     independently, so their temporal requirements do NOT add, they take the
     max) exceeds the actual installed A2's receptive field.
+
+    This is the CORE/HARD check -- see docs/blend-mode.md's cabinet
+    approximation policy: callers must pass the CORE Hybrid/Blend dependency
+    here (`hybrid.receptive_field.combine_required_history`'s
+    `hard_required_samples`), NEVER a cab-inflated total. A baked cabinet's
+    formal (post-combination, serial) history is a separate, advisory-only
+    calculation -- see `cab_fir_serial_history_samples` -- that must never
+    be passed to this function as if it were part of the hard requirement.
 
     `required == receptive_field_samples` (an EXACT fit, zero temporal
     margin) is PERMITTED, not treated as a failure -- a memoryless
@@ -298,13 +332,26 @@ def assert_envelope_history_fits(
     environment isn't installed here at all -- see that class's docstring.
     """
     rf = compute_a2_receptive_field()
-    required = int(envelope_history_samples * (1.0 + margin_fraction))
+    required = int(required_history_samples * (1.0 + margin_fraction))
     if required > rf.receptive_field_samples:
         raise ValueError(
-            f"Crossover envelope history ({envelope_history_samples} samples, "
-            f"{envelope_history_samples / sample_rate * 1000:.1f} ms at {sample_rate} Hz, "
+            f"Required history ({required_history_samples} samples, "
+            f"{required_history_samples / sample_rate * 1000:.1f} ms at {sample_rate} Hz, "
             f"{required} with margin) does not fit inside the installed A2's receptive "
             f"field ({rf.receptive_field_samples} samples, submodels={rf.submodel_names}, "
             f"from {rf.config_path})."
         )
     return rf
+
+
+def assert_envelope_history_fits(
+    envelope_history_samples: int,
+    sample_rate: int,
+    margin_fraction: float = 0.0,
+) -> A2ReceptiveField:
+    """Deprecated alias for `assert_required_history_fits` -- kept for
+    backward compatibility with existing callers/tests written before this
+    function was renamed to reflect that it checks the CORE Hybrid/Blend
+    dependency (Amp A/B [+ envelope]), not merely "the envelope". Prefer
+    `assert_required_history_fits` in new code."""
+    return assert_required_history_fits(envelope_history_samples, sample_rate, margin_fraction)

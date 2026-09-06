@@ -376,9 +376,12 @@ def compute_receptive_field_record(
     `.nam` files (pure JSON-schema math, no torch/neural-amp-modeler
     required -- see hybrid/receptive_field.py), so this can always be
     computed at generation time in the plain Flask environment; validating
-    it against the actually-installed A2's real receptive field happens
-    later, in scripts/train_a2.py (local) or the Kaggle cloud worker, which
-    run in the dedicated training environment (see CLAUDE.md).
+    the CORE (hard) dependency against the actually-installed A2's real
+    receptive field happens later, in scripts/train_a2.py (local) or the
+    Kaggle cloud worker, which run in the dedicated training environment
+    (see CLAUDE.md) -- see docs/blend-mode.md's cabinet approximation policy
+    for why a baked cab's formal history is calculated here but never used
+    to gate generation itself.
 
     Never raises: an amp whose receptive field can't be determined (e.g. an
     unrecognized/synthetic architecture in a test fixture) is recorded as
@@ -386,7 +389,7 @@ def compute_receptive_field_record(
     scripts/train_a2.py's own check_receptive_field is what actually gates
     training and already handles this the same way.
     """
-    from .receptive_field import ReceptiveFieldUnavailable
+    from .receptive_field import ReceptiveFieldUnavailable, compute_a2_receptive_field
 
     unavailable_notes: list[str] = []
 
@@ -406,8 +409,10 @@ def compute_receptive_field_record(
             raise ValueError("envelope_max_history_ms is required for mode='hybrid'")
         envelope_samples = int(round(envelope_max_history_ms / 1000.0 * sample_rate))
 
+    cab_baked = bool(cab is not None and cab.baked)
+    cab_fir_length = None
     cab_fir_samples = 0
-    if cab is not None and cab.baked and cab.ir_working_path:
+    if cab_baked and cab.ir_working_path:
         # Recompute the tap count AT THE TRAINING SAMPLE RATE -- the
         # audition-time `cab.fir_history_samples` was prepared against
         # whatever sample rate the preview DI happened to be at, which need
@@ -416,21 +421,55 @@ def compute_receptive_field_record(
         # the IR file if generation already prepared it via maybe_bake_cab.
         try:
             prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+            cab_fir_length = prepared.prepared_frame_count
             cab_fir_samples = max(0, prepared.prepared_frame_count - 1)
         except CabIrError:
+            cab_fir_length = cab.prepared_frame_count
             cab_fir_samples = cab.fir_history_samples or 0
 
+    # Best-effort ONLY: the plain Flask/runtime environment normally does
+    # NOT have neural-amp-modeler installed (see CLAUDE.md), so this is
+    # usually None -- the AUTHORITATIVE cab-approximation determination
+    # happens at train time (scripts/train_a2.py / the Kaggle cloud worker),
+    # never here. Never guess/falsify this value -- see docs/blend-mode.md
+    # "Do not hide or falsify the RF numbers."
+    cab_requires_approximation: Optional[bool] = None
+    a2_rf_at_generation_time: Optional[int] = None
+    if cab_baked and cab_fir_samples:
+        try:
+            a2_rf_at_generation_time = compute_a2_receptive_field().receptive_field_samples
+        except ReceptiveFieldUnavailable:
+            a2_rf_at_generation_time = None
+
+    cab_record = {
+        "baked": cab_baked,
+        "fir_length_samples": cab_fir_length,
+        "fir_history_samples": cab_fir_samples,
+    }
+
     if amp_a_samples is None or amp_b_samples is None:
-        return {
+        record = {
             "mode": mode,
             "branch_samples": {"amp_a": amp_a_samples, "amp_b": amp_b_samples, "envelope": envelope_samples},
+            "hard_required_samples": None,
+            "cab": cab_record,
+            "formal_total_required_samples": None,
+            "cab_requires_approximation": None,
+            "unavailable": "; ".join(unavailable_notes),
+            # Legacy aliases -- see combine_required_history's docstring.
             "base_required_samples": None,
             "cab_fir_serial_samples": cab_fir_samples,
             "total_required_samples": None,
-            "unavailable": "; ".join(unavailable_notes),
         }
+        return record
 
-    return combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples)
+    record = combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples)
+    record["cab"] = cab_record
+    if a2_rf_at_generation_time is not None:
+        cab_requires_approximation = record["formal_total_required_samples"] > a2_rf_at_generation_time
+        record["a2_receptive_field_samples_at_generation_time"] = a2_rf_at_generation_time
+    record["cab_requires_approximation"] = cab_requires_approximation
+    return record
 
 
 def generate_training_bundle(

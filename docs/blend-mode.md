@@ -838,3 +838,50 @@ When implementation is complete:
 3. Commit the completed work with a clear commit message.
 4. Push the commit to the repository's existing master branch.
 5. Stop there. Do not begin any follow-on feature work automatically.
+
+
+ADDENDUM -- CABINET RF POLICY CORRECTED TO ADVISORY/APPROXIMATION
+===================================================================
+
+The original "RECEPTIVE FIELD -- IMPORTANT" section above described a
+formal `base + (cab FIR length - 1)` total and said generation/training
+"abort[s]" if that total exceeds the destination A2's receptive field.
+
+That turned out to be too strict in practice: it made cabinet baking
+impossible whenever the source NAMs themselves already use most/all of the
+A2's receptive field (a common case -- both a Hybrid/Blend pair's Amp A and
+Amp B RF can each already equal the full ~132 ms A2 receptive field on
+their own), even though A2 is being TRAINED to approximate the rendered
+teacher target, not to compile its signal graph exactly. A real Kaggle
+training run was refused for exactly this reason.
+
+The corrected, now-implemented policy distinguishes two tiers:
+
+1. **CORE dependency (Amp A/Amp B RF, + the crossover envelope for
+   Hybrid) is still a HARD requirement.** If this alone exceeds the
+   destination A2's receptive field, generation/training is still refused
+   exactly as originally specified -- this has NOT changed.
+2. **A baked cabinet's formal serial FIR history (`fir_length - 1`) is
+   calculated and reported honestly, but is now ADVISORY ONLY.** If
+   `core + cab_history` exceeds the A2's receptive field, training
+   CONTINUES: the A2 is understood to be learning an APPROXIMATION of the
+   post-cab response within its available temporal capacity. Both
+   `scripts/train_a2.py` and `cloud/kaggle/train_a2_cloud.py` print an
+   explicit "CABINET APPROXIMATION" notice explaining this rather than
+   refusing to train, and the manifest's `receptive_field` record
+   distinguishes `hard_required_samples` (the gate) from
+   `formal_total_required_samples`/`cab_requires_approximation` (advisory).
+
+Nothing about the actual signal chain changed: the full prepared cabinet IR
+is still convolved in its entirety for both preview and a baked training
+target (see `hybrid/cab_ir.py`) -- only the POLICY deciding whether A2 is
+allowed to attempt learning a cab that formally exceeds its receptive field
+changed. Preview remains an exact convolution; a trained A2 whose baked cab
+exceeded its receptive field may not reproduce the very end of a long IR's
+tail exactly, and validation (ESR/RMS metrics plus listening) is how you
+find out whether that approximation is good enough for a given IR.
+
+`hybrid.cab_ir.PreparedCabIr` also gained cumulative-energy diagnostics
+(`energy_99_samples`/`_999_`/`_9999_samples` and `energy_fraction_within`)
+so a long IR's actually-meaningful length can be seen without ever
+truncating the real convolution taps.

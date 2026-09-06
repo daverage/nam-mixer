@@ -23,15 +23,44 @@ reused by both):
 A third, mode-independent stage, **Cabinet IR** (`hybrid/cab_ir.py`), sits
 AFTER the amp combination in either mode: ordinary causal FIR convolution,
 optionally preview-only or "baked" into the generated A2 target via the same
-`apply_cab_ir` function in both cases. A baked cab adds `len(ir) - 1` samples
-of SERIAL temporal dependency on top of whatever the amps (+ envelope, for
-Hybrid) already need -- see `hybrid.receptive_field.combine_required_history`
--- and generation/training is refused with an explicit message, never
-silently truncated, if that exceeds the destination A2's receptive field.
-`scripts/train_a2.py`'s `check_receptive_field` and
-`cloud/kaggle/train_a2_cloud.py`'s (duplicated, self-contained per that
-module's docstring) `check_receptive_field` both enforce this from the
-generated manifest's `mode`/`cab`/`receptive_field` fields.
+`apply_cab_ir` function on the COMPLETE prepared IR (never shortened) in
+both cases.
+
+**Receptive-field policy (`hybrid.receptive_field.combine_required_history`)
+has two tiers, not one:**
+
+- **CORE (hard gate).** Amp A/Amp B RF (+ the bounded crossover envelope,
+  Hybrid only) -- `hard_required_samples`. This MUST fit inside the
+  destination A2's actual receptive field; failing it aborts
+  generation/training exactly as before, via
+  `assert_required_history_fits` (renamed from `assert_envelope_history_fits`,
+  which remains as a back-compat alias).
+- **Baked cabinet (advisory only).** A baked cab adds `len(ir) - 1` samples
+  of SERIAL temporal dependency on top of the core --
+  `formal_total_required_samples`. This is always calculated and reported
+  (never hidden/falsified), but it NEVER gates training by itself: A2 is
+  being trained to *approximate* the rendered teacher target, not to
+  compile its signal graph exactly, so a baked cab whose formal total
+  exceeds the A2's receptive field means A2 learns an approximation within
+  its available temporal capacity -- `scripts/train_a2.py`'s
+  `check_receptive_field` and `cloud/kaggle/train_a2_cloud.py`'s
+  (duplicated, self-contained per that module's docstring)
+  `check_receptive_field` both print a "CABINET APPROXIMATION" notice and
+  continue rather than aborting (see tests/test_receptive_field_parity.py
+  for why these two independent implementations can never silently
+  diverge). Only the CORE dependency exceeding the A2's receptive field
+  still aborts.
+
+Legacy manifest keys (`base_required_samples`/`cab_fir_serial_samples`/
+`total_required_samples`, from before this two-tier policy existed) are
+preserved as numeric aliases of `hard_required_samples`/the cab FIR history/
+`formal_total_required_samples` respectively -- old manifests remain
+trainable, and `total_required_samples` is NEVER read as the hard gate.
+
+Cumulative-energy diagnostics on the prepared IR (`PreparedCabIr.energy_99_
+/_999_/_9999_samples`, `energy_fraction_within`) report how much of a long
+IR is actually meaningful signal -- purely informational, never used to
+truncate the actual FIR taps.
 
 ## What this is
 
@@ -99,11 +128,18 @@ The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`,
 `hybrid/training_target.py`, `hybrid/a2_training_settings.py`,
 `hybrid/kaggle_training.py`, `hybrid/fixed_blend.py`,
-`hybrid/blend_training_target.py`, and `hybrid/cab_ir.py` against synthetic
-signals only (the pipeline/training-target tests fake out `render()` via
-monkeypatch; the Kaggle tests mock the CLI at the `subprocess` boundary —
-see docs/kaggle_training.md) — no torch, built native tool, or real Kaggle
-credentials required. `tests/test_render.py`
+`hybrid/blend_training_target.py`, `hybrid/cab_ir.py`, and
+`hybrid/receptive_field.py` against synthetic signals only (the pipeline/
+training-target tests fake out `render()` via monkeypatch; the Kaggle tests
+mock the CLI at the `subprocess` boundary — see docs/kaggle_training.md) —
+no torch, built native tool, or real Kaggle credentials required.
+`tests/test_receptive_field_parity.py` loads BOTH `scripts/train_a2.py` and
+`cloud/kaggle/train_a2_cloud.py` as modules and asserts their
+`check_receptive_field` implementations reach the same hard/advisory
+conclusions from equivalent manifests — the mechanism that makes local/cloud
+receptive-field-policy drift a test failure instead of a silent divergence
+(the exact bug class that motivated the two-tier CORE/cabinet RF policy
+described above). `tests/test_render.py`
 exercises real NAM inference and auto-skips unless `native/nam_render` has
 been built AND a real `.nam` file exists at
 `assets/nam_models/FenderSuperReverb1977_Clean.nam` (gitignored,
@@ -218,14 +254,16 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     preview/baked provenance.
 18. **`receptive_field.py`**'s `combine_required_history` is the mode-aware
     (Hybrid includes the crossover-envelope branch; Blend doesn't) combiner
-    that also folds in a baked cab's `cab_fir_serial_history_samples` --
-    SERIAL (`base + (L-1)`), not another parallel branch, since the FIR runs
-    after the amp combination. `scripts/train_a2.py`'s
+    that returns BOTH the CORE `hard_required_samples` (Amp A/B [+
+    envelope], no cab) and a baked cab's `formal_total_required_samples`
+    (`hard + (L-1)` SERIAL, not another parallel branch, since the FIR runs
+    after the amp combination) -- see "Design modes" above for the two-tier
+    gating policy this enables. `scripts/train_a2.py`'s
     `check_receptive_field` and the duplicated, self-contained equivalent in
-    `cloud/kaggle/train_a2_cloud.py` both gate training on this from the
-    manifest's `mode`/`cab`/`receptive_field` fields, aborting with an
-    explicit message (never silently truncating the IR) if a baked cab's
-    added history exceeds the destination A2's actual receptive field.
+    `cloud/kaggle/train_a2_cloud.py` both abort ONLY when the CORE
+    dependency exceeds the destination A2's actual receptive field; a baked
+    cab's formal overflow is reported (never hidden, never silently
+    truncated) but training continues as an approximation.
 
 `assets/di/` contains real recorded genre/style DI guitar/bass performances
 (sourced from the NAMtoClo project — see `assets/di/README.md`) used for

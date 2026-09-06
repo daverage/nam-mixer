@@ -126,7 +126,7 @@ def _write_nam_with_config(path, kernel_sizes, dilations):
 
 
 def test_check_receptive_field_uses_max_across_envelope_and_amp_branches(tmp_path, monkeypatch):
-    """docs/phase3.md review: the complete dependency is
+    """docs/phase3.md review: the complete CORE dependency is
     max(envelope, Amp A, Amp B) since the branches run in parallel -- prove
     check_receptive_field actually computes that max and passes IT (not just
     the envelope) to the A2 fits-check."""
@@ -152,27 +152,28 @@ def test_check_receptive_field_uses_max_across_envelope_and_amp_branches(tmp_pat
             submodel_names = ["fake"]
         return FakeRF()
 
-    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
 
-    train_a2.check_receptive_field(manifest, 48000)
+    result = train_a2.check_receptive_field(manifest, 48000)
 
     envelope_samples = int(round(80.0 / 1000.0 * 48000))
     amp_b_rf = train_a2.compute_source_nam_receptive_field(train_a2.load_nam(amp_b))
     assert amp_b_rf > envelope_samples
     assert captured["samples"] == amp_b_rf
+    assert result["hard_required_samples"] == amp_b_rf
 
 
 def test_check_receptive_field_warns_but_continues_when_amp_path_missing(tmp_path, monkeypatch):
     manifest = {"design": {"envelope_max_history_ms": 80.0}}  # no amp_a/amp_b paths
     monkeypatch.setattr(
-        train_a2, "assert_envelope_history_fits",
+        train_a2, "assert_required_history_fits",
         lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": samples + 1, "submodel_names": ["x"]})(),
     )
     train_a2.check_receptive_field(manifest, 48000)  # must not raise
 
 
 def test_check_receptive_field_blend_mode_ignores_envelope_and_uses_amp_max(tmp_path, monkeypatch):
-    """docs/blend-mode.md: Blend mode's base dependency is max(Amp A, Amp B)
+    """docs/blend-mode.md: Blend mode's CORE dependency is max(Amp A, Amp B)
     only -- no envelope branch at all, even if envelope_max_history_ms were
     (incorrectly) present in the manifest."""
     amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # small RF
@@ -191,14 +192,17 @@ def test_check_receptive_field_blend_mode_ignores_envelope_and_uses_amp_max(tmp_
         captured["samples"] = samples
         return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
 
-    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
     train_a2.check_receptive_field(manifest, 48000)
 
     amp_b_rf = train_a2.compute_source_nam_receptive_field(train_a2.load_nam(amp_b))
     assert captured["samples"] == amp_b_rf  # NOT inflated by the bogus envelope_max_history_ms
 
 
-def test_check_receptive_field_adds_baked_cab_serially(tmp_path, monkeypatch):
+def test_check_receptive_field_baked_cab_formal_total_is_core_plus_history(tmp_path, monkeypatch):
+    """The formal total (advisory only) is still calculated as core + (L-1),
+    but it must NOT be what's passed to the hard fits-check -- only the
+    CORE dependency (3 samples here) is."""
     amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 3
     amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])  # RF = 3
 
@@ -215,12 +219,17 @@ def test_check_receptive_field_adds_baked_cab_serially(tmp_path, monkeypatch):
         captured["samples"] = samples
         return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
 
-    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
-    train_a2.check_receptive_field(manifest, 48000)
-    assert captured["samples"] == 3 + 500  # base max (3) + serial cab FIR (500)
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
+    result = train_a2.check_receptive_field(manifest, 48000)
+
+    assert captured["samples"] == 3  # HARD check only ever sees the core dependency
+    assert result["hard_required_samples"] == 3
+    assert result["cab_fir_history_samples"] == 500
+    assert result["formal_total_required_samples"] == 3 + 500  # advisory total, reported not gated
+    assert result["cab_requires_approximation"] is False  # A2 RF in this fake is 1003, formal total 503 fits
 
 
-def test_check_receptive_field_preview_only_cab_adds_nothing(tmp_path, monkeypatch):
+def test_check_receptive_field_preview_only_cab_adds_no_approximation_warning(tmp_path, monkeypatch):
     amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
     amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
 
@@ -237,14 +246,21 @@ def test_check_receptive_field_preview_only_cab_adds_nothing(tmp_path, monkeypat
         captured["samples"] = samples
         return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
 
-    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
-    train_a2.check_receptive_field(manifest, 48000)
-    assert captured["samples"] == 3  # cab not baked -- zero added
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
+    result = train_a2.check_receptive_field(manifest, 48000)
+    assert captured["samples"] == 3  # cab not baked -- zero added, not part of the hard check either
+    assert result["cab_baked"] is False
+    assert result["cab_requires_approximation"] is False
+    assert result["formal_total_required_samples"] == 3
 
 
-def test_check_receptive_field_over_capacity_baked_cab_fails_clearly(tmp_path, monkeypatch):
-    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
-    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
+def test_check_receptive_field_baked_cab_over_capacity_does_not_abort(tmp_path, monkeypatch):
+    """The core acceptance criterion of this policy: a baked cab whose
+    formal total exceeds the A2 receptive field must NOT abort training --
+    only the CORE dependency exceeding it does (see the sibling test
+    test_check_receptive_field_core_over_capacity_aborts)."""
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 3
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])  # RF = 3
 
     manifest = {
         "mode": "blend",
@@ -253,11 +269,36 @@ def test_check_receptive_field_over_capacity_baked_cab_fails_clearly(tmp_path, m
         "cab": {"baked": True, "fir_history_samples": 5000},
     }
 
-    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
-        raise ValueError(f"required {samples} exceeds available 100")
-    monkeypatch.setattr(train_a2, "assert_envelope_history_fits", fake_assert_fits)
+    # Core (3 samples) fits comfortably inside a small fake A2 RF (100), but
+    # the formal total (3 + 5000 = 5003) does not -- this must NOT raise.
+    monkeypatch.setattr(
+        train_a2, "assert_required_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": 100, "submodel_names": ["fake"]})(),
+    )
 
-    with pytest.raises(train_a2.TrainingAbort, match="baking"):
+    result = train_a2.check_receptive_field(manifest, 48000)  # must NOT raise
+    assert result["hard_required_samples"] == 3
+    assert result["formal_total_required_samples"] == 3 + 5000
+    assert result["cab_requires_approximation"] is True
+
+
+def test_check_receptive_field_core_over_capacity_aborts(tmp_path, monkeypatch):
+    """Unlike a baked cab's formal overflow, the CORE dependency exceeding
+    A2's receptive field must still abort exactly as before this policy."""
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
+
+    manifest = {
+        "mode": "blend",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+    }
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        raise ValueError(f"required {samples} exceeds available 1")
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
+
+    with pytest.raises(train_a2.TrainingAbort, match="REFUSING"):
         train_a2.check_receptive_field(manifest, 48000)
 
 
@@ -267,10 +308,79 @@ def test_check_receptive_field_exact_fit_boundary_still_permitted(tmp_path, monk
     manifest = {"mode": "blend", "amp_a": {"path": str(amp_a)}, "amp_b": {"path": str(amp_b)}}
 
     monkeypatch.setattr(
-        train_a2, "assert_envelope_history_fits",
+        train_a2, "assert_required_history_fits",
         lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": samples, "submodel_names": ["x"]})(),
     )
-    train_a2.check_receptive_field(manifest, 48000)  # exact fit -- must not raise
+    result = train_a2.check_receptive_field(manifest, 48000)  # exact fit -- must not raise
+    assert result["core_status"] == "EXACT FIT"
+
+
+def test_check_receptive_field_real_world_bug_report_scenario_trains(tmp_path, monkeypatch):
+    """Acceptance criterion #1 (docs/blend-mode.md): a Blend whose Amp A and
+    Amp B each require 6332 samples (the real installed A2's own receptive
+    field, per hybrid/receptive_field.py's module docstring) can still train
+    with a baked 500ms/24000-sample cabinet IR -- the exact real-world
+    scenario that used to be incorrectly refused."""
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [6332], [1])  # RF = 1 + 6331*1 = 6332
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [6332], [1])  # RF = 6332
+
+    manifest = {
+        "mode": "blend",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "cab": {"baked": True, "fir_history_samples": 24000},
+    }
+
+    monkeypatch.setattr(
+        train_a2, "assert_required_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": 6332, "submodel_names": ["channels_8"]})(),
+    )
+
+    result = train_a2.check_receptive_field(manifest, 48000)  # must NOT raise/abort
+
+    assert result["hard_required_samples"] == 6332
+    assert result["a2_receptive_field_samples"] == 6332
+    assert result["core_status"] == "EXACT FIT"
+    assert result["formal_total_required_samples"] == 6332 + 24000
+    assert result["cab_requires_approximation"] is True
+
+
+def test_check_receptive_field_legacy_manifest_base_is_hard_total_is_formal(tmp_path, monkeypatch):
+    """A manifest written by the PRE-policy code has
+    receptive_field.base_required_samples/cab_fir_serial_samples/
+    total_required_samples but no receptive_field.cab sub-record. The hard
+    gate must still only ever see the CORE (base) dependency, never the
+    (formerly-hard, now-formal-only) total -- see docs/blend-mode.md
+    "BACKWARDS COMPATIBILITY"."""
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 3
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])  # RF = 3
+
+    manifest = {
+        "mode": "blend",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "cab": {"baked": True},  # no fir_history_samples on the CabDesign itself
+        "receptive_field": {
+            "mode": "blend",
+            "branch_samples": {"amp_a": 3, "amp_b": 3},
+            "base_required_samples": 3,
+            "cab_fir_serial_samples": 500,
+            "total_required_samples": 503,
+        },
+    }
+
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
+
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
+    result = train_a2.check_receptive_field(manifest, 48000)
+
+    assert captured["samples"] == 3  # hard gate sees the CORE amp dependency only
+    assert result["cab_fir_history_samples"] == 500  # resolved from the legacy cab_fir_serial_samples key
+    assert result["formal_total_required_samples"] == 503
 
 
 def test_validate_exported_nam_runs_native_render(tmp_path, monkeypatch):

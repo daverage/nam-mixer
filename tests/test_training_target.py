@@ -332,3 +332,58 @@ def test_baked_cab_alters_hybrid_target_but_preview_only_does_not(tmp_path):
     np.testing.assert_allclose(t_no_cab, t_preview, atol=1e-6)
     assert bundle_baked.manifest["cab"]["baked"] is True
     assert bundle_baked.manifest["receptive_field"]["cab_fir_serial_samples"] == prepared.prepared_frame_count - 1
+    # New RF-policy manifest fields (docs/blend-mode.md "REFRACTOR THE RF
+    # RECORD"), alongside the legacy ones asserted above.
+    assert bundle_baked.manifest["receptive_field"]["hard_required_samples"] == bundle_baked.manifest["receptive_field"]["base_required_samples"]
+    assert bundle_baked.manifest["receptive_field"]["formal_total_required_samples"] == bundle_baked.manifest["receptive_field"]["total_required_samples"]
+    assert bundle_baked.manifest["receptive_field"]["cab"]["baked"] is True
+    assert bundle_baked.manifest["receptive_field"]["cab"]["fir_history_samples"] == prepared.prepared_frame_count - 1
+
+
+def test_baked_cab_target_uses_the_full_prepared_ir_no_truncation(tmp_path):
+    """The exact intended teacher signal (docs/blend-mode.md "TRAINING
+    TARGET MUST REMAIN THE SAME") must use the COMPLETE prepared IR, not an
+    energy-percentile-truncated approximation. With effective_b_trim_db=0.0
+    and the identity-render fixture, Amp A/Amp B renders are both exactly
+    `official_input`, so the pre-cab hybrid signal is `official_input`
+    regardless of the crossover blend weight -- letting us assert the baked
+    raw target equals `apply_cab_ir(official_input, full_prepared_ir)`
+    EXACTLY, byte for byte, rather than merely "different from no-cab"."""
+    from hybrid.cab_ir import apply_cab_ir, cab_design_from_prepared, load_and_prepare_cab_ir
+
+    amp_a = _write_nam(tmp_path / "a.nam")
+    amp_b = _write_nam(tmp_path / "b.nam")
+    training_input_path = tmp_path / "input.wav"
+    n = 4800
+    training_input = _write_training_input(training_input_path, n=n)
+
+    # 99.9% of the energy sits in the first few taps, but a long, low-level
+    # tail follows -- if generation ever truncated at an energy percentile,
+    # this tail would silently vanish from the target.
+    rng = np.random.default_rng(42)
+    ir = np.concatenate([[1.0, 0.3, 0.1], rng.uniform(-0.01, 0.01, 500)]).astype(np.float32)
+    ir_path = tmp_path / "ir.wav"
+    sf.write(ir_path, ir, 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, target_sample_rate=48000)
+    assert prepared.energy_999_samples < len(prepared.samples)  # confirms this IR actually has a meaningful tail
+
+    baked_cab = cab_design_from_prepared(prepared, original_filename="ir.wav", preview_enabled=True, baked=True)
+    design = _design(amp_a, amp_b, cab=baked_cab, auto_trim_db=0.0, manual_b_trim_db=0.0, effective_b_trim_db=0.0)
+    bundle = generate_training_bundle(design, training_input_path, tmp_path / "baked")
+
+    official_input, _ = sf.read(training_input_path, dtype="float32")
+    expected_full = apply_cab_ir(official_input.astype(np.float32), prepared)
+    target_raw, _ = sf.read(bundle.hybrid_target_raw_path, dtype="float32")
+    np.testing.assert_allclose(target_raw, expected_full, atol=1e-6)
+
+    # A hypothetically truncated IR (cut at the 99.9%-energy point) would
+    # have produced a measurably different result -- proving the test IR's
+    # tail is actually load-bearing for this assertion.
+    truncated_ir = prepared.samples[: prepared.energy_999_samples]
+    expected_truncated = apply_cab_ir(official_input.astype(np.float32), type(prepared)(
+        samples=truncated_ir, sample_rate=prepared.sample_rate, source_path=prepared.source_path,
+        sha256=prepared.sha256, original_sample_rate=prepared.original_sample_rate,
+        original_channels=prepared.original_channels, original_frame_count=prepared.original_frame_count,
+        prepared_frame_count=len(truncated_ir), leading_samples_trimmed=prepared.leading_samples_trimmed,
+    ))
+    assert not np.allclose(target_raw, expected_truncated, atol=1e-6)

@@ -214,7 +214,18 @@ def api_cab_upload():
             "sha256": prepared.sha256,
             "prepared_sample_rate": prepared.sample_rate,
             "prepared_frame_count": prepared.prepared_frame_count,
+            "prepared_duration_ms": prepared.prepared_duration_ms,
             "leading_samples_trimmed": prepared.leading_samples_trimmed,
+            # Diagnostic-only cabinet energy profile (docs/blend-mode.md
+            # "CABINET ENERGY ANALYSIS") -- how much of this IR is actually
+            # meaningful signal vs. raw WAV/FIR length. Never used to alter
+            # the actual convolution.
+            "energy_99_samples": prepared.energy_99_samples,
+            "energy_99_ms": prepared.energy_99_ms,
+            "energy_999_samples": prepared.energy_999_samples,
+            "energy_999_ms": prepared.energy_999_ms,
+            "energy_9999_samples": prepared.energy_9999_samples,
+            "energy_9999_ms": prepared.energy_9999_ms,
         })
     except CabIrError as exc:
         dest.unlink(missing_ok=True)

@@ -194,45 +194,73 @@ def validate_inputs(bundle_dir: Path) -> dict:
     }
 
 
-def check_receptive_field(manifest: dict, sample_rate: int) -> None:
-    """Mode-aware receptive-field gate, duplicated from
+def _resolve_baked_cab_fir_samples(manifest: dict) -> int:
+    """Resolve a baked cab's formal serial FIR-history sample count from
+    whatever the manifest recorded -- this self-contained worker never
+    receives the actual cab IR file (see docs/blend-mode.md "TRAINING /
+    KAGGLE": source NAMs/cab IRs are not uploaded to Kaggle), so, unlike
+    scripts/train_a2.py's local equivalent, it can only ever trust numbers
+    already computed by hybrid.training_target.compute_receptive_field_record
+    at generation time. Prefers the NEW nested receptive_field.cab record
+    (computed at the OFFICIAL TRAINING INPUT's sample rate, i.e. accurate for
+    what was actually baked into hybrid_target.wav) over the legacy flat
+    receptive_field.cab_fir_serial_samples key, over the CabDesign's own
+    audition-time (possibly different sample rate) fir_history_samples.
+    """
+    cab = manifest.get("cab") or {}
+    if not cab.get("baked"):
+        return 0
+    rf_record = manifest.get("receptive_field") or {}
+    rf_cab = rf_record.get("cab") or {}
+    if rf_cab.get("fir_history_samples") is not None:
+        return int(rf_cab["fir_history_samples"])
+    legacy = rf_record.get("cab_fir_serial_samples")
+    if legacy is not None:
+        return int(legacy)
+    return int(cab.get("fir_history_samples") or 0)
+
+
+def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
+    """Mode-aware receptive-field policy, duplicated from
     scripts/train_a2.py's check_receptive_field (see this module's docstring
-    for why this script duplicates rather than imports hybrid/ code). Reads
-    ONLY the manifest -- this script never receives the source .nam files
-    (see docs/blend-mode.md "TRAINING / KAGGLE": source NAMs/cab IRs are not
-    uploaded to Kaggle), so branch samples come from
+    for why this script duplicates rather than imports hybrid/ code) --
+    MUST stay semantically identical to it (see
+    tests/test_receptive_field_parity.py). Reads ONLY the manifest -- this
+    script never receives the source .nam files or cab IR (see
+    docs/blend-mode.md "TRAINING / KAGGLE"), so branch samples come from
     manifest["receptive_field"]["branch_samples"], computed locally at
     generation time by hybrid.training_target.compute_receptive_field_record.
 
-    Validated against the packed A2 config of the neural-amp-modeler version
-    actually installed in THIS kernel (ensure_nam_installed() must have run
-    first) -- the same JSON schema hybrid/receptive_field.py parses, read
-    directly here since importing hybrid/ isn't available in this sandbox.
+    Two separate questions, exactly as in the local script:
+
+    1. CORE (hard) dependency -- max(Amp A RF, Amp B RF[, envelope RF for
+       Hybrid]) -- MUST fit inside the destination A2's receptive field
+       (the packed A2 config of the neural-amp-modeler version actually
+       installed in THIS kernel; `ensure_nam_installed()` must have run
+       first). Failing this raises `CloudTrainingError` -- training aborts.
+    2. A baked cabinet's FORMAL total (core + FIR history) is calculated and
+       reported honestly, but NEVER gates training by itself -- exceeding
+       the A2's receptive field means A2 will approximate the post-cab
+       response within its available temporal capacity, not that training
+       is invalid.
     """
     rf_record = manifest.get("receptive_field")
     if not rf_record:
         print("WARNING: manifest has no receptive_field record -- skipping receptive-field check.")
-        return
+        return {}
 
     branch_samples = {k: v for k, v in (rf_record.get("branch_samples") or {}).items() if v is not None}
     if not branch_samples:
         print("WARNING: receptive_field.branch_samples is empty/unavailable -- skipping receptive-field check.")
-        return
+        return {}
 
-    cab = manifest.get("cab") or {}
-    cab_fir_samples = int(cab["fir_history_samples"]) if cab.get("baked") and cab.get("fir_history_samples") else 0
-
-    base_required = max(branch_samples.values())
-    total_required = base_required + cab_fir_samples
-
+    hard_required = max(branch_samples.values())
     mode = manifest.get("mode", "hybrid")
-    print(f"Target dependency by branch (mode={mode}, parallel branches take the max):")
+
+    print(f"Core target dependency by branch (mode={mode}):")
     for label, samples in branch_samples.items():
         print(f"  {label:<12} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
-    print(f"  {'base max':<12} {base_required:>6} samples ({base_required / sample_rate * 1000:6.1f} ms)")
-    if cab_fir_samples:
-        print(f"  {'+ cab FIR':<12} {cab_fir_samples:>6} samples ({cab_fir_samples / sample_rate * 1000:6.1f} ms) [serial, baked cab]")
-    print(f"  {'total':<12} {total_required:>6} samples ({total_required / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'hard core':<12} {hard_required:>6} samples ({hard_required / sample_rate * 1000:6.1f} ms)")
 
     import importlib.resources
 
@@ -253,24 +281,76 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> None:
     except Exception as exc:  # noqa: BLE001 -- report, never guess at the config shape
         raise CloudTrainingError(f"could not determine installed A2's receptive field: {exc}") from exc
 
-    if total_required > best_samples:
-        message = (
-            f"REFUSING to train: total dependency {total_required} samples exceeds the installed "
+    # CORE dependency is the HARD gate -- unlike a baked cab below, this is
+    # never relaxed to an advisory warning.
+    if hard_required > best_samples:
+        raise CloudTrainingError(
+            f"REFUSING to train: core dependency {hard_required} samples exceeds the installed "
             f"A2's receptive field {best_samples} samples (submodels={names})."
         )
-        if cab_fir_samples:
-            message += (
-                " The cab works fine for preview, but baking this particular IR after these source "
-                "NAMs exceeds the destination A2's temporal history. Disable baking and re-generate, "
-                "or use a shorter IR."
-            )
-        raise CloudTrainingError(message)
 
-    margin = best_samples - total_required
+    margin = best_samples - hard_required
+    core_status = "EXACT FIT" if margin == 0 else "OK"
+    print("\nDestination A2 RF:")
+    print(f"  {'available':<12} {best_samples:>6} samples ({best_samples / sample_rate * 1000:6.1f} ms)")
     if margin == 0:
-        print(f"Receptive field: EXACT FIT -- {total_required} samples == {best_samples} samples. Zero margin, training permitted.")
+        print(f"  {'core status':<12} {core_status} -- zero temporal margin. Training permitted.")
     else:
-        print(f"Receptive field OK: {total_required} samples fits inside {best_samples} samples, margin {margin / sample_rate * 1000:.1f} ms.")
+        print(f"  {'core status':<12} {core_status}  margin {margin / sample_rate * 1000:.1f} ms")
+
+    result = {
+        "mode": mode,
+        "branch_samples": branch_samples,
+        "hard_required_samples": hard_required,
+        "a2_receptive_field_samples": best_samples,
+        "a2_submodels": names,
+        "core_status": core_status,
+        "cab_baked": False,
+        "cab_fir_history_samples": 0,
+        "formal_total_required_samples": hard_required,
+        "cab_requires_approximation": False,
+    }
+
+    cab = manifest.get("cab") or {}
+    if not cab.get("baked"):
+        return result
+
+    cab_fir_samples = _resolve_baked_cab_fir_samples(manifest)
+    if not cab_fir_samples:
+        return result
+
+    formal_total = hard_required + cab_fir_samples
+    result.update({
+        "cab_baked": True,
+        "cab_fir_history_samples": cab_fir_samples,
+        "formal_total_required_samples": formal_total,
+    })
+
+    print("\nBaked cabinet:")
+    print(f"  {'FIR history':<12} {cab_fir_samples:>6} samples ({cab_fir_samples / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'formal total':<12} {formal_total:>6} samples ({formal_total / sample_rate * 1000:6.1f} ms)")
+
+    # The formal total is NEVER a hard gate -- only report/record whether A2
+    # is being asked to approximate the cab.
+    if formal_total > best_samples:
+        result["cab_requires_approximation"] = True
+        print(
+            "\nCABINET APPROXIMATION:\n"
+            f"  The core {mode.capitalize()} target fits within the A2 receptive field "
+            f"({hard_required} / {best_samples} samples).\n"
+            f"  The baked cabinet extends the teacher's formal temporal dependency to "
+            f"{formal_total} samples, beyond the A2 receptive field of {best_samples} samples.\n"
+            "  Training will continue: the cabinet response will be approximated by the A2 within its "
+            "available temporal capacity.\n"
+            "  Validate the resulting model against the baked target and by listening."
+        )
+    else:
+        print(
+            f"  Formal total also fits inside the A2 receptive field "
+            f"({formal_total} <= {best_samples}) -- no approximation needed for the cab."
+        )
+
+    return result
 
 
 def user_metadata_kwargs(manifest: dict) -> dict:
@@ -314,7 +394,7 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
     with open(bundle_dir / "training_manifest.json", "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
-    check_receptive_field(manifest, REQUIRED_SAMPLE_RATE)
+    rf_check = check_receptive_field(manifest, REQUIRED_SAMPLE_RATE)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -363,10 +443,17 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
     if not nam_path.is_file():
         raise CloudTrainingError(f"export did not produce expected file: {nam_path}")
 
+    if rf_check.get("cab_requires_approximation"):
+        print(
+            "\nBaked cab was trained as an approximation because its formal temporal "
+            "dependency exceeded A2 RF. Review validation metrics and listening result."
+        )
+
     return {
         "nam_path": nam_path,
         "duration_seconds": duration_s,
         "settings": settings,
+        "receptive_field_check": rf_check,
     }
 
 
@@ -419,6 +506,7 @@ def main() -> int:
             "duration_seconds": train_result["duration_seconds"],
             "output_nam_filename": final_nam_path.name,
             "output_nam_sha256": _sha256_file(final_nam_path),
+            "receptive_field_check": train_result.get("receptive_field_check"),
         })
     except Exception as exc:  # noqa: BLE001 -- report every failure, never crash silently past this point
         result["success"] = False

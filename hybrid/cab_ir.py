@@ -28,6 +28,17 @@ enforces):
   threshold (documented below) -- NOT peak alignment to some other point in
   the IR, which would already start reshaping what the cab does. The number
   of samples trimmed is recorded on `PreparedCabIr` for manifest provenance.
+
+Cabinet ENERGY diagnostics (`PreparedCabIr.energy_99_samples`/`_999_`/`_9999_`
+and `energy_fraction_within`) are purely informational -- see docs/
+blend-mode.md's cabinet-approximation-policy addendum. Raw WAV/FIR length is
+a poor proxy for how much of a captured IR is actually audible signal versus
+a long, mostly-inaudible decay tail; these numbers exist so a user (and
+`scripts/train_a2.py`/the Kaggle cloud worker) can see how much of a long IR
+is functionally meaningful WITHOUT that ever causing the actual convolution
+to be shortened -- the full prepared IR is always used for both preview and
+a baked training target. See "TRAILING IR PADDING" in docs/blend-mode.md for
+why deliberately NOT truncating at an energy percentile is a hard rule here.
 """
 from __future__ import annotations
 
@@ -55,11 +66,54 @@ class CabIrError(ValueError):
     cannot be safely used -- generation/preview aborts rather than guessing."""
 
 
+# Cumulative-energy thresholds reported on every prepared IR -- see module
+# docstring's "Cabinet ENERGY diagnostics" note. Purely diagnostic: never
+# used to truncate/edit the actual FIR taps used for convolution.
+ENERGY_PERCENTILES = (0.99, 0.999, 0.9999)
+
+
+def _energy_percentile_sample_counts(samples: np.ndarray) -> tuple[float, dict[str, int]]:
+    """Return (total_energy, {percentile_key: sample_count}) where
+    `sample_count` is the number of LEADING samples of `samples` needed for
+    their cumulative sum-of-squares to reach that fraction of the IR's total
+    energy -- e.g. `sample_count == 1` for a percentile means "the very
+    first tap already carries that much energy" (a near-ideal one-tap/
+    minimal-latency IR), while `sample_count == len(samples)` means the
+    entire prepared IR is needed (a flat/uniform-energy signal has no
+    meaningfully shorter effective length).
+    """
+    energy = samples.astype(np.float64) ** 2
+    total_energy = float(np.sum(energy))
+    n = len(samples)
+    if n == 0 or total_energy <= 0:
+        return total_energy, {_energy_key(p): 0 for p in ENERGY_PERCENTILES}
+
+    cumulative = np.cumsum(energy)
+    counts = {}
+    for fraction in ENERGY_PERCENTILES:
+        threshold = fraction * total_energy
+        idx = int(np.searchsorted(cumulative, threshold, side="left"))
+        counts[_energy_key(fraction)] = min(idx, n - 1) + 1  # 1-based sample count
+    return total_energy, counts
+
+
+def _energy_key(fraction: float) -> str:
+    # 0.99 -> "99", 0.999 -> "999", 0.9999 -> "9999" -- matches the
+    # energy_99_samples/energy_999_samples/energy_9999_samples field names.
+    return str(fraction).split(".")[1].rstrip("0") or "0"
+
+
 @dataclass(frozen=True)
 class PreparedCabIr:
     """An IR that has been loaded, downmixed, trimmed, and resampled to a
     specific target sample rate -- ready to convolve via `apply_cab_ir`.
-    Immutable and cacheable by (sha256, target_sample_rate)."""
+    Immutable and cacheable by (sha256, target_sample_rate).
+
+    `total_energy`/`energy_99_samples`/`energy_999_samples`/
+    `energy_9999_samples` are DIAGNOSTIC ONLY (see module docstring) -- they
+    never affect `samples` itself, which always carries the complete
+    prepared IR used identically for preview and for a baked target.
+    """
 
     samples: np.ndarray  # mono float32, causal FIR taps
     sample_rate: int  # == target_sample_rate this was prepared for
@@ -70,6 +124,44 @@ class PreparedCabIr:
     original_frame_count: int
     prepared_frame_count: int
     leading_samples_trimmed: int
+    total_energy: float = 0.0
+    energy_99_samples: int = 0
+    energy_999_samples: int = 0
+    energy_9999_samples: int = 0
+
+    @property
+    def prepared_duration_ms(self) -> float:
+        return self.prepared_frame_count / self.sample_rate * 1000.0 if self.sample_rate else 0.0
+
+    @property
+    def energy_99_ms(self) -> float:
+        return self.energy_99_samples / self.sample_rate * 1000.0 if self.sample_rate else 0.0
+
+    @property
+    def energy_999_ms(self) -> float:
+        return self.energy_999_samples / self.sample_rate * 1000.0 if self.sample_rate else 0.0
+
+    @property
+    def energy_9999_ms(self) -> float:
+        return self.energy_9999_samples / self.sample_rate * 1000.0 if self.sample_rate else 0.0
+
+    def energy_fraction_within(self, window_samples: int) -> float:
+        """Fraction (0..1) of this IR's total energy contained within its
+        first `window_samples` taps -- e.g. pass a destination A2's
+        receptive field to see how much of the cab's response falls inside
+        it. This is analysis of the CAB IR ALONE: it is NOT proof that the
+        complete amp+cab teacher signal fits within that receptive field
+        (the amp branches consume their own history too -- see
+        hybrid.receptive_field.combine_required_history) -- only an
+        indication of how much LATE cab energy a fixed-size model may be
+        unable to reproduce exactly. See docs/blend-mode.md "CABINET ENERGY
+        ANALYSIS".
+        """
+        if self.total_energy <= 0 or window_samples <= 0:
+            return 0.0
+        window_samples = min(int(window_samples), len(self.samples))
+        partial = float(np.sum(self.samples[:window_samples].astype(np.float64) ** 2))
+        return max(0.0, min(1.0, partial / self.total_energy))
 
 
 def _sha256_file(path: str | Path) -> str:
@@ -138,6 +230,8 @@ def load_and_prepare_cab_ir(
     else:
         prepared = trimmed.astype(np.float32)
 
+    total_energy, energy_counts = _energy_percentile_sample_counts(prepared)
+
     return PreparedCabIr(
         samples=prepared,
         sample_rate=int(target_sample_rate),
@@ -148,6 +242,10 @@ def load_and_prepare_cab_ir(
         original_frame_count=int(original_frame_count),
         prepared_frame_count=int(len(prepared)),
         leading_samples_trimmed=int(leading_trimmed),
+        total_energy=total_energy,
+        energy_99_samples=energy_counts["99"],
+        energy_999_samples=energy_counts["999"],
+        energy_9999_samples=energy_counts["9999"],
     )
 
 
@@ -219,7 +317,17 @@ class CabDesign:
     original_frame_count: Optional[int] = None
     prepared_frame_count: Optional[int] = None
     leading_samples_trimmed: Optional[int] = None
-    fir_history_samples: Optional[int] = None  # prepared_frame_count - 1, the serial RF cost when baked
+    fir_history_samples: Optional[int] = None  # prepared_frame_count - 1, the FORMAL serial RF cost when baked -- see hybrid/receptive_field.py
+
+    # Diagnostic-only cabinet energy profile (docs/blend-mode.md "CABINET
+    # ENERGY ANALYSIS") -- never used to alter the actual FIR taps.
+    prepared_duration_ms: Optional[float] = None
+    energy_99_samples: Optional[int] = None
+    energy_99_ms: Optional[float] = None
+    energy_999_samples: Optional[int] = None
+    energy_999_ms: Optional[float] = None
+    energy_9999_samples: Optional[int] = None
+    energy_9999_ms: Optional[float] = None
 
     def to_dict(self) -> dict:
         from dataclasses import asdict
@@ -248,4 +356,11 @@ def cab_design_from_prepared(
         prepared_frame_count=prepared.prepared_frame_count,
         leading_samples_trimmed=prepared.leading_samples_trimmed,
         fir_history_samples=fir_history_samples,
+        prepared_duration_ms=prepared.prepared_duration_ms,
+        energy_99_samples=prepared.energy_99_samples,
+        energy_99_ms=prepared.energy_99_ms,
+        energy_999_samples=prepared.energy_999_samples,
+        energy_999_ms=prepared.energy_999_ms,
+        energy_9999_samples=prepared.energy_9999_samples,
+        energy_9999_ms=prepared.energy_9999_ms,
     )

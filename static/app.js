@@ -154,9 +154,14 @@ cabFileInput.addEventListener("change", async () => {
     cabPreviewEnabled.disabled = false;
     cabBaked.disabled = false;
     const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
-    cabInfoEl.textContent =
+    const preparedMs = data.prepared_duration_ms !== undefined ? data.prepared_duration_ms.toFixed(1) : null;
+    const energy999Ms = data.energy_999_ms !== undefined ? data.energy_999_ms.toFixed(1) : null;
+    let info =
       `${file.name} -- ${data.original_sample_rate} Hz, ${data.original_channels}ch, ${durationS}s` +
       (data.leading_samples_trimmed ? ` (${data.leading_samples_trimmed} leading samples trimmed)` : "");
+    if (preparedMs !== null) info += ` -- prepared length ${preparedMs} ms`;
+    if (energy999Ms !== null) info += `, 99.9% energy by ${energy999Ms} ms`;
+    cabInfoEl.textContent = info;
   } catch (err) {
     cabInfoEl.textContent = "Upload failed: " + err;
   }

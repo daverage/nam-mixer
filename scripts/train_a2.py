@@ -60,9 +60,10 @@ from hybrid.a2_training_settings import (  # noqa: E402
     settings_for_preset,
     user_metadata_kwargs,
 )
+from hybrid.cab_ir import CabIrError, get_prepared_cab_ir  # noqa: E402
 from hybrid.receptive_field import (  # noqa: E402
     ReceptiveFieldUnavailable,
-    assert_envelope_history_fits,
+    assert_required_history_fits,
     compute_source_nam_receptive_field,
 )
 from hybrid.render import NamRenderError, render  # noqa: E402
@@ -175,18 +176,60 @@ def load_and_validate_manifest(manifest_path: Path) -> dict:
     return manifest
 
 
-def check_receptive_field(manifest: dict, sample_rate: int) -> None:
-    """The complete dry-input dependency of a generated target is, mode-aware
-    (see docs/blend-mode.md "RECEPTIVE FIELD -- IMPORTANT"):
+def _resolve_baked_cab_fir_samples(manifest: dict, cab: dict, sample_rate: int) -> tuple[int, "int | None"]:
+    """Resolve (fir_history_samples, fir_length_samples) for a baked cab.
 
-        Hybrid: max(envelope history, Amp A RF, Amp B RF) [+ (cab FIR - 1) if baked]
-        Blend:  max(Amp A RF, Amp B RF)                   [+ (cab FIR - 1) if baked]
+    Prefers recomputing the EXACT prepared tap count from the actual cab IR
+    file (the same `get_prepared_cab_ir` call `hybrid.training_target.
+    maybe_bake_cab` used to produce hybrid_target.wav) -- this local trainer,
+    unlike the self-contained Kaggle cloud worker, can import hybrid/ and
+    normally runs on the same machine that generated the bundle, so the IR
+    file is usually still reachable. Falls back to the manifest's own
+    recorded numbers (receptive_field.cab, then the legacy
+    receptive_field.cab_fir_serial_samples key, then the CabDesign's own
+    audition-time fir_history_samples) if the file is no longer reachable.
+    """
+    ir_path = cab.get("ir_working_path")
+    if ir_path:
+        try:
+            prepared = get_prepared_cab_ir(ir_path, sample_rate)
+            return max(0, prepared.prepared_frame_count - 1), prepared.prepared_frame_count
+        except (CabIrError, OSError) as exc:
+            print(f"WARNING: could not recompute baked cab from {ir_path} ({exc}) -- falling back to recorded manifest numbers.")
 
-    Amp A/B run on the same dry input IN PARALLEL with the crossover
-    envelope (Hybrid only -- see hybrid.pipeline.render_pair), so their own
-    receptive fields matter here too, not just the envelope's; a baked
-    cabinet FIR runs AFTER that combination, so it's a SERIAL addition, not
-    another parallel branch (see hybrid.receptive_field.combine_required_history).
+    rf_record = manifest.get("receptive_field") or {}
+    rf_cab = rf_record.get("cab") or {}
+    if rf_cab.get("fir_history_samples") is not None:
+        return int(rf_cab["fir_history_samples"]), rf_cab.get("fir_length_samples")
+    legacy = rf_record.get("cab_fir_serial_samples")
+    if legacy is not None:
+        return int(legacy), None
+    if cab.get("fir_history_samples"):
+        return int(cab["fir_history_samples"]), cab.get("prepared_frame_count")
+    return 0, None
+
+
+def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
+    """CORE (hard) vs. baked-CABINET (formal/advisory) receptive-field
+    policy -- see docs/blend-mode.md's cabinet-approximation-policy section
+    for the full rationale this implements. Two separate questions:
+
+    1. Does the CORE Hybrid/Blend dependency -- Amp A/Amp B (+ the crossover
+       envelope, Hybrid only), mode-aware exactly as before -- fit inside
+       the installed A2's actual receptive field? This is a HARD
+       requirement: failing it aborts training (`assert_required_history_fits`).
+
+    2. If a cab is baked, does ALSO adding its serial FIR history
+       (`fir_length - 1` samples) keep the FORMAL total within the A2's
+       receptive field? This is calculated and reported honestly, but it
+       NEVER gates training by itself -- exceeding it means the A2 will
+       LEARN AN APPROXIMATION of the post-cab response within its available
+       temporal capacity, not that training is invalid (we are training A2
+       to approximate the rendered teacher target, not compiling its signal
+       graph exactly).
+
+    Returns a summary dict (empty if the check was skipped for lack of
+    data) so `main()` can fold it into the manifest's "training" section.
     """
     mode = manifest.get("mode", "hybrid")
 
@@ -195,7 +238,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> None:
         max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
         if max_history_ms is None:
             print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
-            return
+            return {}
         branch_samples["envelope"] = int(round(max_history_ms / 1000.0 * sample_rate))
 
     for label, key in (("Amp A", "amp_a"), ("Amp B", "amp_b")):
@@ -211,60 +254,101 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> None:
 
     if not branch_samples:
         print("WARNING: no branch dependency could be determined -- skipping receptive-field check.")
-        return
+        return {}
 
-    cab = manifest.get("cab") or {}
-    cab_fir_samples = 0
-    if cab.get("baked") and cab.get("fir_history_samples"):
-        cab_fir_samples = int(cab["fir_history_samples"])
+    hard_required = max(branch_samples.values())
 
-    base_required = max(branch_samples.values())
-    worst_samples = base_required + cab_fir_samples
-
-    print(f"Target dependency by branch (mode={mode}, parallel branches take the max):")
+    print(f"Core target dependency by branch (mode={mode}):")
     for label, samples in branch_samples.items():
         print(f"  {label:<12} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
-    print(f"  {'base max':<12} {base_required:>6} samples ({base_required / sample_rate * 1000:6.1f} ms)")
-    if cab_fir_samples:
-        print(f"  {'+ cab FIR':<12} {cab_fir_samples:>6} samples ({cab_fir_samples / sample_rate * 1000:6.1f} ms) [serial, baked cab]")
-    print(f"  {'total':<12} {worst_samples:>6} samples ({worst_samples / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'hard core':<12} {hard_required:>6} samples ({hard_required / sample_rate * 1000:6.1f} ms)")
 
+    # The CORE dependency is a HARD requirement -- unlike a baked cab below,
+    # this is never relaxed to an advisory warning. A2's temporal capacity
+    # was the whole reason the crossover envelope was bounded/causal and why
+    # the source amps are what they are; if the core teacher itself doesn't
+    # fit, the composite function genuinely cannot be represented.
     try:
-        # base branches are PARALLEL (they consume the same dry input
-        # independently, and the per-sample amp combination is memoryless),
-        # so their temporal requirement is a MAX, not a sum; a baked cab FIR
-        # runs AFTER that combination and so is SERIAL/additive on top -- see
-        # assert_envelope_history_fits's/combine_required_history's docstrings.
-        # An exact fit (required == available) is representable with zero
-        # slack, not a failure.
-        rf = assert_envelope_history_fits(worst_samples, sample_rate, margin_fraction=0.0)
-        margin_samples = rf.receptive_field_samples - worst_samples
-        margin_ms = margin_samples / sample_rate * 1000
-        if margin_samples == 0:
-            print(
-                f"Receptive field: EXACT FIT -- total dependency {worst_samples} samples "
-                f"exactly equals the A2 receptive field {rf.receptive_field_samples} samples "
-                f"(submodels={rf.submodel_names}). Zero temporal margin. Training permitted -- this "
-                "checks temporal reach only, not whether the network has enough capacity to actually "
-                "learn the composite function within that reach; that is exactly what this "
-                "experiment is meant to determine."
-            )
-        else:
-            print(
-                f"Receptive field OK: total dependency {worst_samples} samples fits inside A2 "
-                f"receptive field {rf.receptive_field_samples} samples (submodels={rf.submodel_names}), "
-                f"margin {margin_ms:.1f} ms."
-            )
+        rf = assert_required_history_fits(hard_required, sample_rate, margin_fraction=0.0)
     except ReceptiveFieldUnavailable as exc:
         raise TrainingAbort(str(exc)) from exc
     except ValueError as exc:
-        if cab_fir_samples:
-            raise TrainingAbort(
-                f"REFUSING to train: {exc}\nThe cab works fine for preview, but baking this "
-                "particular IR after these source NAMs exceeds the destination A2's temporal "
-                "history. Disable baking (preview-only cab remains available) or use a shorter IR."
-            ) from exc
         raise TrainingAbort(f"REFUSING to train: {exc}") from exc
+
+    margin_samples = rf.receptive_field_samples - hard_required
+    core_status = "EXACT FIT" if margin_samples == 0 else "OK"
+    print("\nDestination A2 RF:")
+    print(f"  {'available':<12} {rf.receptive_field_samples:>6} samples ({rf.receptive_field_samples / sample_rate * 1000:6.1f} ms)")
+    if margin_samples == 0:
+        print(
+            f"  {'core status':<12} {core_status} -- zero temporal margin. Training permitted -- this checks "
+            "temporal reach only, not whether the network has enough capacity to actually learn the "
+            "composite function within that reach; that is exactly what this experiment is meant to determine."
+        )
+    else:
+        print(f"  {'core status':<12} {core_status}  margin {margin_samples / sample_rate * 1000:.1f} ms")
+
+    result = {
+        "mode": mode,
+        "branch_samples": branch_samples,
+        "hard_required_samples": hard_required,
+        "a2_receptive_field_samples": rf.receptive_field_samples,
+        "a2_submodels": rf.submodel_names,
+        "core_status": core_status,
+        "cab_baked": False,
+        "cab_fir_length_samples": None,
+        "cab_fir_history_samples": 0,
+        "formal_total_required_samples": hard_required,
+        "cab_requires_approximation": False,
+    }
+
+    cab = manifest.get("cab") or {}
+    if not cab.get("baked"):
+        return result
+
+    cab_fir_samples, cab_fir_length = _resolve_baked_cab_fir_samples(manifest, cab, sample_rate)
+    if not cab_fir_samples:
+        return result
+
+    formal_total = hard_required + cab_fir_samples
+    result.update({
+        "cab_baked": True,
+        "cab_fir_length_samples": cab_fir_length,
+        "cab_fir_history_samples": cab_fir_samples,
+        "formal_total_required_samples": formal_total,
+    })
+
+    print("\nBaked cabinet:")
+    if cab_fir_length:
+        print(f"  {'FIR length':<12} {cab_fir_length:>6} samples ({cab_fir_length / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'FIR history':<12} {cab_fir_samples:>6} samples ({cab_fir_samples / sample_rate * 1000:6.1f} ms)")
+    print(f"  {'formal total':<12} {formal_total:>6} samples ({formal_total / sample_rate * 1000:6.1f} ms)")
+    energy_999_samples = cab.get("energy_999_samples")
+    energy_999_ms = cab.get("energy_999_ms")
+    if energy_999_samples is not None and energy_999_ms is not None:
+        print(f"  99.9% energy by: {energy_999_samples} samples ({energy_999_ms:.1f} ms)")
+
+    # The formal total is NEVER a hard gate -- see function docstring. Only
+    # report/record whether A2 is being asked to approximate the cab.
+    if formal_total > rf.receptive_field_samples:
+        result["cab_requires_approximation"] = True
+        print(
+            "\nCABINET APPROXIMATION:\n"
+            f"  The core {mode.capitalize()} target fits within the A2 receptive field "
+            f"({hard_required} / {rf.receptive_field_samples} samples).\n"
+            f"  The baked cabinet extends the teacher's formal temporal dependency to "
+            f"{formal_total} samples, beyond the A2 receptive field of {rf.receptive_field_samples} samples.\n"
+            "  Training will continue: the cabinet response will be approximated by the A2 within its "
+            "available temporal capacity.\n"
+            "  Validate the resulting model against the baked target and by listening."
+        )
+    else:
+        print(
+            f"  Formal total also fits inside the A2 receptive field "
+            f"({formal_total} <= {rf.receptive_field_samples}) -- no approximation needed for the cab."
+        )
+
+    return result
 
 
 def _build_user_metadata(manifest: dict):
@@ -459,7 +543,7 @@ def main(argv=None) -> int:
         target_path = Path(manifest["_target_path"])
         sample_rate = manifest["training_input"]["sample_rate"]
 
-        check_receptive_field(manifest, sample_rate)
+        rf_check = check_receptive_field(manifest, sample_rate) or {}
 
         output_dir = args.output_dir or (bundle_dir / "a2_output")
         if args.quick:
@@ -482,6 +566,12 @@ def main(argv=None) -> int:
         except TrainingAbort as exc:
             print(f"Lite/slim validation skipped or failed: {exc}")
 
+        if rf_check.get("cab_requires_approximation"):
+            print(
+                "\nBaked cab was trained as an approximation because its formal temporal "
+                "dependency exceeded A2 RF. Review validation metrics and listening result above."
+            )
+
         manifest["training"] = {
             **env_info,
             "device_requested": args.device,
@@ -493,6 +583,8 @@ def main(argv=None) -> int:
             "full_metrics_vs_target": full_metrics,
             "lite_metrics_vs_target": lite_metrics,
         }
+        if rf_check:
+            manifest["receptive_field_check"] = rf_check
         manifest.pop("_bundle_dir", None)
         manifest.pop("_input_path", None)
         manifest.pop("_target_path", None)
