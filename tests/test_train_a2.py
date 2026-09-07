@@ -413,6 +413,26 @@ def test_validate_exported_nam_rejects_non_finite(tmp_path, monkeypatch):
         train_a2.validate_exported_nam(nam_path, input_path, 48000)
 
 
+def test_check_full_low_level_response_delegates_to_shared_helper_and_prints_verdict(tmp_path, monkeypatch, capsys):
+    """The substantive sweep/comparison logic (docs/blend-mode-fixes.md,
+    Phases 10-11) lives in hybrid.character_training_target.check_full_low_
+    level_response, shared with hybrid.kaggle_training.validate_downloaded_
+    model -- see tests/test_character_training_target.py for that logic.
+    This only checks train_a2.py's wrapper delegates and reports a verdict."""
+    manifest = {"mode": "character", "low_level_response": {}}
+    nam_path, input_path = tmp_path / "model.nam", tmp_path / "input.wav"
+
+    canned = {"max_error_db": 3.0, "pass": True, "dead_zone_detected": False}
+    monkeypatch.setattr(train_a2.character_training_target, "check_full_low_level_response", lambda *a, **k: canned)
+
+    result = train_a2.check_full_low_level_response(manifest, nam_path, input_path, 48000)
+    assert result is canned
+    assert "PASS" in capsys.readouterr().out
+
+    monkeypatch.setattr(train_a2.character_training_target, "check_full_low_level_response", lambda *a, **k: None)
+    assert train_a2.check_full_low_level_response(manifest, nam_path, input_path, 48000) is None
+
+
 def test_compare_to_target_metrics(tmp_path):
     target_path = tmp_path / "target.wav"
     target_audio = np.full(1000, 0.5, dtype=np.float32)

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import soundfile as sf
@@ -24,8 +25,8 @@ from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.blend_training_target import generate_blend_training_bundle
 from hybrid.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio, load_cached_analysis, sha256_file, store_cached_analysis
-from hybrid.character_blend import CharacterBlendDesign, build_character_blend, freeze_character_design
-from hybrid.character_training_target import generate_character_training_bundle
+from hybrid.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
+from hybrid.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
 from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
@@ -34,6 +35,7 @@ from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
+    db_to_amplitude,
     get_profile,
     resolve_profile_gain_db,
 )
@@ -47,7 +49,7 @@ from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
 from hybrid.nam_loader import load_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
-from hybrid.render import NamRenderError
+from hybrid.render import NamRenderError, render
 from hybrid.safety import preview_safety_limiter
 from hybrid.training_target import TrainingInputError, generate_training_bundle, validate_training_input
 
@@ -509,6 +511,43 @@ def _build_character_result(pair: RenderedPair, data: dict):
         analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config, b_hash)
         if b_hash: store_cached_analysis(cache_dir, analysis_b)
     return build_character_blend(pair, design, analysis_a=analysis_a, analysis_b=analysis_b), params
+
+
+@app.route("/api/character/low_level_check", methods=["POST"])
+def api_character_low_level_check():
+    """Pre-flight low-level response sweep for the CURRENT Character Blend
+    controls (docs/blend-mode-fixes.md, Phase 6) -- lets the UI show whether
+    this design is healthy across a soft-playing gain sweep before the user
+    spends time generating a bundle/training on Kaggle. Uses the exact same
+    build_character_blend() as preview and the training-bundle gate (Phase 7)."""
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    a_path, b_path = _rendered_pair_cache.get("amp_a_path"), _rendered_pair_cache.get("amp_b_path")
+    if pair is None or not a_path or not b_path:
+        return jsonify({"error": "Render and audition an amp pair first (POST /api/render_pair)."}), 400
+    data = request.get_json(force=True)
+    try:
+        result, params = _build_character_result(pair, data)
+    except (TypeError, ValueError):
+        return jsonify({"error": "character tone/feel/drive controls must be numbers"}), 400
+    design = CharacterBlendDesign(
+        amp_a_path="", amp_b_path="",
+        analysis_a=json.loads(json.dumps(result.analysis_a.to_dict())),
+        analysis_b=json.loads(json.dumps(result.analysis_b.to_dict())),
+        **params,
+    )
+    reference = pair.profiled_dry[: int(pair.sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS)]
+    if len(reference) == 0:
+        reference = pair.profiled_dry
+    amp_a, amp_b = load_nam(a_path), load_nam(b_path)
+
+    def build_pair_at_gain(gain_db: float):
+        scaled = (reference * db_to_amplitude(gain_db)).astype(np.float32)
+        a = render(amp_a, (scaled * db_to_amplitude(pair.amp_a_calibration_gain_db)).astype(np.float32), pair.sample_rate)
+        b = render(amp_b, (scaled * db_to_amplitude(pair.amp_b_calibration_gain_db)).astype(np.float32), pair.sample_rate)
+        return SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=pair.sample_rate)
+
+    check = evaluate_low_level_response(build_pair_at_gain, design)
+    return jsonify({"low_level_response": check.to_dict()})
 
 
 def _parse_hybrid_params(data: dict):
@@ -1016,6 +1055,7 @@ def api_generate():
             "amp_b_gain_db": design.amp_b_calibration_gain_db,
         },
         "cab_summary": design.cab.to_dict() if design.cab else None,
+        "low_level_response": bundle.manifest.get("low_level_response"),
         "training_command": f"python scripts/train_a2.py {bundle.training_manifest_path}",
         "epoch_presets": A2_EPOCH_PRESETS,
         "default_epoch_preset": "high_def" if mode == "character" else DEFAULT_EPOCH_PRESET,

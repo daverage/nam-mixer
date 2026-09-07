@@ -46,6 +46,7 @@ from typing import Optional
 import numpy as np
 
 from .a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
+from .character_training_target import check_full_low_level_response
 from .nam_loader import load_nam
 from .render import NamRenderError, render
 from .validation import compute_esr_metrics
@@ -1160,7 +1161,15 @@ class KaggleJobManager:
 
         try:
             bundle_dir = self.a2_output_dir / job.design_id
-            validation = validate_downloaded_model(nam_path, bundle_dir / "input.wav", bundle_dir / "hybrid_target.wav")
+            manifest_path = bundle_dir / "training_manifest.json"
+            bundle_manifest = None
+            if manifest_path.is_file():
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        bundle_manifest = json.load(f)
+                except (OSError, json.JSONDecodeError):
+                    bundle_manifest = None
+            validation = validate_downloaded_model(nam_path, bundle_dir / "input.wav", bundle_dir / "hybrid_target.wav", manifest=bundle_manifest)
         except (NamRenderError, OSError, ValueError) as exc:
             job.state = "failed"
             job.error = f"local validation of downloaded model failed: {exc}"
@@ -1248,11 +1257,18 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_path: Path) -> dict:
+def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_path: Path, manifest: dict | None = None) -> dict:
     """Reuses the exact same NAMCore verification `scripts/train_a2.py`
     performs for the local trainer's own export -- Full/Lite render, finite,
     correct length, plus ESR comparison against the target -- so a Kaggle
-    "success" only counts once it passes the identical bar."""
+    "success" only counts once it passes the identical bar.
+
+    `manifest` (the bundle's training_manifest.json, if available) additionally
+    runs the Character Blend low-level response check (docs/blend-mode-
+    fixes.md, Phases 10-11) via `hybrid.character_training_target.check_full_
+    low_level_response` -- the same function `scripts/train_a2.py` uses --
+    so a Kaggle-trained Character Blend A2 is held to the identical
+    low-level-response bar as a locally-trained one."""
     import soundfile as sf
 
     nam_path = Path(nam_path)
@@ -1275,5 +1291,10 @@ def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_
 
     if not report["full"].get("rendered_ok"):
         raise NamRenderError(f"Full submodel failed to render: {report['full'].get('error')}")
+
+    if manifest is not None:
+        low_level_response_check = check_full_low_level_response(manifest, nam_path, training_input_path, sr)
+        if low_level_response_check is not None:
+            report["low_level_response_check"] = low_level_response_check
 
     return report

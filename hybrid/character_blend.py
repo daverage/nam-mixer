@@ -73,6 +73,81 @@ class CharacterBlendResult:
     analysis_b: AmpCharacterAnalysis
 
 
+# Fixed reference sweep for the low-level response sanity check (see
+# docs/blend-mode-fixes.md, "Phase 4"). Deliberately highest-to-lowest so a
+# reader (and the manifest/UI) sees it in the same order a player backing off
+# their instrument would experience it.
+DEFAULT_LOW_LEVEL_SWEEP_DB: tuple[float, ...] = (0.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0)
+# A natural amp/compression response can lose several dB of output for a
+# given dB of input reduction; a HARD gate loses vastly more. This margin
+# (added on top of the input step itself) is a conservative amount of extra
+# attenuation-per-step no ordinary amplifier behaviour should produce.
+DEFAULT_LOW_LEVEL_COLLAPSE_MARGIN_DB: float = 25.0
+_LOW_LEVEL_FLOOR_DBFS: float = -90.0
+
+
+@dataclass(frozen=True)
+class LowLevelResponseCheck:
+    ok: bool
+    levels_db: list
+    output_rms_dbfs: list
+    max_step_error_db: float
+    dead_zone_detected: bool
+    warning: Optional[str] = None
+
+    def to_dict(self) -> dict: return asdict(self)
+
+
+def _rms_dbfs(audio: np.ndarray, floor_dbfs: float = _LOW_LEVEL_FLOOR_DBFS) -> float:
+    if len(audio) == 0: return floor_dbfs
+    rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
+    return max(20.0 * np.log10(max(rms, _EPS)), floor_dbfs)
+
+
+def evaluate_low_level_response(
+    build_pair_at_gain, design: "CharacterBlendDesign", levels_db: tuple = DEFAULT_LOW_LEVEL_SWEEP_DB,
+    *, collapse_margin_db: float = DEFAULT_LOW_LEVEL_COLLAPSE_MARGIN_DB, floor_dbfs: float = _LOW_LEVEL_FLOOR_DBFS,
+    analysis_a: Optional[AmpCharacterAnalysis] = None, analysis_b: Optional[AmpCharacterAnalysis] = None,
+) -> LowLevelResponseCheck:
+    """Render+blend a fixed reference DI across `levels_db` relative input
+    gains and verify Character Blend remains a responsive amplifier rather
+    than developing a hard low-level gate (docs/blend-mode-fixes.md, Phases
+    4-5). This is the same `build_character_blend()` used by preview and
+    training-bundle generation (Phase 7) -- only the sweep of input gains
+    driving it is new.
+
+    `build_pair_at_gain(gain_db)` renders a pair-like object (`.dry`/
+    `.amp_a`/`.amp_b`/`.sample_rate`) for one relative gain; injected rather
+    than computed here so this stays usable with synthetic pairs in tests and
+    with real NAM renders in the training-bundle gate alike.
+
+    A dead zone is flagged either by an output level pinned at `floor_dbfs`
+    (digital silence) or by a step from one level to the next losing far more
+    output than the corresponding input change alone would explain -- e.g.
+    "input drops 6 dB, output drops 50 dB" -- rather than one arbitrary
+    absolute RMS floor, since a quiet-but-still-descending amp is healthy and
+    a collapsed one is not.
+    """
+    output_rms = [
+        _rms_dbfs(build_character_blend(build_pair_at_gain(gain_db), design, analysis_a=analysis_a, analysis_b=analysis_b).blend, floor_dbfs)
+        for gain_db in levels_db
+    ]
+    step_errors = [
+        abs(output_rms[i] - output_rms[i - 1]) - abs(levels_db[i] - levels_db[i - 1])
+        for i in range(1, len(levels_db))
+    ]
+    max_step_error_db = float(max(step_errors)) if step_errors else 0.0
+    dead_zone_detected = max_step_error_db > collapse_margin_db or any(rms <= floor_dbfs + 1e-6 for rms in output_rms)
+    warning = None
+    if dead_zone_detected:
+        sweep = ", ".join(f"{lv:g}dB->{rms:.1f}dBFS" for lv, rms in zip(levels_db, output_rms))
+        warning = (
+            f"Character Blend low-level response collapsed (max step error {max_step_error_db:.1f} dB "
+            f"exceeds the {collapse_margin_db:.1f} dB margin): {sweep}"
+        )
+    return LowLevelResponseCheck(not dead_zone_detected, list(levels_db), output_rms, max_step_error_db, dead_zone_detected, warning)
+
+
 def _analysis_from_design(data: Optional[dict]) -> Optional[AmpCharacterAnalysis]:
     return AmpCharacterAnalysis.from_dict(data) if data else None
 
@@ -81,12 +156,63 @@ def _interp(levels: np.ndarray, values: np.ndarray, envelope: np.ndarray) -> np.
     return np.interp(envelope, levels, values, left=values[0], right=values[-1])
 
 
+def _adjacent_level_weights(levels: np.ndarray, envelope: np.ndarray) -> np.ndarray:
+    """Per-sample weights (n_levels, n_samples) over the analysis grid.
+
+    Unlike an all-level triangular basis, every sample's weight comes from
+    AT MOST its two neighbouring analysis levels, and clamps -- rather than
+    zeroing out -- once the envelope moves outside the grid. This guarantees
+    ``weights.sum(axis=0) == 1`` everywhere, including far below the lowest
+    measured level, where a triangular kernel's support vanishes and would
+    otherwise silently zero the teacher output (the low-level collapse bug
+    this replaces).
+    """
+    n_levels = len(levels)
+    lower_idx = np.clip(np.searchsorted(levels, envelope, side="right") - 1, 0, n_levels - 2)
+    upper_idx = lower_idx + 1
+    lo, hi = levels[lower_idx], levels[upper_idx]
+    frac = np.clip((envelope - lo) / np.maximum(hi - lo, _EPS), 0.0, 1.0)
+    below, above = envelope <= levels[0], envelope >= levels[-1]
+    frac = np.where(below, 0.0, np.where(above, 1.0, frac))
+    weights = np.zeros((n_levels, len(envelope)), dtype=np.float64)
+    sample_idx = np.arange(len(envelope))
+    weights[lower_idx, sample_idx] += 1.0 - frac
+    weights[upper_idx, sample_idx] += frac
+    assert np.allclose(weights.sum(axis=0), 1.0), "Character Blend interpolation weights must sum to 1"
+    return weights
+
+
 def _drive_curve(design: CharacterBlendDesign, envelope: np.ndarray, levels: np.ndarray) -> np.ndarray:
     if None not in (design.drive_low_mix_b, design.drive_mid_mix_b, design.drive_high_mix_b):
         points = np.array([_clamp(design.drive_low_mix_b), _clamp(design.drive_mid_mix_b), _clamp(design.drive_high_mix_b)])
         anchors = np.array([levels[0], levels[len(levels)//2], levels[-1]])
         return _interp(anchors, points, envelope)
     return np.full(len(envelope), _clamp(design.drive_mix_b), dtype=np.float64)
+
+
+def _select_donor(a: np.ndarray, b: np.ndarray, drive_b: np.ndarray, sample_rate: int) -> np.ndarray:
+    """The Drive donor selection (docs/blend-mode-fixes.md, Phase 8): below
+    50% B, Amp A is the donor; AT 50% B and above, Amp B is the donor -- the
+    boundary favours B, not an even split. Drive therefore picks a single
+    donor per sample, not a continuous nonlinear morph; a "50%" setting
+    selects 100% Amp B, not a 50/50 blend of the two waveforms. A short
+    crossfade only occurs where the donor identity actually switches;
+    steady regions are exactly one source waveform.
+
+    This behaviour is intentionally left as-is by the low-level response fix
+    (see the module's Phase-1/2/3 tests) -- it is documented here rather
+    than changed, per docs/blend-mode-fixes.md Phase 8.
+    """
+    n = len(drive_b)
+    donor = np.where(drive_b >= 0.5, b, a).astype(np.float64)
+    changes = np.flatnonzero(np.diff((drive_b >= .5).astype(np.int8))) + 1
+    fade = max(1, int(sample_rate * .01))
+    for point in changes:
+        start, end = max(0, point - fade), min(n, point + fade)
+        w = np.linspace(0, 1, end - start)
+        if drive_b[point] >= .5: donor[start:end] = a[start:end] * (1 - w) + b[start:end] * w
+        else: donor[start:end] = b[start:end] * (1 - w) + a[start:end] * w
+    return donor
 
 
 def _smooth(value: np.ndarray, sample_rate: int, ms: float) -> np.ndarray:
@@ -118,16 +244,7 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     analysis_b = analysis_b or _analysis_from_design(design.analysis_b) or analyse_rendered_audio(dry, b, pair.sample_rate, config)
     levels = np.array([x.input_gain_db for x in analysis_a.levels])
     drive_b = _smooth(_drive_curve(design, envelope, levels), pair.sample_rate, design.envelope_smoothing_ms)
-    # A block-continuous donor transition. It only occurs where the identity
-    # changes; steady regions are exactly one source waveform.
-    donor = np.where(drive_b >= 0.5, b, a).astype(np.float64)
-    changes = np.flatnonzero(np.diff((drive_b >= .5).astype(np.int8))) + 1
-    fade = max(1, int(pair.sample_rate * .01))
-    for point in changes:
-        start, end = max(0, point - fade), min(n, point + fade)
-        w = np.linspace(0, 1, end - start)
-        if drive_b[point] >= .5: donor[start:end] = a[start:end] * (1 - w) + b[start:end] * w
-        else: donor[start:end] = b[start:end] * (1 - w) + a[start:end] * w
+    donor = _select_donor(a, b, drive_b, pair.sample_rate)
     gain_a = np.array([x.compression_gain_db for x in analysis_a.levels]); gain_b = np.array([x.compression_gain_db for x in analysis_b.levels])
     target_gain = gain_a * (1 - _clamp(design.feel_mix_b)) + gain_b * _clamp(design.feel_mix_b)
     donor_gain = np.where(drive_b >= .5, _interp(levels, gain_b, envelope), _interp(levels, gain_a, envelope))
@@ -143,8 +260,7 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
         donor_eq = eq_b if _drive_curve(design, np.array([level]), levels)[0] >= .5 else eq_a
         correction = np.clip(target - donor_eq, -abs(design.eq_correction_limit_db), abs(design.eq_correction_limit_db))
         filtered.append(fftconvolve(corrected, _minimum_phase_correction(freqs, correction, pair.sample_rate), mode="full")[:n])
-    weights = np.vstack([np.maximum(0.0, 1.0 - np.abs(envelope - level) / max(1.0, np.diff(levels).mean())) for level in levels])
-    weights /= np.maximum(weights.sum(axis=0), _EPS)
+    weights = _adjacent_level_weights(levels, envelope)
     output = np.sum(np.vstack(filtered) * weights, axis=0).astype(np.float32)
     return CharacterBlendResult(output, envelope, drive_b, analysis_a, analysis_b)
 

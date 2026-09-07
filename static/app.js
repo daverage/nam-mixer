@@ -592,6 +592,24 @@ function characterParamsBody() {
     drive_high_mix_b: morph ? pct("drive-high") : null };
 }
 
+// Rendered display for a LowLevelResponseCheck dict (see
+// hybrid.character_blend.LowLevelResponseCheck / docs/blend-mode-fixes.md
+// Phase 6) -- shared by the on-demand check button and the Generate result.
+function renderLowLevelResponseHtml(check) {
+  if (!check) return "";
+  const rows = check.levels_db
+    .map((lv, i) => `<tr><td>${fmtSigned(lv)} dB</td><td>${check.output_rms_dbfs[i].toFixed(1)} dBFS</td></tr>`)
+    .join("");
+  const verdict = check.ok
+    ? `<div class="ok-line">&#10003; continuous low-level response, no dead zone</div>`
+    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design -- see docs/blend-mode-fixes.md.</div>`;
+  return `
+    <div><strong>LOW-LEVEL RESPONSE</strong></div>
+    <table class="coverage-table"><tbody>${rows}</tbody></table>
+    ${verdict}
+  `;
+}
+
 // Mode-aware params for whichever mode tab is active -- shared by
 // /api/mix_info, /api/preview (source=hybrid/blend), and /api/generate.
 function currentModeParamsBody() {
@@ -971,6 +989,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
 
   previewButtons.forEach((btn) => (btn.disabled = false));
   liveBlendButton.disabled = false;
+  document.getElementById("btn-character-low-level-check").disabled = false;
   havePair = true;
   updateTrimReadout();
   updateJourney();
@@ -982,6 +1001,7 @@ renderPairBtn.addEventListener("click", async () => {
   renderStatus.textContent = "Rendering (running NAM inference twice)...";
   renderWarnings.hidden = true;
   previewButtons.forEach((btn) => (btn.disabled = true));
+  document.getElementById("btn-character-low-level-check").disabled = true;
   try {
     const data = await doRenderPair();
     applyRenderResult(data, { applySuggestedCrossover: true });
@@ -1090,6 +1110,38 @@ trainingInputFile.addEventListener("change", async () => {
   }
 });
 
+const characterLowLevelBtn = document.getElementById("btn-character-low-level-check");
+const characterLowLevelStatus = document.getElementById("character-low-level-status");
+const characterLowLevelResult = document.getElementById("character-low-level-result");
+characterLowLevelBtn.addEventListener("click", async () => {
+  if (!havePair) {
+    setStatus("Render and audition an amp pair first.", true);
+    return;
+  }
+  characterLowLevelBtn.disabled = true;
+  characterLowLevelResult.hidden = true;
+  characterLowLevelStatus.textContent = "Sweeping 0 to -36 dB (running NAM inference several times on a short excerpt)...";
+  try {
+    const resp = await fetch("/api/character/low_level_check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(characterParamsBody()),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      characterLowLevelStatus.textContent = "Error: " + (data.error || "low-level check failed");
+      return;
+    }
+    characterLowLevelStatus.textContent = "Low-level response sweep complete.";
+    characterLowLevelResult.hidden = false;
+    characterLowLevelResult.innerHTML = renderLowLevelResponseHtml(data.low_level_response);
+  } catch (err) {
+    characterLowLevelStatus.textContent = "Request failed: " + err;
+  } finally {
+    characterLowLevelBtn.disabled = false;
+  }
+});
+
 const generateBtn = document.getElementById("btn-generate");
 const modelNameInput = document.getElementById("model-name");
 generateBtn.addEventListener("click", async () => {
@@ -1141,6 +1193,7 @@ generateBtn.addEventListener("click", async () => {
     const cabLine = data.cab_summary
       ? `<div><strong>Cab:</strong> ${data.cab_summary.baked ? "baked into this A2" : "not baked (preview only)"} -- ${data.cab_summary.original_filename}</div>`
       : "";
+    const lowLevelHtml = data.low_level_response ? renderLowLevelResponseHtml(data.low_level_response) : "";
     generateResult.innerHTML = `
       <div><strong>Bundle:</strong> <code>${data.bundle_dir}</code></div>
       <div><strong>Final model:</strong> <code>${data.download_filename}</code></div>
@@ -1149,6 +1202,7 @@ generateBtn.addEventListener("click", async () => {
       ${cabLine}
       <div><strong>Train it with:</strong> <code>${data.training_command}</code></div>
       ${warningsHtml}
+      ${lowLevelHtml}
     `;
     setStatus("Training bundle ready.");
 

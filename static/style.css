@@ -488,6 +488,17 @@ details.advanced summary:hover { color: var(--text); }
   line-height: 1.4;
 }
 
+.ok-line {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.3);
+  color: var(--success, #2ea043);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .link-btn {
   background: none;
   border: none;

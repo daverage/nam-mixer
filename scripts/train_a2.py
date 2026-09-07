@@ -63,6 +63,7 @@ from hybrid.a2_training_settings import (  # noqa: E402
     user_metadata_kwargs,
 )
 from hybrid.cab_ir import CabIrError, get_prepared_cab_ir  # noqa: E402
+import hybrid.character_training_target as character_training_target  # noqa: E402
 from hybrid.receptive_field import (  # noqa: E402
     ReceptiveFieldUnavailable,
     assert_required_history_fits,
@@ -519,6 +520,22 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
     return {"path": str(nam_path), "sample_rate": sr, "frame_count": len(rendered), "rendered": rendered}
 
 
+def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int) -> "dict | None":
+    """Thin wrapper over `hybrid.character_training_target.check_full_low_
+    level_response` (docs/blend-mode-fixes.md, Phases 10-11) that also prints
+    a verdict line -- the actual sweep/comparison logic is shared with
+    `hybrid.kaggle_training.validate_downloaded_model` so both local and
+    Kaggle-trained models are held to the identical bar (see that function's
+    docstring). Only meaningful for Character Blend bundles that recorded a
+    `low_level_response` section; returns None otherwise.
+    """
+    result = character_training_target.check_full_low_level_response(manifest, nam_path, input_path, sample_rate)
+    if result is not None:
+        verdict = "PASS" if result["pass"] else "FAIL -- trained Full A2 developed a low-level response gap vs. the teacher"
+        print(f"Character Blend low-level response (Full A2 vs teacher): max error {result['max_error_db']:.1f} dB -- {verdict}")
+    return result
+
+
 def compare_to_target(rendered: np.ndarray, target_path: Path) -> dict:
     target_audio, _ = _read_audio(target_path)
     metrics = compute_esr_metrics(rendered, target_audio)
@@ -576,6 +593,7 @@ def main(argv=None) -> int:
 
         full_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=False)
         full_metrics = compare_to_target(full_result["rendered"], target_path)
+        low_level_response_check = check_full_low_level_response(manifest, nam_path, input_path, sample_rate)
 
         lite_metrics = None
         try:
@@ -603,6 +621,8 @@ def main(argv=None) -> int:
         }
         if rf_check:
             manifest["receptive_field_check"] = rf_check
+        if low_level_response_check:
+            manifest["low_level_response_check"] = low_level_response_check
         manifest.pop("_bundle_dir", None)
         manifest.pop("_input_path", None)
         manifest.pop("_target_path", None)

@@ -133,6 +133,13 @@
         <input type="range" id="feel-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
         <div class="slider-row"><label for="drive-slider">Drive: Amp A / Amp B</label><span id="drive-value" class="value-chip">50% B</span></div>
         <input type="range" id="drive-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+        <div class="hint">
+          Drive picks a SINGLE donor per sample, not a continuous nonlinear
+          morph: below 50% B, Amp A is the donor; at 50% B and above, Amp B
+          is the donor (with a short crossfade only where the donor actually
+          switches). A "50/50" setting therefore means Amp B, not an even
+          blend -- see docs/blend-mode-fixes.md, Phase 8.
+        </div>
         <details class="advanced"><summary>Advanced: drive morph by input level</summary>
           <div class="slider-row"><label for="drive-low-slider">Low input</label><span id="drive-low-value" class="value-chip">20% B</span></div><input type="range" id="drive-low-slider" min="0" max="100" step="1" value="20" class="slider slider-mix">
           <div class="slider-row"><label for="drive-mid-slider">Mid input</label><span id="drive-mid-value" class="value-chip">50% B</span></div><input type="range" id="drive-mid-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
@@ -140,6 +147,12 @@
           <label class="checkbox-row"><input type="checkbox" id="drive-morph-enabled"> Drive morph by input level</label>
         </details>
         <div id="character-readout" class="trim-readout" aria-live="polite">Tone, feel, and drive analyses run from the rendered pair.</div>
+
+        <button id="btn-character-low-level-check" type="button" class="btn btn-secondary btn-block" disabled>Check low-level response</button>
+        <div id="character-low-level-status" class="info" aria-live="polite">
+          Sweeps a short excerpt of the rendered DI at 0 to -36&nbsp;dB and confirms this design stays a responsive amplifier at soft playing levels, rather than collapsing to digital silence -- see docs/blend-mode-fixes.md.
+        </div>
+        <div id="character-low-level-result" class="generate-result" hidden aria-live="polite"></div>
       </section>
 
       <section class="card">

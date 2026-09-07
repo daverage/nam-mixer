@@ -1296,6 +1296,32 @@ def _write_bundle_wavs(a2_output_dir: Path, design_id: str, n: int = 1000, sr: i
     sf.write(bundle_dir / "hybrid_target.wav", audio, sr, subtype="FLOAT")
 
 
+def test_validate_downloaded_model_runs_low_level_response_check_when_manifest_is_character_mode(monkeypatch, tmp_path):
+    """docs/blend-mode-fixes.md Phase 10/11: a Kaggle-trained Character
+    Blend A2 gets the same low-level-response bar as a locally-trained one,
+    via the SAME hybrid.character_training_target.check_full_low_level_
+    response function scripts/train_a2.py uses."""
+    import hybrid.character_training_target as character_training_target
+
+    nam_path = _write_nam(tmp_path / "model.nam")
+    input_path = tmp_path / "input.wav"
+    target_path = tmp_path / "target.wav"
+    audio = np.zeros(4800, dtype=np.float32)
+    sf.write(input_path, audio, 48000, subtype="FLOAT")
+    sf.write(target_path, audio, 48000, subtype="FLOAT")
+
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    monkeypatch.setattr(character_training_target, "render", _fake_render)
+
+    manifest = {"mode": "character", "low_level_response": {"levels_db": [0.0], "output_rms_dbfs": [-120.0], "dead_zone_detected": False}}
+    report = kaggle_training.validate_downloaded_model(nam_path, input_path, target_path, manifest=manifest)
+    assert "low_level_response_check" in report
+
+    report_without_manifest = kaggle_training.validate_downloaded_model(nam_path, input_path, target_path)
+    assert "low_level_response_check" not in report_without_manifest
+
+
 def test_kernels_output_never_passes_the_invalid_glob_pattern(monkeypatch, tmp_path):
     """Reproduces the real incident: `_download_and_validate` must call
     kernels_output() with no file_pattern at all -- never the glob-shaped
