@@ -144,6 +144,41 @@ def test_not_installed_reports_cleanly(monkeypatch):
     assert cli.is_authenticated() is False
 
 
+def test_launch_auth_login_falls_back_to_python_module_when_no_console_script(monkeypatch):
+    """Regression: importlib reports the `kaggle` package available (so
+    is_installed() is True) but shutil.which("kaggle") finds nothing --
+    e.g. a GUI app's PATH not including the user-site console-script dir on
+    macOS. `executable` is then None; launching auth login must go through
+    `_build_argv` (falling back to `sys.executable -m kaggle`) rather than
+    Popen-ing `[None, "auth", "login"]`, which raised an uncaught TypeError."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    cli = KaggleCli()
+    assert cli.executable is None
+
+    captured = {}
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        class _P:
+            pass
+        return _P()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    assert cli.launch_auth_login() is True
+    assert None not in captured["argv"]
+    assert captured["argv"][-2:] == ["auth", "login"]
+
+
+def test_launch_auth_login_returns_false_on_oserror(monkeypatch):
+    cli = KaggleCli(executable="/usr/bin/kaggle")
+
+    def raising_popen(argv, **kwargs):
+        raise OSError("no such file")
+    monkeypatch.setattr(subprocess, "Popen", raising_popen)
+
+    assert cli.launch_auth_login() is False
+
+
 def test_version_parsing(monkeypatch):
     cli, calls = make_cli(monkeypatch, responses={("--version",): FakeCompleted(0, "Kaggle API 2.2.4\n", "")})
     assert cli.version() == "2.2.4"

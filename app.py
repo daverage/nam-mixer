@@ -1111,16 +1111,9 @@ def api_kaggle_auth_start():
     credential (docs/kaggle_training.md)."""
     if not _kaggle_manager.cli.is_installed():
         return jsonify({"error": "Kaggle CLI is not installed. Run: pip install kaggle", "command": "pip install kaggle"}), 400
-    import subprocess
-    try:
-        subprocess.Popen(
-            [_kaggle_manager.cli.executable, "auth", "login"],
-            shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        started = True
-    except OSError as exc:
-        started = False
-        logger.warning("could not launch kaggle auth login: %s", exc)
+    started = _kaggle_manager.cli.launch_auth_login()
+    if not started:
+        logger.warning("could not launch kaggle auth login")
     return jsonify({
         "started": started,
         "command": "kaggle auth login",

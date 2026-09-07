@@ -38,6 +38,31 @@ def test_auth_start_without_cli_returns_actionable_error(client, monkeypatch):
     assert "pip install kaggle" in data["command"]
 
 
+def test_auth_start_falls_back_to_python_module_when_console_script_missing(client, monkeypatch):
+    """Regression: a `kaggle` package importable but with no console script
+    on PATH (e.g. a GUI app's PATH not including the user-site bin dir on
+    macOS) reports is_installed()=True with cli.executable=None. Popen-ing
+    `[None, "auth", "login"]` directly raised an uncaught TypeError (not
+    OSError) and surfaced as a 500 -- launch_auth_login() must fall back to
+    `sys.executable -m kaggle` instead."""
+    monkeypatch.setattr(app_module._kaggle_manager.cli, "is_installed", lambda: True)
+    monkeypatch.setattr(app_module._kaggle_manager.cli, "executable", None)
+    captured = {}
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        class _P:
+            pass
+        return _P()
+    monkeypatch.setattr("hybrid.kaggle_training.subprocess.Popen", fake_popen)
+
+    resp = client.post("/api/kaggle/auth/start")
+    assert resp.status_code == 200
+    assert resp.get_json()["started"] is True
+    assert captured["argv"][1:] == ["-m", "kaggle", "auth", "login"]
+    assert None not in captured["argv"]
+
+
 def test_train_requires_design_id(client):
     resp = client.post("/api/kaggle/train", json={})
     assert resp.status_code == 400

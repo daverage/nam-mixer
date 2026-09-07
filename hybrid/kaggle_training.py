@@ -214,6 +214,22 @@ class KaggleCli:
             return [sys.executable, "-m", "kaggle", *args]
         return [self.executable, *args]
 
+    def launch_auth_login(self) -> bool:
+        """Starts `kaggle auth login` as a non-blocking background process
+        (never a custom OAuth implementation, never reads/stores the
+        resulting credential). Always goes through `_build_argv` -- NOT
+        `[self.executable, ...]` directly -- so the `_module_available()`
+        case (console script absent from PATH, e.g. a GUI app's PATH on
+        macOS not including the user-site bin dir, but the package still
+        importable) falls back to `sys.executable -m kaggle` instead of
+        Popen-ing a literal `None` executable, which raised an uncaught
+        TypeError (not OSError) and surfaced as a 500 to callers."""
+        try:
+            subprocess.Popen(self._build_argv(["auth", "login"]), shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except OSError:
+            return False
+
     def _run(self, args: list[str], timeout: Optional[int] = None) -> CliResult:
         argv = self._build_argv(args)
         try:
