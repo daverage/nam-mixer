@@ -109,20 +109,6 @@
         </div>
       </section>
 
-      <section class="card" id="blend-panel-mix" data-mode-panel="blend" hidden>
-        <h2><span class="step">2</span> Fixed mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
-
-        <div class="slider-row">
-          <label for="mix-slider">Amp A / Amp B mix</label>
-          <span id="mix-value" class="value-chip">Amp A 50% / Amp B 50%</span>
-        </div>
-        <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
-        <div class="info">
-          A fixed ratio, independent of playing level -- no crossover envelope.
-          0% is 100% Amp A, 100% is 100% Amp B.
-        </div>
-      </section>
-
       <section class="card">
         <h2><span class="step">3</span> Level match <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
@@ -167,6 +153,18 @@
           reach the crossover; drag to stress-test the response. Automatically
           re-renders (real NAM inference, briefly) and refreshes what's
           playing -- no separate Render Amps click needed.
+        </div>
+
+        <div data-mode-panel="blend" hidden>
+          <div class="slider-row">
+            <label for="mix-slider">Amp A / Amp B mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></label>
+            <span id="mix-value" class="value-chip">Amp A 50% / Amp B 50%</span>
+          </div>
+          <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+          <div class="info">
+            A fixed ratio, independent of playing level -- no crossover envelope.
+            0% is 100% Amp A, 100% is 100% Amp B.
+          </div>
         </div>
       </section>
 

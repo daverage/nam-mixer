@@ -45,6 +45,7 @@ import argparse
 import hashlib
 import json
 import platform
+import shutil
 import sys
 from pathlib import Path
 
@@ -67,6 +68,7 @@ from hybrid.receptive_field import (  # noqa: E402
     compute_source_nam_receptive_field,
 )
 from hybrid.render import NamRenderError, render  # noqa: E402
+from hybrid.metadata import suggested_nam_filename  # noqa: E402
 from hybrid.nam_loader import load_nam  # noqa: E402
 from hybrid.validation import compute_esr_metrics  # noqa: E402
 
@@ -555,6 +557,17 @@ def main(argv=None) -> int:
 
         nam_path = _run_official_trainer(input_path, target_path, output_dir, settings, args.device, manifest)
         print(f"Trainer produced: {nam_path}")
+
+        # Also leave a copy under a human-meaningful name (<amp_a>_<amp_b>_
+        # hybrid|blendNN.nam) alongside the trainer's own fixed "model.nam" --
+        # export_dir/model.nam stays untouched since BaseNet.export() always
+        # writes that exact basename and other code paths (e.g. re-running
+        # validate_exported_nam) expect it to still be there.
+        friendly_name = suggested_nam_filename(manifest, fallback=nam_path.stem)
+        friendly_path = nam_path.with_name(friendly_name)
+        if friendly_path != nam_path:
+            shutil.copyfile(nam_path, friendly_path)
+            print(f"Also copied as: {friendly_path}")
 
         full_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=False)
         full_metrics = compare_to_target(full_result["rendered"], target_path)

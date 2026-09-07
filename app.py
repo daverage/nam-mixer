@@ -10,6 +10,7 @@ then open http://127.0.0.1:5000/ in a browser.
 from __future__ import annotations
 
 import io
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,7 @@ from hybrid.kaggle_training import (
     find_active_job,
     load_job,
 )
+from hybrid.metadata import suggested_nam_filename
 from hybrid.nam_loader import load_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError
@@ -846,15 +848,30 @@ def api_generate():
     })
 
 
+def _suggested_nam_filename(design_id: str) -> str:
+    """Download filename for a trained A2 model -- reads the bundle's own
+    training_manifest.json (already-recorded amp filenames/mode/mix) and
+    defers to hybrid.metadata.suggested_nam_filename so the naming logic
+    lives in one place shared with scripts/train_a2.py, rather than
+    duplicated per caller. Falls back to `<design_id>.nam` if the manifest
+    is missing/unreadable (e.g. a bundle generated before this existed)."""
+    manifest_path = A2_OUTPUT_DIR / secure_filename(str(design_id)) / "training_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+    return suggested_nam_filename(manifest, fallback=str(design_id))
+
+
 def _job_dict_for_client(job) -> dict:
     """job.to_dict() plus `download_filename` -- the EXACT filename
-    GET /api/kaggle/jobs/<id>/download will actually save the file as
-    (`{secure_filename(design_id)}.nam`), computed the same way here so the
-    UI's download button/link can never show a different name (e.g. the
-    internal `hybrid_a2.nam` export basename baked inside the Kaggle kernel,
-    job.output_nam_path's own basename) than what the browser actually saves."""
+    GET /api/kaggle/jobs/<id>/download will actually save the file as,
+    computed the same way here so the UI's download button/link can never
+    show a different name (e.g. the internal `hybrid_a2.nam` export
+    basename baked inside the Kaggle kernel, job.output_nam_path's own
+    basename) than what the browser actually saves."""
     data = job.to_dict()
-    data["download_filename"] = f"{secure_filename(str(job.design_id))}.nam"
+    data["download_filename"] = _suggested_nam_filename(job.design_id)
     return data
 
 
@@ -985,7 +1002,7 @@ def api_kaggle_job_download(job_id: str):
     if not nam_path.is_file():
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
-    download_name = f"{secure_filename(str(design_id))}.nam"
+    download_name = _suggested_nam_filename(design_id)
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 

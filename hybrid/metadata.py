@@ -9,6 +9,7 @@ dict to put there.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
@@ -50,3 +51,36 @@ class HybridMetadata:
         with open(sidecar_path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
         return sidecar_path
+
+
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _slug(text: str) -> str:
+    """Filesystem-safe slug -- deliberately NOT werkzeug.secure_filename:
+    this module has no Flask dependency (see module docstring/CLAUDE.md), and
+    both callers (app.py, scripts/train_a2.py) need the identical result."""
+    return _UNSAFE_FILENAME_CHARS.sub("_", text).strip("_") or "untitled"
+
+
+def suggested_nam_filename(manifest: dict, fallback: str) -> str:
+    """A human-meaningful `.nam` filename for a trained A2 model, derived from
+    a `training_manifest.json`-shaped dict (see hybrid.training_target/
+    hybrid.blend_training_target) -- `<amp_a>_<amp_b>_hybrid.nam` or
+    `<amp_a>_<amp_b>_blendNN.nam` -- so a downloaded/exported model is
+    identifiable by name alone rather than only by an opaque design id/
+    timestamp. Falls back to `<fallback>.nam` if the manifest doesn't have
+    the expected shape (e.g. an older bundle) -- never raises.
+    """
+    try:
+        amp_a = Path(manifest["amp_a"]["filename"]).stem
+        amp_b = Path(manifest["amp_b"]["filename"]).stem
+        if manifest.get("mode") == "blend":
+            mix_b_pct = round(float(manifest["design"]["mix_b"]) * 100)
+            suffix = f"blend{mix_b_pct:02d}"
+        else:
+            suffix = "hybrid"
+        base = f"{amp_a}_{amp_b}_{suffix}"
+    except (KeyError, TypeError, ValueError):
+        base = str(fallback)
+    return f"{_slug(base)}.nam"
