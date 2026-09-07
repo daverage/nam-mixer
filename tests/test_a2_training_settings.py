@@ -143,6 +143,15 @@ def test_cloud_worker_user_metadata_matches_shared_helper():
     assert cloud.user_metadata_kwargs(manifest_raw) == kwargs
 
 
+def test_explicit_model_name_is_embedded_in_nam_metadata():
+    manifest = {
+        "model_name": "Mesa + JCM800 Studio Blend",
+        "amp_a": {"filename": "Mesa.nam"},
+        "amp_b": {"filename": "JCM800.nam"},
+    }
+    assert user_metadata_kwargs(manifest)["name"] == "Mesa + JCM800 Studio Blend"
+
+
 @pytest.mark.parametrize("preset,expected_epochs", [("draft", 20), ("standard", 60), ("high_def", 120)])
 def test_cloud_worker_run_training_uses_requested_epoch_preset(tmp_path, monkeypatch, preset, expected_epochs):
     """Direct test of the cloud worker's run_training(): whichever preset is

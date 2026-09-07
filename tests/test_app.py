@@ -7,11 +7,13 @@ need a fresh render).
 """
 from __future__ import annotations
 
+import io
 import json as jsonlib
 from pathlib import Path
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 import app as app_module
 import hybrid.blend_training_target as blend_training_target
@@ -69,6 +71,27 @@ def test_preview_without_render_pair_first_returns_400(client):
     resp = client.post("/api/preview", json={"source": "a"})
     assert resp.status_code == 400
     assert "render" in resp.get_json()["error"].lower()
+
+
+def test_live_blend_stems_returns_trimmed_stereo_pair_without_rerender(client, tmp_path):
+    """The live-audition route must reuse the cached NAM output and leave the
+    browser to perform only the final, adjustable linear mix."""
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+
+    response = client.post("/api/live_blend_stems", json={
+        "mix_b": 0.5, "auto_level": True, "manual_b_trim_db": 0.0,
+    })
+
+    assert response.status_code == 200
+    assert response.headers["X-Live-Audition"] == "fixed-blend-stems"
+    assert response.headers["X-Effective-Trim-Db"] == "0.000"
+    audio, sample_rate = sf.read(io.BytesIO(response.data), dtype="float32", always_2d=True)
+    assert sample_rate == 48_000
+    assert audio.shape[1] == 2
+    assert np.allclose(audio[:, 0], audio[:, 1])
 
 
 def test_render_pair_cache_reflects_the_newest_profile_not_the_old_one(client, tmp_path):
@@ -279,6 +302,7 @@ def test_generate_end_to_end_produces_bundle(client, isolated_training_paths, tm
     resp = client.post("/api/generate", json={
         "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "auto_level": False, "manual_b_trim_db": 1.5,
+        "model_name": "My Hybrid Rig",
     })
     assert resp.status_code == 200
     data = resp.get_json()
@@ -294,6 +318,9 @@ def test_generate_end_to_end_produces_bundle(client, isolated_training_paths, tm
     assert manifest["design"]["pickup_profile_applied_to_training_input"] is False
     assert manifest["design"]["frozen_effective_b_trim_db"] == pytest.approx(1.5)
     assert manifest["mode"] == "hybrid"  # omitted mode defaults to Hybrid
+    assert manifest["model_name"] == "My Hybrid Rig"
+    assert manifest["artifact_filename"] == "My_Hybrid_Rig.nam"
+    assert data["download_filename"] == "My_Hybrid_Rig.nam"
 
 
 def test_mix_info_defaults_to_hybrid_mode(client, tmp_path):

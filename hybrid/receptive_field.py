@@ -269,11 +269,11 @@ def combine_required_history(
     (some old code/tests did exactly that, which is the bug this policy
     fixes; see docs/blend-mode.md).
     """
-    if mode not in ("hybrid", "blend"):
-        raise ValueError(f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')")
+    if mode not in ("hybrid", "blend", "character"):
+        raise ValueError(f"unknown mode: {mode!r} (expected 'hybrid', 'blend', or 'character')")
 
     branch_samples = {"amp_a": int(amp_a_samples), "amp_b": int(amp_b_samples)}
-    if mode == "hybrid":
+    if mode in ("hybrid", "character"):
         if envelope_samples is None:
             raise ValueError("envelope_samples is required for mode='hybrid'")
         branch_samples["envelope"] = int(envelope_samples)

@@ -12,9 +12,10 @@ from __future__ import annotations
 import io
 import json
 import logging
-from datetime import datetime, timezone
+import os
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 from flask import Flask, Response, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
@@ -22,6 +23,9 @@ from werkzeug.utils import secure_filename
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.blend_training_target import generate_blend_training_bundle
+from hybrid.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio, load_cached_analysis, sha256_file, store_cached_analysis
+from hybrid.character_blend import CharacterBlendDesign, build_character_blend, freeze_character_design
+from hybrid.character_training_target import generate_character_training_bundle
 from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
@@ -40,6 +44,7 @@ from hybrid.kaggle_training import (
     load_job,
 )
 from hybrid.metadata import suggested_nam_filename
+from hybrid.local_training import LocalTrainingManager
 from hybrid.nam_loader import load_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError
@@ -68,6 +73,7 @@ A2_OUTPUT_DIR = WORK_DIR / "a2"
 A2_OUTPUT_DIR.mkdir(exist_ok=True)
 
 _kaggle_manager = KaggleJobManager(A2_OUTPUT_DIR)
+_local_training_manager = LocalTrainingManager(BASE_DIR, A2_OUTPUT_DIR)
 
 app = Flask(__name__)
 
@@ -473,6 +479,38 @@ def _parse_blend_params(data: dict):
     return mix_b, manual_b_trim_db, auto_level
 
 
+def _parse_character_params(data: dict):
+    """Character controls are independent percentages; no raw-output trim is
+    used because Character Blend has one donor path and derived correction."""
+    def mix(name, default=0.5):
+        return max(0.0, min(1.0, float(data.get(name, default))))
+    optional = lambda name: None if data.get(name) is None else mix(name)
+    return {
+        "tone_mix_b": mix("tone_mix_b"), "feel_mix_b": mix("feel_mix_b"), "drive_mix_b": mix("drive_mix_b"),
+        "drive_low_mix_b": optional("drive_low_mix_b"), "drive_mid_mix_b": optional("drive_mid_mix_b"), "drive_high_mix_b": optional("drive_high_mix_b"),
+    }
+
+
+def _build_character_result(pair: RenderedPair, data: dict):
+    params = _parse_character_params(data)
+    # Preview analysis is intentionally derived from this already-auditioned
+    # pair.  The frozen analysis is then reused by official target generation.
+    design = CharacterBlendDesign(amp_a_path="", amp_b_path="", **params)
+    config = CharacterAnalysisConfig()
+    cache_dir = WORK_DIR / "character_analysis"
+    a_path, b_path = _rendered_pair_cache.get("amp_a_path"), _rendered_pair_cache.get("amp_b_path")
+    a_hash, b_hash = (sha256_file(a_path) if a_path else ""), (sha256_file(b_path) if b_path else "")
+    analysis_a = load_cached_analysis(cache_dir, a_hash, config) if a_hash else None
+    analysis_b = load_cached_analysis(cache_dir, b_hash, config) if b_hash else None
+    if analysis_a is None:
+        analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config, a_hash)
+        if a_hash: store_cached_analysis(cache_dir, analysis_a)
+    if analysis_b is None:
+        analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config, b_hash)
+        if b_hash: store_cached_analysis(cache_dir, analysis_b)
+    return build_character_blend(pair, design, analysis_a=analysis_a, analysis_b=analysis_b), params
+
+
 def _parse_hybrid_params(data: dict):
     """Shared crossover/transition/trim parsing for /api/preview,
     /api/blend_info, and /api/blend_curve -- all drive the same
@@ -551,6 +589,12 @@ def api_mix_info():
             "effective_b_trim_db": result.effective_b_trim_db,
             "alignment_offset_samples": result.alignment_offset_samples,
         })
+    elif mode == "character":
+        try:
+            result, params = _build_character_result(pair, data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "character tone/feel/drive controls must be numbers"}), 400
+        return jsonify({"mode": "character", "tone_mix_b": params["tone_mix_b"], "feel_mix_b": params["feel_mix_b"], "drive_mix_b": params["drive_mix_b"], "drive_weight_b_min": float(result.drive_weight_b.min()), "drive_weight_b_max": float(result.drive_weight_b.max())})
     elif mode == "hybrid":
         try:
             crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
@@ -568,7 +612,7 @@ def api_mix_info():
             "alignment_offset_samples": result.alignment_offset_samples,
         })
     else:
-        return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')"}), 400
+        return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid', 'blend', or 'character')"}), 400
 
 
 @app.route("/api/blend_curve", methods=["POST"])
@@ -679,8 +723,15 @@ def api_preview():
             "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
             "X-Alignment-Offset-Samples": str(result.alignment_offset_samples),
         }
+    elif source == "character":
+        try:
+            result, params = _build_character_result(pair, data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "character tone/feel/drive controls must be numbers"}), 400
+        audio = result.blend
+        headers = {"X-Tone-Mix-B": f"{params['tone_mix_b']:.4f}", "X-Feel-Mix-B": f"{params['feel_mix_b']:.4f}", "X-Drive-Mix-B": f"{params['drive_mix_b']:.4f}"}
     else:
-        return jsonify({"error": f"unknown source: {source!r} (expected a, b, hybrid, or blend)"}), 400
+        return jsonify({"error": f"unknown source: {source!r} (expected a, b, hybrid, blend, or character)"}), 400
 
     try:
         cab = _parse_cab_params(data, pair.sample_rate)
@@ -697,6 +748,60 @@ def api_preview():
     return Response(buf.read(), mimetype="audio/wav", headers=headers)
 
 
+@app.post("/api/live_blend_stems")
+def api_live_blend_stems():
+    """Return the cached A/B renders as an aligned stereo WAV for browser-side
+    live *fixed* blending.
+
+    The left channel is Amp A; the right is Amp B after the exact same
+    level-match and manual trim used by :func:`build_fixed_blend`.  The browser
+    can therefore change only the linear mix gain without another HTTP request
+    or NAM inference.  This deliberately does not apply the preview limiter:
+    it is applied after the live mix by Web Audio's safety compressor, whereas
+    limiting either stem first would change the blend.
+    """
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    if pair is None:
+        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
+
+    data = request.get_json(force=True)
+    try:
+        mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
+    except (TypeError, ValueError):
+        return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
+
+    # `mix_b` is irrelevant to the stems themselves, but calling the canonical
+    # builder means its trim/length policy cannot drift from the exported A2.
+    result = build_fixed_blend(
+        pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+        align_enabled=False,
+    )
+    n = min(len(pair.amp_a), len(pair.amp_b), len(pair.envelope_db))
+    amp_a = pair.amp_a[:n].astype(np.float32)
+    amp_b = pair.amp_b[:n].astype(np.float32) * (10.0 ** (result.effective_b_trim_db / 20.0))
+
+    try:
+        cab = _parse_cab_params(data, pair.sample_rate)
+    except CabIrError as exc:
+        return jsonify({"error": f"cab live-preview error: {exc}"}), 400
+    if cab is not None:
+        # Convolution is linear, so applying the shared cabinet to both stems
+        # before the browser's linear blend is exactly equivalent to applying
+        # it to their blend afterwards.
+        from hybrid.cab_ir import apply_cab_ir
+        amp_a = apply_cab_ir(amp_a, cab)
+        amp_b = apply_cab_ir(amp_b, cab)
+
+    buf = io.BytesIO()
+    sf.write(buf, np.column_stack((amp_a, amp_b)), pair.sample_rate, format="WAV", subtype="FLOAT")
+    buf.seek(0)
+    return Response(buf.read(), mimetype="audio/wav", headers={
+        "X-Auto-Trim-Db": f"{result.auto_trim_db:.3f}",
+        "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
+        "X-Live-Audition": "fixed-blend-stems",
+    })
+
+
 @app.route("/api/training_input/status", methods=["GET"])
 def api_training_input_status():
     """Whether an official NAM training input has been uploaded/is usable --
@@ -711,6 +816,35 @@ def api_training_input_status():
         "ready": True, "path": str(TRAINING_INPUT_PATH),
         "sample_rate": info.sample_rate, "frame_count": info.frame_count, "sha256": info.sha256,
     })
+
+
+@app.get("/api/local_training/status")
+def api_local_training_status():
+    return jsonify(_local_training_manager.status())
+
+
+@app.post("/api/local_training/setup")
+def api_local_training_setup():
+    try:
+        _local_training_manager.setup()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify(_local_training_manager.status()), 202
+
+
+@app.post("/api/local_training/start")
+def api_local_training_start():
+    data = request.get_json(force=True)
+    design_id = str(data.get("design_id") or "")
+    preset = str(data.get("epoch_preset") or DEFAULT_EPOCH_PRESET)
+    if preset not in A2_EPOCH_PRESETS:
+        return jsonify({"error": f"unknown epoch preset: {preset}"}), 400
+    manifest = A2_OUTPUT_DIR / secure_filename(design_id) / "training_manifest.json"
+    try:
+        _local_training_manager.train(manifest, preset)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_local_training_manager.status()), 202
 
 
 @app.route("/api/training_input/upload", methods=["POST"])
@@ -760,18 +894,49 @@ def api_generate():
 
     data = request.get_json(force=True)
     mode = data.get("mode", "hybrid")
-    if mode not in ("hybrid", "blend"):
-        return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid' or 'blend')"}), 400
+    if mode not in ("hybrid", "blend", "character"):
+        return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid', 'blend', or 'character')"}), 400
 
     try:
         cab = _resolve_cab_design(data, pair.sample_rate)
     except CabIrError as exc:
         return jsonify({"error": f"cab error: {exc}"}), 400
 
-    design_id = str(data.get("design_id") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    # A timestamp is useful for a log, but a poor identity for a model: it
+    # leaks all the way through the bundle, Kaggle resources, and the browser
+    # download name.  Keep a human-readable display name in the manifest and
+    # derive one safe, stable filesystem stem from it.
+    requested_name = str(data.get("model_name") or data.get("design_id") or "").strip()
+    if not requested_name:
+        amp_a_name = Path(amp_a_path).stem
+        amp_b_name = Path(amp_b_path).stem
+        joiner = " + " if mode in ("blend", "character") else " to "
+        requested_name = f"{amp_a_name}{joiner}{amp_b_name}"
+    if len(requested_name) > 100:
+        return jsonify({"error": "model_name must be 100 characters or fewer"}), 400
+    design_id = secure_filename(requested_name)
+    if not design_id:
+        return jsonify({"error": "model_name must contain letters or numbers"}), 400
     bundle_dir = A2_OUTPUT_DIR / design_id
+    if (bundle_dir / "training_manifest.json").is_file():
+        return jsonify({
+            "error": f"a training bundle named {requested_name!r} already exists; choose a distinct model name",
+            "model_name": requested_name,
+        }), 409
 
-    if mode == "blend":
+    if mode == "character":
+        try:
+            result, params = _build_character_result(pair, data)
+        except (TypeError, ValueError):
+            return jsonify({"error": "character tone/feel/drive controls must be numbers"}), 400
+        design = freeze_character_design(pair, result, amp_a_path=amp_a_path, amp_b_path=amp_b_path,
+            amp_a_sha256=sha256_file(amp_a_path), amp_b_sha256=sha256_file(amp_b_path), design_di_file=di_file, cab=cab, **params)
+        try:
+            design.write_json(bundle_dir / "character_design.json")
+            bundle = generate_character_training_bundle(design, TRAINING_INPUT_PATH, bundle_dir)
+        except (TrainingInputError, CabIrError, OSError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
+    elif mode == "blend":
         try:
             mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
         except (TypeError, ValueError):
@@ -820,8 +985,19 @@ def api_generate():
         except (TrainingInputError, CabIrError, OSError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
 
+    # These fields are deliberately part of the training manifest rather than
+    # merely response/UI state: both local and Kaggle exporters consume the
+    # manifest to set the final NAM's embedded UserMetadata and file basename.
+    bundle.manifest["model_name"] = requested_name
+    bundle.manifest["artifact_stem"] = design_id
+    bundle.manifest["artifact_filename"] = f"{design_id}.nam"
+    with open(bundle.training_manifest_path, "w", encoding="utf-8") as f:
+        json.dump(bundle.manifest, f, indent=2)
+
     return jsonify({
         "design_id": design_id,
+        "model_name": requested_name,
+        "download_filename": f"{design_id}.nam",
         "mode": mode,
         "bundle_dir": str(bundle.bundle_dir),
         "input_path": str(bundle.input_path),
@@ -842,7 +1018,7 @@ def api_generate():
         "cab_summary": design.cab.to_dict() if design.cab else None,
         "training_command": f"python scripts/train_a2.py {bundle.training_manifest_path}",
         "epoch_presets": A2_EPOCH_PRESETS,
-        "default_epoch_preset": DEFAULT_EPOCH_PRESET,
+        "default_epoch_preset": "high_def" if mode == "character" else DEFAULT_EPOCH_PRESET,
         "warnings": bundle.warnings,
         "implemented": True,
     })
@@ -931,14 +1107,17 @@ def api_kaggle_train():
     design_id = data.get("design_id")
     if not design_id:
         return jsonify({"error": "design_id is required (from a prior POST /api/generate response)"}), 400
-    epoch_preset = data.get("epoch_preset", DEFAULT_EPOCH_PRESET)
-    if epoch_preset not in A2_EPOCH_PRESETS:
-        return jsonify({"error": f"epoch_preset must be one of {sorted(A2_EPOCH_PRESETS)}, got {epoch_preset!r}"}), 400
-
     bundle_dir = A2_OUTPUT_DIR / secure_filename(str(design_id))
     manifest_path = bundle_dir / "training_manifest.json"
     if not manifest_path.is_file():
         return jsonify({"error": f"no generated training bundle found for design_id {design_id!r} -- call POST /api/generate first"}), 400
+
+    # Character teachers are deliberately more complex than a source NAM;
+    # honor their 120-epoch default for direct API users as well as the UI.
+    manifest_mode = json.loads(manifest_path.read_text(encoding="utf-8")).get("mode")
+    epoch_preset = data.get("epoch_preset", "high_def" if manifest_mode == "character" else DEFAULT_EPOCH_PRESET)
+    if epoch_preset not in A2_EPOCH_PRESETS:
+        return jsonify({"error": f"epoch_preset must be one of {sorted(A2_EPOCH_PRESETS)}, got {epoch_preset!r}"}), 400
 
     try:
         job = _kaggle_manager.submit_async(design_id, bundle_dir, epoch_preset=epoch_preset)
@@ -1042,4 +1221,6 @@ def api_kaggle_job_cleanup(job_id: str):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Keep the local tool safe and single-process by default.  Opt into the
+    # Flask debugger/reloader explicitly while developing.
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG") == "1")

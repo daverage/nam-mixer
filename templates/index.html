@@ -9,12 +9,13 @@
 <body>
   <header class="topbar">
     <h1>Hybrid NAM Builder <span class="badge">Experimental</span></h1>
-    <p class="tagline">Create dynamic input-driven hybrids or fixed blends from two NAM captures.</p>
+    <p class="tagline">Create dynamic hybrids, parallel blends, or deterministic character blends from two NAM captures.</p>
   </header>
 
   <div class="mode-tabs" role="tablist" aria-label="Design mode">
     <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" role="tab" aria-selected="true">Dynamic Hybrid</button>
-    <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" role="tab" aria-selected="false">Fixed Blend</button>
+    <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" role="tab" aria-selected="false">Parallel Blend</button>
+    <button type="button" class="mode-tab" id="tab-character" data-mode="character" role="tab" aria-selected="false">Character Blend</button>
   </div>
 
   <div class="layout">
@@ -109,6 +110,38 @@
         </div>
       </section>
 
+      <section class="card" id="blend-panel-mix" data-mode-panel="blend" hidden>
+        <h2><span class="step">2</span> Fixed mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
+
+        <div class="slider-row">
+          <label for="mix-slider">Amp A / Amp B mix</label>
+          <span id="mix-value" class="value-chip">Amp A 50% / Amp B 50%</span>
+        </div>
+        <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+        <div class="info">
+          A fixed ratio, independent of playing level -- no crossover envelope.
+          0% is 100% Amp A, 100% is 100% Amp B.
+        </div>
+      </section>
+
+      <section class="card" id="character-panel" data-mode-panel="character" hidden>
+        <h2><span class="step">2</span> Character design <span class="cost-badge cost-badge-instant">✓ deterministic</span></h2>
+        <div class="info">Uses one level-selected nonlinear donor, then derives broad EQ and compression corrections. It is not a parallel waveform mix.</div>
+        <div class="slider-row"><label for="tone-slider">Tone: Amp A / Amp B</label><span id="tone-value" class="value-chip">50% B</span></div>
+        <input type="range" id="tone-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+        <div class="slider-row"><label for="feel-slider">Feel: Amp A / Amp B</label><span id="feel-value" class="value-chip">50% B</span></div>
+        <input type="range" id="feel-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+        <div class="slider-row"><label for="drive-slider">Drive: Amp A / Amp B</label><span id="drive-value" class="value-chip">50% B</span></div>
+        <input type="range" id="drive-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+        <details class="advanced"><summary>Advanced: drive morph by input level</summary>
+          <div class="slider-row"><label for="drive-low-slider">Low input</label><span id="drive-low-value" class="value-chip">20% B</span></div><input type="range" id="drive-low-slider" min="0" max="100" step="1" value="20" class="slider slider-mix">
+          <div class="slider-row"><label for="drive-mid-slider">Mid input</label><span id="drive-mid-value" class="value-chip">50% B</span></div><input type="range" id="drive-mid-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+          <div class="slider-row"><label for="drive-high-slider">High input</label><span id="drive-high-value" class="value-chip">80% B</span></div><input type="range" id="drive-high-slider" min="0" max="100" step="1" value="80" class="slider slider-mix">
+          <label class="checkbox-row"><input type="checkbox" id="drive-morph-enabled"> Drive morph by input level</label>
+        </details>
+        <div id="character-readout" class="trim-readout" aria-live="polite">Tone, feel, and drive analyses run from the rendered pair.</div>
+      </section>
+
       <section class="card">
         <h2><span class="step">3</span> Level match <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
@@ -133,13 +166,16 @@
 
       <div class="group-label">Diagnostics -- explore before you commit to a design</div>
 
-      <section class="card">
-        <h2><span class="step">4</span> Listen</h2>
+      <section class="card audition-card">
+        <div class="audition-heading"><div><div class="eyebrow">Audition</div><h2><span class="step">4</span> Hear the current design</h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
+        <p class="audition-intro">Render the two real NAM outputs once. Then compare A, Result, and B at the same level; cached controls update without running NAM again.</p>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
           <button id="btn-preview-mix" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
+        <div class="audition-live-row"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Parallel Blend mode">Start instant live mix</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition"> Refresh Result while it is playing</label></div>
+        <div id="live-blend-status" class="info" aria-live="polite">Parallel Blend changes Mix at audio rate. Dynamic and Character modes refresh the exact cached server result while you drag.</div>
         <audio id="player" controls></audio>
 
         <div class="slider-row">
@@ -243,6 +279,10 @@
         <input type="file" id="training-input-file" accept=".wav" class="file-input">
         <div id="training-input-status" class="info" aria-live="polite">Checking...</div>
 
+        <label class="field-label" for="model-name">Model name</label>
+        <input type="text" id="model-name" class="file-input" maxlength="100" placeholder="e.g. Mesa Mark V Clean + JCM800 Crunch" autocomplete="off">
+        <div class="hint">Used for the bundle, final <code>.nam</code> filename, and embedded NAM model name. Leave blank to use the selected amp names.</div>
+
         <button id="btn-generate" class="btn btn-primary btn-block">Generate Training Bundle</button>
         <div id="generate-status" class="info" aria-live="polite"></div>
         <div id="generate-result" class="generate-result" hidden aria-live="polite"></div>
@@ -281,8 +321,12 @@
           </div>
 
           <div id="local-panel" hidden>
-            <div class="info">Run locally in the dedicated training environment (see scripts/setup_a2_env.ps1):</div>
-            <div id="local-training-command" class="info"></div>
+            <div id="local-training-status" class="info" aria-live="polite">Checking local training environment…</div>
+            <div id="local-training-meta" class="hint" aria-live="polite"></div>
+            <button id="btn-local-setup" class="btn btn-secondary btn-block" type="button">Set up local training</button>
+            <button id="btn-local-train" class="btn btn-primary btn-block" type="button" disabled>Train locally</button>
+            <details><summary>Live local-training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
+            <div class="hint">Creates and uses <code>.venv-a2</code>; works on macOS and Windows without copying a command into Terminal.</div>
           </div>
         </div>
       </section>

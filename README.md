@@ -1,7 +1,7 @@
 # Hybrid NAM Builder
 
-**Status: experimental proof-of-concept. Not a finished tool. NAM inference is not
-yet wired in — see "Current limitations" below.**
+**Status: experimental local tool. It renders source NAMs through NAMCore and
+generates trainable A2 bundles; listen and validate every generated model.**
 
 ## What this is
 
@@ -218,6 +218,27 @@ actually audible signal, the Cabinet card also reports cumulative-energy
 diagnostics (e.g. "99.9% energy by: 42.7 ms" for a nominally-500ms IR) —
 purely informational, never used to shorten the actual convolution.
 
+## macOS quick start
+
+Requires Python 3.10+, Xcode Command Line Tools, CMake 3.18+, and internet
+access the first time the native renderer downloads NAMCore.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+cmake --build native/nam_render/build --config Release --target nam_render -j 4
+python3 app.py
+```
+
+Open <http://127.0.0.1:5000>. The app discovers the resulting
+`native/nam_render/build/nam_render` automatically. Local A2 training still
+needs the separate training environment documented in `requirements-training.txt`;
+Kaggle training is available from the UI after authenticating the Kaggle CLI.
+If macOS has reserved port 5000 (for example, AirPlay Receiver), run
+`PORT=5001 python3 app.py` and open <http://127.0.0.1:5001>.
+
 ## Current limitations / experimental status
 
 - **NAM inference is implemented, via a native tool, not torch.**
@@ -228,10 +249,9 @@ purely informational, never used to shorten the actual convolution.
   depending on the Python `neural-amp-modeler`/torch package for inference
   entirely, and avoids guessing at the `.nam` → model-class mapping, since
   NAMCore's own `nam::get_dsp()` loader is the reference implementation. See
-  `native/nam_render/README.md` for how to build it. `hybrid/render.py` can
-  now render real `.nam` files end-to-end; what's still missing is wiring
-  that into `app.py`'s `/api/preview`/`/api/generate` routes (currently
-  still return HTTP 501 — see below).
+  `native/nam_render/README.md` for how to build it. `hybrid/render.py`
+  renders real `.nam` files end-to-end and is wired into the Flask preview
+  and training-bundle routes.
 - `.nam` file **parsing and calibration metadata** (`input_level_dbu`/
   `output_level_dbu` where present) IS implemented (`hybrid/nam_loader.py`) —
   older/uncalibrated files are read fine, just reported as
@@ -251,12 +271,11 @@ purely informational, never used to shorten the actual convolution.
   once we've verified what latency guarantees, if any, the official NAM
   inference API actually makes — see that module's docstring.
 - The Flask app (`app.py`) and UI (`templates/index.html`, `static/`) now
-  wire up real rendering and preview end-to-end (`/api/render_pair`,
+  wire up real rendering, preview, and target generation end-to-end (`/api/render_pair`,
   `/api/preview`, `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
-  `/api/profile_coverage`). `/api/generate` (final training-target generation)
-  still intentionally returns HTTP 501 — see "Not implemented yet" below.
-- No A2 training step exists yet at all — that remains future work once
-  synthetic target generation is working end-to-end.
+  `/api/profile_coverage`, `/api/generate`).
+- Character Blend is a deterministic teacher-design system, not a claim that
+  the resulting A2 will perceptually match its target without validation.
 - No automated audio-quality/tone judgment is attempted anywhere in this
   project; only mechanical sanity checks (NaN/Inf, clipping, silence,
   alignment, discontinuities — see `hybrid/safety.py` and `tests/`).

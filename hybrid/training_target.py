@@ -404,9 +404,9 @@ def compute_receptive_field_record(
     amp_b_samples = _rf(amp_b, "amp_b")
 
     envelope_samples = None
-    if mode == "hybrid":
+    if mode in ("hybrid", "character"):
         if envelope_max_history_ms is None:
-            raise ValueError("envelope_max_history_ms is required for mode='hybrid'")
+            raise ValueError(f"envelope_max_history_ms is required for mode={mode!r}")
         envelope_samples = int(round(envelope_max_history_ms / 1000.0 * sample_rate))
 
     cab_baked = bool(cab is not None and cab.baked)

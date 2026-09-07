@@ -42,6 +42,7 @@ section 17) and does NOT default to a low-epoch smoke-test config (section 15)
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 import platform
@@ -236,7 +237,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     mode = manifest.get("mode", "hybrid")
 
     branch_samples = {}
-    if mode == "hybrid":
+    if mode in ("hybrid", "character"):
         max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
         if max_history_ms is None:
             print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
@@ -474,14 +475,15 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
 
     export_dir = output_dir / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
+    artifact_stem = str(manifest.get("artifact_stem") or "model")
     result.model.net.export(
         export_dir,
-        basename="model",
+        basename=artifact_stem,
         user_metadata=_build_user_metadata(manifest),
         other_metadata={TRAINING_KEY: result.metadata.model_dump()},
     )
 
-    nam_path = export_dir / "model.nam"
+    nam_path = export_dir / f"{artifact_stem}.nam"
     if not nam_path.is_file():
         raise TrainingAbort(f"BaseNet.export() did not produce the expected file: {nam_path}")
     return nam_path
@@ -534,6 +536,7 @@ def main(argv=None) -> int:
         help=f"training quality/length ({', '.join(f'{k}={v}' for k, v in A2_EPOCH_PRESETS.items())} epochs); ignored if --quick",
     )
     parser.add_argument("--device", default="auto", help="'auto', 'cpu', 'cuda', or 'mps'")
+    parser.add_argument("--progress", action="store_true", help="show official trainer epoch progress (used by the local UI)")
     parser.add_argument("--output-dir", type=Path, default=None, help="defaults to <bundle_dir>/a2_output")
     args = parser.parse_args(argv)
 
@@ -554,6 +557,8 @@ def main(argv=None) -> int:
         else:
             settings = settings_for_preset(args.epoch_preset)
             print(f"--epoch-preset={args.epoch_preset}: training for {settings.epochs} epochs.")
+        if args.progress:
+            settings = replace(settings, silent=False)
 
         nam_path = _run_official_trainer(input_path, target_path, output_dir, settings, args.device, manifest)
         print(f"Trainer produced: {nam_path}")

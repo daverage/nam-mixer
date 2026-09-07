@@ -137,6 +137,7 @@ def make_cli(monkeypatch, executable="/usr/bin/kaggle", responses=None):
 
 def test_not_installed_reports_cleanly(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(KaggleCli, "_module_available", staticmethod(lambda: False))
     cli = KaggleCli()
     assert cli.is_installed() is False
     assert cli.version() is None
@@ -429,6 +430,7 @@ def test_create_kernel_succeeds_when_status_resolves_on_second_attempt(tmp_path,
 
 def test_submit_requires_cli_installed(tmp_path, bundle_dir, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(KaggleCli, "_module_available", staticmethod(lambda: False))
     manager = KaggleJobManager(tmp_path)
     with pytest.raises(KaggleTrainingError, match="not installed"):
         manager.submit("mydesign", bundle_dir)

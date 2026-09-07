@@ -27,6 +27,7 @@ Security invariants enforced throughout:
 from __future__ import annotations
 
 import csv
+import importlib.util
 import io
 import json
 import os
@@ -194,11 +195,19 @@ class KaggleCli:
             return found
         return None
 
+    @staticmethod
+    def _module_available() -> bool:
+        """The macOS user-site console-script directory is commonly absent
+        from GUI-app PATHs.  The package is still a valid CLI via
+        ``sys.executable -m kaggle``; detect it without importing Kaggle or
+        touching its credential directory."""
+        return importlib.util.find_spec("kaggle") is not None
+
     def is_installed(self) -> bool:
-        return self.executable is not None
+        return self.executable is not None or self._module_available()
 
     def _build_argv(self, args: list[str]) -> list[str]:
-        if not self.is_installed():
+        if self.executable is None:
             # Fall back to `python -m kaggle` in case the console script
             # isn't on PATH but the package is importable in this interpreter.
             return [sys.executable, "-m", "kaggle", *args]

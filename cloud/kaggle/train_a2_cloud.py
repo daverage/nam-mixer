@@ -369,14 +369,18 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         ratio = f" {round((1 - mix_b) * 100)}-{round(mix_b * 100)}" if mix_b is not None else ""
         name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
         gear_model = f"{amp_a_name} + {amp_b_name}{ratio}"
+    elif mode == "character":
+        name = f"Character Blend {amp_a_name} + {amp_b_name}"
+        gear_model = f"Character Blend {amp_a_name} + {amp_b_name}"
     else:
         name = f"Hybrid {amp_a_name} -> {amp_b_name}"
         gear_model = f"{amp_a_name} -> {amp_b_name}"
 
+    model_name = str(manifest.get("model_name") or "").strip() or name
     return {
-        "name": name,
+        "name": model_name,
         "modeled_by": "Hybrid NAM Builder",
-        "gear_make": "Hybrid" if mode == "hybrid" else "Blend",
+        "gear_make": "Hybrid" if mode == "hybrid" else "Character Blend" if mode == "character" else "Blend",
         "gear_model": gear_model,
         "input_level_dbu": input_level_dbu,
     }
@@ -432,14 +436,15 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
                 gear_type = candidate
                 break
     user_metadata = UserMetadata(gear_type=gear_type, **user_metadata_kwargs(manifest))
+    artifact_stem = str(manifest.get("artifact_stem") or "hybrid_a2")
     result.model.net.export(
         export_dir,
-        basename="hybrid_a2",
+        basename=artifact_stem,
         user_metadata=user_metadata,
         other_metadata={TRAINING_KEY: result.metadata.model_dump()},
     )
 
-    nam_path = export_dir / "hybrid_a2.nam"
+    nam_path = export_dir / f"{artifact_stem}.nam"
     if not nam_path.is_file():
         raise CloudTrainingError(f"export did not produce expected file: {nam_path}")
 

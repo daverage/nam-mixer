@@ -2,7 +2,7 @@
 
 const statusEl = document.getElementById("status");
 
-// ---- Design mode tabs (Dynamic Hybrid / Fixed Blend) ----
+// ---- Design mode tabs (Dynamic Hybrid / Parallel Blend / Character Blend) ----
 // Tabs are DESIGN MODES, not separate applications -- Amp A/B, the preview
 // DI, input profile/calibration, render, test gain, Listen controls, the
 // Cabinet IR stage, official training input, A2 quality, and training all
@@ -27,15 +27,21 @@ const BLEND_A2_DESCRIPTION =
   "Freezes the CURRENT fixed mix/trim into an immutable design, then combines " +
   "the official NAM training excitation through both amps at that same ratio " +
   "(unmodified by the input profile above -- that's a design/preview-only control).";
+const CHARACTER_A2_DESCRIPTION =
+  "Freezes the measured amp-character analysis plus Tone, Feel, and Drive controls, " +
+  "then builds the same deterministic one-donor teacher for the official input. " +
+  "Character Blend recommends High def (120 epochs).";
 
 function applyModeVisibility() {
   modePanels.forEach((el) => {
     el.hidden = el.dataset.modePanel !== currentMode;
   });
-  btnPreviewMix.textContent = currentMode === "blend" ? "Blend" : "Hybrid";
+  btnPreviewMix.textContent = currentMode === "blend" ? "Blend" : currentMode === "character" ? "Character" : "Hybrid";
   autoLevelMatchLabel.textContent = currentMode === "blend" ? BLEND_LEVEL_MATCH_LABEL : HYBRID_LEVEL_MATCH_LABEL;
-  createA2Title.textContent = currentMode === "blend" ? "Create Blend A2" : "Create Hybrid A2";
-  createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
+  createA2Title.textContent = currentMode === "blend" ? "Create Blend A2" : currentMode === "character" ? "Create Character A2" : "Create Hybrid A2";
+  createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : currentMode === "character" ? CHARACTER_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
+  const auditionMode = document.getElementById("audition-mode");
+  auditionMode.textContent = currentMode === "blend" ? "Parallel Blend" : currentMode === "character" ? "Character Blend" : "Dynamic Hybrid";
 }
 
 modeTabs.forEach((tab) => {
@@ -171,14 +177,16 @@ cabFileInput.addEventListener("change", async () => {
 cabPreviewEnabled.addEventListener("change", () => {
   if (!cabPreviewEnabled.checked) cabBaked.checked = false; // bake requires preview
   updateCabStatus();
-  if (lastPreviewSource) preview(lastPreviewSource);
+  invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
+  if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
 cabBaked.addEventListener("change", () => {
   // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
   // is also enabled" -- docs/blend-mode.md "CAB UI".
   if (cabBaked.checked) cabPreviewEnabled.checked = true;
   updateCabStatus();
-  if (lastPreviewSource) preview(lastPreviewSource);
+  invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
+  if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
 updateCabStatus();
 
@@ -331,6 +339,7 @@ const DEFAULT_CROSSOVER_DBFS = crossoverSlider.value;
 crossoverSlider.addEventListener("input", () => {
   crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
   scheduleUpdate();
+  scheduleAuditionRefresh();
 });
 
 const transitionSlider = document.getElementById("transition-slider");
@@ -338,6 +347,7 @@ const transitionValue = document.getElementById("transition-value");
 transitionSlider.addEventListener("input", () => {
   transitionValue.textContent = `${transitionSlider.value} dB`;
   scheduleUpdate();
+  scheduleAuditionRefresh();
 });
 
 const presetButtons = document.querySelectorAll(".preset-btn");
@@ -353,6 +363,7 @@ presetButtons.forEach((btn) => {
     transitionValue.textContent = `${btn.dataset.value} dB`;
     syncPresetButtonStates();
     scheduleUpdate();
+    scheduleAuditionRefresh();
   });
 });
 transitionSlider.addEventListener("input", syncPresetButtonStates);
@@ -366,17 +377,34 @@ function updateMixValueLabel() {
 }
 mixSlider.addEventListener("input", () => {
   updateMixValueLabel();
+  if (liveAudition.active) liveAudition.setMix(parseInt(mixSlider.value, 10) / 100.0);
+  else scheduleAuditionRefresh();
   scheduleUpdate();
 });
 updateMixValueLabel();
 
-document.getElementById("auto-level-match").addEventListener("change", scheduleUpdate);
+const characterSliders = ["tone", "feel", "drive", "drive-low", "drive-mid", "drive-high"];
+characterSliders.forEach((name) => {
+  const slider = document.getElementById(`${name}-slider`);
+  const label = document.getElementById(`${name}-value`);
+  const update = () => { label.textContent = `${slider.value}% B`; scheduleUpdate(); scheduleAuditionRefresh(); };
+  slider.addEventListener("input", update);
+});
+document.getElementById("drive-morph-enabled").addEventListener("change", () => { scheduleUpdate(); scheduleAuditionRefresh(); });
+
+document.getElementById("auto-level-match").addEventListener("change", () => {
+  invalidateLiveAudition("Level-match setting changed — start live blend again to load the matching stems.");
+  scheduleUpdate();
+  scheduleAuditionRefresh();
+});
 
 const ampBTrimSlider = document.getElementById("amp-b-trim");
 const ampBTrimValue = document.getElementById("amp-b-trim-value");
 ampBTrimSlider.addEventListener("input", () => {
   ampBTrimValue.textContent = `${fmtSigned(ampBTrimSlider.value)} dB`;
+  invalidateLiveAudition("Level trim changed — start live blend again to load the matching stems.");
   scheduleUpdate();
+  scheduleAuditionRefresh();
 });
 
 async function notImplementedAction(url) {
@@ -395,6 +423,9 @@ const previewButtons = [
   document.getElementById("btn-preview-b"),
 ];
 const player = document.getElementById("player");
+const liveBlendButton = document.getElementById("btn-live-blend");
+const liveBlendStatus = document.getElementById("live-blend-status");
+const autoAuditionToggle = document.getElementById("auto-audition");
 const trimReadout = document.getElementById("trim-readout");
 const renderStatus = document.getElementById("render-status");
 const journeyCanvas = document.getElementById("journey-canvas");
@@ -409,6 +440,132 @@ let havePair = false;
 let updateTimer = null;
 let lastJourneyData = null;
 let lastSourcePlayed = null;
+let previewRequestId = 0;
+let auditionRefreshTimer = null;
+
+function scheduleAuditionRefresh(source = "mix") {
+  // Refresh can follow an explicit play action, but controls must never cause
+  // sound to start by themselves.
+  if (!havePair || !autoAuditionToggle.checked || liveAudition.active || player.paused) return;
+  clearTimeout(auditionRefreshTimer);
+  auditionRefreshTimer = setTimeout(() => preview(source, { preservePosition: true, quiet: true }), 140);
+}
+
+// NAM rendering remains server-side.  Once the pair is rendered, this holds
+// two decoded stems in Web Audio and changes their *linear* blend gain at
+// audio rate.  That is the exact Fixed Blend equation, not a preview shortcut.
+const liveAudition = {
+  active: false,
+  context: null,
+  sourceA: null,
+  sourceB: null,
+  gainA: null,
+  gainB: null,
+  compressor: null,
+  stop() {
+    [this.sourceA, this.sourceB].forEach((source) => {
+      if (source) { try { source.stop(); } catch (_) { /* already stopped */ } }
+    });
+    this.active = false;
+    this.sourceA = this.sourceB = this.gainA = this.gainB = null;
+    updateLiveAuditionButton();
+  },
+  setMix(mixB, immediate = false) {
+    if (!this.active) return;
+    const now = this.context.currentTime;
+    if (immediate) {
+      this.gainA.gain.cancelScheduledValues(now);
+      this.gainB.gain.cancelScheduledValues(now);
+      this.gainA.gain.setValueAtTime(1 - mixB, now);
+      this.gainB.gain.setValueAtTime(mixB, now);
+      return;
+    }
+    // A short ramp prevents zipper/click artefacts while dragging.
+    this.gainA.gain.setTargetAtTime(1 - mixB, now, 0.012);
+    this.gainB.gain.setTargetAtTime(mixB, now, 0.012);
+  },
+};
+
+function updateLiveAuditionButton() {
+  if (liveAudition.active) liveBlendButton.textContent = "Stop instant live mix";
+  else liveBlendButton.textContent = currentMode === "blend" ? "Start instant live mix" : "Instant mix: Parallel Blend";
+}
+
+function splitStereoBuffer(context, decoded, channel) {
+  const buffer = context.createBuffer(1, decoded.length, decoded.sampleRate);
+  buffer.copyToChannel(decoded.getChannelData(channel), 0);
+  return buffer;
+}
+
+function invalidateLiveAudition(message) {
+  if (!liveAudition.active) return;
+  liveAudition.stop();
+  liveBlendStatus.textContent = message;
+}
+
+async function startLiveBlend() {
+  if (!havePair) return;
+  if (currentMode !== "blend") {
+    liveBlendStatus.textContent = "Instant audio-rate mixing is available in Parallel Blend. This mode still refreshes the exact Result while you drag.";
+    return;
+  }
+  if (liveAudition.active) {
+    liveAudition.stop();
+    liveBlendStatus.textContent = "Live blend stopped.";
+    return;
+  }
+  liveBlendButton.disabled = true;
+  liveBlendStatus.textContent = "Loading cached amp stems...";
+  try {
+    const resp = await fetch("/api/live_blend_stems", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...blendParamsBody(), ...cabParamsBody() }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).error || "Could not load live stems.");
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) throw new Error("This browser does not support Web Audio.");
+    const context = liveAudition.context || new Context();
+    liveAudition.context = context;
+    await context.resume();
+    const decoded = await context.decodeAudioData(await (await resp.blob()).arrayBuffer());
+    if (decoded.numberOfChannels < 2) throw new Error("Live stem response was not stereo.");
+    player.pause();
+    const sourceA = context.createBufferSource();
+    const sourceB = context.createBufferSource();
+    sourceA.buffer = splitStereoBuffer(context, decoded, 0);
+    sourceB.buffer = splitStereoBuffer(context, decoded, 1);
+    sourceA.loop = sourceB.loop = true;
+    const gainA = context.createGain();
+    const gainB = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -3;
+    compressor.knee.value = 4;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.12;
+    sourceA.connect(gainA).connect(compressor);
+    sourceB.connect(gainB).connect(compressor);
+    compressor.connect(context.destination);
+    liveAudition.sourceA = sourceA;
+    liveAudition.sourceB = sourceB;
+    liveAudition.gainA = gainA;
+    liveAudition.gainB = gainB;
+    liveAudition.compressor = compressor;
+    liveAudition.active = true;
+    liveAudition.setMix(parseInt(mixSlider.value, 10) / 100.0, true);
+    sourceA.start();
+    sourceB.start();
+    updateLiveAuditionButton();
+    const trim = resp.headers.get("X-Effective-Trim-Db");
+    liveBlendStatus.textContent = `Live A/B blend running — drag Mix for immediate changes (B trim ${fmtSigned(trim)} dB).`;
+  } catch (err) {
+    liveAudition.stop();
+    liveBlendStatus.textContent = "Live blend unavailable: " + err.message;
+  } finally {
+    liveBlendButton.disabled = !havePair;
+  }
+}
 
 function hybridParamsBody() {
   return {
@@ -427,12 +584,20 @@ function blendParamsBody() {
   };
 }
 
+function characterParamsBody() {
+  const pct = (name) => parseInt(document.getElementById(`${name}-slider`).value, 10) / 100.0;
+  const morph = document.getElementById("drive-morph-enabled").checked;
+  return { tone_mix_b: pct("tone"), feel_mix_b: pct("feel"), drive_mix_b: pct("drive"),
+    drive_low_mix_b: morph ? pct("drive-low") : null, drive_mid_mix_b: morph ? pct("drive-mid") : null,
+    drive_high_mix_b: morph ? pct("drive-high") : null };
+}
+
 // Mode-aware params for whichever mode tab is active -- shared by
 // /api/mix_info, /api/preview (source=hybrid/blend), and /api/generate.
 function currentModeParamsBody() {
-  return currentMode === "blend"
-    ? { mode: "blend", ...blendParamsBody() }
-    : { mode: "hybrid", ...hybridParamsBody() };
+  if (currentMode === "blend") return { mode: "blend", ...blendParamsBody() };
+  if (currentMode === "character") return { mode: "character", ...characterParamsBody() };
+  return { mode: "hybrid", ...hybridParamsBody() };
 }
 
 function cabParamsBody() {
@@ -467,8 +632,10 @@ async function updateTrimReadout() {
       trimReadout.textContent = "Trim error: " + data.error;
       return;
     }
-    trimReadout.textContent =
-      `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
+    if (data.mode === "character") {
+      document.getElementById("character-readout").textContent =
+        `Drive donor trajectory: ${Math.round(data.drive_weight_b_min * 100)}–${Math.round(data.drive_weight_b_max * 100)}% Amp B.`;
+    } else trimReadout.textContent = `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
   } catch (err) {
     trimReadout.textContent = "Trim update failed: " + err;
   }
@@ -769,6 +936,10 @@ async function doRenderPair() {
 // slider every time you nudge the test-gain control would fight the whole
 // point of stress-testing a design you already settled on.
 function applyRenderResult(data, { applySuggestedCrossover }) {
+  if (liveAudition.active) {
+    liveAudition.stop();
+    liveBlendStatus.textContent = "Amp pair changed — start live blend again to load the new stems.";
+  }
   renderPairBtn.classList.remove("btn-render-stale");
   if (data.warnings && data.warnings.length) {
     renderWarnings.hidden = false;
@@ -799,6 +970,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
   }
 
   previewButtons.forEach((btn) => (btn.disabled = false));
+  liveBlendButton.disabled = false;
   havePair = true;
   updateTrimReadout();
   updateJourney();
@@ -827,12 +999,15 @@ renderPairBtn.addEventListener("click", async () => {
 
 let lastPreviewSource = null;
 
-async function preview(requestedSource) {
+async function preview(requestedSource, { preservePosition = false, quiet = false } = {}) {
   // "mix" means "whichever design mode's combined result is active" --
-  // resolves to source=hybrid or source=blend depending on the current tab.
+  // resolves to the active design source without a separate approximation.
   const source = requestedSource === "mix" ? currentMode : requestedSource;
   lastPreviewSource = source;
-  const modeParams = source === "hybrid" || source === "blend" ? currentModeParamsBody() : {};
+  const requestId = ++previewRequestId;
+  const wasPlaying = !player.paused;
+  const resumeAt = preservePosition && Number.isFinite(player.currentTime) ? player.currentTime : 0;
+  const modeParams = ["hybrid", "blend", "character"].includes(source) ? currentModeParamsBody() : {};
   const body = { source, ...modeParams, ...cabParamsBody() };
   try {
     const resp = await fetch("/api/preview", {
@@ -845,6 +1020,9 @@ async function preview(requestedSource) {
       setStatus(data.error || "Preview failed.", true);
       return;
     }
+    // Ignore an older cached-blend request that returned after a newer slider
+    // value. This prevents audible jumps backwards during a fast drag.
+    if (requestId !== previewRequestId) return;
     if (source === "hybrid" || source === "blend") {
       const auto = resp.headers.get("X-Auto-Trim-Db");
       const effective = resp.headers.get("X-Effective-Trim-Db");
@@ -852,10 +1030,16 @@ async function preview(requestedSource) {
         `Auto match ${fmtSigned(auto)} dB  ·  effective trim ${fmtSigned(effective)} dB`;
     }
     const blob = await resp.blob();
+    const previousUrl = player.src.startsWith("blob:") ? player.src : null;
     player.src = URL.createObjectURL(blob);
     lastSourcePlayed = requestedSource;
-    player.play();
-    setStatus(`Playing ${source.toUpperCase()}.`);
+    player.onloadedmetadata = () => {
+      if (requestId !== previewRequestId) return;
+      if (resumeAt > 0 && player.duration) player.currentTime = Math.min(resumeAt, Math.max(0, player.duration - 0.02));
+      if (wasPlaying) player.play();
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+    };
+    if (!quiet) setStatus(`Playing ${source.toUpperCase()}.`);
   } catch (err) {
     setStatus("Request failed: " + err, true);
   }
@@ -864,6 +1048,7 @@ async function preview(requestedSource) {
 document.getElementById("btn-preview-a").addEventListener("click", () => preview("a"));
 document.getElementById("btn-preview-mix").addEventListener("click", () => preview("mix"));
 document.getElementById("btn-preview-b").addEventListener("click", () => preview("b"));
+liveBlendButton.addEventListener("click", startLiveBlend);
 const trainingInputFile = document.getElementById("training-input-file");
 const trainingInputStatus = document.getElementById("training-input-status");
 const generateStatus = document.getElementById("generate-status");
@@ -906,6 +1091,7 @@ trainingInputFile.addEventListener("change", async () => {
 });
 
 const generateBtn = document.getElementById("btn-generate");
+const modelNameInput = document.getElementById("model-name");
 generateBtn.addEventListener("click", async () => {
   if (!havePair) {
     setStatus("Render and audition an amp pair first.", true);
@@ -924,6 +1110,11 @@ generateBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...currentModeParamsBody(),
+        // A browser can retain a cached page template while fetching a newer
+        // app.js after an update. Treat the new optional field defensively so
+        // that mismatch cannot block generation; the API derives a real name
+        // from the selected amps until the page is refreshed.
+        model_name: modelNameInput?.value?.trim() || "",
         cab_path: cabServerPath || null,
         cab_preview_enabled: cabPreviewEnabled.checked,
         cab_baked: cabBaked.checked,
@@ -935,7 +1126,7 @@ generateBtn.addEventListener("click", async () => {
       setStatus("Training bundle generation failed.", true);
       return;
     }
-    generateStatus.textContent = `Bundle generated: ${data.design_id}`;
+    generateStatus.textContent = `Bundle generated: ${data.model_name}`;
     generateResult.hidden = false;
     const newWarningsText = data.warnings ? data.warnings.join(" ") : "";
     const alreadyShownAbove =
@@ -952,6 +1143,7 @@ generateBtn.addEventListener("click", async () => {
       : "";
     generateResult.innerHTML = `
       <div><strong>Bundle:</strong> <code>${data.bundle_dir}</code></div>
+      <div><strong>Final model:</strong> <code>${data.download_filename}</code></div>
       <div><strong>Target:</strong> <code>${data.target_path}</code> (peak ${data.safety_report.final_peak_dbfs.toFixed(1)} dBFS, safety reduction ${data.safety_report.gain_reduction_db.toFixed(2)} dB)</div>
       <div><strong>Calibration:</strong> ${data.calibration_summary.effective_mode} (requested ${data.calibration_summary.requested_mode})</div>
       ${cabLine}
@@ -963,7 +1155,9 @@ generateBtn.addEventListener("click", async () => {
     lastDesignId = data.design_id;
     lastTrainingCommand = data.training_command;
     document.getElementById("a2-training-section").hidden = false;
+    if (data.default_epoch_preset === "high_def") document.getElementById("a2-preset-high_def").checked = true;
     updateLocalTrainingCommand();
+    refreshLocalTraining();
     refreshKaggleStatus();
   } catch (err) {
     generateStatus.textContent = "Request failed: " + err;
@@ -1008,6 +1202,63 @@ function updateLocalTrainingCommand() {
   const command = preset === "standard" ? lastTrainingCommand : `${lastTrainingCommand} --epoch-preset ${preset}`;
   document.getElementById("local-training-command").textContent = command;
 }
+
+const localTrainingStatus = document.getElementById("local-training-status");
+const localTrainingMeta = document.getElementById("local-training-meta");
+const localTrainingLog = document.getElementById("local-training-log");
+const localSetupBtn = document.getElementById("btn-local-setup");
+const localTrainBtn = document.getElementById("btn-local-train");
+let localTrainingPoll = null;
+
+async function refreshLocalTraining() {
+  try {
+    const resp = await fetch("/api/local_training/status");
+    const data = await resp.json();
+    localTrainingStatus.textContent = data.state === "ready"
+      ? "Local training environment is ready."
+      : data.state === "not_configured"
+        ? "Set up the dedicated local training environment once."
+        : `Local training: ${data.state.replace("_", " ")}.`;
+    localTrainingLog.textContent = data.log_tail || "(no local training output yet)";
+    if (data.elapsed_s !== null && data.elapsed_s !== undefined) {
+      const minutes = Math.floor(data.elapsed_s / 60);
+      const seconds = data.elapsed_s % 60;
+      const outcome = data.exit_code === null || data.exit_code === undefined ? "running" : `exit ${data.exit_code}`;
+      const progress = data.progress ? `Epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "Waiting for first epoch…";
+      localTrainingMeta.textContent = `Elapsed ${minutes}m ${seconds}s · ${progress} · ${outcome}`;
+    } else {
+      localTrainingMeta.textContent = "";
+    }
+    localSetupBtn.disabled = data.state === "setting_up" || data.state === "training";
+    localTrainBtn.disabled = !data.ready || !lastDesignId || data.state === "setting_up" || data.state === "training";
+    if (data.state === "setting_up" || data.state === "training") {
+      if (!localTrainingPoll) localTrainingPoll = setInterval(refreshLocalTraining, 1000);
+    } else if (localTrainingPoll) {
+      clearInterval(localTrainingPoll); localTrainingPoll = null;
+    }
+  } catch (err) { localTrainingStatus.textContent = "Could not check local training: " + err; }
+}
+
+localSetupBtn.addEventListener("click", async () => {
+  localSetupBtn.disabled = true;
+  localTrainingStatus.textContent = "Creating the dedicated environment and installing training packages…";
+  const resp = await fetch("/api/local_training/setup", { method: "POST" });
+  const data = await resp.json();
+  if (!resp.ok) localTrainingStatus.textContent = data.error || "Local setup could not start.";
+  await refreshLocalTraining();
+});
+
+localTrainBtn.addEventListener("click", async () => {
+  if (!lastDesignId) return;
+  localTrainBtn.disabled = true;
+  const resp = await fetch("/api/local_training/start", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ design_id: lastDesignId, epoch_preset: selectedEpochPreset() }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) localTrainingStatus.textContent = data.error || "Local training could not start.";
+  await refreshLocalTraining();
+});
 
 document.querySelectorAll('input[name="a2-epoch-preset"]').forEach((el) => {
   el.addEventListener("change", updateLocalTrainingCommand);
@@ -1073,6 +1324,7 @@ function updateBackendPanels() {
 }
 kaggleBackendRadio.addEventListener("change", updateBackendPanels);
 localBackendRadio.addEventListener("change", updateBackendPanels);
+localBackendRadio.addEventListener("change", refreshLocalTraining);
 
 function formatGpuQuota(raw) {
   // `kaggle quota`'s raw CLI table output, best-effort extraction of just

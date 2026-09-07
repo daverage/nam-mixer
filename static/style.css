@@ -336,6 +336,15 @@ input[type="range"].slider::-moz-range-thumb {
 .preview-row { display: flex; gap: 0.6rem; margin-bottom: 0.85rem; }
 .btn-amp { flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
 .btn-hybrid { color: var(--hybrid); border-color: var(--hybrid); }
+#live-blend-status { margin: 0.65rem 0; }
+.audition-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
+.audition-heading h2 { margin-bottom: 0; }
+.eyebrow { color: var(--accent); font-size: 0.68rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; margin-bottom: .25rem; }
+.audition-mode { border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: .72rem; font-weight: 650; padding: .3rem .55rem; white-space: nowrap; }
+.audition-intro { color: var(--text-muted); font-size: .84rem; line-height: 1.45; margin: .9rem 0; }
+.audition-live-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: .15rem 0 .3rem; }
+.audition-autorefresh { color: var(--text-muted); font-size: .78rem; }
+@media (max-width: 480px) { .audition-heading { display: block; } .audition-mode { display: inline-block; margin-top: .55rem; } }
 
 #player { display: block; width: 100%; transition: opacity 0.15s ease; }
 #player.player-busy { opacity: 0.45; pointer-events: none; }
