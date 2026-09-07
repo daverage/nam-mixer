@@ -1207,10 +1207,8 @@ generateBtn.addEventListener("click", async () => {
     setStatus("Training bundle ready.");
 
     lastDesignId = data.design_id;
-    lastTrainingCommand = data.training_command;
     document.getElementById("a2-training-section").hidden = false;
     if (data.default_epoch_preset === "high_def") document.getElementById("a2-preset-high_def").checked = true;
-    updateLocalTrainingCommand();
     refreshLocalTraining();
     refreshKaggleStatus();
   } catch (err) {
@@ -1223,7 +1221,6 @@ generateBtn.addEventListener("click", async () => {
 
 // --- Kaggle GPU training backend -----------------------------------------
 let lastDesignId = null;
-let lastTrainingCommand = "";
 let kaggleAuthenticated = false;
 let kaggleJobPollTimer = null;
 
@@ -1249,12 +1246,6 @@ let kaggleJobSubmittedAt = null;
 function selectedEpochPreset() {
   const checked = document.querySelector('input[name="a2-epoch-preset"]:checked');
   return checked ? checked.value : "standard";
-}
-
-function updateLocalTrainingCommand() {
-  const preset = selectedEpochPreset();
-  const command = preset === "standard" ? lastTrainingCommand : `${lastTrainingCommand} --epoch-preset ${preset}`;
-  document.getElementById("local-training-command").textContent = command;
 }
 
 const localTrainingStatus = document.getElementById("local-training-status");
@@ -1312,10 +1303,6 @@ localTrainBtn.addEventListener("click", async () => {
   const data = await resp.json();
   if (!resp.ok) localTrainingStatus.textContent = data.error || "Local training could not start.";
   await refreshLocalTraining();
-});
-
-document.querySelectorAll('input[name="a2-epoch-preset"]').forEach((el) => {
-  el.addEventListener("change", updateLocalTrainingCommand);
 });
 
 // A completed job's .nam used to be shown only as a bare server-side path
