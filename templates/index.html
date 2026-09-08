@@ -16,20 +16,31 @@
     <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" role="tab" aria-selected="true">Dynamic Hybrid</button>
     <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" role="tab" aria-selected="false">Parallel Blend</button>
     <button type="button" class="mode-tab" id="tab-character" data-mode="character" role="tab" aria-selected="false">Character Blend</button>
-    <div class="session-settings">
-      <button type="button" id="btn-save-settings" class="btn btn-secondary btn-small" title="Save all current controls (amp files, DI, mode, sliders, cab) to this browser so you can reload them later">Save settings</button>
-      <button type="button" id="btn-load-settings" class="btn btn-secondary btn-small" title="Restore controls from the last saved settings">Load settings</button>
-      <button type="button" id="btn-export-settings" class="btn btn-secondary btn-small" title="Download the current controls as a .json file you can share or re-import">Export file</button>
-      <button type="button" id="btn-import-settings" class="btn btn-secondary btn-small" title="Load controls from a previously exported .json settings file">Import file</button>
-      <input type="file" id="import-settings-file" accept=".json" hidden>
-      <span id="session-settings-status" class="info" aria-live="polite"></span>
-    </div>
+    <details class="session-settings">
+      <summary>Project</summary>
+      <div class="session-settings-menu">
+        <button type="button" id="btn-save-settings" class="btn btn-secondary btn-small" title="Save all current controls to this browser">Save here</button>
+        <button type="button" id="btn-load-settings" class="btn btn-secondary btn-small" title="Restore the last browser save">Load saved</button>
+        <button type="button" id="btn-export-settings" class="btn btn-secondary btn-small" title="Download current controls as a portable JSON file">Export file</button>
+        <button type="button" id="btn-import-settings" class="btn btn-secondary btn-small" title="Load controls from an exported JSON settings file">Import file</button>
+        <input type="file" id="import-settings-file" accept=".json" hidden>
+        <span id="session-settings-status" class="info" aria-live="polite"></span>
+      </div>
+    </details>
   </div>
+
+  <nav class="workflow-nav" aria-label="Builder workflow">
+    <button type="button" class="workflow-tab active" data-workflow-stage="configure"><span>1</span> Sources</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>2</span> Shape</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="listen"><span>3</span> Listen</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="create"><span>4</span> Create &amp; train</button>
+    <p id="workflow-hint" class="workflow-hint">Add two amps and choose a DI clip to begin.</p>
+  </nav>
 
   <div class="layout">
     <aside class="col col-setup">
 
-      <section class="card">
+      <section class="card workflow-stage workflow-configure">
         <h2><span class="step">1</span> Amps &amp; input <span class="cost-badge cost-badge-expensive" title="Changing anything here re-runs real NAM inference on both amps">⚡ needs Render Amps</span></h2>
 
         <div class="amp-grid">
@@ -116,7 +127,7 @@
         {{ {"guitar": guitar_profiles, "bass": bass_profiles} | tojson }}
       </script>
 
-      <section class="card" id="hybrid-panel-crossover" data-mode-panel="hybrid">
+      <section class="card workflow-stage workflow-shape" id="hybrid-panel-crossover" data-mode-panel="hybrid">
         <h2><span class="step">2</span> Crossover &amp; transition <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <div class="slider-row">
@@ -150,7 +161,7 @@
         </div>
       </section>
 
-      <section class="card" id="blend-panel-mix" data-mode-panel="blend" hidden>
+      <section class="card workflow-stage workflow-shape" id="blend-panel-mix" data-mode-panel="blend" hidden>
         <h2><span class="step">2</span> Fixed mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <div class="slider-row">
@@ -164,7 +175,7 @@
         </div>
       </section>
 
-      <section class="card" id="character-panel" data-mode-panel="character" hidden>
+      <section class="card workflow-stage workflow-shape" id="character-panel" data-mode-panel="character" hidden>
         <h2><span class="step">2</span> Character design <span class="cost-badge cost-badge-instant">✓ deterministic</span></h2>
         <div class="info">Uses one level-selected nonlinear donor, then derives broad EQ and compression corrections. It is not a parallel waveform mix.</div>
         <div class="slider-row"><label for="tone-slider">Tone: Amp A / Amp B</label><span id="tone-value" class="value-chip">50% B</span></div>
@@ -195,7 +206,7 @@
         <div id="character-low-level-result" class="generate-result" hidden aria-live="polite"></div>
       </section>
 
-      <section class="card">
+      <section class="card workflow-stage workflow-shape">
         <h2><span class="step">3</span> Level match <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <label class="checkbox-row">
@@ -217,11 +228,11 @@
 
     <main class="col col-main">
 
-      <div class="group-label">Diagnostics -- explore before you commit to a design</div>
+      <div class="group-label workflow-stage workflow-listen">Compare and finish</div>
 
-      <section class="card audition-card">
+      <section class="card audition-card workflow-stage workflow-listen">
         <div class="audition-heading"><div><div class="eyebrow">Audition</div><h2><span class="step">4</span> Hear the current design</h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
-        <p class="audition-intro">Render the two real NAM outputs once. Then compare A, Result, and B at the same level; cached controls update without running NAM again.</p>
+        <p class="audition-intro">Compare Amp A, your current result, and Amp B at the same level. Shape controls use the cached pair, so you can explore without re-running NAM.</p>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
           <button id="btn-preview-mix" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
@@ -244,19 +255,11 @@
           playing -- no separate Render Amps click needed.
         </div>
 
-        <div data-mode-panel="blend" hidden>
-          <div class="slider-row">
-            <label for="mix-slider">Amp A / Amp B mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></label>
-            <span id="mix-value" class="value-chip">Amp A 50% / Amp B 50%</span>
-          </div>
-          <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
-          <div class="info">
-            A fixed ratio, independent of playing level -- no crossover envelope.
-            0% is 100% Amp A, 100% is 100% Amp B.
-          </div>
-        </div>
       </section>
 
+      <details class="optional-tools workflow-stage workflow-listen" open>
+        <summary>Finish the sound <span>Cabinet, output level, and safety</span></summary>
+        <div class="finish-tools">
       <section class="card" id="cab-panel">
         <h2><span class="step">5</span> Cabinet IR <span class="hint">(shared, optional)</span> <span class="cost-badge cost-badge-instant" title="Uploading/toggling the cab never re-runs NAM inference">✓ instant</span></h2>
 
@@ -300,8 +303,12 @@
         <div id="output-gain-readout" class="info" aria-live="polite"></div>
         <div id="output-gain-warning" class="warning-box" hidden></div>
       </section>
+        </div>
+      </details>
 
-      <div id="hybrid-only-diagnostics" data-mode-panel="hybrid">
+      <details id="hybrid-only-diagnostics" class="analysis-panel workflow-stage workflow-listen" data-mode-panel="hybrid">
+        <summary>Open dynamic-hybrid analysis <span>Crossfade journey and expected coverage</span></summary>
+        <div class="analysis-tools">
         <section class="card">
           <h2><span class="step">7</span> The journey between amps</h2>
           <div class="legend">
@@ -340,11 +347,12 @@
           </div>
           <div id="coverage-empty" class="info">Render an amp pair to see coverage for each input profile.</div>
         </section>
-      </div>
+        </div>
+      </details>
 
-      <div class="group-label">Export -- produces your training deliverable</div>
+      <div class="group-label workflow-stage workflow-create">Create a training target</div>
 
-      <section class="card">
+      <section class="card workflow-stage workflow-create">
         <h2><span class="step">9</span> <span id="create-a2-title">Create Hybrid A2</span></h2>
         <div class="info" id="create-a2-description">
           Freezes the CURRENT crossover/transition/trim into an immutable

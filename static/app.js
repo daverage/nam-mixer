@@ -16,6 +16,30 @@ const btnPreviewMix = document.getElementById("btn-preview-mix");
 const autoLevelMatchLabel = document.getElementById("auto-level-match-label");
 const createA2Title = document.getElementById("create-a2-title");
 const createA2Description = document.getElementById("create-a2-description");
+const workflowTabs = document.querySelectorAll(".workflow-tab");
+const workflowHint = document.getElementById("workflow-hint");
+let workflowStage = "configure";
+
+const WORKFLOW_HINTS = {
+  configure: "Add two amps and choose a DI clip to begin.",
+  shape: "Choose how the two rendered amps should work together.",
+  listen: "Compare A, your result, and B. Finish with cabinet and output level if needed.",
+  create: "Freeze the current sound into a training target, then choose where to train it.",
+};
+
+function setWorkflowStage(stage) {
+  workflowStage = stage;
+  document.body.dataset.workflowStage = stage;
+  workflowTabs.forEach((tab) => {
+    const active = tab.dataset.workflowStage === stage;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-current", active ? "step" : "false");
+  });
+  workflowHint.textContent = WORKFLOW_HINTS[stage];
+}
+
+workflowTabs.forEach((tab) => tab.addEventListener("click", () => setWorkflowStage(tab.dataset.workflowStage)));
+setWorkflowStage(workflowStage);
 
 const HYBRID_LEVEL_MATCH_LABEL = "Auto level match Amp B to Amp A near the crossover";
 const BLEND_LEVEL_MATCH_LABEL = "Auto level match Amp B to Amp A over active playing";
@@ -52,6 +76,7 @@ modeTabs.forEach((tab) => {
       t.setAttribute("aria-selected", t === tab ? "true" : "false");
     });
     applyModeVisibility();
+    if (workflowStage !== "configure") setWorkflowStage("shape");
     // Switching modes never re-renders NAM inference -- just recompute the
     // (already-rendered) mix/journey/coverage panels for the new mode.
     scheduleUpdate();
@@ -1159,6 +1184,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
   liveBlendButton.disabled = false;
   document.getElementById("btn-character-low-level-check").disabled = false;
   havePair = true;
+  setWorkflowStage("listen");
   updateTrimReadout();
   updateJourney();
   updateCoverage();
