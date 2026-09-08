@@ -42,6 +42,7 @@ body {
   color: var(--text);
   margin: 0;
   padding: 1.5rem;
+  padding-bottom: calc(1.5rem + 2.4em);
 }
 
 .topbar { max-width: 1100px; margin: 0 auto 1.5rem; }
@@ -64,9 +65,19 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
   max-width: 1100px;
   margin: 0 auto 1.25rem;
   display: flex;
+  align-items: center;
   gap: 0.4rem;
   border-bottom: 1px solid var(--border);
 }
+.session-settings {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+}
+.session-settings .info { margin: 0; }
+.btn-small { padding: 0.3rem 0.65rem; font-size: 0.75rem; }
 .mode-tab {
   background: none;
   border: none;
@@ -391,11 +402,20 @@ input[type="range"].slider::-moz-range-thumb {
 }
 
 .status-bar {
-  max-width: 1100px;
-  margin: 1.25rem auto 0;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  min-height: 2.4em;
+  padding: 0 1.5rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow);
   color: var(--text-muted);
   font-size: 0.82rem;
-  min-height: 1.2em;
 }
 
 details.advanced {

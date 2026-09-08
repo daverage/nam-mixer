@@ -41,12 +41,18 @@ def _write_training_input(path, n=48000, sample_rate=48000):
     return path
 
 
-def _design(amp_a_path, amp_b_path):
-    return CharacterBlendDesign(
+def _design(amp_a_path, amp_b_path, **overrides):
+    fields = dict(
         amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path),
         tone_mix_b=0.5, feel_mix_b=0.5, drive_mix_b=0.5,
         calibration_mode="raw",
+        # See test_training_target.py's _design() for why this defaults to a
+        # no-op rather than the production "auto" default.
+        output_gain_mode="manual",
+        manual_output_gain_db=0.0,
     )
+    fields.update(overrides)
+    return CharacterBlendDesign(**fields)
 
 
 def test_generate_character_training_bundle_records_a_healthy_low_level_response(tmp_path):

@@ -61,6 +61,12 @@ def _design(amp_a_path, amp_b_path, **overrides):
         design_reference_profile_id="p90",
         design_reference_profile_gain_db=1.0,
         calibration_mode="raw",
+        # Output gain defaults to "manual"/0 dB here (rather than the
+        # production default of "auto") so pre-existing tests in this file
+        # that assert exact/untouched target audio aren't coupled to the
+        # separate output-gain feature -- see test_output_gain.py for that.
+        output_gain_mode="manual",
+        manual_output_gain_db=0.0,
     )
     fields.update(overrides)
     return HybridDesign(**fields)

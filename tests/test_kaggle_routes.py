@@ -225,6 +225,11 @@ def test_job_status_download_filename_matches_what_download_endpoint_serves(clie
     from hybrid.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
+    bundle_dir = tmp_path / "mydesign"
+    bundle_dir.mkdir()
+    (bundle_dir / "training_manifest.json").write_text(
+        '{"model_name": "Fender Meets Marshall", "artifact_filename": "Fender_Meets_Marshall.nam"}'
+    )
     nam_path = tmp_path / "hybrid_a2.nam"  # internal Kaggle kernel export basename
     nam_path.write_bytes(b"fake nam contents")
     job = KaggleJob(job_id="j1", design_id="mydesign", state="complete", output_nam_path=str(nam_path))
@@ -236,7 +241,7 @@ def test_job_status_download_filename_matches_what_download_endpoint_serves(clie
     status_resp = client.get("/api/kaggle/jobs/j1?design_id=mydesign")
     assert status_resp.status_code == 200
     download_filename = status_resp.get_json()["download_filename"]
-    assert download_filename != "hybrid_a2.nam"  # must NOT be the internal export basename
+    assert download_filename == "Fender_Meets_Marshall.nam"
 
     download_resp = client.get("/api/kaggle/jobs/j1/download?design_id=mydesign")
     assert download_resp.status_code == 200

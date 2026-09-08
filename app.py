@@ -50,8 +50,8 @@ from hybrid.local_training import LocalTrainingManager
 from hybrid.nam_loader import load_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError, render
-from hybrid.safety import preview_safety_limiter
-from hybrid.training_target import TrainingInputError, generate_training_bundle, validate_training_input
+from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
+from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
 # We warn rather than silently clip or normalize -- see docs/INPUT_PROFILE_RESEARCH.md.
@@ -276,6 +276,23 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     )
 
 
+def _parse_output_gain_params(data: dict):
+    """Shared post-combination output-gain parsing for /api/preview
+    (source=hybrid/blend/character) and /api/generate. Mode-independent and
+    applied AFTER the amp combination + cab (mirrors cab's own ordering) --
+    see hybrid/design.py's HybridDesign.output_gain_mode/manual_output_gain_db
+    and hybrid/safety.py's compute_auto_output_gain_db/apply_output_gain.
+    "auto" (the default) is not resolved to a number here -- it's computed
+    downstream from the actual audio at the point it's applied, since that's
+    what makes it "auto" (uses whatever headroom THIS signal actually has).
+    """
+    mode = data.get("output_gain_mode", "auto")
+    if mode not in ("auto", "manual"):
+        mode = "auto"
+    manual_gain_db = float(data.get("manual_output_gain_db", 0.0))
+    return mode, manual_gain_db
+
+
 def _load_di(di_file: str):
     """Validate `di_file` against the actual DI directory listing (prevents path
     traversal via a hand-crafted filename) and load it as mono float32."""
@@ -315,6 +332,11 @@ def api_render_pair():
         test_gain_db = float(data.get("test_gain_db", 0.0) or 0.0)
     except (TypeError, ValueError):
         return jsonify({"error": "test_gain_db must be a number"}), 400
+    try:
+        amp_a_input_gain_db = float(data.get("amp_a_input_gain_db", 0.0) or 0.0)
+        amp_b_input_gain_db = float(data.get("amp_b_input_gain_db", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "amp_a_input_gain_db/amp_b_input_gain_db must be numbers"}), 400
 
     try:
         get_profile(instrument_type, input_profile_id)
@@ -355,6 +377,8 @@ def api_render_pair():
             test_gain_db=test_gain_db,
             calibration_mode=calibration_mode,
             reference_input_level_dbu=reference_input_level_dbu,
+            amp_a_input_gain_db=amp_a_input_gain_db,
+            amp_b_input_gain_db=amp_b_input_gain_db,
         )
     except NamRenderError as exc:
         return jsonify({"error": str(exc)}), 500
@@ -405,6 +429,12 @@ def api_render_pair():
 
         "suggested_crossover_dbfs": suggested_crossover,
         "envelope_percentiles": envelope_percentiles(pair.source_envelope_db[pair.source_envelope_db > -50.0]),
+        # Percentiles of `envelope_db` (profiled -- i.e. AFTER input-profile
+        # gain, the actual instrument-level signal reaching NAM/driving the
+        # real crossfade in build_hybrid(), unlike source_envelope_db above)
+        # -- used to calibrate the "guitar volume feel" 0-10 crossover knob
+        # against real signal levels for THIS render, not a guessed constant.
+        "blend_envelope_percentiles": envelope_percentiles(pair.envelope_db[pair.envelope_db > -50.0]),
 
         "warnings": warnings,
     })
@@ -487,9 +517,11 @@ def _parse_character_params(data: dict):
     def mix(name, default=0.5):
         return max(0.0, min(1.0, float(data.get(name, default))))
     optional = lambda name: None if data.get(name) is None else mix(name)
+    output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
     return {
         "tone_mix_b": mix("tone_mix_b"), "feel_mix_b": mix("feel_mix_b"), "drive_mix_b": mix("drive_mix_b"),
         "drive_low_mix_b": optional("drive_low_mix_b"), "drive_mid_mix_b": optional("drive_mid_mix_b"), "drive_high_mix_b": optional("drive_high_mix_b"),
+        "output_gain_mode": output_gain_mode, "manual_output_gain_db": manual_output_gain_db,
     }
 
 
@@ -780,6 +812,32 @@ def api_preview():
         from hybrid.cab_ir import apply_cab_ir
         audio = apply_cab_ir(audio.astype("float32"), cab)
 
+    # Shared post-combination output gain -- only for the combined result,
+    # not raw Amp A/B auditioning (see _parse_output_gain_params). Applied
+    # BEFORE preview_safety_limiter, matching the training-target ordering in
+    # hybrid/training_target.py so preview represents what generation will
+    # actually do. preview_safety_limiter is a HARD CLIP (np.clip), not a
+    # soft limiter -- an excessive manual gain distorts here rather than
+    # just quietly compressing, so the response headers below let the UI
+    # warn about that distinctly from the (harmless, reduce-only) training
+    # target ceiling.
+    if source in ("hybrid", "blend", "character"):
+        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        audio = audio.astype("float64")
+        if output_gain_mode == "manual":
+            output_gain_db = manual_output_gain_db
+            peak_before_dbfs = compute_auto_output_gain_db(audio, A2_TARGET_PEAK_CEILING_DBFS)[1]
+        else:
+            output_gain_db, peak_before_dbfs = compute_auto_output_gain_db(audio, A2_TARGET_PEAK_CEILING_DBFS)
+        audio = apply_output_gain(audio, output_gain_db)
+        peak_after_dbfs = peak_before_dbfs + output_gain_db if np.isfinite(peak_before_dbfs) else peak_before_dbfs
+        headers["X-Output-Gain-Mode"] = output_gain_mode
+        headers["X-Output-Gain-Db"] = f"{output_gain_db:.3f}"
+        headers["X-Peak-Before-Output-Gain-Dbfs"] = f"{peak_before_dbfs:.3f}" if np.isfinite(peak_before_dbfs) else "-inf"
+        headers["X-Peak-After-Output-Gain-Dbfs"] = f"{peak_after_dbfs:.3f}" if np.isfinite(peak_after_dbfs) else "-inf"
+        # -1.0 dBFS matches preview_safety_limiter's own default ceiling below.
+        headers["X-Output-Gain-Will-Clip-Preview"] = "true" if peak_after_dbfs > -1.0 else "false"
+
     audio = preview_safety_limiter(audio.astype("float32"))
     buf = io.BytesIO()
     sf.write(buf, audio, pair.sample_rate, format="WAV", subtype="PCM_16")
@@ -886,6 +944,36 @@ def api_local_training_start():
     return jsonify(_local_training_manager.status()), 202
 
 
+@app.route("/api/local_training/download", methods=["GET"])
+def api_local_training_download():
+    """Serves a locally-trained .nam as a browser download, mirroring
+    /api/kaggle/jobs/<id>/download. scripts/train_a2.py writes the exported
+    model's path back into the SAME training_manifest.json it was given
+    (manifest["training"]["output_nam_path"]) on success, so this reads
+    straight from that file on disk rather than the (ephemeral,
+    single-slot) LocalTrainingManager in-memory state -- works even after a
+    server restart, same as the Kaggle download path."""
+    design_id = request.args.get("design_id")
+    if not design_id:
+        return jsonify({"error": "design_id query parameter is required"}), 400
+    manifest_path = A2_OUTPUT_DIR / secure_filename(design_id) / "training_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return jsonify({"error": f"no training manifest found for design {design_id!r}"}), 404
+
+    nam_path_str = (manifest.get("training") or {}).get("output_nam_path")
+    if not nam_path_str:
+        return jsonify({"error": "local training for this design hasn't produced a model yet"}), 400
+
+    nam_path = Path(nam_path_str)
+    if not nam_path.is_file():
+        return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
+
+    download_name = _suggested_nam_filename(design_id)
+    return send_file(nam_path, as_attachment=True, download_name=download_name)
+
+
 @app.route("/api/training_input/upload", methods=["POST"])
 def api_training_input_upload():
     """Accept the official NAM training input WAV picked in the browser.
@@ -981,12 +1069,14 @@ def api_generate():
         except (TypeError, ValueError):
             return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
 
+        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
         # Alignment is never exposed as a UI control, matching Hybrid mode.
         result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db, align_enabled=False)
         design = freeze_blend_design(
             pair, result,
             amp_a_path=amp_a_path, amp_b_path=amp_b_path,
             alignment_enabled=False, design_di_file=di_file, cab=cab,
+            output_gain_mode=output_gain_mode, manual_output_gain_db=manual_output_gain_db,
         )
         try:
             design.write_json(bundle_dir / "blend_design.json")
@@ -1011,11 +1101,13 @@ def api_generate():
             align_enabled=False,
         )
 
+        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
         design = freeze_design(
             pair, result,
             amp_a_path=amp_a_path, amp_b_path=amp_b_path,
             crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
             alignment_enabled=False, design_di_file=di_file, cab=cab,
+            output_gain_mode=output_gain_mode, manual_output_gain_db=manual_output_gain_db,
         )
 
         try:

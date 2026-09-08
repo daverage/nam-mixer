@@ -273,6 +273,23 @@ customGainSlider.addEventListener("input", () => {
 calibrationModeSelect.addEventListener("change", () => markProfileStale("Calibration mode changed"));
 referenceDbuInput.addEventListener("change", () => markProfileStale("Reference level changed"));
 
+// Independent per-amp pre-render input trim -- see hybrid/pipeline.py's
+// RenderedPair docstring. A render-stage control like the profile/
+// calibration settings above (it changes what each amp actually receives),
+// not a blend-stage one, so it invalidates the cached RenderedPair too.
+const ampAInputGainSlider = document.getElementById("amp-a-input-gain-slider");
+const ampAInputGainValue = document.getElementById("amp-a-input-gain-value");
+const ampBInputGainSlider = document.getElementById("amp-b-input-gain-slider");
+const ampBInputGainValue = document.getElementById("amp-b-input-gain-value");
+ampAInputGainSlider.addEventListener("input", () => {
+  ampAInputGainValue.textContent = `${fmtSigned(ampAInputGainSlider.value)} dB`;
+  markProfileStale("Amp A input trim changed");
+});
+ampBInputGainSlider.addEventListener("input", () => {
+  ampBInputGainValue.textContent = `${fmtSigned(ampBInputGainSlider.value)} dB`;
+  markProfileStale("Amp B input trim changed");
+});
+
 // Real audio gain (unlike the deprecated preview-only dry_gain_db) -- see
 // hybrid/pipeline.py's render_pair() docstring. Does NOT affect the
 // coverage table (that's computed from the un-gained source envelope so it
@@ -336,8 +353,93 @@ populateProfileSelect();
 const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
 const DEFAULT_CROSSOVER_DBFS = crossoverSlider.value;
+// What "Reset" after a suggested-crossover auto-set should actually go back
+// to -- the app's built-in default UNLESS a saved/imported settings file
+// most recently supplied a different crossover as your real baseline, in
+// which case that's what "Reset" should mean (see applySessionSettings).
+let crossoverBaseline = { value: DEFAULT_CROSSOVER_DBFS, label: "default" };
+
+// --- "Guitar volume feel" 0-10 knob -----------------------------------
+// A cosmetic, per-DI-calibrated alternative to the raw dBFS crossover
+// slider (see static/app.js's crossoverSlider above, which remains the
+// single source of truth -- this knob only ever reads/writes that value).
+// crossoverKnobCalibration.{minDb,maxDb} anchor "0"/"10" to this render's
+// OWN measured instrument-level-into-NAM envelope (blend_envelope_percentiles
+// from /api/render_pair, i.e. pair.envelope_db -- the profiled envelope
+// that actually drives build_hybrid()'s crossfade, per the user's request
+// to calibrate against real "instrument level into NAM" signal rather than
+// an assumed universal volume-pot law -- see docs/README known caveats on
+// why a literal per-guitar pot-taper simulation is deliberately not done).
+// Mapping the knob LINEARLY onto that dBFS range is already the "audio
+// taper" behaviour: dB is itself a log scale of amplitude, so a linear
+// sweep in dB reads as the perceptually-log sweep a real volume pot aims
+// for -- no extra exponential curve is needed on top.
+const crossoverKnobSlider = document.getElementById("crossover-knob-slider");
+const crossoverKnobValue = document.getElementById("crossover-knob-value");
+const crossoverKnobNote = document.getElementById("crossover-knob-note");
+let crossoverKnobCalibration = { minDb: -40.0, maxDb: -6.0, calibrated: false };
+
+function dbFromKnob(knobValue) {
+  const { minDb, maxDb } = crossoverKnobCalibration;
+  return minDb + (parseFloat(knobValue) / 10.0) * (maxDb - minDb);
+}
+
+function knobFromDb(db) {
+  const { minDb, maxDb } = crossoverKnobCalibration;
+  if (maxDb <= minDb) return 0;
+  return Math.min(10, Math.max(0, ((parseFloat(db) - minDb) / (maxDb - minDb)) * 10.0));
+}
+
+// Reflects the raw dBFS crossover value (however it changed -- manual drag,
+// a preset load, the suggested-crossover auto-set, or its reset link) back
+// onto the knob's position, without re-triggering the raw slider's own
+// input handling.
+function syncCrossoverKnobFromDb() {
+  const knobPos = knobFromDb(crossoverSlider.value);
+  crossoverKnobSlider.value = knobPos.toFixed(1);
+  crossoverKnobValue.textContent = `${knobPos.toFixed(1)} / 10`;
+  updateTransitionAroundSwitchNote();
+}
+
+const transitionAroundSwitchNote = document.getElementById("transition-around-switch-note");
+function updateTransitionAroundSwitchNote() {
+  const crossover = parseFloat(crossoverSlider.value);
+  const width = parseFloat(transitionSlider.value);
+  const half = width / 2.0;
+  transitionAroundSwitchNote.textContent =
+    `Blends over ±${half.toFixed(1)} dB around the switch point above ` +
+    `(${(crossover - half).toFixed(1)} to ${(crossover + half).toFixed(1)} dBFS) -- ` +
+    "outside that band it's fully one amp or the other.";
+}
+
+function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
+  const p10 = blendEnvelopePercentiles && blendEnvelopePercentiles.p10;
+  const p90 = blendEnvelopePercentiles && blendEnvelopePercentiles.p90;
+  if (p10 == null || p90 == null || p90 <= p10) {
+    crossoverKnobNote.textContent =
+      "0 = quietest playing seen so far, 10 = loudest -- render a pair with more dynamic range to calibrate this.";
+    return;
+  }
+  crossoverKnobCalibration = { minDb: p10, maxDb: p90, calibrated: true };
+  crossoverKnobNote.textContent =
+    `Calibrated from this render: 0 ≈ ${p10.toFixed(1)} dBFS (quiet playing), ` +
+    `10 ≈ ${p90.toFixed(1)} dBFS (loud playing) -- an approximate, dB-linear (audio-taper-like) ` +
+    "feel for THIS input, not a simulation of any specific guitar's actual volume-knob law.";
+  syncCrossoverKnobFromDb();
+}
+
+crossoverKnobSlider.addEventListener("input", () => {
+  const db = dbFromKnob(crossoverKnobSlider.value);
+  crossoverSlider.value = db.toFixed(2);
+  crossoverValue.textContent = `${db.toFixed(1)} dBFS`;
+  crossoverKnobValue.textContent = `${parseFloat(crossoverKnobSlider.value).toFixed(1)} / 10`;
+  scheduleUpdate();
+  scheduleAuditionRefresh();
+});
+
 crossoverSlider.addEventListener("input", () => {
   crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
+  syncCrossoverKnobFromDb();
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
@@ -346,9 +448,12 @@ const transitionSlider = document.getElementById("transition-slider");
 const transitionValue = document.getElementById("transition-value");
 transitionSlider.addEventListener("input", () => {
   transitionValue.textContent = `${transitionSlider.value} dB`;
+  updateTransitionAroundSwitchNote();
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
+
+syncCrossoverKnobFromDb();
 
 const presetButtons = document.querySelectorAll(".preset-btn");
 function syncPresetButtonStates() {
@@ -362,6 +467,7 @@ presetButtons.forEach((btn) => {
     transitionSlider.value = btn.dataset.value;
     transitionValue.textContent = `${btn.dataset.value} dB`;
     syncPresetButtonStates();
+    updateTransitionAroundSwitchNote();
     scheduleUpdate();
     scheduleAuditionRefresh();
   });
@@ -624,6 +730,61 @@ function cabParamsBody() {
     cab_path: enabled ? cabServerPath : null,
     cab_preview_enabled: enabled,
   };
+}
+
+// --- Output gain (shared, post-combination, all modes) -----------------
+// Mirrors cabParamsBody()'s "shared control" pattern -- see
+// hybrid/design.py's output_gain_mode/manual_output_gain_db and
+// hybrid/safety.py's compute_auto_output_gain_db/apply_output_gain.
+const outputGainAutoCheckbox = document.getElementById("output-gain-auto");
+const outputGainManualSlider = document.getElementById("output-gain-manual-slider");
+const outputGainManualValue = document.getElementById("output-gain-manual-value");
+const outputGainReadout = document.getElementById("output-gain-readout");
+const outputGainWarning = document.getElementById("output-gain-warning");
+
+function outputGainParamsBody() {
+  return {
+    output_gain_mode: outputGainAutoCheckbox.checked ? "auto" : "manual",
+    manual_output_gain_db: parseFloat(outputGainManualSlider.value) || 0.0,
+  };
+}
+
+outputGainAutoCheckbox.addEventListener("change", () => {
+  outputGainManualSlider.disabled = outputGainAutoCheckbox.checked;
+  scheduleUpdate();
+  scheduleAuditionRefresh();
+});
+outputGainManualSlider.addEventListener("input", () => {
+  outputGainManualValue.textContent = `${fmtSigned(outputGainManualSlider.value)} dB`;
+  scheduleUpdate();
+  scheduleAuditionRefresh();
+});
+
+// Reads the X-Output-Gain-* headers a /api/preview response carries for
+// source=hybrid/blend/character (see app.py's /api/preview) and updates the
+// readout + clip warning. Called from preview() below.
+function updateOutputGainReadout(headers) {
+  const mode = headers.get("X-Output-Gain-Mode");
+  if (mode === null) return; // not a combined-result preview (e.g. raw A/B)
+  const gainDb = headers.get("X-Output-Gain-Db");
+  const peakBefore = headers.get("X-Peak-Before-Output-Gain-Dbfs");
+  const peakAfter = headers.get("X-Peak-After-Output-Gain-Dbfs");
+  const willClip = headers.get("X-Output-Gain-Will-Clip-Preview") === "true";
+  outputGainReadout.textContent =
+    `${mode === "auto" ? "Auto" : "Manual"} gain ${fmtSigned(gainDb)} dB` +
+    ` · peak ${parseFloat(peakBefore).toFixed(1)} → ${parseFloat(peakAfter).toFixed(1)} dBFS`;
+  if (willClip) {
+    outputGainWarning.hidden = false;
+    outputGainWarning.textContent =
+      mode === "manual"
+        ? "This manual gain pushes the live preview's peak past -1 dBFS, where preview_safety_limiter HARD-CLIPS " +
+          "(not a soft limiter) -- you'll hear distortion here. The generated training target is separately protected " +
+          "by a gentler, reduce-only ceiling (apply_peak_ceiling), so it won't clip even if this preview does -- but " +
+          "reduce this gain if you want the preview to represent the target accurately."
+        : "Auto gain has pushed the preview peak past -1 dBFS. This shouldn't normally happen -- please report it.";
+  } else {
+    outputGainWarning.hidden = true;
+  }
 }
 
 function scheduleUpdate() {
@@ -932,6 +1093,8 @@ async function doRenderPair() {
   const calibration_mode = calibrationModeSelect.value;
   const reference_input_level_dbu = parseFloat(referenceDbuInput.value) || 12.0;
   const test_gain_db = parseFloat(testGainSlider.value) || 0.0;
+  const amp_a_input_gain_db = parseFloat(ampAInputGainSlider.value) || 0.0;
+  const amp_b_input_gain_db = parseFloat(ampBInputGainSlider.value) || 0.0;
 
   const resp = await fetch("/api/render_pair", {
     method: "POST",
@@ -940,6 +1103,7 @@ async function doRenderPair() {
       amp_a_path, amp_b_path, di_file,
       instrument_type, input_profile_id, custom_input_gain_db,
       calibration_mode, reference_input_level_dbu, test_gain_db,
+      amp_a_input_gain_db, amp_b_input_gain_db,
     }),
   });
   const data = await resp.json();
@@ -959,6 +1123,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
     liveBlendStatus.textContent = "Amp pair changed — start live blend again to load the new stems.";
   }
   renderPairBtn.classList.remove("btn-render-stale");
+  updateCrossoverKnobCalibration(data.blend_envelope_percentiles);
   if (data.warnings && data.warnings.length) {
     renderWarnings.hidden = false;
     renderWarnings.textContent = data.warnings.join(" ");
@@ -972,15 +1137,18 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
       const suggested = data.suggested_crossover_dbfs;
       crossoverSlider.value = suggested.toFixed(1);
       crossoverValue.textContent = `${suggested.toFixed(1)} dBFS`;
+      syncCrossoverKnobFromDb();
       suggestedCrossoverNote.textContent =
         `Crossover set to ${suggested.toFixed(1)} dBFS, suggested from this DI's active-signal level. `;
       const resetBtn = document.createElement("button");
       resetBtn.type = "button";
       resetBtn.className = "link-btn";
-      resetBtn.textContent = `Reset to ${parseFloat(DEFAULT_CROSSOVER_DBFS).toFixed(1)}`;
+      const baselineLabel = crossoverBaseline.label === "default" ? "default" : `preset "${crossoverBaseline.label}"`;
+      resetBtn.textContent = `Reset to ${baselineLabel} (${parseFloat(crossoverBaseline.value).toFixed(1)})`;
       resetBtn.addEventListener("click", () => {
-        crossoverSlider.value = DEFAULT_CROSSOVER_DBFS;
-        crossoverValue.textContent = `${parseFloat(DEFAULT_CROSSOVER_DBFS).toFixed(1)} dBFS`;
+        crossoverSlider.value = crossoverBaseline.value;
+        crossoverValue.textContent = `${parseFloat(crossoverBaseline.value).toFixed(1)} dBFS`;
+        syncCrossoverKnobFromDb();
         scheduleUpdate();
       });
       suggestedCrossoverNote.appendChild(resetBtn);
@@ -997,6 +1165,17 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
 }
 
 renderPairBtn.addEventListener("click", async () => {
+  // Only auto-apply the suggested crossover on the VERY FIRST render of a
+  // session, AND only when nothing has already given the crossover slider
+  // an explicit value -- a re-render (new DI, profile, calibration change,
+  // or just clicking Render Amps again) must never silently discard a
+  // crossover the user already set, exactly like the test-gain auto-render
+  // below already avoids doing (see its comment). Also covers importing a
+  // settings file THEN clicking Render Amps for the first time this
+  // session -- crossoverBaseline.label is no longer "default" once a preset
+  // has been loaded (see applySessionSettings), so that imported value
+  // survives its first render too, not just subsequent ones.
+  const isFirstRenderThisSession = !havePair && crossoverBaseline.label === "default";
   renderPairBtn.disabled = true;
   renderStatus.textContent = "Rendering (running NAM inference twice)...";
   renderWarnings.hidden = true;
@@ -1004,7 +1183,7 @@ renderPairBtn.addEventListener("click", async () => {
   document.getElementById("btn-character-low-level-check").disabled = true;
   try {
     const data = await doRenderPair();
-    applyRenderResult(data, { applySuggestedCrossover: true });
+    applyRenderResult(data, { applySuggestedCrossover: isFirstRenderThisSession });
     renderStatus.textContent =
       `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz -- ` +
       `input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
@@ -1028,7 +1207,8 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
   const wasPlaying = !player.paused;
   const resumeAt = preservePosition && Number.isFinite(player.currentTime) ? player.currentTime : 0;
   const modeParams = ["hybrid", "blend", "character"].includes(source) ? currentModeParamsBody() : {};
-  const body = { source, ...modeParams, ...cabParamsBody() };
+  const outputGainParams = ["hybrid", "blend", "character"].includes(source) ? outputGainParamsBody() : {};
+  const body = { source, ...modeParams, ...cabParamsBody(), ...outputGainParams };
   try {
     const resp = await fetch("/api/preview", {
       method: "POST",
@@ -1049,6 +1229,7 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
       trimReadout.textContent =
         `Auto match ${fmtSigned(auto)} dB  ·  effective trim ${fmtSigned(effective)} dB`;
     }
+    updateOutputGainReadout(resp.headers);
     const blob = await resp.blob();
     const previousUrl = player.src.startsWith("blob:") ? player.src : null;
     player.src = URL.createObjectURL(blob);
@@ -1170,6 +1351,7 @@ generateBtn.addEventListener("click", async () => {
         cab_path: cabServerPath || null,
         cab_preview_enabled: cabPreviewEnabled.checked,
         cab_baked: cabBaked.checked,
+        ...outputGainParamsBody(),
       }),
     });
     const data = await resp.json();
@@ -1253,7 +1435,18 @@ const localTrainingMeta = document.getElementById("local-training-meta");
 const localTrainingLog = document.getElementById("local-training-log");
 const localSetupBtn = document.getElementById("btn-local-setup");
 const localTrainBtn = document.getElementById("btn-local-train");
+const localResultEl = document.getElementById("local-result");
 let localTrainingPoll = null;
+// The design a completed "training" state actually belongs to -- captured
+// at the moment Train locally is clicked, since LocalTrainingManager is a
+// single global slot with no design_id of its own to poll back.
+let localTrainingDesignId = null;
+
+function renderLocalDownloadResult(designId) {
+  const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
+  localResultEl.hidden = false;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block">Download trained .nam</a>`;
+}
 
 async function refreshLocalTraining() {
   try {
@@ -1281,6 +1474,11 @@ async function refreshLocalTraining() {
     } else if (localTrainingPoll) {
       clearInterval(localTrainingPoll); localTrainingPoll = null;
     }
+    if (data.state === "complete" && data.exit_code === 0 && localTrainingDesignId) {
+      renderLocalDownloadResult(localTrainingDesignId);
+    } else if (data.state !== "complete") {
+      localResultEl.hidden = true;
+    }
   } catch (err) { localTrainingStatus.textContent = "Could not check local training: " + err; }
 }
 
@@ -1296,6 +1494,8 @@ localSetupBtn.addEventListener("click", async () => {
 localTrainBtn.addEventListener("click", async () => {
   if (!lastDesignId) return;
   localTrainBtn.disabled = true;
+  localResultEl.hidden = true;
+  localTrainingDesignId = lastDesignId;
   const resp = await fetch("/api/local_training/start", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ design_id: lastDesignId, epoch_preset: selectedEpochPreset() }),
@@ -1541,5 +1741,197 @@ function pollKaggleJob(designId, jobId) {
   poll();
   kaggleJobPollTimer = setInterval(poll, KAGGLE_JOB_POLL_MS);
 }
+
+// ---- Save/Load settings ----
+// Browser-local (localStorage) snapshot of every control on the page, for
+// quickly restoring a test setup instead of re-picking amp files and
+// re-dragging every slider. Amp/cab files are NOT re-uploaded -- it stores
+// the server-side paths /api/nam/upload and /api/cab/upload already
+// resolved (see ampServerPaths/cabServerPath above), which stay valid as
+// long as work/uploaded_nam and work/uploaded_cab on the server still have
+// those files. It never triggers a render -- the user still clicks Render
+// Amps, same as any other settings change, so a stale/missing file on disk
+// surfaces as the normal render-failure error rather than silently.
+const SESSION_SETTINGS_KEY = "hybridNamBuilder.settings.v1";
+
+function collectSessionSettings() {
+  return {
+    mode: currentMode,
+    ampA: { path: ampServerPaths.a, label: document.getElementById("amp-a-info").textContent },
+    ampB: { path: ampServerPaths.b, label: document.getElementById("amp-b-info").textContent },
+    diFile: diSelector.value,
+    instrument: instrumentSelect.value,
+    inputProfileId: profileSelect.value,
+    customGainDb: customGainSlider.value,
+    calibrationMode: calibrationModeSelect.value,
+    referenceDbu: referenceDbuInput.value,
+    testGainDb: testGainSlider.value,
+    ampAInputGainDb: ampAInputGainSlider.value,
+    ampBInputGainDb: ampBInputGainSlider.value,
+    crossover: crossoverSlider.value,
+    transition: transitionSlider.value,
+    mix: mixSlider.value,
+    character: Object.fromEntries(
+      characterSliders.map((name) => [name, document.getElementById(`${name}-slider`).value])
+    ),
+    driveMorphEnabled: document.getElementById("drive-morph-enabled").checked,
+    autoLevelMatch: document.getElementById("auto-level-match").checked,
+    ampBTrim: ampBTrimSlider.value,
+    cab: {
+      path: cabServerPath,
+      label: cabInfoEl.textContent,
+      previewEnabled: cabPreviewEnabled.checked,
+      baked: cabBaked.checked,
+    },
+    outputGainAuto: outputGainAutoCheckbox.checked,
+    outputGainManualDb: outputGainManualSlider.value,
+    modelName: document.getElementById("model-name").value,
+  };
+}
+
+function applySessionSettings(s) {
+  ampServerPaths.a = s.ampA.path;
+  ampServerPaths.b = s.ampB.path;
+  document.getElementById("amp-a-info").textContent = s.ampA.path ? `${s.ampA.label} (restored)` : "";
+  document.getElementById("amp-b-info").textContent = s.ampB.path ? `${s.ampB.label} (restored)` : "";
+
+  diSelector.value = s.diFile;
+  instrumentSelect.value = s.instrument;
+  populateProfileSelect();
+  profileSelect.value = s.inputProfileId;
+  updateProfileDescription();
+  customGainSlider.value = s.customGainDb;
+  customGainValue.textContent = `${fmtSigned(customGainSlider.value)} dB`;
+  calibrationModeSelect.value = s.calibrationMode;
+  referenceDbuInput.value = s.referenceDbu;
+  testGainSlider.value = s.testGainDb;
+  testGainValue.textContent = `${fmtSigned(testGainSlider.value)} dB`;
+  ampAInputGainSlider.value = s.ampAInputGainDb || 0;
+  ampAInputGainValue.textContent = `${fmtSigned(ampAInputGainSlider.value)} dB`;
+  ampBInputGainSlider.value = s.ampBInputGainDb || 0;
+  ampBInputGainValue.textContent = `${fmtSigned(ampBInputGainSlider.value)} dB`;
+
+  crossoverSlider.value = s.crossover;
+  crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
+  syncCrossoverKnobFromDb();
+  // "Reset to ..." after a suggested-crossover auto-set (see
+  // applyRenderResult) should go back to what THIS preset set the crossover
+  // to, not silently fall back to the app's hardcoded built-in default.
+  crossoverBaseline = { value: s.crossover, label: s.modelName || "loaded settings" };
+  transitionSlider.value = s.transition;
+  transitionValue.textContent = `${transitionSlider.value} dB`;
+  updateTransitionAroundSwitchNote();
+  syncPresetButtonStates();
+  mixSlider.value = s.mix;
+  updateMixValueLabel();
+
+  characterSliders.forEach((name) => {
+    const slider = document.getElementById(`${name}-slider`);
+    slider.value = s.character[name];
+    document.getElementById(`${name}-value`).textContent = `${slider.value}% B`;
+  });
+  document.getElementById("drive-morph-enabled").checked = s.driveMorphEnabled;
+
+  document.getElementById("auto-level-match").checked = s.autoLevelMatch;
+  ampBTrimSlider.value = s.ampBTrim;
+  ampBTrimValue.textContent = `${fmtSigned(ampBTrimSlider.value)} dB`;
+
+  cabServerPath = s.cab.path;
+  cabInfoEl.textContent = s.cab.path ? `${s.cab.label} (restored)` : "";
+  cabPreviewEnabled.disabled = !s.cab.path;
+  cabBaked.disabled = !s.cab.path;
+  cabPreviewEnabled.checked = s.cab.previewEnabled;
+  cabBaked.checked = s.cab.baked;
+  updateCabStatus();
+
+  // outputGainAuto defaults to true (auto) for settings files saved before
+  // this field existed, matching the production default in hybrid/design.py.
+  outputGainAutoCheckbox.checked = s.outputGainAuto !== false;
+  outputGainManualSlider.disabled = outputGainAutoCheckbox.checked;
+  outputGainManualSlider.value = s.outputGainManualDb || 0;
+  outputGainManualValue.textContent = `${fmtSigned(outputGainManualSlider.value)} dB`;
+
+  document.getElementById("model-name").value = s.modelName || "";
+
+  const tab = document.getElementById(`tab-${s.mode}`);
+  if (tab) {
+    currentMode = s.mode;
+    modeTabs.forEach((t) => {
+      t.classList.toggle("active", t === tab);
+      t.setAttribute("aria-selected", t === tab ? "true" : "false");
+    });
+    applyModeVisibility();
+  }
+
+  // A restored pair still needs a real re-render before anything is
+  // trustworthy (the server file may be gone, or NAM inference simply
+  // hasn't run this session) -- flag it exactly like any other stale change
+  // rather than pretending the (unrendered) result is already valid.
+  if (ampServerPaths.a && ampServerPaths.b && diSelector.value) {
+    renderPairBtn.classList.add("btn-render-stale");
+    renderStatus.textContent = "Settings restored -- click Render Amps to rebuild this pair.";
+  }
+  updateCoverage();
+}
+
+const sessionSettingsStatus = document.getElementById("session-settings-status");
+
+document.getElementById("btn-save-settings").addEventListener("click", () => {
+  try {
+    localStorage.setItem(SESSION_SETTINGS_KEY, JSON.stringify(collectSessionSettings()));
+    sessionSettingsStatus.textContent = `Saved ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    sessionSettingsStatus.textContent = "Save failed: " + err;
+  }
+});
+
+document.getElementById("btn-load-settings").addEventListener("click", () => {
+  const raw = localStorage.getItem(SESSION_SETTINGS_KEY);
+  if (!raw) {
+    sessionSettingsStatus.textContent = "No saved settings in this browser.";
+    return;
+  }
+  try {
+    applySessionSettings(JSON.parse(raw));
+    sessionSettingsStatus.textContent = `Loaded ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    sessionSettingsStatus.textContent = "Load failed: " + err;
+  }
+});
+
+// File-based export/import -- same shape as the localStorage save/load
+// above, just as a portable .json instead of browser-local storage, so a
+// settings file can be handed to someone else or reloaded after clearing
+// site data.
+document.getElementById("btn-export-settings").addEventListener("click", () => {
+  try {
+    const blob = new Blob([JSON.stringify(collectSessionSettings(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "hybrid-nam-builder-settings.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    sessionSettingsStatus.textContent = `Exported ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    sessionSettingsStatus.textContent = "Export failed: " + err;
+  }
+});
+
+const importSettingsFileInput = document.getElementById("import-settings-file");
+document.getElementById("btn-import-settings").addEventListener("click", () => importSettingsFileInput.click());
+importSettingsFileInput.addEventListener("change", async () => {
+  const file = importSettingsFileInput.files[0];
+  importSettingsFileInput.value = "";
+  if (!file) return;
+  try {
+    applySessionSettings(JSON.parse(await file.text()));
+    sessionSettingsStatus.textContent = `Imported ${file.name}`;
+  } catch (err) {
+    sessionSettingsStatus.textContent = "Import failed: " + err;
+  }
+});
 
 updateBackendPanels();

@@ -16,6 +16,14 @@
     <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" role="tab" aria-selected="true">Dynamic Hybrid</button>
     <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" role="tab" aria-selected="false">Parallel Blend</button>
     <button type="button" class="mode-tab" id="tab-character" data-mode="character" role="tab" aria-selected="false">Character Blend</button>
+    <div class="session-settings">
+      <button type="button" id="btn-save-settings" class="btn btn-secondary btn-small" title="Save all current controls (amp files, DI, mode, sliders, cab) to this browser so you can reload them later">Save settings</button>
+      <button type="button" id="btn-load-settings" class="btn btn-secondary btn-small" title="Restore controls from the last saved settings">Load settings</button>
+      <button type="button" id="btn-export-settings" class="btn btn-secondary btn-small" title="Download the current controls as a .json file you can share or re-import">Export file</button>
+      <button type="button" id="btn-import-settings" class="btn btn-secondary btn-small" title="Load controls from a previously exported .json settings file">Import file</button>
+      <input type="file" id="import-settings-file" accept=".json" hidden>
+      <span id="session-settings-status" class="info" aria-live="polite"></span>
+    </div>
   </div>
 
   <div class="layout">
@@ -77,6 +85,26 @@
           <label class="field-label" for="reference-dbu-input">Reference level (dBu)</label>
           <input type="number" id="reference-dbu-input" value="{{ default_reference_input_level_dbu }}" step="0.5" class="select-input" aria-describedby="reference-dbu-info">
           <div id="reference-dbu-info" class="info">The virtual analogue level assumed to correspond to digital full scale (NAM plugin default: +12 dBu). Not a pickup output value.</div>
+
+          <div class="slider-row">
+            <label for="amp-a-input-gain-slider">Amp A input trim</label>
+            <span id="amp-a-input-gain-value" class="value-chip">+0.0 dB</span>
+          </div>
+          <input type="range" id="amp-a-input-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
+          <div class="slider-row">
+            <label for="amp-b-input-gain-slider">Amp B input trim</label>
+            <span id="amp-b-input-gain-value" class="value-chip">+0.0 dB</span>
+          </div>
+          <input type="range" id="amp-b-input-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
+          <div class="info">
+            Independent per-amp trim applied BEFORE NAM inference, on top of
+            calibration -- unlike the crossover blend, which only chooses
+            which amp's already-rendered output dominates, this actually
+            changes what each amp receives. Use it when the amp on the
+            "loud" side of the crossfade has too little headroom to stay
+            clean at the levels that select it (or vice versa). Applied to
+            real A2 generation too, not just preview.
+          </div>
         </details>
 
         <button id="btn-render-pair" class="btn btn-primary btn-block">Render Amps</button>
@@ -92,7 +120,18 @@
         <h2><span class="step">2</span> Crossover &amp; transition <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
 
         <div class="slider-row">
-          <label for="crossover-slider">Crossover point</label>
+          <label for="crossover-knob-slider">Switch point (guitar volume feel)</label>
+          <span id="crossover-knob-value" class="value-chip">7.0 / 10</span>
+        </div>
+        <input type="range" id="crossover-knob-slider" min="0" max="10" step="0.1" value="7" class="slider slider-crossover">
+        <div id="crossover-knob-note" class="info">
+          0 = quietest playing seen so far, 10 = loudest -- an approximate, per-DI-calibrated feel
+          (dB-linear, like an audio-taper volume pot), not a simulation of any specific guitar's
+          actual volume-knob law. Render Amps to calibrate this against the real signal level.
+        </div>
+
+        <div class="slider-row">
+          <label for="crossover-slider">Crossover point (raw)</label>
           <span id="crossover-value" class="value-chip">-22.0 dBFS</span>
         </div>
         <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
@@ -103,6 +142,7 @@
           <span id="transition-value" class="value-chip">{{ default_transition_width_db }} dB</span>
         </div>
         <input type="range" id="transition-slider" min="2" max="18" step="0.5" value="{{ default_transition_width_db }}" class="slider slider-transition">
+        <div id="transition-around-switch-note" class="info"></div>
         <div class="preset-row">
           {% for name, value in transition_presets.items() %}
             <button type="button" class="preset-btn" data-value="{{ value }}" aria-pressed="false">{{ name.replace('_', ' ') }}</button>
@@ -236,9 +276,34 @@
         <div id="cab-status" class="info" aria-live="polite">Cab: off</div>
       </section>
 
+      <section class="card" id="output-gain-panel">
+        <h2><span class="step">6</span> Output gain <span class="hint">(shared, auto by default)</span> <span class="cost-badge cost-badge-instant" title="Runs after the amp combination and cab, before the final safety ceiling -- no NAM inference">✓ instant</span></h2>
+        <div class="info">
+          Boosts the combined result up to the training-target safety ceiling
+          (<span id="output-gain-ceiling-dbfs">-0.2</span> dBFS peak) using whatever headroom
+          it isn't already using -- a single fixed gain, never a limiter, so dynamics are
+          preserved exactly (<code>hybrid/safety.py</code>). Applies identically to live
+          preview and the generated A2 target.
+        </div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="output-gain-auto" checked>
+          Auto (use all available headroom)
+        </label>
+
+        <div class="slider-row">
+          <label for="output-gain-manual-slider">Manual override</label>
+          <span id="output-gain-manual-value" class="value-chip">+0.0 dB</span>
+        </div>
+        <input type="range" id="output-gain-manual-slider" min="-24" max="24" step="0.5" value="0" class="slider" disabled>
+
+        <div id="output-gain-readout" class="info" aria-live="polite"></div>
+        <div id="output-gain-warning" class="warning-box" hidden></div>
+      </section>
+
       <div id="hybrid-only-diagnostics" data-mode-panel="hybrid">
         <section class="card">
-          <h2><span class="step">6</span> The journey between amps</h2>
+          <h2><span class="step">7</span> The journey between amps</h2>
           <div class="legend">
             <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
             <span class="legend-item"><i class="swatch swatch-band"></i>Transition band</span>
@@ -255,7 +320,7 @@
         </section>
 
         <section class="card">
-          <h2><span class="step">7</span> Expected crossover coverage</h2>
+          <h2><span class="step">8</span> Expected crossover coverage</h2>
           <div class="info">
             For each input profile, the share of ACTIVE playing time (silence
             excluded) that would land mostly in Amp A, in transition, or mostly
@@ -280,7 +345,7 @@
       <div class="group-label">Export -- produces your training deliverable</div>
 
       <section class="card">
-        <h2><span class="step">8</span> <span id="create-a2-title">Create Hybrid A2</span></h2>
+        <h2><span class="step">9</span> <span id="create-a2-title">Create Hybrid A2</span></h2>
         <div class="info" id="create-a2-description">
           Freezes the CURRENT crossover/transition/trim into an immutable
           design, then blends the official NAM training excitation through
@@ -340,6 +405,7 @@
             <button id="btn-local-train" class="btn btn-primary btn-block" type="button" disabled>Train locally</button>
             <details><summary>Live local-training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
             <div class="hint">Creates and uses <code>.venv-a2</code>; works on macOS and Windows without copying a command into Terminal.</div>
+            <div id="local-result" class="generate-result" hidden aria-live="polite"></div>
           </div>
         </div>
       </section>

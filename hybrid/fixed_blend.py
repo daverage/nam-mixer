@@ -177,11 +177,23 @@ class BlendDesign:
     calibration_effective_mode: str = "raw"
     calibration_warning: Optional[str] = None
 
+    # See hybrid.pipeline.RenderedPair's docstring -- independent per-amp
+    # pre-render trim, applied both in preview and real A2 generation.
+    amp_a_input_gain_db: float = 0.0
+    amp_b_input_gain_db: float = 0.0
+
     design_di_file: Optional[str] = None  # provenance only -- NOT the training input
 
     mode: str = "blend"
 
     cab: Optional[CabDesign] = None
+
+    # Shared post-combination output gain -- see hybrid.design.HybridDesign's
+    # matching fields for the full rationale (mode-independent, "auto" is
+    # recomputed fresh at generation time against the official training
+    # input, not frozen here).
+    output_gain_mode: str = "auto"
+    manual_output_gain_db: float = 0.0
 
     @property
     def mix_a(self) -> float:
@@ -218,6 +230,8 @@ def freeze_blend_design(
     alignment_enabled: bool,
     design_di_file: Optional[str] = None,
     cab: Optional[CabDesign] = None,
+    output_gain_mode: str = "auto",
+    manual_output_gain_db: float = 0.0,
 ) -> BlendDesign:
     """Build a `BlendDesign` from a `RenderedPair`/`BlendResult` the user
     actually auditioned -- the only intended way to construct a real
@@ -243,6 +257,10 @@ def freeze_blend_design(
         calibration_applied=pair.calibration_applied,
         calibration_effective_mode=pair.calibration_mode if pair.calibration_applied else "raw",
         calibration_warning=pair.calibration_warning,
+        amp_a_input_gain_db=pair.amp_a_input_gain_db,
+        amp_b_input_gain_db=pair.amp_b_input_gain_db,
         design_di_file=design_di_file,
         cab=cab,
+        output_gain_mode=output_gain_mode,
+        manual_output_gain_db=manual_output_gain_db,
     )

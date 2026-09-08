@@ -57,6 +57,10 @@ def _design(amp_a_path, amp_b_path, **overrides):
         design_reference_profile_id="p90",
         design_reference_profile_gain_db=1.0,
         calibration_mode="raw",
+        # See test_training_target.py's _design() for why this defaults to a
+        # no-op rather than the production "auto" default.
+        output_gain_mode="manual",
+        manual_output_gain_db=0.0,
     )
     fields.update(overrides)
     return BlendDesign(**fields)

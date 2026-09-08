@@ -58,6 +58,20 @@ class RenderedPair:
     amp_a_calibration_gain_db: float = 0.0
     amp_b_calibration_gain_db: float = 0.0
 
+    # Independent per-amp pre-render input trim -- unlike input_profile_gain_db
+    # (identical for both amps, simulates instrument/pickup) or calibration
+    # gain (derived from each .nam's own metadata), this lets amp A and amp B
+    # receive DIFFERENT signal levels even though the envelope-driven blend
+    # weight is identical for both. Needed because build_hybrid()/blend()
+    # never attenuate the audio actually fed to NAM inference -- they only
+    # choose which amp's already-rendered output dominates the mix -- so an
+    # amp with limited headroom will distort at exactly the loud moments the
+    # crossfade selects it, regardless of crossover tuning. Real, production
+    # control (unlike test_gain_db): IS applied during A2 generation, see
+    # hybrid/design.py's HybridDesign/hybrid/training_target.py.
+    amp_a_input_gain_db: float = 0.0
+    amp_b_input_gain_db: float = 0.0
+
     input_peak_dbfs: float = float("-inf")
     calibration_warning: Optional[str] = None
 
@@ -74,6 +88,8 @@ def render_pair(
     test_gain_db: float = 0.0,
     calibration_mode: str = "auto",
     reference_input_level_dbu: float = DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
+    amp_a_input_gain_db: float = 0.0,
+    amp_b_input_gain_db: float = 0.0,
     envelope_config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
 ) -> RenderedPair:
     """Render `dry` through both amp models. The expensive step -- call again
@@ -108,6 +124,13 @@ def render_pair(
     profile-adjusted signal BEFORE this per-model calibration split, so the
     crossover stays linked to one common virtual guitar level rather than
     either source model's own recording calibration.
+
+    `amp_a_input_gain_db`/`amp_b_input_gain_db` are an ADDITIONAL, independent
+    per-amp trim applied on top of calibration -- see `RenderedPair`'s field
+    docstring for why this exists (an amp with limited headroom otherwise
+    distorts at exactly the moments the crossfade picks it, no matter how
+    crossover/transition are tuned). The crossover envelope is still derived
+    from the common `profiled_dry` BEFORE this split, same as calibration.
     """
     dry = np.asarray(dry, dtype=np.float32)
     profiled_dry = (dry * db_to_amplitude(input_profile_gain_db + test_gain_db)).astype(np.float32)
@@ -116,8 +139,8 @@ def render_pair(
         calibration_mode, reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu
     )
 
-    amp_a_input = (profiled_dry * db_to_amplitude(calib.amp_a_gain_db)).astype(np.float32)
-    amp_b_input = (profiled_dry * db_to_amplitude(calib.amp_b_gain_db)).astype(np.float32)
+    amp_a_input = (profiled_dry * db_to_amplitude(calib.amp_a_gain_db + amp_a_input_gain_db)).astype(np.float32)
+    amp_b_input = (profiled_dry * db_to_amplitude(calib.amp_b_gain_db + amp_b_input_gain_db)).astype(np.float32)
 
     amp_a_render = render(amp_a, amp_a_input, sample_rate)
     amp_b_render = render(amp_b, amp_b_input, sample_rate)
@@ -144,6 +167,8 @@ def render_pair(
         amp_b_model_input_level_dbu=calib.amp_b_model_input_level_dbu,
         amp_a_calibration_gain_db=calib.amp_a_gain_db,
         amp_b_calibration_gain_db=calib.amp_b_gain_db,
+        amp_a_input_gain_db=amp_a_input_gain_db,
+        amp_b_input_gain_db=amp_b_input_gain_db,
         input_peak_dbfs=_peak_dbfs(profiled_dry),
         calibration_warning=calib.warning,
     )

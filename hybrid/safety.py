@@ -85,6 +85,45 @@ def apply_peak_ceiling(audio: np.ndarray, target_peak_dbfs: float = DEFAULT_TARG
     return audio * gain, reduction_db
 
 
+def compute_auto_output_gain_db(audio: np.ndarray, target_peak_dbfs: float) -> tuple[float, float]:
+    """Suggest a BOOST-only gain (dB) to bring `audio`'s peak up to
+    `target_peak_dbfs`, using whatever headroom is unused -- the auto
+    "make it louder" counterpart to apply_peak_ceiling's reduce-only
+    behaviour (see hybrid/safety.py module docstring: neither function is a
+    limiter, both are a single fixed gain applied to the whole file so
+    dynamics are never altered).
+
+    Never negative: if `audio` already meets or exceeds the ceiling, returns
+    0.0 -- apply_peak_ceiling downstream is what handles reducing it, this
+    function only ever proposes using UNUSED headroom.
+
+    Returns (suggested_gain_db, peak_dbfs_before_this_gain).
+    """
+    audio = np.asarray(audio, dtype=np.float64)
+    finite = audio[np.isfinite(audio)]
+    if len(finite) == 0:
+        return 0.0, -np.inf
+
+    peak_amp = np.max(np.abs(finite))
+    if peak_amp <= 0:
+        return 0.0, -np.inf
+
+    peak_dbfs = 20.0 * np.log10(peak_amp)
+    return max(0.0, target_peak_dbfs - peak_dbfs), peak_dbfs
+
+
+def apply_output_gain(audio: np.ndarray, gain_db: float) -> np.ndarray:
+    """Apply a single fixed gain (dB, positive or negative) to the whole
+    file -- a user-chosen loudness control, distinct from the safety-driven
+    apply_peak_ceiling/preview_safety_limiter that still run AFTER this.
+    Those remain the actual clip/overload protection; this function does not
+    itself guard against exceeding either ceiling.
+    """
+    if gain_db == 0.0:
+        return audio
+    return audio * (10.0 ** (gain_db / 20.0))
+
+
 def preview_safety_limiter(audio: np.ndarray, ceiling_dbfs: float = -1.0) -> np.ndarray:
     """Simple hard-clip safety limiter for LIVE PLAYBACK ONLY.
 

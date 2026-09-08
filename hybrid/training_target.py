@@ -45,7 +45,7 @@ from .metadata import HybridMetadata
 from .nam_loader import NamModel, load_nam
 from .receptive_field import combine_required_history, compute_source_nam_receptive_field
 from .render import render
-from .safety import apply_peak_ceiling, check_audio
+from .safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
 
 REQUIRED_TRAINING_INPUT_SAMPLE_RATE = 48000
 
@@ -257,6 +257,7 @@ def build_training_manifest(
     warnings: list[str],
     training_env: Optional[dict] = None,
     receptive_field: Optional[dict] = None,
+    output_gain: Optional[dict] = None,
 ) -> dict:
     return {
         "hybrid_builder_version": HYBRID_BUILDER_VERSION,
@@ -300,6 +301,8 @@ def build_training_manifest(
             "alignment_enabled": design.alignment_enabled,
             "alignment_offset_samples": alignment_offset_samples,
             "design_di_file": design.design_di_file,
+            "amp_a_input_gain_db": design.amp_a_input_gain_db,
+            "amp_b_input_gain_db": design.amp_b_input_gain_db,
         },
         "calibration": {
             "requested_mode": design.calibration_mode,
@@ -338,6 +341,7 @@ def build_training_manifest(
             "device": None,
         },
         "cab": design.cab.to_dict() if design.cab else {"selected": False},
+        "output_gain": output_gain or {"mode": design.output_gain_mode, "applied_gain_db": 0.0},
         "receptive_field": receptive_field,
         "warnings": warnings,
     }
@@ -505,8 +509,11 @@ def generate_training_bundle(
 
     # NOTE: design.design_reference_profile_gain_db is deliberately NOT
     # applied here -- see module docstring / docs/phase3.md section 1.
-    amp_a_input = (official_input * db_to_amplitude(calib.amp_a_gain_db)).astype(np.float32)
-    amp_b_input = (official_input * db_to_amplitude(calib.amp_b_gain_db)).astype(np.float32)
+    # amp_a_input_gain_db/amp_b_input_gain_db, unlike the profile gain, ARE
+    # applied -- they correct what each amp actually receives (see
+    # hybrid.pipeline.RenderedPair's docstring), not a hypothetical pickup.
+    amp_a_input = (official_input * db_to_amplitude(calib.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32)
+    amp_b_input = (official_input * db_to_amplitude(calib.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32)
 
     amp_a_render = render(amp_a, amp_a_input, input_info.sample_rate)
     amp_b_render = render(amp_b, amp_b_input, input_info.sample_rate)
@@ -537,6 +544,20 @@ def generate_training_bundle(
     # No-op for every pre-Blend-mode design (design.cab is None), preserving
     # existing no-cab Hybrid output exactly.
     hybrid_raw = maybe_bake_cab(hybrid_raw, design.cab, input_info.sample_rate)
+
+    # Shared post-combination output gain (see hybrid.design.HybridDesign's
+    # output_gain_mode/manual_output_gain_db docstring): "auto" is computed
+    # fresh here against THIS actual target audio's peak -- not frozen from
+    # preview -- since it's this file's real headroom that matters. Runs
+    # BEFORE the safety ceiling below, which still has final say: an
+    # over-generous manual gain gets safety-reduced back down exactly like
+    # any other hot signal would, never silently clipped.
+    if design.output_gain_mode == "manual":
+        output_gain_db = design.manual_output_gain_db
+        output_gain_peak_before_dbfs = check_audio(hybrid_raw).peak_dbfs
+    else:
+        output_gain_db, output_gain_peak_before_dbfs = compute_auto_output_gain_db(hybrid_raw, target_peak_dbfs)
+    hybrid_raw = apply_output_gain(hybrid_raw, output_gain_db)
 
     receptive_field = compute_receptive_field_record(
         "hybrid", amp_a, amp_b, input_info.sample_rate, design.cab,
@@ -586,12 +607,19 @@ def generate_training_bundle(
     with open(metadata_out, "w", encoding="utf-8") as f:
         json.dump(_hybrid_metadata_dict(design), f, indent=2)
 
+    output_gain_record = {
+        "mode": design.output_gain_mode,
+        "requested_manual_gain_db": design.manual_output_gain_db if design.output_gain_mode == "manual" else None,
+        "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
+        "applied_gain_db": output_gain_db,
+    }
+
     manifest = build_training_manifest(
         design=design, amp_a=amp_a, amp_b=amp_b,
         amp_a_sha256=amp_a_sha, amp_b_sha256=amp_b_sha,
         calibration=calib, training_input=input_info, safety=safety_report,
         alignment_offset_samples=alignment_offset, envelope_config=envelope_config,
-        warnings=warnings, receptive_field=receptive_field,
+        warnings=warnings, receptive_field=receptive_field, output_gain=output_gain_record,
     )
     with open(manifest_out, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

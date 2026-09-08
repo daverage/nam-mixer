@@ -64,14 +64,20 @@ def _slug(text: str) -> str:
 
 
 def suggested_nam_filename(manifest: dict, fallback: str) -> str:
-    """A human-meaningful `.nam` filename for a trained A2 model, derived from
-    a `training_manifest.json`-shaped dict (see hybrid.training_target/
-    hybrid.blend_training_target) -- `<amp_a>_<amp_b>_hybrid.nam` or
-    `<amp_a>_<amp_b>_blendNN.nam` -- so a downloaded/exported model is
-    identifiable by name alone rather than only by an opaque design id/
-    timestamp. Falls back to `<fallback>.nam` if the manifest doesn't have
-    the expected shape (e.g. an older bundle) -- never raises.
+    """Return the final user-facing filename for a trained A2 model.
+
+    New bundles persist ``artifact_filename`` from the user's model-name
+    entry.  That is the authoritative filename: it must be used by both the
+    physical export and the browser's Content-Disposition header.  Older
+    bundles predate this field, so retain the source-model-derived fallback.
     """
+    artifact_filename = manifest.get("artifact_filename")
+    if isinstance(artifact_filename, str):
+        # A manifest is local state, but never let a malformed legacy edit
+        # turn a response header into a path.  The app writes this form.
+        safe = _slug(Path(artifact_filename).stem)
+        if safe != "untitled":
+            return f"{safe}.nam"
     try:
         amp_a = Path(manifest["amp_a"]["filename"]).stem
         amp_b = Path(manifest["amp_b"]["filename"]).stem

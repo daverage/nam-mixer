@@ -31,9 +31,28 @@ class LocalTrainingManager:
         self.log.clear()
         self.state = state
         self.started_at, self.finished_at, self.exit_code = time.time(), None, None
+        # Without this, an op unimplemented on MPS raises a hard error instead
+        # of falling back to CPU for that op -- surfaces as training dying
+        # almost immediately with ~0 CPU time consumed and no output.
+        # Without MPLBACKEND=Agg, nam.train.core's plt.show() calls open a
+        # blocking native window on macOS -- training then sits at ~0 CPU
+        # until a human closes it, which looks identical to a genuine hang
+        # in this headless/background subprocess.
+        # bufsize=1/text=True below only govern how WE read the pipe -- the
+        # child's own stdout is block-buffered (~8KB) because it's a pipe,
+        # not a tty, so without PYTHONUNBUFFERED=1 every print() (including
+        # the "Epoch X/Y" progress line _collect()/status() parse) sits in
+        # the child's buffer and never reaches log_tail/progress until it
+        # fills or the process exits -- looks like the epoch count is frozen.
+        env = {
+            **os.environ,
+            "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+            "MPLBACKEND": "Agg",
+            "PYTHONUNBUFFERED": "1",
+        }
         self.process = subprocess.Popen(
             command, cwd=self.repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            text=True, bufsize=1, env=env,
         )
         threading.Thread(target=self._collect, daemon=True).start()
 

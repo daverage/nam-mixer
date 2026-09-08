@@ -60,6 +60,14 @@ class HybridDesign:
     calibration_effective_mode: str = "raw"
     calibration_warning: Optional[str] = None
 
+    # Independent per-amp pre-render input trim, frozen from the RenderedPair
+    # that was actually auditioned -- see hybrid/pipeline.py's RenderedPair
+    # docstring. Unlike design_reference_profile_gain_db, this IS re-applied
+    # during real A2 generation (hybrid/training_target.py) -- it corrects
+    # what each amp actually receives, not a hypothetical pickup identity.
+    amp_a_input_gain_db: float = 0.0
+    amp_b_input_gain_db: float = 0.0
+
     envelope_rms_window_ms: float = 20.0
     envelope_attack_avg_ms: float = 5.0
     envelope_release_window_ms: float = 55.0
@@ -75,6 +83,18 @@ class HybridDesign:
     # pre-Blend-mode design and fully backward compatible with previously
     # written hybrid_design.json files that predate this field.
     cab: Optional[CabDesign] = None
+
+    # Shared post-combination output gain (hybrid/safety.py's
+    # compute_auto_output_gain_db/apply_output_gain), mode-independent like
+    # cab. "auto" is NOT frozen to a number here -- unlike effective_b_trim_db,
+    # it is recomputed fresh at generation time against the actual official
+    # training-input-driven target audio (training_target.generate_training_bundle),
+    # since that's the signal whose headroom actually matters, not the preview
+    # DI's. "manual" uses manual_output_gain_db verbatim, same convention as
+    # manual_b_trim_db. Defaults are backward compatible with pre-existing
+    # hybrid_design.json files that predate this field (no gain applied).
+    output_gain_mode: str = "auto"
+    manual_output_gain_db: float = 0.0
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -109,6 +129,8 @@ def freeze_design(
     blend_algorithm: str = "smoothstep-linear",
     envelope_config=None,
     cab: Optional[CabDesign] = None,
+    output_gain_mode: str = "auto",
+    manual_output_gain_db: float = 0.0,
 ) -> HybridDesign:
     """Build a `HybridDesign` from a `RenderedPair`/`HybridResult` the user
     actually auditioned. This is the ONLY intended way to construct a real
@@ -142,6 +164,8 @@ def freeze_design(
         calibration_applied=pair.calibration_applied,
         calibration_effective_mode=pair.calibration_mode if pair.calibration_applied else "raw",
         calibration_warning=pair.calibration_warning,
+        amp_a_input_gain_db=pair.amp_a_input_gain_db,
+        amp_b_input_gain_db=pair.amp_b_input_gain_db,
         envelope_rms_window_ms=envelope_config.rms_window_ms,
         envelope_attack_avg_ms=envelope_config.attack_avg_ms,
         envelope_release_window_ms=envelope_config.release_window_ms,
@@ -149,4 +173,6 @@ def freeze_design(
         envelope_max_history_ms=bounded_envelope_max_history_ms(envelope_config),
         design_di_file=design_di_file,
         cab=cab,
+        output_gain_mode=output_gain_mode,
+        manual_output_gain_db=manual_output_gain_db,
     )

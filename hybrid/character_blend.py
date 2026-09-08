@@ -54,6 +54,11 @@ class CharacterBlendDesign:
     mode: str = "character"
     cab: Optional[CabDesign] = None
 
+    # Shared post-combination output gain -- see hybrid.design.HybridDesign's
+    # matching fields for the full rationale.
+    output_gain_mode: str = "auto"
+    manual_output_gain_db: float = 0.0
+
     def to_dict(self) -> dict: return asdict(self)
     def write_json(self, path: str | Path) -> Path:
         path = Path(path); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8"); return path
