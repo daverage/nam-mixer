@@ -5,13 +5,13 @@ generates trainable A2 bundles; listen and validate every generated model.**
 
 ## What this is
 
-Hybrid NAM Builder is a small local tool for building a **dynamic transition
-between two existing [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler)
-(NAM) amp captures** — e.g. a Fender clean model that gradually morphs into a
-Marshall crunch model as you play harder, then eventually into a JCM800 at full
-tilt. The goal is a single resulting NAM model that behaves like one amp with
-a wide, dynamic gain range, built out of two (or more, eventually) amps that
-already exist as separate `.nam` captures.
+Hybrid NAM Builder is a small local tool for building a **dynamic transition,
+parallel blend, or deterministic character blend** from two existing
+[Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) (NAM)
+amp captures — for example, moving from a Fender clean model toward a Marshall
+crunch model as you play harder. It generates a trainable target, then can
+train and validate a single resulting NAM A2 model that reproduces the chosen
+design without requiring the two source models at inference time.
 
 ## This is NOT model-weight merging
 
@@ -34,8 +34,9 @@ Instead, the approach is:
    directly — at that point the two source `.nam` files are no longer needed at
    inference time.
 
-Step 4 (actually training the A2 model) is the long-term goal, not something
-this proof-of-concept does yet. What exists today builds up to steps 1–3.
+Step 4 is available through the UI for either Kaggle GPU or local training.
+Every generated model still needs listening and validation; the tool does not
+make a claim of perceptual equivalence merely because training completes.
 
 ## Why the *dry input's* level controls the transition
 
@@ -128,13 +129,18 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
 
 ## Workflow
 
-1. Select Amp A `.nam` and Amp B `.nam`.
-2. Choose the crossover point (dBFS) and transition width (dB) — how loud the
-   input needs to get before Amp A hands off to Amp B, and how gradual that
-   handoff is.
-3. Auto level-match trims Amp B to Amp A around the crossover region; override
-   manually if desired.
-4. Preview Amp A alone, Amp B alone, and the hybrid blend against a chosen
+The interface is organised into four stages. You can move between them at any
+time; the same sources, preview material, cabinet, output safety, and training
+tools remain shared across all three design modes.
+
+1. **Sources** — select Amp A and Amp B `.nam` files, a preview DI, an
+   instrument/input profile, and (when needed) advanced NAM calibration or
+   per-amp input trims. **Render Amps** runs the two expensive NAM inference
+   passes.
+2. **Shape** — choose Dynamic Hybrid crossover/transition, Parallel Blend mix,
+   or Character Blend tone/feel/drive controls, then set level matching. These
+   controls recombine the cached pair and do not re-run NAM inference.
+3. **Listen** — compare Amp A, the current result, and Amp B against a chosen
    genre DI, using an input profile to simulate different pickups/output
    levels (DESIGN/preview context only — see "Input profile vs. crossover vs.
    NAM calibration" above). The genre DI is a convenience audition
@@ -142,17 +148,19 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
    — use **Test gain** (an additional real gain on top of the profile,
    applied before both amps render) to deliberately push the level up/down
    and stress-test the crossfade beyond whatever that clip's own dynamics
-   happen to cover. Both require clicking Render Amps (real NAM inference).
-5. **Create A2**: upload the official NAM training excitation, then "Generate
-   Training Bundle" — this freezes everything from steps 2-4 into an
-   immutable `HybridDesign` (`hybrid/design.py`) and blends the *official*
+   happen to cover. Test gain automatically re-renders the pair after you stop
+   dragging. Cabinet and output-gain controls are optional finishing tools;
+   Dynamic Hybrid analysis is available on demand.
+4. **Create & train** — upload the official NAM training excitation, then "Generate
+   Training Bundle" — this freezes the current design into an immutable
+   `HybridDesign` (`hybrid/design.py`) and blends the *official*
    training input (not the preview DI, and not with the input-profile gain
    applied — the profile only shaped *design/preview*, never the actual
    training excitation) through Amp A/Amp B with that frozen design
    (`hybrid/training_target.py`). Produces `input.wav`, `hybrid_target.wav`
    (+ `hybrid_target_raw.wav` for comparison), `hybrid.hybrid.json`, and
    `training_manifest.json` under `work/a2/<design_id>/`.
-6. Train a real A2 (PackedWaveNet) model on the bundle, either:
+   Then train a real A2 (PackedWaveNet) model on the bundle, either:
    - **Kaggle GPU** (recommended, one-click from the "Create A2" card after a
      one-time `pip install kaggle && kaggle auth login` — see
      `docs/kaggle_training.md`), which trains on a private Kaggle T4 GPU and
@@ -165,31 +173,35 @@ deliberate and should not be blurred — see `assets/di/README.md` for more.
    rendering it (Full and Lite) through the existing native NAMCore renderer
    and comparing against the training target.
 
-## Design modes: Dynamic Hybrid vs. Fixed Blend, and the shared Cabinet stage
+## Design modes and the shared Cabinet stage
 
 The workflow above describes **Dynamic Hybrid** mode, the original/default
-mode. A second mode, **Fixed Blend**, is available as a separate tab in the
-UI:
+mode. Two further modes are available from the same mode selector:
 
 - **Dynamic Hybrid** (`hybrid/blend.py`, `hybrid/design.py`,
   `hybrid/training_target.py`): changes from Amp A toward Amp B according to
   playing level, via the crossover/transition envelope described above.
-- **Fixed Blend** (`hybrid/fixed_blend.py`, `hybrid/blend_training_target.py`):
+- **Parallel Blend** (`hybrid/fixed_blend.py`, `hybrid/blend_training_target.py`):
   always combines the two amp responses at one constant, user-chosen ratio
   (`result = A * (1 - mix_b) + B * mix_b`), independent of playing level —
   no crossover envelope at all. Its own auto level-match uses the DI's
   ACTIVE playing material (silence excluded) rather than a crossover band,
   since there's no crossover region to match around (see
   `hybrid.fixed_blend.compute_active_trim`).
+- **Character Blend** (`hybrid/character_blend.py`): uses a level-selected
+  nonlinear donor plus measured EQ and compression corrections to produce a
+  deterministic teacher design. Tone, Feel, and Drive are not a simple
+  parallel waveform mix; Drive selects one donor at a time and can optionally
+  vary by input level.
 
-Both tabs share Amp A/Amp B, the preview DI, input profile/calibration,
+All modes share Amp A/Amp B, the preview DI, input profile/calibration,
 render, test gain, the Listen controls, the Cabinet IR stage, the official
 training input, A2 quality, and training — switching tabs never re-runs NAM
 inference; the already-rendered `RenderedPair` (`hybrid/pipeline.py`) is
 reused by whichever mode you're auditioning.
 
 A third, mode-independent stage — **Cabinet IR** (`hybrid/cab_ir.py`) — sits
-AFTER the amp combination in either mode: an ordinary causal FIR convolution,
+AFTER the amp combination in any mode: an ordinary causal FIR convolution,
 optionally auditioned in preview only, or "baked" into the generated A2
 training target. Preview-only and baked processing always go through the
 exact same `apply_cab_ir` function on the COMPLETE prepared IR (never a
@@ -304,10 +316,10 @@ hybrid-nam-builder/
 │   ├── level_match.py      -- crossover-region auto level-match trim
 │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
 │   ├── blend.py            -- the dynamic crossfade itself
-│   ├── fixed_blend.py      -- Fixed Blend design mode (fixed-ratio combination)
+│   ├── fixed_blend.py      -- Parallel Blend mode (fixed-ratio combination)
 │   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
 │   ├── training_target.py         -- Dynamic Hybrid A2 training-target generation
-│   ├── blend_training_target.py   -- Fixed Blend A2 training-target generation
+│   ├── blend_training_target.py   -- Parallel Blend A2 training-target generation
 │   ├── receptive_field.py -- mode/cab-aware temporal-dependency accounting
 │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
 │   └── metadata.py         -- hybrid provenance metadata (JSON sidecar)
@@ -344,7 +356,7 @@ README) and a real `.nam` file is present at
 
 `torch`/`neural-amp-modeler` are no longer in `requirements.txt` — inference
 is handled entirely by the native `nam_render` tool now. They only matter for
-the eventual A2 training step, and live in `requirements-training.txt`
+local A2 training, and live in `requirements-training.txt`
 instead (install into a separate, supported-Python-version environment when
 you get to that step).
 

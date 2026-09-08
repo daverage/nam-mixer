@@ -4,6 +4,9 @@ work/*
 # Personal amp captures -- not project fixtures like assets/di/*.wav.
 assets/nam_models/*.nam
 
+# Locally exported sessions can contain machine-specific file paths.
+presets/
+
 __pycache__/
 *.pyc
 .pytest_cache/
