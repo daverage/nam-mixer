@@ -952,7 +952,12 @@ def test_submit_async_persists_dataset_ref_before_long_upload_completes(tmp_path
     # settling loop retry for its full default timeout on a background
     # thread that outlives this test's monkeypatch teardown -- letting a
     # stray subprocess.run call reach the REAL kaggle CLI once unmocked.
-    manager = KaggleJobManager(tmp_path, dataset_verify_timeout_s=0.2, dataset_verify_interval_s=0.05)
+    manager = KaggleJobManager(
+        tmp_path,
+        cli=KaggleCli(executable="/usr/bin/kaggle"),
+        dataset_verify_timeout_s=0.2,
+        dataset_verify_interval_s=0.05,
+    )
     job = KaggleJob(job_id="abc123", design_id="mydesign")
     dataset_staging, _kernel_staging = manager.stage(job, bundle_dir)
 

@@ -226,6 +226,33 @@ def test_active_profile_without_custom_gain_is_rejected(client, tmp_path):
     assert resp.status_code == 400
 
 
+@pytest.mark.parametrize("field", ["reference_input_level_dbu", "test_gain_db", "amp_a_input_gain_db", "amp_b_input_gain_db"])
+def test_render_pair_rejects_non_numeric_gain_controls(client, tmp_path, field):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+
+    resp = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, **{field: "not-a-number"}))
+
+    assert resp.status_code == 400
+    assert resp.is_json
+
+
+def test_preview_rejects_invalid_output_gain(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+
+    resp = client.post("/api/preview", json={
+        "source": "hybrid", "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "manual_output_gain_db": "not-a-number",
+    })
+
+    assert resp.status_code == 400
+    assert resp.is_json
+
+
 @pytest.fixture
 def isolated_training_paths(tmp_path, monkeypatch):
     """Redirect app.py's training-input/bundle paths into tmp_path so these

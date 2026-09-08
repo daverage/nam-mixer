@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 from scipy.signal import fftconvolve, firwin2, minimum_phase
 
+from .audio_metrics import rms_dbfs as _shared_rms_dbfs
 from .cab_ir import CabDesign
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from .character_analysis import AmpCharacterAnalysis, CharacterAnalysisConfig, analyse_rendered_audio
@@ -45,6 +46,8 @@ class CharacterBlendDesign:
     amp_b_input_level_dbu: Optional[float] = None
     amp_a_calibration_gain_db: float = 0.0
     amp_b_calibration_gain_db: float = 0.0
+    amp_a_input_gain_db: float = 0.0
+    amp_b_input_gain_db: float = 0.0
     calibration_applied: bool = False
     calibration_effective_mode: str = "raw"
     calibration_warning: Optional[str] = None
@@ -104,9 +107,7 @@ class LowLevelResponseCheck:
 
 
 def _rms_dbfs(audio: np.ndarray, floor_dbfs: float = _LOW_LEVEL_FLOOR_DBFS) -> float:
-    if len(audio) == 0: return floor_dbfs
-    rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
-    return max(20.0 * np.log10(max(rms, _EPS)), floor_dbfs)
+    return float(_shared_rms_dbfs(audio, floor_dbfs))
 
 
 def evaluate_low_level_response(
@@ -278,4 +279,4 @@ def freeze_character_design(pair, result: CharacterBlendResult, amp_a_path: str,
     config = json.loads(json.dumps(asdict(CharacterAnalysisConfig(
         levels_db=tuple(x.input_gain_db for x in result.analysis_a.levels), frequencies_hz=result.analysis_a.frequencies_hz,
     ))))
-    return CharacterBlendDesign(amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path), analysis_a=frozen_a, analysis_b=frozen_b, analysis_config=config, instrument_type=pair.instrument_type, design_reference_profile_id=pair.input_profile_id, design_reference_profile_gain_db=pair.input_profile_gain_db, calibration_mode=pair.calibration_mode, reference_input_level_dbu=pair.reference_input_level_dbu, amp_a_input_level_dbu=pair.amp_a_model_input_level_dbu, amp_b_input_level_dbu=pair.amp_b_model_input_level_dbu, amp_a_calibration_gain_db=pair.amp_a_calibration_gain_db, amp_b_calibration_gain_db=pair.amp_b_calibration_gain_db, calibration_applied=pair.calibration_applied, calibration_effective_mode=pair.calibration_mode if pair.calibration_applied else "raw", calibration_warning=pair.calibration_warning, **kwargs)
+    return CharacterBlendDesign(amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path), analysis_a=frozen_a, analysis_b=frozen_b, analysis_config=config, instrument_type=pair.instrument_type, design_reference_profile_id=pair.input_profile_id, design_reference_profile_gain_db=pair.input_profile_gain_db, calibration_mode=pair.calibration_mode, reference_input_level_dbu=pair.reference_input_level_dbu, amp_a_input_level_dbu=pair.amp_a_model_input_level_dbu, amp_b_input_level_dbu=pair.amp_b_model_input_level_dbu, amp_a_calibration_gain_db=pair.amp_a_calibration_gain_db, amp_b_calibration_gain_db=pair.amp_b_calibration_gain_db, amp_a_input_gain_db=pair.amp_a_input_gain_db, amp_b_input_gain_db=pair.amp_b_input_gain_db, calibration_applied=pair.calibration_applied, calibration_effective_mode=pair.calibration_mode if pair.calibration_applied else "raw", calibration_warning=pair.calibration_warning, **kwargs)

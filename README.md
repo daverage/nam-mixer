@@ -329,7 +329,8 @@ python app.py
 ```
 
 ```bash
-python -m pytest tests/
+python3 -m pytest -q
+# `pytest -q` works too; pytest.ini resolves the repository modules.
 ```
 
 The test suite covers `hybrid/envelope.py`, `hybrid/blend.py`,

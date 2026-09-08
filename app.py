@@ -288,8 +288,10 @@ def _parse_output_gain_params(data: dict):
     """
     mode = data.get("output_gain_mode", "auto")
     if mode not in ("auto", "manual"):
-        mode = "auto"
-    manual_gain_db = float(data.get("manual_output_gain_db", 0.0))
+        raise ValueError("output_gain_mode must be 'auto' or 'manual'")
+    manual_gain_db = float(data.get("manual_output_gain_db", 0.0) or 0.0)
+    if not np.isfinite(manual_gain_db):
+        raise ValueError("manual_output_gain_db must be a finite number")
     return mode, manual_gain_db
 
 
@@ -327,16 +329,15 @@ def api_render_pair():
     input_profile_id = data.get("input_profile_id", "vintage_humbucker")
     custom_input_gain_db = data.get("custom_input_gain_db")
     calibration_mode = data.get("calibration_mode", "auto")
-    reference_input_level_dbu = float(data.get("reference_input_level_dbu", DEFAULT_REFERENCE_INPUT_LEVEL_DBU))
     try:
+        reference_input_level_dbu = float(data.get("reference_input_level_dbu", DEFAULT_REFERENCE_INPUT_LEVEL_DBU))
         test_gain_db = float(data.get("test_gain_db", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return jsonify({"error": "test_gain_db must be a number"}), 400
-    try:
         amp_a_input_gain_db = float(data.get("amp_a_input_gain_db", 0.0) or 0.0)
         amp_b_input_gain_db = float(data.get("amp_b_input_gain_db", 0.0) or 0.0)
     except (TypeError, ValueError):
-        return jsonify({"error": "amp_a_input_gain_db/amp_b_input_gain_db must be numbers"}), 400
+        return jsonify({"error": "reference_input_level_dbu, test_gain_db, amp_a_input_gain_db, and amp_b_input_gain_db must be numbers"}), 400
+    if not all(np.isfinite(value) for value in (reference_input_level_dbu, test_gain_db, amp_a_input_gain_db, amp_b_input_gain_db)):
+        return jsonify({"error": "reference_input_level_dbu, test_gain_db, amp_a_input_gain_db, and amp_b_input_gain_db must be finite numbers"}), 400
 
     try:
         get_profile(instrument_type, input_profile_id)
@@ -822,7 +823,10 @@ def api_preview():
     # warn about that distinctly from the (harmless, reduce-only) training
     # target ceiling.
     if source in ("hybrid", "blend", "character"):
-        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        try:
+            output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
         audio = audio.astype("float64")
         if output_gain_mode == "manual":
             output_gain_db = manual_output_gain_db
@@ -1069,7 +1073,10 @@ def api_generate():
         except (TypeError, ValueError):
             return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
 
-        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        try:
+            output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
         # Alignment is never exposed as a UI control, matching Hybrid mode.
         result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db, align_enabled=False)
         design = freeze_blend_design(
@@ -1101,7 +1108,10 @@ def api_generate():
             align_enabled=False,
         )
 
-        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        try:
+            output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
         design = freeze_design(
             pair, result,
             amp_a_path=amp_a_path, amp_b_path=amp_b_path,

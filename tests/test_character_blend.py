@@ -26,6 +26,7 @@ def _pair(n=4096, sample_rate=48000):
         calibration_mode="raw", reference_input_level_dbu=12.0, calibration_applied=False,
         amp_a_model_input_level_dbu=None, amp_b_model_input_level_dbu=None,
         amp_a_calibration_gain_db=0.0, amp_b_calibration_gain_db=0.0, calibration_warning=None,
+        amp_a_input_gain_db=0.0, amp_b_input_gain_db=0.0,
     )
 
 
@@ -56,6 +57,17 @@ def test_drive_curve_is_smooth_and_freeze_roundtrips(tmp_path):
     frozen = freeze_character_design(pair, result, "a.nam", "b.nam", drive_mix_b=.5)
     path = frozen.write_json(tmp_path / "character.json")
     assert CharacterBlendDesign.read_json(path).analysis_a == frozen.analysis_a
+
+
+def test_freeze_character_design_preserves_per_amp_input_gains():
+    pair = _pair()
+    pair.amp_a_input_gain_db, pair.amp_b_input_gain_db = -3.0, 2.5
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"))
+
+    frozen = freeze_character_design(pair, result, "a.nam", "b.nam")
+
+    assert frozen.amp_a_input_gain_db == -3.0
+    assert frozen.amp_b_input_gain_db == 2.5
 
 
 # ---------------------------------------------------------------------------

@@ -25,20 +25,11 @@ from typing import Optional
 import numpy as np
 
 from .align import align_to_reference
+from .audio_metrics import rms_dbfs as _rms_dbfs
 from .blend import DEFAULT_TRANSITION_WIDTH_DB  # noqa: F401 -- re-exported for symmetry, unused here
 from .cab_ir import CabDesign
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from .coverage import ACTIVE_SIGNAL_THRESHOLD_DBFS, active_signal_mask
-
-_EPS = 1e-10
-
-
-def _rms_dbfs(x: np.ndarray) -> float:
-    if len(x) == 0:
-        return -np.inf
-    rms = np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2))
-    return 20.0 * np.log10(max(rms, _EPS))
-
 
 @dataclass
 class BlendLevelMatchResult:

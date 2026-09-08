@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-_EPS = 1e-10
+from .audio_metrics import rms_dbfs as _rms_dbfs
 
 
 @dataclass
@@ -27,13 +27,6 @@ def _region_mask(envelope_db: np.ndarray, crossover_dbfs: float, transition_widt
     lo = crossover_dbfs - transition_width_db / 2.0
     hi = crossover_dbfs + transition_width_db / 2.0
     return (envelope_db >= lo) & (envelope_db <= hi)
-
-
-def _rms_dbfs(x: np.ndarray) -> float:
-    if len(x) == 0:
-        return -np.inf
-    rms = np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2))
-    return 20.0 * np.log10(max(rms, _EPS))
 
 
 def compute_crossover_trim(

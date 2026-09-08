@@ -36,8 +36,8 @@ def evaluate_bundle_low_level_response(design, amp_a, amp_b, calibration, offici
 
     def build_pair_at_gain(gain_db: float):
         scaled = (reference * db_to_amplitude(gain_db)).astype(np.float32)
-        a = render(amp_a, (scaled * db_to_amplitude(calibration.amp_a_gain_db)).astype(np.float32), sample_rate)
-        b = render(amp_b, (scaled * db_to_amplitude(calibration.amp_b_gain_db)).astype(np.float32), sample_rate)
+        a = render(amp_a, (scaled * db_to_amplitude(calibration.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32), sample_rate)
+        b = render(amp_b, (scaled * db_to_amplitude(calibration.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32), sample_rate)
         return SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=sample_rate)
 
     return evaluate_low_level_response(build_pair_at_gain, design)
@@ -114,8 +114,8 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
     a_sha, b_sha = _sha256_file(design.amp_a_path), _sha256_file(design.amp_b_path)
     calibration = resolve_calibration(design.calibration_mode, design.reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu)
     warnings = [calibration.warning] if calibration.warning else []
-    a = render(amp_a, (official_input * db_to_amplitude(calibration.amp_a_gain_db)).astype(np.float32), input_info.sample_rate)
-    b = render(amp_b, (official_input * db_to_amplitude(calibration.amp_b_gain_db)).astype(np.float32), input_info.sample_rate)
+    a = render(amp_a, (official_input * db_to_amplitude(calibration.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32), input_info.sample_rate)
+    b = render(amp_b, (official_input * db_to_amplitude(calibration.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32), input_info.sample_rate)
     pair = SimpleNamespace(dry=official_input, amp_a=a, amp_b=b, sample_rate=input_info.sample_rate)
     target_raw = build_character_blend(pair, design).blend
     if len(target_raw) != len(official_input): raise TrainingInputError("generated Character Blend target is not sample-aligned with training input")
