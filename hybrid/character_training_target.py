@@ -21,12 +21,13 @@ from .training_target import (
     _git_commit, _sha256_file, compute_receptive_field_record, maybe_bake_cab, validate_training_input,
 )
 
-HYBRID_BUILDER_VERSION = "character-blend-v1"
+HYBRID_BUILDER_VERSION = "character-blend-v2"
 # Bounded so the sweep (Phases 4-5, docs/blend-mode-fixes.md) costs a fixed
 # handful of extra NAM renders regardless of how long the official training
 # input is -- it is a sanity check on the teacher's low-level response, not
 # a re-render of the whole excitation file.
 LOW_LEVEL_CHECK_REFERENCE_SECONDS = 5.0
+EXPORT_VALIDATION_REFERENCE_SCHEMA_VERSION = 1
 
 
 def evaluate_bundle_low_level_response(design, amp_a, amp_b, calibration, official_input, sample_rate) -> LowLevelResponseCheck:
@@ -43,6 +44,59 @@ def evaluate_bundle_low_level_response(design, amp_a, amp_b, calibration, offici
     return evaluate_low_level_response(build_pair_at_gain, design)
 
 
+def _select_reference_excerpt(audio: np.ndarray, sample_rate: int) -> tuple[np.ndarray, int]:
+    """Choose a deterministic energetic excerpt instead of blindly using t=0.
+
+    The official excitation may begin with silence.  Score one-second windows
+    by RMS and select the earliest highest-energy contiguous five-second
+    region; reject material that contains no useful excitation.
+    """
+    frames = min(len(audio), int(sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS))
+    if frames <= 0:
+        raise TrainingInputError("cannot build validation reference from an empty training input")
+    window = max(1, int(sample_rate))
+    starts = range(0, max(1, len(audio) - frames + 1), window)
+    start = max(starts, key=lambda offset: float(np.mean(np.square(audio[offset:offset + frames], dtype=np.float64))))
+    excerpt = np.asarray(audio[start:start + frames], dtype=np.float32)
+    if float(np.sqrt(np.mean(np.square(excerpt, dtype=np.float64)))) < 1e-7:
+        raise TrainingInputError("training input has no useful excitation for exported-model validation")
+    return excerpt, int(start)
+
+
+def build_export_validation_reference(design, amp_a, amp_b, calibration, official_input, sample_rate: int, *, output_gain_db: float, peak_reduction_db: float) -> tuple[dict, np.ndarray]:
+    """Build the *processed* teacher reference used for exported-model checks.
+
+    Unlike the pre-processing teacher-health sweep, this applies the baked
+    cabinet (when selected), frozen output gain, and the one fixed target peak
+    reduction.  None of these values are recomputed per level.
+    """
+    excerpt, start = _select_reference_excerpt(official_input, sample_rate)
+    teacher_rms = []
+    peak_scale = db_to_amplitude(-peak_reduction_db)
+    for gain_db in (0.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0):
+        scaled = (excerpt * db_to_amplitude(gain_db)).astype(np.float32)
+        a = render(amp_a, (scaled * db_to_amplitude(calibration.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32), sample_rate)
+        b = render(amp_b, (scaled * db_to_amplitude(calibration.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32), sample_rate)
+        teacher = build_character_blend(SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=sample_rate), design).blend
+        teacher = maybe_bake_cab(teacher, design.cab, sample_rate)
+        teacher = apply_output_gain(teacher, output_gain_db) * peak_scale
+        rms = float(np.sqrt(np.mean(np.square(teacher, dtype=np.float64))))
+        teacher_rms.append(float(max(20.0 * np.log10(max(rms, 1e-10)), -90.0)))
+    return {
+        "schema_version": EXPORT_VALIDATION_REFERENCE_SCHEMA_VERSION,
+        "levels_db": [0.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0],
+        "teacher_output_rms_dbfs": teacher_rms,
+        "sample_rate": sample_rate,
+        "frame_start": start,
+        "frame_count": len(excerpt),
+        "input_gain_db": {"amp_a": calibration.amp_a_gain_db + design.amp_a_input_gain_db, "amp_b": calibration.amp_b_gain_db + design.amp_b_input_gain_db},
+        "output_gain_db": output_gain_db,
+        "peak_reduction_db": peak_reduction_db,
+        "cab_baked": bool(design.cab and design.cab.baked),
+        "teacher_semantics_version": design.teacher_semantics_version,
+    }, excerpt
+
+
 def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int) -> "dict | None":
     """Re-run the teacher's low-level response sweep (docs/blend-mode-fixes.md,
     Phases 10-11) through an exported Full A2 and compare its output RMS at
@@ -56,16 +110,15 @@ def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_r
     identical bar. Returns None for non-Character-Blend or older manifests
     without a recorded `low_level_response`.
     """
-    teacher = manifest.get("low_level_response")
+    teacher = manifest.get("export_validation_reference")
     if not teacher or manifest.get("mode") != "character":
         return None
     input_audio, sr = sf.read(str(input_path), dtype="float32", always_2d=False)
-    # Same bounded excerpt used to build the teacher's own sweep -- both
-    # fixed-length, so comparing per-level RMS is apples-to-apples regardless
-    # of the full excitation file's length.
-    reference = input_audio[: int(sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS)]
-    if len(reference) == 0:
-        reference = input_audio
+    start = int(teacher.get("frame_start", 0))
+    frame_count = int(teacher.get("frame_count", 0))
+    reference = input_audio[start:start + frame_count]
+    if len(reference) != frame_count or frame_count <= 0:
+        return {"state": "unavailable", "reason": "validation reference excerpt is unavailable", "pass": None}
     model = load_nam(nam_path)
 
     full_rms_dbfs = []
@@ -75,14 +128,15 @@ def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_r
         rms = float(np.sqrt(np.mean(np.square(rendered, dtype=np.float64))))
         full_rms_dbfs.append(float(max(20.0 * np.log10(max(rms, 1e-10)), -90.0)))
 
-    errors_db = [float(abs(full - teach)) for full, teach in zip(full_rms_dbfs, teacher["output_rms_dbfs"])]
+    errors_db = [float(abs(full - teach)) for full, teach in zip(full_rms_dbfs, teacher["teacher_output_rms_dbfs"])]
     max_error_db = max(errors_db) if errors_db else 0.0
     # The teacher's own dead-zone status is the baseline: only flag the
     # TRAINED model going silent when the teacher itself did not.
     dead_zone_detected = bool(any(rms <= -89.999 for rms in full_rms_dbfs) and not teacher.get("dead_zone_detected"))
     passed = bool(not dead_zone_detected and max_error_db < 20.0)
     return {
-        "levels_db": teacher["levels_db"], "teacher_output_rms_dbfs": teacher["output_rms_dbfs"],
+        "state": "passed" if passed else "failed",
+        "levels_db": teacher["levels_db"], "teacher_output_rms_dbfs": teacher["teacher_output_rms_dbfs"],
         "full_output_rms_dbfs": full_rms_dbfs, "full_error_db": errors_db,
         "max_error_db": max_error_db, "dead_zone_detected": dead_zone_detected, "pass": passed,
     }
@@ -94,7 +148,7 @@ def build_character_training_manifest(design, amp_a, amp_b, amp_a_sha256, amp_b_
         "amp_a": {"filename": Path(design.amp_a_path).name, "path": design.amp_a_path, "sha256": amp_a_sha256, "architecture": amp_a.architecture, "sample_rate": amp_a.sample_rate, "input_level_dbu": amp_a.input_level_dbu},
         "amp_b": {"filename": Path(design.amp_b_path).name, "path": design.amp_b_path, "sha256": amp_b_sha256, "architecture": amp_b.architecture, "sample_rate": amp_b.sample_rate, "input_level_dbu": amp_b.input_level_dbu},
         "design": design.to_dict(),
-        "character_analysis": {"version": 1, "amp_a_sha256": design.amp_a_sha256 or amp_a_sha256, "amp_b_sha256": design.amp_b_sha256 or amp_b_sha256, "analysis_a": design.analysis_a, "analysis_b": design.analysis_b, "tone_mix_b": design.tone_mix_b, "feel_mix_b": design.feel_mix_b, "drive_mix_b": design.drive_mix_b, "drive_curve": {"low": design.drive_low_mix_b, "mid": design.drive_mid_mix_b, "high": design.drive_high_mix_b}},
+        "character_analysis": {"version": 2, "teacher_semantics_version": design.teacher_semantics_version, "amp_a_sha256": design.amp_a_sha256 or amp_a_sha256, "amp_b_sha256": design.amp_b_sha256 or amp_b_sha256, "analysis_a": design.analysis_a, "analysis_b": design.analysis_b, "tone_mix_b": design.tone_mix_b, "feel_mix_b": design.feel_mix_b, "drive_mix_b": design.drive_mix_b, "drive_curve": {"low": design.drive_low_mix_b, "mid": design.drive_mid_mix_b, "high": design.drive_high_mix_b}},
         "calibration": {"requested_mode": design.calibration_mode, "effective_mode": "auto" if calibration.applied else "raw", "reference_input_level_dbu": calibration.reference_input_level_dbu, "amp_a_compensation_db": calibration.amp_a_gain_db, "amp_b_compensation_db": calibration.amp_b_gain_db, "applied": calibration.applied, "warning": calibration.warning},
         "training_input": {"path": training_input.path, "sample_rate": training_input.sample_rate, "frame_count": training_input.frame_count, "sha256": training_input.sha256, "md5": training_input.md5, "detected_version": training_input.detected_version},
         "target": {"raw_sha256": safety.raw_sha256, "final_sha256": safety.final_sha256, "peak_before_safety_dbfs": safety.raw_peak_dbfs, "peak_after_safety_dbfs": safety.final_peak_dbfs, "global_safety_gain_reduction_db": safety.gain_reduction_db, "preview_limiter_used": False, "synthetic_latency_samples": 0},
@@ -140,10 +194,18 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
     if check.has_nan_or_inf: raise TrainingInputError("generated Character Blend target contains NaN/Inf -- aborting")
     if check.is_silent: warnings.append("generated Character Blend target is silent -- check amp/DI/design selection")
     target_final, reduction = apply_peak_ceiling(target_raw, target_peak_dbfs)
+    validation_reference, validation_excerpt = build_export_validation_reference(
+        design, amp_a, amp_b, calibration, official_input, input_info.sample_rate,
+        output_gain_db=output_gain_db, peak_reduction_db=reduction,
+    )
     input_out, raw_out, final_out, manifest_out = output_directory / "input.wav", output_directory / "hybrid_target_raw.wav", output_directory / "hybrid_target.wav", output_directory / "training_manifest.json"
-    shutil.copyfile(official_input_path, input_out); sf.write(raw_out, target_raw.astype(np.float32), input_info.sample_rate, subtype="FLOAT"); sf.write(final_out, target_final.astype(np.float32), input_info.sample_rate, subtype="FLOAT")
+    reference_out = output_directory / "export_validation_reference_input.wav"
+    shutil.copyfile(official_input_path, input_out); sf.write(raw_out, target_raw.astype(np.float32), input_info.sample_rate, subtype="FLOAT"); sf.write(final_out, target_final.astype(np.float32), input_info.sample_rate, subtype="FLOAT"); sf.write(reference_out, validation_excerpt, input_info.sample_rate, subtype="FLOAT")
     safety = TargetSafetyReport(check.peak_dbfs, check.peak_dbfs - reduction, reduction, _sha256_file(raw_out), _sha256_file(final_out))
-    receptive = compute_receptive_field_record("character", amp_a, amp_b, input_info.sample_rate, design.cab, bounded_envelope_max_history_ms())
+    receptive = compute_receptive_field_record(
+        "character", amp_a, amp_b, input_info.sample_rate, design.cab,
+        bounded_envelope_max_history_ms(), design.envelope_smoothing_ms,
+    )
     output_gain_record = {
         "mode": design.output_gain_mode,
         "requested_manual_gain_db": design.manual_output_gain_db if design.output_gain_mode == "manual" else None,
@@ -151,5 +213,7 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
         "applied_gain_db": output_gain_db,
     }
     manifest = build_character_training_manifest(design, amp_a, amp_b, a_sha, b_sha, calibration, input_info, safety, receptive, warnings, low_level_response, output_gain=output_gain_record)
+    validation_reference.update({"input_excerpt_path": reference_out.name, "input_excerpt_sha256": _sha256_file(reference_out), "amp_a_sha256": a_sha, "amp_b_sha256": b_sha, "cab_sha256": design.cab.sha256 if design.cab else None})
+    manifest["export_validation_reference"] = validation_reference
     manifest_out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return TrainingBundle(output_directory, input_out, raw_out, final_out, None, manifest_out, design, safety, input_info, warnings, manifest)

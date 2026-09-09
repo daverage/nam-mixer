@@ -8,6 +8,8 @@ from hybrid.character_blend import (
     CharacterBlendDesign,
     LowLevelResponseCheck,
     _adjacent_level_weights,
+    _causal_donor_weight,
+    character_temporal_history_samples,
     _select_donor,
     build_character_blend,
     evaluate_low_level_response,
@@ -185,3 +187,48 @@ def test_drive_donor_threshold_favours_amp_b_at_exactly_half():
     assert np.allclose(at_half, b)     # AT exactly 50% B: Amp B is already the donor
     assert np.allclose(above_half, b)  # above 50% B: still Amp A -> Amp B is unaffected
     assert not np.allclose(at_half, 0.5 * (a + b))  # not a literal 50/50 waveform blend
+
+
+def test_drive_donor_transition_is_prefix_invariant_and_causal():
+    """A future switch must never rewrite already-emitted teacher samples."""
+    sample_rate = 1000
+    a = np.zeros(100, dtype=np.float64)
+    b = np.ones(100, dtype=np.float64)
+    before_switch = np.zeros(100, dtype=np.float64)
+    switches_at_50 = before_switch.copy()
+    switches_at_50[50:] = 1.0
+    assert np.array_equal(
+        _select_donor(a, b, before_switch, sample_rate)[:50],
+        _select_donor(a, b, switches_at_50, sample_rate)[:50],
+    )
+    # The first affected sample is the switch itself, never a centred pre-fade.
+    assert _select_donor(a, b, switches_at_50, sample_rate)[49] == 0.0
+    assert _select_donor(a, b, switches_at_50, sample_rate)[50] > 0.0
+
+
+def test_drive_donor_causal_ramp_handles_reversal_without_a_jump():
+    drive = np.zeros(40)
+    drive[5:12] = 1.0
+    weight = _causal_donor_weight(drive, 1000)
+    assert np.all((0.0 <= weight) & (weight <= 1.0))
+    assert weight[0] == 0.0
+    assert weight[5] > 0.0
+    assert 0.0 < weight[11] < 1.0
+    # The new ramp starts from the current weight, rather than snapping to A.
+    assert abs(weight[12] - weight[11]) <= 0.1
+    assert weight[-1] == 0.0
+
+
+def test_character_design_without_semantics_version_loads_as_legacy(tmp_path):
+    path = tmp_path / "legacy-character.json"
+    path.write_text('{"amp_a_path":"a.nam","amp_b_path":"b.nam"}')
+    assert CharacterBlendDesign.read_json(path).teacher_semantics_version == 1
+
+
+def test_character_temporal_history_reports_serial_dependencies():
+    history = character_temporal_history_samples(1000, 40.0)
+    assert history == {
+        "drive_smoothing_serial_samples": 39,
+        "donor_transition_serial_samples": 9,
+        "correction_fir_serial_samples": 64,
+    }

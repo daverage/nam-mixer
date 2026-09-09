@@ -45,6 +45,7 @@ def client():
         yield c
     # Don't leak a rendered pair into unrelated tests/sessions.
     app_module._rendered_pair_cache["pair"] = None
+    app_module._rendered_pair_cache["snapshot"] = None
 
 
 def _write_fake_nam(path, input_level_dbu=None):
@@ -75,11 +76,32 @@ def _render_body(amp_a, amp_b, **overrides):
     return body
 
 
+def _current_render_id():
+    return app_module._rendered_pair_cache["snapshot"]["render_id"]
+
+
 def test_preview_without_render_pair_first_returns_400(client):
     app_module._rendered_pair_cache["pair"] = None
     resp = client.post("/api/preview", json={"source": "a"})
     assert resp.status_code == 400
     assert "render" in resp.get_json()["error"].lower()
+
+
+def test_renderer_readiness_reports_missing_binary_without_attempting_inference(client, monkeypatch):
+    monkeypatch.setattr(app_module, "find_nam_render_exe", lambda: (_ for _ in ()).throw(app_module.NamRenderError("not found")))
+    response = client.get("/api/renderer/readiness")
+    assert response.status_code == 200
+    assert response.get_json() == {"found": False, "verified": False, "error": "not found"}
+
+
+def test_renderer_readiness_accepts_namcore_usage_exit(client, monkeypatch):
+    class Result:
+        returncode, stdout, stderr = 1, "Usage: render <model.nam> <input.wav>", ""
+    monkeypatch.setattr(app_module, "find_nam_render_exe", lambda: Path("/tmp/nam_render"))
+    monkeypatch.setattr(app_module.subprocess, "run", lambda *args, **kwargs: Result())
+    assert client.get("/api/renderer/readiness").get_json() == {
+        "found": True, "verified": True, "path": "/tmp/nam_render",
+    }
 
 
 def test_oversized_upload_returns_a_clear_json_error(client, monkeypatch):
@@ -166,7 +188,7 @@ def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
 
 def test_wizard_insight_requires_a_rendered_pair(client):
     app_module._rendered_pair_cache["pair"] = None
-    resp = client.post("/api/wizard/insight")
+    resp = client.post("/api/wizard/insight", json={})
     assert resp.status_code == 400
     assert "render" in resp.get_json()["error"].lower()
 
@@ -177,7 +199,7 @@ def test_wizard_insight_describes_a_rendered_pair(client, tmp_path):
     _write_fake_nam(amp_b)
     assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
 
-    resp = client.post("/api/wizard/insight")
+    resp = client.post("/api/wizard/insight", json={"render_id": _current_render_id()})
     assert resp.status_code == 200
     data = resp.get_json()
     assert {"level_text", "tone_text", "feel_text", "amp_a", "amp_b"} <= data.keys()
@@ -191,7 +213,7 @@ def test_live_blend_stems_returns_trimmed_stereo_pair_without_rerender(client, t
     _write_fake_nam(amp_b)
     assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
 
-    response = client.post("/api/live_blend_stems", json={
+    response = client.post("/api/live_blend_stems", json={"render_id": _current_render_id(),
         "mix_b": 0.5, "auto_level": True, "manual_b_trim_db": 0.0,
     })
 
@@ -216,16 +238,31 @@ def test_render_pair_cache_reflects_the_newest_profile_not_the_old_one(client, t
     assert resp0.status_code == 200
     data0 = resp0.get_json()
     assert data0["input_profile_gain_db"] == 0.0
-    audio_at_0db = client.post("/api/preview", json={"source": "a"}).data
+    audio_at_0db = client.post("/api/preview", json={"source": "a", "render_id": data0["render_id"]}).data
 
     resp1 = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, input_profile_id="hot_humbucker"))
     assert resp1.status_code == 200
     data1 = resp1.get_json()
     assert data1["input_profile_gain_db"] == 4.5
     assert data1["input_peak_dbfs"] > data0["input_peak_dbfs"]
-    audio_at_hot = client.post("/api/preview", json={"source": "a"}).data
+    audio_at_hot = client.post("/api/preview", json={"source": "a", "render_id": data1["render_id"]}).data
 
     assert audio_at_0db != audio_at_hot
+
+
+def test_stale_render_id_cannot_preview_or_generate_a_newer_pair(client, tmp_path, isolated_training_paths):
+    training_path, _ = isolated_training_paths
+    _write_training_wav(training_path)
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    old = client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+    new = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, test_gain_db=2.0)).get_json()
+    assert old["render_id"] != new["render_id"]
+    preview = client.post("/api/preview", json={"source": "a", "render_id": old["render_id"]})
+    generate = client.post("/api/generate", json={"render_id": old["render_id"], "model_name": "must-not-exist"})
+    assert preview.status_code == generate.status_code == 409
+    assert preview.get_json()["code"] == generate.get_json()["code"] == "stale_render"
 
 
 def test_render_pair_applies_test_gain_db_as_real_additional_gain(client, tmp_path):
@@ -279,8 +316,8 @@ def test_blend_stage_routes_never_require_a_fresh_render(client, tmp_path):
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
 
-    r1 = client.post("/api/blend_info", json={"crossover_dbfs": -35.0, "transition_width_db": 8.0})
-    r2 = client.post("/api/blend_info", json={"crossover_dbfs": -5.0, "transition_width_db": 8.0})
+    r1 = client.post("/api/blend_info", json={"render_id": _current_render_id(), "crossover_dbfs": -35.0, "transition_width_db": 8.0})
+    r2 = client.post("/api/blend_info", json={"render_id": _current_render_id(), "crossover_dbfs": -5.0, "transition_width_db": 8.0})
     assert r1.status_code == 200
     assert r2.status_code == 200
 
@@ -288,8 +325,8 @@ def test_blend_stage_routes_never_require_a_fresh_render(client, tmp_path):
     # the real proof that crossover moves the blend without a rerender is
     # the blend WEIGHT curve itself, which depends only on the envelope and
     # crossover config, not on which amps were rendered.
-    curve1 = client.post("/api/blend_curve", json={"crossover_dbfs": -35.0, "transition_width_db": 8.0, "max_points": 200})
-    curve2 = client.post("/api/blend_curve", json={"crossover_dbfs": -5.0, "transition_width_db": 8.0, "max_points": 200})
+    curve1 = client.post("/api/blend_curve", json={"render_id": _current_render_id(), "crossover_dbfs": -35.0, "transition_width_db": 8.0, "max_points": 200})
+    curve2 = client.post("/api/blend_curve", json={"render_id": _current_render_id(), "crossover_dbfs": -5.0, "transition_width_db": 8.0, "max_points": 200})
     assert curve1.status_code == 200 and curve2.status_code == 200
     assert curve1.get_json()["blend_weight"] != curve2.get_json()["blend_weight"]
 
@@ -303,11 +340,11 @@ def test_input_profile_gain_reaches_the_actual_rendered_audio(client, tmp_path):
     _write_fake_nam(amp_a)
     _write_fake_nam(amp_b)
 
-    client.post("/api/render_pair", json=_render_body(amp_a, amp_b, input_profile_id="vintage_single"))
-    quiet_wav = client.post("/api/preview", json={"source": "a"}).data
+    quiet_render = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, input_profile_id="vintage_single")).get_json()
+    quiet_wav = client.post("/api/preview", json={"source": "a", "render_id": quiet_render["render_id"]}).data
 
-    client.post("/api/render_pair", json=_render_body(amp_a, amp_b, input_profile_id="extreme_passive"))
-    loud_wav = client.post("/api/preview", json={"source": "a"}).data
+    loud_render = client.post("/api/render_pair", json=_render_body(amp_a, amp_b, input_profile_id="extreme_passive")).get_json()
+    loud_wav = client.post("/api/preview", json={"source": "a", "render_id": loud_render["render_id"]}).data
 
     # Both are valid WAVs of the same nominal duration; the hot one must
     # simply contain larger sample magnitudes since render() is an identity
@@ -355,7 +392,7 @@ def test_preview_rejects_invalid_output_gain(client, tmp_path):
     assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
 
     resp = client.post("/api/preview", json={
-        "source": "hybrid", "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "source": "hybrid", "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "manual_output_gain_db": "not-a-number",
     })
 
@@ -412,6 +449,7 @@ def test_training_input_upload_rejects_wrong_sample_rate(client, isolated_traini
 
 def test_generate_requires_rendered_pair(client, isolated_training_paths):
     app_module._rendered_pair_cache["pair"] = None
+    app_module._rendered_pair_cache["snapshot"] = None
     resp = client.post("/api/generate", json={})
     assert resp.status_code == 400
 
@@ -422,7 +460,7 @@ def test_generate_requires_training_input(client, isolated_training_paths, tmp_p
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
 
-    resp = client.post("/api/generate", json={"crossover_dbfs": -20.0, "transition_width_db": 8.0})
+    resp = client.post("/api/generate", json={"render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0})
     assert resp.status_code == 400
     assert resp.get_json()["training_input_ready"] is False
 
@@ -437,7 +475,7 @@ def test_generate_end_to_end_produces_bundle(client, isolated_training_paths, tm
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
 
     resp = client.post("/api/generate", json={
-        "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "auto_level": False, "manual_b_trim_db": 1.5,
         "model_name": "My Hybrid Rig",
     })
@@ -465,7 +503,7 @@ def test_mix_info_defaults_to_hybrid_mode(client, tmp_path):
     _write_fake_nam(amp_a)
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
-    resp = client.post("/api/mix_info", json={"crossover_dbfs": -20.0, "transition_width_db": 8.0})
+    resp = client.post("/api/mix_info", json={"render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0})
     assert resp.status_code == 200
     assert resp.get_json()["mode"] == "hybrid"
 
@@ -475,7 +513,7 @@ def test_mix_info_blend_mode_accepts_mix_b(client, tmp_path):
     _write_fake_nam(amp_a)
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
-    resp = client.post("/api/mix_info", json={"mode": "blend", "mix_b": 0.75})
+    resp = client.post("/api/mix_info", json={"render_id": _current_render_id(), "mode": "blend", "mix_b": 0.75})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["mode"] == "blend"
@@ -489,7 +527,7 @@ def test_preview_blend_source_accepts_mix_and_is_independent_of_crossover_params
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
 
-    resp = client.post("/api/preview", json={"source": "blend", "mix_b": 0.2, "auto_level": False})
+    resp = client.post("/api/preview", json={"source": "blend", "render_id": _current_render_id(), "mix_b": 0.2, "auto_level": False})
     assert resp.status_code == 200
     assert resp.headers.get("X-Mix-B") is not None
     assert float(resp.headers["X-Mix-B"]) == pytest.approx(0.2)
@@ -501,7 +539,7 @@ def test_preview_invalid_mix_b_is_clamped(client, tmp_path):
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
 
-    resp = client.post("/api/preview", json={"source": "blend", "mix_b": 5.0, "auto_level": False})
+    resp = client.post("/api/preview", json={"source": "blend", "render_id": _current_render_id(), "mix_b": 5.0, "auto_level": False})
     assert resp.status_code == 200
     assert float(resp.headers["X-Mix-B"]) == pytest.approx(1.0)
 
@@ -552,7 +590,7 @@ def test_preview_with_cab_applies_same_ir_to_a_result_and_b(client, tmp_path):
 
     for source in ("a", "b", "hybrid"):
         resp = client.post("/api/preview", json={
-            "source": source, "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+                "source": source, "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
             "cab_path": str(ir_path), "cab_preview_enabled": True,
         })
         assert resp.status_code == 200, (source, resp.get_json() if resp.data else resp.status_code)
@@ -567,7 +605,7 @@ def test_generate_blend_mode_produces_bundle_with_mode_blend(client, isolated_tr
     _write_fake_nam(amp_b)
     client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
 
-    resp = client.post("/api/generate", json={"mode": "blend", "mix_b": 0.4, "auto_level": False, "manual_b_trim_db": 0.5})
+    resp = client.post("/api/generate", json={"render_id": _current_render_id(), "mode": "blend", "mix_b": 0.4, "auto_level": False, "manual_b_trim_db": 0.5})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["mode"] == "blend"
@@ -598,7 +636,7 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     sf.write(ir_path, ir_data, 48000, subtype="FLOAT")
 
     resp = client.post("/api/generate", json={
-        "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_baked": True,
     })
     assert resp.status_code == 200

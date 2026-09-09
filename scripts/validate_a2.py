@@ -39,9 +39,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from hybrid.design import HybridDesign  # noqa: E402
+from hybrid.fixed_blend import BlendDesign  # noqa: E402
+from hybrid.character_blend import CharacterBlendDesign  # noqa: E402
 from hybrid.input_profiles import db_to_amplitude  # noqa: E402
 from hybrid.safety import check_audio  # noqa: E402
-from hybrid.validation import compute_esr_metrics, render_reference_hybrid, render_trained_a2  # noqa: E402
+from hybrid.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character, render_trained_a2  # noqa: E402
 
 # A single fixed listening-safety gain applied identically to every file in a
 # comparison, if any of them would clip -- never per-file, never a limiter,
@@ -67,14 +69,15 @@ def _parse_gain_arg(value: str) -> tuple[float, str]:
 
 
 def run_validation(
-    design: HybridDesign,
+    design,
     a2_nam_path: Path,
     di_paths: list[Path],
     gains: list[tuple[float, str]],
     out_dir: Path,
 ) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
-    report: dict = {"design": str(design.amp_a_path) + " -> " + str(design.amp_b_path), "results": []}
+    render_teacher = {"hybrid": render_reference_hybrid, "blend": render_reference_blend, "character": render_reference_character}[design.mode]
+    report: dict = {"mode": design.mode, "design": str(design.amp_a_path) + " -> " + str(design.amp_b_path), "results": []}
 
     for di_path in di_paths:
         dry, sr = _load_di(di_path)
@@ -82,7 +85,7 @@ def run_validation(
         for gain_db, label in gains:
             gained = (dry * db_to_amplitude(gain_db)).astype(np.float32)
 
-            ref = render_reference_hybrid(design, gained, sr)
+            ref = render_teacher(design, gained, sr)
             full = render_trained_a2(a2_nam_path, gained, sr, slim=0.0)
             try:
                 lite = render_trained_a2(a2_nam_path, gained, sr, slim=1.0)
@@ -161,7 +164,8 @@ def main(argv=None) -> int:
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args(argv)
 
-    design = HybridDesign.read_json(args.design)
+    raw_design = json.loads(args.design.read_text(encoding="utf-8"))
+    design = {"hybrid": HybridDesign, "blend": BlendDesign, "character": CharacterBlendDesign}.get(raw_design.get("mode", "hybrid"), HybridDesign).read_json(args.design)
     gains = [_parse_gain_arg(g) for g in args.gain]
     run_validation(design, args.a2_nam, args.di, gains, args.out_dir)
     return 0

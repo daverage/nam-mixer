@@ -1305,12 +1305,17 @@ def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_
             continue
         report[label] = {"rendered_ok": True, "metrics": compute_esr_metrics(rendered, target_audio)}
 
-    if not report["full"].get("rendered_ok"):
-        raise NamRenderError(f"Full submodel failed to render: {report['full'].get('error')}")
-
+    low_level_response_check = None
     if manifest is not None:
         low_level_response_check = check_full_low_level_response(manifest, nam_path, training_input_path, sr)
         if low_level_response_check is not None:
             report["low_level_response_check"] = low_level_response_check
+
+    from .validation_report import build_validation_report
+    report["validation_report"] = build_validation_report(
+        report["sha256"], {"full": report.get("full"), "lite": report.get("lite")},
+        quiet_playing=low_level_response_check,
+        cabinet=(manifest or {}).get("receptive_field", {}).get("cab", {"baked": False, "approximation": None}),
+    )
 
     return report

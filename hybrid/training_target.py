@@ -374,6 +374,7 @@ def compute_receptive_field_record(
     sample_rate: int,
     cab: Optional[CabDesign],
     envelope_max_history_ms: Optional[float] = None,
+    character_envelope_smoothing_ms: Optional[float] = None,
 ) -> dict:
     """Best-effort required-history record for the manifest -- see
     hybrid.receptive_field.combine_required_history. Only needs the source
@@ -467,7 +468,24 @@ def compute_receptive_field_record(
         }
         return record
 
-    record = combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples)
+    character_history = None
+    extra_branches = None
+    if mode == "character":
+        from .character_blend import character_temporal_history_samples
+
+        character_history = character_temporal_history_samples(sample_rate, character_envelope_smoothing_ms or 40.0)
+        # Envelope -> smoothing -> donor-transition is serial control history;
+        # the correction FIR is serial with each source amp path.  Those three
+        # paths are parallel at the teacher output, hence their maximum.
+        control_history = (envelope_samples or 0) + character_history["drive_smoothing_serial_samples"] + character_history["donor_transition_serial_samples"]
+        extra_branches = {
+            "character_amp_a_correction": amp_a_samples + character_history["correction_fir_serial_samples"],
+            "character_amp_b_correction": amp_b_samples + character_history["correction_fir_serial_samples"],
+            "character_drive_control": control_history,
+        }
+    record = combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples, extra_branches)
+    if character_history is not None:
+        record["character_temporal_history"] = character_history
     record["cab"] = cab_record
     if a2_rf_at_generation_time is not None:
         cab_requires_approximation = record["formal_total_required_samples"] > a2_rf_at_generation_time

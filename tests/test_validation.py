@@ -12,7 +12,10 @@ import pytest
 
 import hybrid.validation as validation
 from hybrid.design import HybridDesign
-from hybrid.validation import compute_esr_metrics, render_reference_hybrid
+from hybrid.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character
+from hybrid.fixed_blend import BlendDesign
+from hybrid.character_blend import CharacterBlendDesign
+from hybrid.validation_report import build_validation_report
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +80,16 @@ def test_render_reference_hybrid_uses_per_model_calibration(tmp_path):
     assert np.max(np.abs(result.amp_a)) > np.max(np.abs(dry))
 
 
+def test_frozen_blend_and_character_teachers_render_without_current_ui_state(tmp_path):
+    amp_a = _write_nam(tmp_path / "a.nam")
+    amp_b = _write_nam(tmp_path / "b.nam")
+    dry = np.full(4800, .1, dtype=np.float32)
+    blend = render_reference_blend(BlendDesign(str(amp_a), str(amp_b), mix_b=.25, calibration_mode="raw"), dry, 48000)
+    character = render_reference_character(CharacterBlendDesign(str(amp_a), str(amp_b), calibration_mode="raw"), dry, 48000)
+    assert len(blend.hybrid) == len(character.hybrid) == len(dry)
+    assert np.isfinite(blend.hybrid).all() and np.isfinite(character.hybrid).all()
+
+
 def test_compute_esr_metrics_zero_for_identical_signals():
     a = np.full(1000, 0.5, dtype=np.float32)
     metrics = compute_esr_metrics(a, a)
@@ -100,3 +113,14 @@ def test_compute_esr_metrics_distinguishes_gain_from_shape_error():
     distorted = reference + rng.uniform(-0.1, 0.1, 2000)
     shape_metrics = compute_esr_metrics(distorted, reference)
     assert shape_metrics["gain_normalized_esr"] > 0.0
+
+
+def test_validation_report_separates_completion_quality_and_unavailable_checks():
+    report = build_validation_report(
+        "model-hash",
+        {"full": {"rendered_ok": True, "metrics": {"raw_esr": 0.1}}, "lite": {"rendered_ok": False, "error": "Lite render failed"}},
+    )
+    assert report["state"] == "needs_attention"
+    assert {check["id"]: check["state"] for check in report["checks"]} == {
+        "full_render": "passed", "lite_render": "failed", "quiet_playing": "unavailable",
+    }

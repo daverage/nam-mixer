@@ -229,6 +229,7 @@ def combine_required_history(
     amp_b_samples: int,
     envelope_samples: Optional[int],
     cab_fir_samples: int = 0,
+    additional_parallel_branches: Optional[dict[str, int]] = None,
 ) -> dict:
     """Combine the per-branch dependency samples of a generated target into
     one required-history record, mode-aware -- see docs/blend-mode.md
@@ -277,6 +278,10 @@ def combine_required_history(
         if envelope_samples is None:
             raise ValueError("envelope_samples is required for mode='hybrid'")
         branch_samples["envelope"] = int(envelope_samples)
+    for name, samples in (additional_parallel_branches or {}).items():
+        if samples < 0:
+            raise ValueError(f"additional branch {name!r} must have non-negative history")
+        branch_samples[str(name)] = int(samples)
 
     hard_required_samples = max(branch_samples.values())
     cab_fir_samples = max(0, int(cab_fir_samples))

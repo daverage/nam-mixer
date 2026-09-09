@@ -396,6 +396,22 @@ automatically unless both `native/nam_render` has been built (see its
 README) and a real `.nam` file is present at
 `assets/nam_models/FenderSuperReverb1977_Clean.nam`.
 
+For repeatable opt-in real-render coverage across all three design modes, use
+the explicit harness rather than relying on that personal-model test:
+
+```bash
+python3 scripts/real_render_regression.py \
+  --amp-a assets/test_cabs/Clean_NoCab_Fender_Deluxe_Reverb_Head_2.nam \
+  --amp-b 'assets/test_cabs/HighGain_NoCab_SLASH AFD#2 Head.nam' \
+  --di assets/di/high_thrash.wav --di assets/di/clean_smooth.wav \
+  --cab 'assets/nam_models/V30 LL 4FB 4x12 SM57 1.00in 0.0in SA73.wav' \
+  --out-dir work/real-render-regression --release
+```
+
+It writes listenable stems and `real_render_report.json` beneath ignored
+`work/`; `--release` fails if prerequisites are missing or a checked case is
+invalid/silent. The Phase 4 implementation was exercised with this command.
+
 `torch`/`neural-amp-modeler` are no longer in `requirements.txt` — inference
 is handled entirely by the native `nam_render` tool now. They only matter for
 local A2 training, and live in `requirements-training.txt`

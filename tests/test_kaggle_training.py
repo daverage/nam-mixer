@@ -1354,7 +1354,7 @@ def test_validate_downloaded_model_runs_low_level_response_check_when_manifest_i
     monkeypatch.setattr(kaggle_training, "render", _fake_render)
     monkeypatch.setattr(character_training_target, "render", _fake_render)
 
-    manifest = {"mode": "character", "low_level_response": {"levels_db": [0.0], "output_rms_dbfs": [-120.0], "dead_zone_detected": False}}
+    manifest = {"mode": "character", "export_validation_reference": {"levels_db": [0.0], "teacher_output_rms_dbfs": [-120.0], "frame_start": 0, "frame_count": len(audio)}}
     report = kaggle_training.validate_downloaded_model(nam_path, input_path, target_path, manifest=manifest)
     assert "low_level_response_check" in report
 

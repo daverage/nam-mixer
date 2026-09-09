@@ -11,6 +11,7 @@ environment.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -18,6 +19,8 @@ from .align import align_to_reference
 from .blend import CrossoverConfig, blend
 from .calibration import resolve_calibration
 from .design import HybridDesign
+from .fixed_blend import BlendDesign, build_fixed_blend
+from .character_blend import CharacterBlendDesign, build_character_blend
 from .envelope import BoundedEnvelopeConfig, bounded_causal_envelope_db
 from .nam_loader import load_nam
 from .render import render
@@ -32,6 +35,16 @@ class ReferenceHybridResult:
     alignment_offset_samples: int
 
 
+def _render_frozen_sources(design, dry: np.ndarray, sample_rate: int):
+    """Render the two source NAMs using a frozen design's calibration/trims."""
+    dry = np.asarray(dry, dtype=np.float32)
+    amp_a, amp_b = load_nam(design.amp_a_path), load_nam(design.amp_b_path)
+    calib = resolve_calibration(design.calibration_mode, design.reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu)
+    a = render(amp_a, (dry * (10.0 ** ((calib.amp_a_gain_db + design.amp_a_input_gain_db) / 20.0))).astype(np.float32), sample_rate)
+    b = render(amp_b, (dry * (10.0 ** ((calib.amp_b_gain_db + design.amp_b_input_gain_db) / 20.0))).astype(np.float32), sample_rate)
+    return dry, a, b
+
+
 def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
     """Render the LIVE two-NAM reference hybrid for held-out validation,
     reusing the frozen `design` exactly as auditioned -- same crossover,
@@ -42,19 +55,7 @@ def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: 
     generation, validation DOES apply real profile gains, as actual audio,
     never the deprecated envelope-only `dry_gain_db`).
     """
-    dry = np.asarray(dry, dtype=np.float32)
-    amp_a = load_nam(design.amp_a_path)
-    amp_b = load_nam(design.amp_b_path)
-
-    calib = resolve_calibration(
-        design.calibration_mode, design.reference_input_level_dbu,
-        amp_a.input_level_dbu, amp_b.input_level_dbu,
-    )
-    amp_a_input = (dry * (10.0 ** (calib.amp_a_gain_db / 20.0))).astype(np.float32)
-    amp_b_input = (dry * (10.0 ** (calib.amp_b_gain_db / 20.0))).astype(np.float32)
-
-    amp_a_render = render(amp_a, amp_a_input, sample_rate)
-    amp_b_render = render(amp_b, amp_b_input, sample_rate)
+    dry, amp_a_render, amp_b_render = _render_frozen_sources(design, dry, sample_rate)
 
     envelope_config = BoundedEnvelopeConfig(
         rms_window_ms=design.envelope_rms_window_ms,
@@ -77,6 +78,21 @@ def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: 
         hybrid=hybrid_audio, amp_a=amp_a_render, amp_b=amp_b_aligned,
         envelope_db=envelope_db, alignment_offset_samples=offset,
     )
+
+
+def render_reference_blend(design: BlendDesign, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Frozen Parallel Blend teacher for held-out Full/Lite comparisons."""
+    dry, a, b = _render_frozen_sources(design, dry, sample_rate)
+    pair = SimpleNamespace(dry=dry, amp_a=a, amp_b=b, envelope_db=np.zeros(len(dry)), sample_rate=sample_rate)
+    result = build_fixed_blend(pair, mix_b=design.mix_b, auto_level=False, manual_b_trim_db=design.effective_b_trim_db)
+    return ReferenceHybridResult(result.blend, a, b, np.zeros(len(result.blend)), result.alignment_offset_samples)
+
+
+def render_reference_character(design: CharacterBlendDesign, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Frozen Character Blend teacher for held-out Full/Lite comparisons."""
+    dry, a, b = _render_frozen_sources(design, dry, sample_rate)
+    result = build_character_blend(SimpleNamespace(dry=dry, amp_a=a, amp_b=b, sample_rate=sample_rate), design)
+    return ReferenceHybridResult(result.blend, a, b, result.envelope_db, 0)
 
 
 def render_trained_a2(nam_path, dry: np.ndarray, sample_rate: int, slim: float | None = None) -> np.ndarray:

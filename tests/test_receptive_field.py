@@ -200,3 +200,12 @@ def test_combine_required_history_adds_baked_cab_serially_not_as_parallel_max():
 def test_combine_required_history_rejects_unknown_mode():
     with pytest.raises(ValueError):
         combine_required_history("bogus", amp_a_samples=1, amp_b_samples=1, envelope_samples=None)
+
+
+def test_combine_required_history_includes_explicit_character_parallel_paths():
+    record = combine_required_history(
+        "character", amp_a_samples=100, amp_b_samples=120, envelope_samples=80,
+        additional_parallel_branches={"character_amp_a_correction": 164, "character_drive_control": 130},
+    )
+    assert record["hard_required_samples"] == 164
+    assert record["branch_samples"]["character_drive_control"] == 130

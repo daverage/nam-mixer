@@ -10,18 +10,23 @@ then open http://127.0.0.1:5000/ in a browser.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
 import os
 import shutil
+import subprocess
+import threading
+import uuid
+from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import soundfile as sf
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
@@ -54,7 +59,7 @@ from hybrid.local_training import LocalTrainingManager
 from hybrid.nam_loader import load_nam
 from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
-from hybrid.render import NamRenderError, render
+from hybrid.render import NamRenderError, find_nam_render_exe, render
 from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
 from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
 from hybrid.wizard import summarise_amp_pair
@@ -109,6 +114,77 @@ _rendered_pair_cache: dict = {
     "pair": None, "amp_a_summary": None, "amp_b_summary": None, "di_file": None,
     "amp_a_path": None, "amp_b_path": None,
 }
+_rendered_pair_lock = threading.RLock()
+
+
+def _sha256_path(path: str | Path) -> str:
+    """Hash a source asset for render identity/provenance, not its filename."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: str, amp_b_path: str, di_file: str, settings: dict) -> dict:
+    """Atomically publish a complete pair only after both renders succeeded."""
+    snapshot = {
+        "render_id": uuid.uuid4().hex,
+        "pair": pair,
+        "amp_a_path": amp_a_path,
+        "amp_b_path": amp_b_path,
+        "di_file": di_file,
+        "amp_a_summary": amp_a.summary(),
+        "amp_b_summary": amp_b.summary(),
+        "source_hashes": {
+            "amp_a": _sha256_path(amp_a_path), "amp_b": _sha256_path(amp_b_path),
+            "di": _sha256_path(DI_DIR / di_file),
+        },
+        "settings": settings,
+    }
+    with _rendered_pair_lock:
+        # Retain the old keys only for compatibility with the app's existing
+        # read-only diagnostics. Consumers requiring audio use the snapshot.
+        _rendered_pair_cache.update(snapshot)
+        _rendered_pair_cache["snapshot"] = snapshot
+    return snapshot
+
+
+def _require_render_snapshot(data: dict):
+    """Return the one immutable cached render selected by the client id.
+
+    A replacement render from another tab invalidates the prior opaque id;
+    it can never cause an operation to consume a different pair silently.
+    """
+    render_id = data.get("render_id")
+    with _rendered_pair_lock:
+        snapshot = _rendered_pair_cache.get("snapshot")
+    if snapshot is None or snapshot.get("pair") is None:
+        return None, (jsonify({"error": "Render the amp pair first (POST /api/render_pair).", "code": "render_required"}), 400)
+    if not isinstance(render_id, str) or render_id != snapshot["render_id"]:
+        return None, (jsonify({"error": "This render is stale or missing. Render the amps again.", "code": "stale_render"}), 409)
+    return snapshot, None
+
+
+def require_current_render_id(view):
+    """Gate cheap render consumers too; controls cannot revive a stale pair."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        data = request.get_json(silent=True) or {}
+        snapshot, error = _require_render_snapshot(data)
+        if error:
+            return error
+        # Every route invocation retains this exact object for its entire
+        # lifetime.  A concurrent render may replace the global cache, but it
+        # cannot splice its paths/metadata into this operation.
+        g.render_snapshot = snapshot
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _request_render_snapshot() -> dict:
+    """The identity-checked immutable snapshot installed by the decorator."""
+    return g.render_snapshot
 
 
 def _profile_options(instrument_type: str) -> list[dict]:
@@ -150,6 +226,26 @@ def api_input_profiles():
         "custom_gain_range_db": [-12.0, 12.0],
         "default_reference_input_level_dbu": DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
     })
+
+
+@app.get("/api/renderer/readiness")
+def api_renderer_readiness():
+    """Cheap native-renderer readiness probe; never runs NAM inference."""
+    try:
+        exe = find_nam_render_exe()
+    except NamRenderError as exc:
+        return jsonify({"found": False, "verified": False, "error": str(exc)}), 200
+    try:
+        result = subprocess.run([str(exe), "--help"], capture_output=True, text=True, timeout=5)
+        usage = (result.stderr or result.stdout or "").strip()
+        # NAMCore's small CLI deliberately exits non-zero after printing its
+        # usage for --help.  That still proves the executable launched and
+        # accepted a command-line invocation; it is not an unusable renderer.
+        if result.returncode != 0 and "usage:" not in usage.lower():
+            return jsonify({"found": True, "verified": False, "path": str(exe), "error": usage or "renderer --help failed"})
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return jsonify({"found": True, "verified": False, "path": str(exe), "error": str(exc)})
+    return jsonify({"found": True, "verified": True, "path": str(exe)})
 
 
 @app.route("/api/nam/upload", methods=["POST"])
@@ -726,12 +822,16 @@ def api_render_pair():
     except NamRenderError as exc:
         return jsonify({"error": str(exc)}), 500
 
-    _rendered_pair_cache["pair"] = pair
-    _rendered_pair_cache["amp_a_summary"] = amp_a.summary()
-    _rendered_pair_cache["amp_b_summary"] = amp_b.summary()
-    _rendered_pair_cache["di_file"] = di_file
-    _rendered_pair_cache["amp_a_path"] = amp_a_path
-    _rendered_pair_cache["amp_b_path"] = amp_b_path
+    snapshot = _publish_render_snapshot(
+        pair, amp_a, amp_b, amp_a_path=amp_a_path, amp_b_path=amp_b_path, di_file=di_file,
+        settings={
+            "instrument_type": instrument_type, "input_profile_id": input_profile_id,
+            "input_profile_gain_db": input_profile_gain_db, "custom_input_gain_db": custom_input_gain_db,
+            "calibration_mode": calibration_mode, "reference_input_level_dbu": reference_input_level_dbu,
+            "test_gain_db": test_gain_db, "amp_a_input_gain_db": amp_a_input_gain_db,
+            "amp_b_input_gain_db": amp_b_input_gain_db,
+        },
+    )
 
     warnings = []
     if pair.calibration_warning:
@@ -747,6 +847,9 @@ def api_render_pair():
     suggested_crossover = suggest_crossover_dbfs(pair.source_envelope_db)
 
     return jsonify({
+        "render_id": snapshot["render_id"],
+        "source_hashes": snapshot["source_hashes"],
+        "render_settings": snapshot["settings"],
         "amp_a": amp_a.summary(),
         "amp_b": amp_b.summary(),
         "di_file": di_file,
@@ -784,6 +887,7 @@ def api_render_pair():
 
 
 @app.route("/api/profile_coverage", methods=["POST"])
+@require_current_render_id
 def api_profile_coverage():
     """For the currently-rendered DI, report what fraction of active playing
     time each instrument profile would land in Amp A / transition / Amp B
@@ -791,7 +895,7 @@ def api_profile_coverage():
     cached pair's source (un-profiled) envelope, so it updates instantly as
     crossover/transition/custom-gain change and does NOT require a rerender.
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
 
@@ -875,7 +979,7 @@ def _build_character_result(pair: RenderedPair, data: dict):
     design = CharacterBlendDesign(amp_a_path="", amp_b_path="", **params)
     config = CharacterAnalysisConfig()
     cache_dir = WORK_DIR / "character_analysis"
-    a_path, b_path = _rendered_pair_cache.get("amp_a_path"), _rendered_pair_cache.get("amp_b_path")
+    a_path, b_path = _request_render_snapshot()["amp_a_path"], _request_render_snapshot()["amp_b_path"]
     a_hash, b_hash = (sha256_file(a_path) if a_path else ""), (sha256_file(b_path) if b_path else "")
     analysis_a = load_cached_analysis(cache_dir, a_hash, config) if a_hash else None
     analysis_b = load_cached_analysis(cache_dir, b_hash, config) if b_hash else None
@@ -889,14 +993,15 @@ def _build_character_result(pair: RenderedPair, data: dict):
 
 
 @app.route("/api/character/low_level_check", methods=["POST"])
+@require_current_render_id
 def api_character_low_level_check():
     """Pre-flight low-level response sweep for the CURRENT Character Blend
     controls (docs/blend-mode-fixes.md, Phase 6) -- lets the UI show whether
     this design is healthy across a soft-playing gain sweep before the user
     spends time generating a bundle/training on Kaggle. Uses the exact same
     build_character_blend() as preview and the training-bundle gate (Phase 7)."""
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
-    a_path, b_path = _rendered_pair_cache.get("amp_a_path"), _rendered_pair_cache.get("amp_b_path")
+    pair: RenderedPair | None = _request_render_snapshot()["pair"]
+    a_path, b_path = _request_render_snapshot()["amp_a_path"], _request_render_snapshot()["amp_b_path"]
     if pair is None or not a_path or not b_path:
         return jsonify({"error": "Render and audition an amp pair first (POST /api/render_pair)."}), 400
     data = request.get_json(force=True)
@@ -941,7 +1046,7 @@ def _parse_hybrid_params(data: dict):
 
 def api_wizard_insight():
     """Describe the cached pair for the guided UI, using measured audio only."""
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
     config = CharacterAnalysisConfig()
@@ -951,11 +1056,13 @@ def api_wizard_insight():
 
 
 @app.post("/api/wizard/insight")
+@require_current_render_id
 def api_wizard_insight_route():
     return api_wizard_insight()
 
 
 @app.route("/api/blend_info", methods=["POST"])
+@require_current_render_id
 def api_blend_info():
     """Report the auto/manual/effective trim breakdown for the current
     crossover/transition/trim settings, without generating any audio.
@@ -965,7 +1072,7 @@ def api_blend_info():
     Preview Hybrid click -- build_hybrid() is cheap (no NAM inference), so
     calling it on every slider `input` event is fine.
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
 
@@ -991,6 +1098,7 @@ def api_blend_info():
 
 
 @app.route("/api/mix_info", methods=["POST"])
+@require_current_render_id
 def api_mix_info():
     """Mode-aware trim/mix readout, for both design modes -- the generic
     replacement for /api/blend_info now that "Blend" is a real design mode
@@ -998,7 +1106,7 @@ def api_mix_info():
     backwards-compatible Hybrid-only alias, never removed). Cheap for both
     modes -- no NAM inference, safe on every slider move.
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
 
@@ -1046,6 +1154,7 @@ def api_mix_info():
 
 
 @app.route("/api/blend_curve", methods=["POST"])
+@require_current_render_id
 def api_blend_curve():
     """Downsampled time series for the "journey between amps" visualization:
     the profile-adjusted dry envelope and the resulting Amp B blend weight,
@@ -1056,7 +1165,7 @@ def api_blend_curve():
     path, so losing brief spikes between sampled points is an acceptable
     tradeoff for a small, fast response.
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
 
@@ -1106,11 +1215,12 @@ def api_preview():
     BEFORE preview_safety_limiter (playback safety net only -- never used on
     a training target, see hybrid/safety.py).
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
-    if pair is None:
-        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
-
     data = request.get_json(force=True)
+    snapshot, error = _require_render_snapshot(data)
+    if error:
+        return error
+    g.render_snapshot = snapshot
+    pair: RenderedPair = snapshot["pair"]
     source = data.get("source", "hybrid")
 
     headers = {}
@@ -1219,11 +1329,12 @@ def api_live_blend_stems():
     it is applied after the live mix by Web Audio's safety compressor, whereas
     limiting either stem first would change the blend.
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
-    if pair is None:
-        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
-
     data = request.get_json(force=True)
+    snapshot, error = _require_render_snapshot(data)
+    if error:
+        return error
+    g.render_snapshot = snapshot
+    pair: RenderedPair = snapshot["pair"]
     try:
         mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
     except (TypeError, ValueError):
@@ -1377,12 +1488,15 @@ def api_generate():
     (POST /api/render_pair) and an uploaded official NAM training input
     (POST /api/training_input/upload) -- never trains on the preview/genre DI.
     """
-    pair: RenderedPair | None = _rendered_pair_cache["pair"]
-    if pair is None:
-        return jsonify({"error": "Render and audition an amp pair first (POST /api/render_pair)."}), 400
-    amp_a_path = _rendered_pair_cache["amp_a_path"]
-    amp_b_path = _rendered_pair_cache["amp_b_path"]
-    di_file = _rendered_pair_cache["di_file"]
+    data = request.get_json(force=True)
+    snapshot, error = _require_render_snapshot(data)
+    if error:
+        return error
+    g.render_snapshot = snapshot
+    pair: RenderedPair = snapshot["pair"]
+    amp_a_path = snapshot["amp_a_path"]
+    amp_b_path = snapshot["amp_b_path"]
+    di_file = snapshot["di_file"]
 
     if not TRAINING_INPUT_PATH.is_file():
         return jsonify({
@@ -1390,7 +1504,6 @@ def api_generate():
             "training_input_ready": False,
         }), 400
 
-    data = request.get_json(force=True)
     mode = data.get("mode", "hybrid")
     if mode not in ("hybrid", "blend", "character"):
         return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid', 'blend', or 'character')"}), 400
@@ -1503,6 +1616,13 @@ def api_generate():
     bundle.manifest["model_name"] = requested_name
     bundle.manifest["artifact_stem"] = design_id
     bundle.manifest["artifact_filename"] = f"{design_id}.nam"
+    # The opaque id is only a live-cache capability.  Persist the content
+    # identities and frozen render inputs as durable provenance instead.
+    bundle.manifest["preview_render_provenance"] = {
+        "render_id": snapshot["render_id"],
+        "source_hashes": snapshot["source_hashes"],
+        "render_settings": snapshot["settings"],
+    }
     with open(bundle.training_manifest_path, "w", encoding="utf-8") as f:
         json.dump(bundle.manifest, f, indent=2)
 

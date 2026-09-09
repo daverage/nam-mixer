@@ -298,12 +298,22 @@ function populateProfileSelect() {
 // (not a generic "input profile changed" for every case).
 function markProfileStale(reason) {
   resetGeneratedModel("The source or input settings changed. Create new training files when you are happy with the new sound.");
-  if (havePair) {
-    clearAudition();
-    previewButtons.forEach((btn) => (btn.disabled = true));
-    renderPairBtn.classList.add("btn-render-stale");
-    renderStatus.textContent = `${reason || "A setting that affects amp rendering changed"} -- click Render Amps to update.`;
-  }
+  // This is the single invalidation boundary for every setting that changes
+  // NAM inference.  A warning alone must never leave old audio usable.
+  renderGeneration += 1;
+  activeRenderId = null;
+  havePair = false;
+  clearAudition();
+  invalidateLiveAudition("Amp pair changed — start live blend again after rendering.");
+  previewButtons.forEach((btn) => (btn.disabled = true));
+  liveBlendButton.disabled = true;
+  document.getElementById("btn-character-low-level-check").disabled = true;
+  wizardAnalyseButton.disabled = true;
+  clearTimeout(updateTimer);
+  clearTimeout(auditionRefreshTimer);
+  syncTrainingControls();
+  renderPairBtn.classList.add("btn-render-stale");
+  renderStatus.textContent = `${reason || "A setting that affects amp rendering changed"} -- click Render Amps to update.`;
 }
 
 document.getElementById("amp-a-file").addEventListener("change", () => markProfileStale("Amp A changed"));
@@ -360,16 +370,22 @@ let testGainRenderTimer = null;
 
 testGainSlider.addEventListener("input", () => {
   testGainValue.textContent = `${fmtSigned(testGainSlider.value)} dB`;
-  if (!havePair) return; // nothing rendered yet -- Render Amps sets the baseline first
+  const shouldRender = havePair || testGainRenderTimer !== null;
   if (testGainRenderTimer) clearTimeout(testGainRenderTimer);
+  markProfileStale("Test gain changed");
+  if (!shouldRender) return;
+  const requestGeneration = renderGeneration;
   testGainStatus.textContent = "Will re-render shortly...";
   testGainRenderTimer = setTimeout(async () => {
+    testGainRenderTimer = null;
+    if (requestGeneration !== renderGeneration) return;
     previewButtons.forEach((btn) => (btn.disabled = true));
     setRenderBusy(true);
     player.classList.add("player-busy");
     const stopElapsed = showElapsed(testGainStatus, "Preparing both amps for the new input level");
     try {
       const data = await doRenderPair();
+      if (requestGeneration !== renderGeneration) return;
       applyRenderResult(data, { applySuggestedCrossover: false });
       testGainStatus.textContent = `Updated -- input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
       if (lastPreviewSource) {
@@ -676,7 +692,7 @@ wizardAnalyseButton.addEventListener("click", async () => {
   wizardResult.textContent = "Listening to the rendered pair…";
   wizardAnalyseButton.disabled = true;
   try {
-    const resp = await fetch("/api/wizard/insight", { method: "POST" });
+    const resp = await fetch("/api/wizard/insight", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ render_id: activeRenderId }) });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "Could not analyse the rendered amps.");
     wizardResult.textContent = `${data.level_text} ${data.tone_text} ${data.feel_text}`;
@@ -741,18 +757,38 @@ const coverageEmpty = document.getElementById("coverage-empty");
 const coverageWarning = document.getElementById("coverage-warning");
 
 let havePair = false;
+let activeRenderId = null;
+let renderGeneration = 0;
 let updateTimer = null;
 let lastJourneyData = null;
 let lastSourcePlayed = null;
 let previewRequestId = 0;
 let auditionRefreshTimer = null;
 
+async function refreshRendererReadiness() {
+  try {
+    const resp = await fetch("/api/renderer/readiness");
+    const data = await resp.json();
+    if (!data.verified) {
+      renderStatus.textContent = `Renderer unavailable: ${data.error}. Build native/nam_render (see its README), then click Render Amps to retry.`;
+    }
+    return data;
+  } catch (err) {
+    renderStatus.textContent = `Could not verify the renderer: ${err}`;
+    return { verified: false };
+  }
+}
+refreshRendererReadiness();
+
 function clearAudition() {
   // Do not leave an old result playing after an upstream setting has changed.
   previewRequestId += 1;
   player.pause();
+  const previousUrl = player.src;
+  player.onloadedmetadata = null;
   player.removeAttribute("src");
   player.load();
+  if (previousUrl.startsWith("blob:")) URL.revokeObjectURL(previousUrl);
   lastPreviewSource = null;
   lastSourcePlayed = null;
 }
@@ -770,6 +806,7 @@ function scheduleAuditionRefresh(source = "mix") {
 // audio rate.  That is the exact Fixed Blend equation, not a preview shortcut.
 const liveAudition = {
   active: false,
+  requestId: 0,
   context: null,
   sourceA: null,
   sourceB: null,
@@ -777,6 +814,7 @@ const liveAudition = {
   gainB: null,
   compressor: null,
   stop() {
+    this.requestId += 1;
     [this.sourceA, this.sourceB].forEach((source) => {
       if (source) { try { source.stop(); } catch (_) { /* already stopped */ } }
     });
@@ -812,7 +850,6 @@ function splitStereoBuffer(context, decoded, channel) {
 }
 
 function invalidateLiveAudition(message) {
-  if (!liveAudition.active) return;
   liveAudition.stop();
   liveBlendStatus.textContent = message;
 }
@@ -829,12 +866,13 @@ async function startLiveBlend() {
     return;
   }
   liveBlendButton.disabled = true;
+  const requestId = ++liveAudition.requestId;
   liveBlendStatus.textContent = "Loading the prepared amps...";
   try {
     const resp = await fetch("/api/live_blend_stems", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...blendParamsBody(), ...cabParamsBody() }),
+      body: JSON.stringify({ render_id: activeRenderId, ...blendParamsBody(), ...cabParamsBody() }),
     });
     if (!resp.ok) throw new Error((await resp.json()).error || "Could not load live stems.");
     const Context = window.AudioContext || window.webkitAudioContext;
@@ -843,6 +881,7 @@ async function startLiveBlend() {
     liveAudition.context = context;
     await context.resume();
     const decoded = await context.decodeAudioData(await (await resp.blob()).arrayBuffer());
+    if (requestId !== liveAudition.requestId || !havePair) return;
     if (decoded.numberOfChannels < 2) throw new Error("Live stem response was not stereo.");
     player.pause();
     const sourceA = context.createBufferSource();
@@ -874,6 +913,7 @@ async function startLiveBlend() {
     const trim = resp.headers.get("X-Effective-Trim-Db");
     liveBlendStatus.textContent = "Adjust the mix while listening. Changes are immediate.";
   } catch (err) {
+    if (requestId !== liveAudition.requestId) return;
     liveAudition.stop();
     liveBlendStatus.textContent = "Live blend unavailable: " + err.message;
   } finally {
@@ -1009,7 +1049,7 @@ async function updateTrimReadout() {
     const resp = await fetch("/api/mix_info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentModeParamsBody()),
+      body: JSON.stringify({ render_id: activeRenderId, ...currentModeParamsBody() }),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -1030,7 +1070,7 @@ async function updateJourney() {
     const resp = await fetch("/api/blend_curve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(hybridParamsBody()),
+      body: JSON.stringify({ render_id: activeRenderId, ...hybridParamsBody() }),
     });
     const data = await resp.json();
     if (!resp.ok) return;
@@ -1049,6 +1089,7 @@ async function updateCoverage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        render_id: activeRenderId,
         crossover_dbfs: parseFloat(crossoverSlider.value),
         transition_width_db: parseFloat(transitionSlider.value),
         instrument_type: instrumentSelect.value,
@@ -1299,6 +1340,8 @@ async function doRenderPair() {
   if (!amp_a_path || !amp_b_path || !di_file) {
     throw new Error("Choose both Amp A and Amp B .nam files and pick a DI clip first.");
   }
+  const renderer = await refreshRendererReadiness();
+  if (!renderer.verified) throw new Error(renderer.error || "Native renderer is not ready. Build native/nam_render, then retry.");
 
   const profile = currentProfile();
   const instrument_type = instrumentSelect.value;
@@ -1369,10 +1412,12 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
     }
   }
 
+  activeRenderId = data.render_id;
   previewButtons.forEach((btn) => (btn.disabled = false));
   liveBlendButton.disabled = false;
   document.getElementById("btn-character-low-level-check").disabled = false;
   havePair = true;
+  syncTrainingControls();
   wizardAnalyseButton.disabled = false;
   setWorkflowStage("listen");
   updateTrimReadout();
@@ -1392,6 +1437,8 @@ renderPairBtn.addEventListener("click", async () => {
   // has been loaded (see applySessionSettings), so that imported value
   // survives its first render too, not just subsequent ones.
   const isFirstRenderThisSession = !havePair && crossoverBaseline.label === "default";
+  markProfileStale("Rendering amps");
+  const requestGeneration = renderGeneration;
   renderPairBtn.disabled = true;
   setRenderBusy(true);
   const stopElapsed = showElapsed(renderStatus, "Preparing both amps for comparison");
@@ -1400,6 +1447,7 @@ renderPairBtn.addEventListener("click", async () => {
   document.getElementById("btn-character-low-level-check").disabled = true;
   try {
     const data = await doRenderPair();
+    if (requestGeneration !== renderGeneration) return;
     applyRenderResult(data, { applySuggestedCrossover: isFirstRenderThisSession });
     renderStatus.textContent =
       `Rendered ${data.duration_s.toFixed(1)}s @ ${data.sample_rate} Hz -- ` +
@@ -1418,6 +1466,7 @@ renderPairBtn.addEventListener("click", async () => {
 let lastPreviewSource = null;
 
 async function preview(requestedSource, { preservePosition = false, quiet = false } = {}) {
+  if (!havePair || !activeRenderId) return;
   // "mix" means "whichever design mode's combined result is active" --
   // resolves to the active design source without a separate approximation.
   const source = requestedSource === "mix" ? currentMode : requestedSource;
@@ -1427,7 +1476,7 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
   const resumeAt = preservePosition && Number.isFinite(player.currentTime) ? player.currentTime : 0;
   const modeParams = ["hybrid", "blend", "character"].includes(source) ? currentModeParamsBody() : {};
   const outputGainParams = ["hybrid", "blend", "character"].includes(source) ? outputGainParamsBody() : {};
-  const body = { source, ...modeParams, ...cabParamsBody(), ...outputGainParams };
+  const body = { source, render_id: activeRenderId, ...modeParams, ...cabParamsBody(), ...outputGainParams };
   try {
     const resp = await fetch("/api/preview", {
       method: "POST",
@@ -1436,6 +1485,8 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
     });
     if (!resp.ok) {
       const data = await resp.json();
+      if (requestId !== previewRequestId) return;
+      if (resp.status === 409) markProfileStale("The rendered pair has been replaced");
       setStatus(data.error || "Preview failed.", true);
       return;
     }
@@ -1450,17 +1501,19 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
     }
     updateOutputGainReadout(resp.headers);
     const blob = await resp.blob();
+    if (requestId !== previewRequestId) return;
     const previousUrl = player.src.startsWith("blob:") ? player.src : null;
     player.src = URL.createObjectURL(blob);
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
     lastSourcePlayed = requestedSource;
     player.onloadedmetadata = () => {
       if (requestId !== previewRequestId) return;
       if (resumeAt > 0 && player.duration) player.currentTime = Math.min(resumeAt, Math.max(0, player.duration - 0.02));
       if (wasPlaying) player.play();
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
     };
     if (!quiet) setStatus(`Playing ${source.toUpperCase()}.`);
   } catch (err) {
+    if (requestId !== previewRequestId) return;
     setStatus("Request failed: " + err, true);
   }
 }
@@ -1485,6 +1538,9 @@ async function refreshTrainingInputStatus() {
       : "Add the official NAM training input to continue.";
   } catch (err) {
     trainingInputStatus.textContent = "Could not check training input status: " + err;
+    trainingInputReady = false;
+  } finally {
+    syncTrainingControls();
   }
 }
 refreshTrainingInputStatus();
@@ -1492,6 +1548,8 @@ refreshTrainingInputStatus();
 trainingInputFile.addEventListener("change", async () => {
   const file = trainingInputFile.files[0];
   if (!file) return;
+  trainingInputReady = false;
+  syncTrainingControls();
   const stopElapsed = showElapsed(trainingInputStatus, `Uploading ${file.name}`);
   const formData = new FormData();
   formData.append("file", file);
@@ -1509,6 +1567,7 @@ trainingInputFile.addEventListener("change", async () => {
     trainingInputStatus.textContent = "Upload failed: " + err;
   } finally {
     stopElapsed();
+    syncTrainingControls();
   }
 });
 
@@ -1521,15 +1580,17 @@ characterLowLevelBtn.addEventListener("click", async () => {
     return;
   }
   characterLowLevelBtn.disabled = true;
+  const requestGeneration = renderGeneration;
   characterLowLevelResult.hidden = true;
   const stopElapsed = showElapsed(characterLowLevelStatus, "Checking how the sound responds to quiet playing");
   try {
     const resp = await fetch("/api/character/low_level_check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(characterParamsBody()),
+      body: JSON.stringify({ render_id: activeRenderId, ...characterParamsBody() }),
     });
     const data = await resp.json();
+    if (requestGeneration !== renderGeneration) return;
     if (!resp.ok) {
       characterLowLevelStatus.textContent = "Error: " + (data.error || "low-level check failed");
       return;
@@ -1538,16 +1599,19 @@ characterLowLevelBtn.addEventListener("click", async () => {
     characterLowLevelResult.hidden = false;
     characterLowLevelResult.innerHTML = renderLowLevelResponseHtml(data.low_level_response);
   } catch (err) {
+    if (requestGeneration !== renderGeneration) return;
     characterLowLevelStatus.textContent = "Request failed: " + err;
   } finally {
     stopElapsed();
-    characterLowLevelBtn.disabled = false;
+    characterLowLevelBtn.disabled = !havePair;
   }
 });
 
 const generateBtn = document.getElementById("btn-generate");
 const modelNameInput = document.getElementById("model-name");
+let generationPending = false;
 generateBtn.addEventListener("click", async () => {
+  if (generationPending) return;
   if (!havePair) {
     setStatus("Render and audition an amp pair first.", true);
     return;
@@ -1556,7 +1620,9 @@ generateBtn.addEventListener("click", async () => {
     setStatus("Upload the official NAM training input first.", true);
     return;
   }
-  generateBtn.disabled = true;
+  generationPending = true;
+  syncTrainingControls();
+  const requestGeneration = renderGeneration;
   const stopElapsed = showElapsed(generateStatus, "Creating training files from the official NAM input");
   generateResult.hidden = true;
   try {
@@ -1564,6 +1630,7 @@ generateBtn.addEventListener("click", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        render_id: activeRenderId,
         ...currentModeParamsBody(),
         // A browser can retain a cached page template while fetching a newer
         // app.js after an update. Treat the new optional field defensively so
@@ -1577,6 +1644,7 @@ generateBtn.addEventListener("click", async () => {
       }),
     });
     const data = await resp.json();
+    if (requestGeneration !== renderGeneration) return;
     if (!resp.ok) {
       generateStatus.textContent = "Error: " + (data.error || "generation failed");
       setStatus("Training bundle generation failed.", true);
@@ -1610,6 +1678,7 @@ generateBtn.addEventListener("click", async () => {
 
     lastDesignId = data.design_id;
     completedNamArtifact = null;
+    completedValidationReport = null;
     activeSessionId = sessionId();
     activeSessionName = data.model_name;
     activeSessionGenerated = true;
@@ -1624,11 +1693,13 @@ generateBtn.addEventListener("click", async () => {
     refreshLocalTraining();
     refreshKaggleStatus();
   } catch (err) {
+    if (requestGeneration !== renderGeneration) return;
     generateStatus.textContent = "Request failed: " + err;
     setStatus("Training bundle generation failed.", true);
   } finally {
     stopElapsed();
-    generateBtn.disabled = false;
+    generationPending = false;
+    syncTrainingControls();
   }
 });
 
@@ -1674,6 +1745,7 @@ function resetGeneratedModel(reason) {
   if (!lastDesignId || trainingIsActive()) return;
   lastDesignId = null;
   completedNamArtifact = null;
+  completedValidationReport = null;
   activeSessionId = null;
   activeSessionName = null;
   activeSessionGenerated = false;
@@ -1685,7 +1757,7 @@ function resetGeneratedModel(reason) {
 
 function syncTrainingControls() {
   const locked = trainingIsActive();
-  generateBtn.disabled = locked;
+  generateBtn.disabled = locked || generationPending || !havePair || !activeRenderId || !trainingInputReady;
   trainingInputFile.disabled = locked;
   modelNameInput.disabled = locked;
   document.querySelectorAll('input[name="a2-epoch-preset"], input[name="a2-backend"]').forEach((input) => { input.disabled = locked; });
@@ -1709,13 +1781,22 @@ let localTrainingPoll = null;
 // at the moment Train locally is clicked, since LocalTrainingManager is a
 // single global slot with no design_id of its own to poll back.
 let localTrainingDesignId = null;
+let completedValidationReport = null;
 
-function renderLocalDownloadResult(designId) {
+function validationSummaryHtml(report) {
+  if (!report) return `<div class="warning-box">Validation report unavailable for this export.</div>`;
+  const label = report.state === "passed" ? "Technical validation passed" : report.state === "needs_attention" ? "Validation needs attention" : "Validation unavailable";
+  const checks = (report.checks || []).map((check) => `${check.id.replaceAll("_", " ")}: ${check.state}`).join(" · ");
+  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${report.summary || ""}<br><small>${checks}</small></div>`;
+}
+
+function renderLocalDownloadResult(designId, validationReport = null) {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
   completedNamArtifact = { type: "local", designId, downloadUrl, filename: "trained-model.nam" };
+  completedValidationReport = validationReport;
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block">Download trained .nam</a>`;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block">Download trained .nam</a>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -1751,7 +1832,7 @@ async function refreshLocalTraining() {
       clearInterval(localTrainingPoll); localTrainingPoll = null;
     }
     if (data.state === "complete" && data.exit_code === 0 && localTrainingDesignId) {
-      renderLocalDownloadResult(localTrainingDesignId);
+      renderLocalDownloadResult(localTrainingDesignId, data.validation_report);
     } else if (data.state !== "complete") {
       localResultEl.hidden = true;
     }
@@ -1810,11 +1891,13 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
   completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename };
+  completedValidationReport = data.local_validation?.validation_report || null;
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   kaggleResultEl.innerHTML = `
     <a href="${downloadUrl}" download class="btn btn-primary btn-block">Download ${namFilename}</a>
     <div class="hint" title="${data.output_nam_path || ""}">Full path: <code>${data.output_nam_path || "(unknown)"}</code></div>
     <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
+    ${validationSummaryHtml(completedValidationReport)}
   `;
 }
 
@@ -2162,12 +2245,9 @@ function applySessionSettings(s) {
 
   // A restored pair still needs a real re-render before anything is
   // trustworthy (the server file may be gone, or NAM inference simply
-  // hasn't run this session) -- flag it exactly like any other stale change
-  // rather than pretending the (unrendered) result is already valid.
-  if (ampServerPaths.a && ampServerPaths.b && diSelector.value) {
-    renderPairBtn.classList.add("btn-render-stale");
-    renderStatus.textContent = "Settings restored -- click Render Amps to rebuild this pair.";
-  }
+  // hasn't run this session).  Use the normal invalidation path so playback,
+  // cached audition audio, and the server capability all become unavailable.
+  markProfileStale("Settings restored");
   updateCoverage();
 }
 
@@ -2219,7 +2299,7 @@ async function currentSession(name, generated = activeSessionGenerated) {
     type: "nam-mixer-session", version: 1,
     id: activeSessionId || sessionId(), name, savedAt: new Date().toISOString(),
     settings: collectSessionSettings(), designId: lastDesignId,
-    artifact: await portableArtifact(), ...(generated ? { generated: true } : {}),
+    artifact: await portableArtifact(), validationReport: completedValidationReport, ...(generated ? { generated: true } : {}),
   };
 }
 
@@ -2307,6 +2387,7 @@ async function renderSessions() {
         applySessionSettings(session.settings);
         lastDesignId = session.designId || null;
         completedNamArtifact = session.artifact || null;
+        completedValidationReport = session.validationReport || null;
         activeSessionId = session.id;
         activeSessionName = session.name;
         activeSessionGenerated = session.generated === true;

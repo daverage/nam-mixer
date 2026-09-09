@@ -117,7 +117,7 @@ def test_check_full_low_level_response_passes_when_full_tracks_teacher(tmp_path)
         rms = float(np.sqrt(np.mean(np.square(scaled, dtype=np.float64))))
         teacher_rms.append(float(max(20.0 * np.log10(max(rms, 1e-10)), -90.0)))
 
-    manifest = {"mode": "character", "low_level_response": {"levels_db": levels_db, "output_rms_dbfs": teacher_rms, "dead_zone_detected": False}}
+    manifest = {"mode": "character", "export_validation_reference": {"levels_db": levels_db, "teacher_output_rms_dbfs": teacher_rms, "frame_start": 0, "frame_count": len(reference)}}
     result = character_training_target.check_full_low_level_response(manifest, nam_path, input_path, 48000)
     assert result["pass"] is True
     assert result["max_error_db"] < 1e-6
@@ -137,7 +137,7 @@ def test_check_full_low_level_response_flags_a_new_dead_zone(tmp_path, monkeypat
     sf.write(input_path, (0.3 * np.ones(48000, dtype=np.float32)), 48000, subtype="FLOAT")
     manifest = {
         "mode": "character",
-        "low_level_response": {"levels_db": levels_db, "output_rms_dbfs": [-10.0, -16.0, -22.0], "dead_zone_detected": False},
+            "export_validation_reference": {"levels_db": levels_db, "teacher_output_rms_dbfs": [-10.0, -16.0, -22.0], "frame_start": 0, "frame_count": 48000},
     }
 
     result = character_training_target.check_full_low_level_response(manifest, nam_path, input_path, 48000)

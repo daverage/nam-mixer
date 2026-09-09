@@ -17,8 +17,35 @@ from .envelope import bounded_causal_envelope_db, bounded_envelope_max_history_m
 
 _EPS = 1e-10
 
+# Version 1 used a centred donor crossfade, which made the output before a
+# switch depend on future control samples.  Version 2 starts a bounded ramp at
+# the switch instead.  Keep the old value readable so existing bundles are not
+# silently reinterpreted when they are opened again.
+CHARACTER_TEACHER_SEMANTICS_VERSION = 2
+DONOR_TRANSITION_MS = 10.0
+
 
 def _clamp(value: float) -> float: return max(0.0, min(1.0, float(value)))
+
+
+def character_temporal_history_samples(sample_rate: int, smoothing_ms: float) -> dict[str, int]:
+    """History introduced by the Character Blend teacher itself.
+
+    The source NAM paths, envelope, and these paths run in parallel until the
+    final output.  Within the drive-control path, however, envelope smoothing
+    and donor transition state are serial dependencies.  The broad correction
+    FIR is serial with each selected amp path.  Reporting the pieces avoids
+    incorrectly treating all of them as one Dynamic-Hybrid envelope branch.
+    """
+    smoothing = max(0, int(sample_rate * max(0.0, smoothing_ms) / 1000.0) - 1)
+    transition = max(0, int(round(sample_rate * DONOR_TRANSITION_MS / 1000.0)) - 1)
+    # scipy.minimum_phase(..., half=True) yields ceil(129 / 2) = 65 taps.
+    correction_fir = 64
+    return {
+        "drive_smoothing_serial_samples": smoothing,
+        "donor_transition_serial_samples": transition,
+        "correction_fir_serial_samples": correction_fir,
+    }
 
 
 @dataclass(frozen=True)
@@ -55,6 +82,7 @@ class CharacterBlendDesign:
     amp_b_sha256: str = ""
     design_di_file: Optional[str] = None
     mode: str = "character"
+    teacher_semantics_version: int = CHARACTER_TEACHER_SEMANTICS_VERSION
     cab: Optional[CabDesign] = None
 
     # Shared post-combination output gain -- see hybrid.design.HybridDesign's
@@ -68,6 +96,10 @@ class CharacterBlendDesign:
     @staticmethod
     def read_json(path: str | Path) -> "CharacterBlendDesign":
         data = json.loads(Path(path).read_text(encoding="utf-8"));
+        # Designs written before causal donor selection have no version.  They
+        # retain their original (v1) behaviour rather than silently changing a
+        # previously generated target's meaning.
+        data.setdefault("teacher_semantics_version", 1)
         if isinstance(data.get("cab"), dict): data["cab"] = CabDesign(**data["cab"])
         return CharacterBlendDesign(**data)
 
@@ -196,20 +228,50 @@ def _drive_curve(design: CharacterBlendDesign, envelope: np.ndarray, levels: np.
     return np.full(len(envelope), _clamp(design.drive_mix_b), dtype=np.float64)
 
 
-def _select_donor(a: np.ndarray, b: np.ndarray, drive_b: np.ndarray, sample_rate: int) -> np.ndarray:
-    """The Drive donor selection (docs/blend-mode-fixes.md, Phase 8): below
-    50% B, Amp A is the donor; AT 50% B and above, Amp B is the donor -- the
-    boundary favours B, not an even split. Drive therefore picks a single
-    donor per sample, not a continuous nonlinear morph; a "50%" setting
-    selects 100% Amp B, not a 50/50 blend of the two waveforms. A short
-    crossfade only occurs where the donor identity actually switches;
-    steady regions are exactly one source waveform.
+def _causal_donor_weight(drive_b: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Return the causal Amp-B donor weight for the version-2 teacher.
 
-    This behaviour is intentionally left as-is by the low-level response fix
-    (see the module's Phase-1/2/3 tests) -- it is documented here rather
-    than changed, per docs/blend-mode-fixes.md Phase 8.
+    Below 50% requests Amp A; 50% and above requests Amp B.  A constant B
+    request begins at B (there is no artificial A-to-B startup fade).  At a
+    later change, the ramp starts at the current sample and from the current
+    weight.  A reversal during that ramp consequently remains continuous and
+    cannot use control values from the future.
     """
+    requested = np.asarray(drive_b, dtype=np.float64) >= 0.5
+    n = len(requested)
+    if n == 0:
+        return np.empty(0, dtype=np.float64)
+    ramp_samples = max(1, int(round(sample_rate * DONOR_TRANSITION_MS / 1000.0)))
+    weights = np.empty(n, dtype=np.float64)
+    weight = 1.0 if requested[0] else 0.0
+    target = weight
+    start_weight = weight
+    ramp_remaining = 0
+    for i, want_b in enumerate(requested):
+        new_target = 1.0 if want_b else 0.0
+        if new_target != target:
+            # `weight` is the value actually emitted for the preceding sample;
+            # starting here gives a causal, bounded transition.
+            start_weight, target, ramp_remaining = weight, new_target, ramp_samples
+        if ramp_remaining:
+            step = ramp_samples - ramp_remaining + 1
+            weight = start_weight + (target - start_weight) * (step / ramp_samples)
+            ramp_remaining -= 1
+        else:
+            weight = target
+        weights[i] = weight
+    return np.clip(weights, 0.0, 1.0)
+
+
+def _select_donor(a: np.ndarray, b: np.ndarray, drive_b: np.ndarray, sample_rate: int, *, semantics_version: int = CHARACTER_TEACHER_SEMANTICS_VERSION) -> np.ndarray:
+    """Select the thresholded Drive donor with versioned transition semantics."""
     n = len(drive_b)
+    if semantics_version >= CHARACTER_TEACHER_SEMANTICS_VERSION:
+        weight_b = _causal_donor_weight(drive_b, sample_rate)
+        return (a[:n] * (1.0 - weight_b) + b[:n] * weight_b).astype(np.float64)
+
+    # Legacy bundles retain their historical centred transition.  Do not use
+    # this path for newly frozen designs.
     donor = np.where(drive_b >= 0.5, b, a).astype(np.float64)
     changes = np.flatnonzero(np.diff((drive_b >= .5).astype(np.int8))) + 1
     fade = max(1, int(sample_rate * .01))
@@ -250,10 +312,13 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     analysis_b = analysis_b or _analysis_from_design(design.analysis_b) or analyse_rendered_audio(dry, b, pair.sample_rate, config)
     levels = np.array([x.input_gain_db for x in analysis_a.levels])
     drive_b = _smooth(_drive_curve(design, envelope, levels), pair.sample_rate, design.envelope_smoothing_ms)
-    donor = _select_donor(a, b, drive_b, pair.sample_rate)
+    donor_weight_b = _causal_donor_weight(drive_b, pair.sample_rate) if design.teacher_semantics_version >= CHARACTER_TEACHER_SEMANTICS_VERSION else (drive_b >= 0.5).astype(np.float64)
+    donor = _select_donor(a, b, drive_b, pair.sample_rate, semantics_version=design.teacher_semantics_version)
     gain_a = np.array([x.compression_gain_db for x in analysis_a.levels]); gain_b = np.array([x.compression_gain_db for x in analysis_b.levels])
     target_gain = gain_a * (1 - _clamp(design.feel_mix_b)) + gain_b * _clamp(design.feel_mix_b)
-    donor_gain = np.where(drive_b >= .5, _interp(levels, gain_b, envelope), _interp(levels, gain_a, envelope))
+    # Apply the same transition weight to compensation: otherwise the donor
+    # waveform would be smooth while its gain correction still jumped.
+    donor_gain = _interp(levels, gain_a, envelope) * (1.0 - donor_weight_b) + _interp(levels, gain_b, envelope) * donor_weight_b
     gain = 10 ** (_smooth(_interp(levels, target_gain, envelope) - donor_gain, pair.sample_rate, design.envelope_smoothing_ms) / 20.0)
     corrected = donor * gain
     freqs = np.array(analysis_a.frequencies_hz)

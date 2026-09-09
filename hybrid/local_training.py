@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import signal
 import subprocess
@@ -23,6 +24,7 @@ class LocalTrainingManager:
         self.finished_at: float | None = None
         self.exit_code: int | None = None
         self.cancel_requested = False
+        self.manifest_path: Path | None = None
         self._lock = threading.Lock()
 
     @property
@@ -123,6 +125,7 @@ class LocalTrainingManager:
             raise RuntimeError("Local setup or training is already running.")
         if not self.python.is_file():
             raise RuntimeError("Local A2 environment is not ready. Click Set up local training first.")
+        self.manifest_path = manifest
         self._start([str(self.python), "scripts/train_a2.py", str(manifest), "--epoch-preset", preset, "--progress"], "training")
 
     def status(self) -> dict:
@@ -134,9 +137,16 @@ class LocalTrainingManager:
         progress = None if not matches else {"epoch": int(matches[-1][0]), "total_epochs": int(matches[-1][1])}
         now = time.time()
         elapsed_s = None if self.started_at is None else int((self.finished_at or now) - self.started_at)
+        validation_report = None
+        if state == "complete" and self.manifest_path and self.manifest_path.is_file():
+            try:
+                validation_report = json.loads(self.manifest_path.read_text(encoding="utf-8")).get("training", {}).get("validation_report")
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass
         return {
             "state": state, "ready": self.python.is_file(), "python": str(self.python),
             "log_tail": tail, "started_at": self.started_at, "finished_at": self.finished_at,
             "elapsed_s": elapsed_s, "exit_code": self.exit_code,
             "progress": progress,
+            "validation_report": validation_report,
         }

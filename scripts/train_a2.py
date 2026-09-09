@@ -73,6 +73,7 @@ from hybrid.render import NamRenderError, render  # noqa: E402
 from hybrid.metadata import suggested_nam_filename  # noqa: E402
 from hybrid.nam_loader import load_nam  # noqa: E402
 from hybrid.validation import compute_esr_metrics  # noqa: E402
+from hybrid.validation_report import build_validation_report  # noqa: E402
 
 
 class TrainingAbort(RuntimeError):
@@ -596,11 +597,21 @@ def main(argv=None) -> int:
         low_level_response_check = check_full_low_level_response(manifest, nam_path, input_path, sample_rate)
 
         lite_metrics = None
+        lite_validation = None
         try:
             lite_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=True)
             lite_metrics = compare_to_target(lite_result["rendered"], target_path)
+            lite_validation = {"rendered_ok": True, "metrics": lite_metrics}
         except TrainingAbort as exc:
             print(f"Lite/slim validation skipped or failed: {exc}")
+            lite_validation = {"rendered_ok": False, "error": str(exc)}
+
+        validation_report = build_validation_report(
+            _sha256_file(nam_path),
+            {"full": {"rendered_ok": True, "metrics": full_metrics}, "lite": lite_validation},
+            quiet_playing=low_level_response_check,
+            cabinet=manifest.get("receptive_field", {}).get("cab", {"baked": False, "approximation": None}),
+        )
 
         if rf_check.get("cab_requires_approximation"):
             print(
@@ -618,6 +629,7 @@ def main(argv=None) -> int:
             "output_nam_sha256": _sha256_file(nam_path),
             "full_metrics_vs_target": full_metrics,
             "lite_metrics_vs_target": lite_metrics,
+            "validation_report": validation_report,
         }
         if rf_check:
             manifest["receptive_field_check"] = rf_check
