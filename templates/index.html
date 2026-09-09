@@ -3,45 +3,122 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hybrid NAM Builder</title>
+  <title>NAM Mixer</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <h1>Hybrid NAM Builder <span class="badge">Experimental</span></h1>
-    <p class="tagline">Create dynamic hybrids, parallel blends, or deterministic character blends from two NAM captures.</p>
+    <div class="brand-lockup"><img src="{{ url_for('static', filename='nam-mixer-logo.png') }}" alt="" class="brand-logo"><h1>NAM Mixer <span class="badge">Beta</span></h1></div>
+    <p class="tagline">Combine two NAM captures into one sound that responds the way you want to play.</p>
   </header>
 
-  <div class="mode-tabs" role="tablist" aria-label="Design mode">
-    <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" role="tab" aria-selected="true">Dynamic Hybrid</button>
-    <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" role="tab" aria-selected="false">Parallel Blend</button>
-    <button type="button" class="mode-tab" id="tab-character" data-mode="character" role="tab" aria-selected="false">Character Blend</button>
+  <nav class="mode-tabs" aria-label="Design mode">
+    <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" aria-pressed="true">Dynamic Hybrid</button>
+    <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" aria-pressed="false">Parallel Blend</button>
+    <button type="button" class="mode-tab" id="tab-character" data-mode="character" aria-pressed="false">Character Blend</button>
+    <button type="button" class="mode-tab" id="tab-tools" aria-pressed="false" aria-controls="nam-tools-panel">Tools</button>
     <details class="session-settings">
       <summary>Project</summary>
       <div class="session-settings-menu">
-        <button type="button" id="btn-save-settings" class="btn btn-secondary btn-small" title="Save all current controls to this browser">Save here</button>
-        <button type="button" id="btn-load-settings" class="btn btn-secondary btn-small" title="Restore the last browser save">Load saved</button>
-        <button type="button" id="btn-export-settings" class="btn btn-secondary btn-small" title="Download current controls as a portable JSON file">Export file</button>
-        <button type="button" id="btn-import-settings" class="btn btn-secondary btn-small" title="Load controls from an exported JSON settings file">Import file</button>
-        <input type="file" id="import-settings-file" accept=".json" hidden>
+        <button type="button" id="btn-manage-sessions" class="btn btn-secondary btn-small" title="Save, inspect, load, download, or delete browser-local sessions">Sessions</button>
         <span id="session-settings-status" class="info" aria-live="polite"></span>
       </div>
     </details>
-  </div>
+  </nav>
+  <p id="mode-description" class="mode-description" aria-live="polite"></p>
+
+  <section id="nam-tools-panel" class="nam-tools" hidden aria-labelledby="nam-tools-title">
+    <div class="tools-heading"><div><div class="eyebrow">Safe file editing</div><h2 id="nam-tools-title">NAM Tools</h2></div><button type="button" id="btn-close-tools" class="btn btn-secondary btn-small">Back to builder</button></div>
+    <p class="info">Open a NAM or use the latest locally generated model. All edits create a new file; the source is never overwritten.</p>
+    <label class="field-label" for="tool-nam-file">NAM file</label>
+    <input type="file" id="tool-nam-file" accept=".nam" class="file-input">
+    <div class="tool-actions"><button type="button" id="btn-tool-upload" class="btn btn-secondary">Open NAM</button><button type="button" id="btn-tool-generated" class="btn btn-secondary">Use latest generated NAM</button></div>
+    <div id="tool-nam-info" class="info" aria-live="polite">Choose a file to start.</div>
+    <div id="tool-editors" hidden>
+      <div class="tools-grid">
+        <section>
+          <h3>Output volume</h3><p class="info">The slider begins at this model's current measured loudness. It changes only recognised final-output <code>head_scale</code> values and loudness metadata, never <code>metadata.gain</code>, weights, or input behaviour.</p>
+          <label class="field-label" for="tool-volume-slider">Target output loudness <span id="tool-volume-value" class="value-chip">—</span></label><input id="tool-volume-slider" type="range" min="-60" max="12" step="0.1" value="0" class="slider" disabled>
+          <div id="tool-volume-baseline" class="info"></div>
+          <button type="button" id="btn-tool-volume" class="btn btn-primary">Create volume-adjusted NAM</button>
+        </section>
+        <section>
+          <h3>Metadata editor</h3><p class="info">Edits descriptive NAM metadata only. Input/output calibration is shown below but cannot be changed here; it must come from a real calibration measurement.</p>
+          <label class="field-label" for="tool-meta-name">Name</label><input id="tool-meta-name" class="select-input" placeholder="Optional model name">
+          <label class="field-label" for="tool-meta-modeled-by">Modeled by</label><input id="tool-meta-modeled-by" class="select-input">
+          <label class="field-label" for="tool-meta-gear-type">Gear type</label><select id="tool-meta-gear-type" class="select-input"><option value="">Not specified</option><option value="amp">Amp</option><option value="pedal">Pedal</option><option value="pedal_amp">Pedal + amp</option><option value="amp_cab">Amp + cab</option><option value="amp_pedal_cab">Amp + pedal + cab</option><option value="preamp">Preamp</option><option value="studio">Studio</option></select>
+          <label class="field-label" for="tool-meta-gear-make">Gear make</label><input id="tool-meta-gear-make" class="select-input">
+          <label class="field-label" for="tool-meta-gear-model">Gear model</label><input id="tool-meta-gear-model" class="select-input">
+          <label class="field-label" for="tool-meta-tone-type">Tone type</label><select id="tool-meta-tone-type" class="select-input"><option value="">Not specified</option><option value="clean">Clean</option><option value="overdrive">Overdrive</option><option value="crunch">Crunch</option><option value="hi_gain">High gain</option><option value="fuzz">Fuzz</option></select>
+          <div id="tool-calibration-status" class="info" aria-live="polite"></div>
+          <button type="button" id="btn-tool-metadata" class="btn btn-primary">Create metadata-edited NAM</button>
+        </section>
+      </div>
+      <div id="tool-result" class="tool-result" hidden aria-live="polite"></div>
+    </div>
+  </section>
 
   <nav class="workflow-nav" aria-label="Builder workflow">
-    <button type="button" class="workflow-tab active" data-workflow-stage="configure"><span>1</span> Sources</button>
-    <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>2</span> Shape</button>
+    <button type="button" class="workflow-tab active" data-workflow-stage="configure"><span>1</span> Choose amps</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>2</span> Shape the sound</button>
     <button type="button" class="workflow-tab" data-workflow-stage="listen"><span>3</span> Listen</button>
-    <button type="button" class="workflow-tab" data-workflow-stage="create"><span>4</span> Create &amp; train</button>
-    <p id="workflow-hint" class="workflow-hint">Add two amps and choose a DI clip to begin.</p>
+    <button type="button" class="workflow-tab" data-workflow-stage="create"><span>4</span> Make a model</button>
+    <p id="workflow-hint" class="workflow-hint">Add two amps and a test performance to begin.</p>
   </nav>
+
+  <section class="tone-wizard workflow-stage workflow-configure" aria-labelledby="wizard-title">
+    <div class="tone-wizard-heading">
+      <div><div class="eyebrow">Guided setup</div><h2 id="wizard-title">Tone Wizard</h2></div>
+      <button type="button" id="btn-wizard-toggle" class="btn btn-secondary btn-small" aria-expanded="false" aria-controls="wizard-body">Set up a sound</button>
+    </div>
+    <div id="wizard-body" hidden>
+      <p class="wizard-intro">Answer a few musical questions to set a starting point. You can refine everything later.</p>
+      <div class="wizard-grid">
+        <fieldset><legend>What is driving the amps?</legend>
+          <label for="wizard-instrument">Instrument</label>
+          <select id="wizard-instrument" class="select-input">
+            <option value="guitar">Guitar</option>
+            <option value="bass">Bass</option>
+          </select>
+          <label for="wizard-profile">Pickup / input type</label>
+          <select id="wizard-profile" class="select-input"></select>
+          <div id="wizard-profile-description" class="info"></div>
+        </fieldset>
+        <fieldset><legend>How should the two amps behave?</legend>
+          <label><input type="radio" name="wizard-behaviour" value="dynamic" checked> Clean-to-driven as I turn up</label>
+          <label><input type="radio" name="wizard-behaviour" value="smooth"> A broad, smooth dynamic blend</label>
+          <label><input type="radio" name="wizard-behaviour" value="fixed"> A constant A/B mix</label>
+          <label><input type="radio" name="wizard-behaviour" value="character"> Take tone from one amp and feel/drive from the other</label>
+        </fieldset>
+        <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend>
+          <label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label>
+          <input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover">
+          <div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div>
+        </fieldset>
+        <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend>
+          <label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label>
+          <input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix">
+        </fieldset>
+        <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
+        <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend>
+          <label for="wizard-tone-source">Broad tone / EQ comes from</label>
+          <select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select>
+          <label for="wizard-drive-source">Feel and drive response comes from</label>
+          <select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select>
+          <div class="info">For an AC30 in Amp A and a JCM800 in Amp B, choose Amp A for tone and Amp B for feel/drive.</div>
+        </fieldset>
+      </div>
+      <div class="wizard-actions"><button type="button" id="btn-wizard-apply" class="btn btn-primary">Apply this starting point</button><button type="button" id="btn-wizard-analyse" class="btn btn-secondary" disabled>Explain my rendered amps</button></div>
+      <div id="wizard-result" class="wizard-result" hidden aria-live="polite"></div>
+    </div>
+  </section>
 
   <div class="layout">
     <aside class="col col-setup">
 
       <section class="card workflow-stage workflow-configure">
-        <h2><span class="step">1</span> Amps &amp; input <span class="cost-badge cost-badge-expensive" title="Changing anything here re-runs real NAM inference on both amps">⚡ needs Render Amps</span></h2>
+        <h2>Choose your amps <span class="cost-badge cost-badge-expensive" title="Changing anything here re-runs both NAMs">⚡ prepare again after changes</span></h2>
 
         <div class="amp-grid">
           <div class="amp-slot">
@@ -56,13 +133,13 @@
           </div>
         </div>
 
-        <label class="field-label" for="di-selector">Preview DI clip</label>
+        <label class="field-label" for="di-selector">Test performance (DI)</label>
         <select id="di-selector" class="select-input">
           {% for f in di_files %}
             <option value="{{ f }}">{{ f }}</option>
           {% endfor %}
         </select>
-        <div class="info">See <code>assets/di/README.md</code> for what each clip is good for.</div>
+        <div class="info">A DI is a dry performance used to compare the amps fairly. Choose one that suits the playing you expect.</div>
 
         <label class="field-label" for="instrument-select">Instrument</label>
         <select id="instrument-select" class="select-input">
@@ -70,7 +147,7 @@
           <option value="bass">Bass</option>
         </select>
 
-        <label class="field-label" for="input-profile-select">Input profile</label>
+        <label class="field-label" for="input-profile-select">Pickup / input type</label>
         <select id="input-profile-select" class="select-input"></select>
         <div id="input-profile-description" class="info"></div>
 
@@ -118,7 +195,7 @@
           </div>
         </details>
 
-        <button id="btn-render-pair" class="btn btn-primary btn-block">Render Amps</button>
+        <button id="btn-render-pair" class="btn btn-primary btn-block">Prepare amps for comparison</button>
         <div id="render-status" class="info" aria-live="polite"></div>
         <div id="render-warnings" class="warning-box" hidden aria-live="assertive"></div>
       </section>
@@ -128,28 +205,19 @@
       </script>
 
       <section class="card workflow-stage workflow-shape" id="hybrid-panel-crossover" data-mode-panel="hybrid">
-        <h2><span class="step">2</span> Crossover &amp; transition <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
+        <h2>When should it change? <span class="cost-badge cost-badge-instant" title="Uses the prepared amps; no new NAM rendering">✓ instant</span></h2>
 
         <div class="slider-row">
-          <label for="crossover-knob-slider">Switch point (guitar volume feel)</label>
+          <label for="crossover-knob-slider">Where does it start to change?</label>
           <span id="crossover-knob-value" class="value-chip">7.0 / 10</span>
         </div>
         <input type="range" id="crossover-knob-slider" min="0" max="10" step="0.1" value="7" class="slider slider-crossover">
         <div id="crossover-knob-note" class="info">
-          0 = quietest playing seen so far, 10 = loudest -- an approximate, per-DI-calibrated feel
-          (dB-linear, like an audio-taper volume pot), not a simulation of any specific guitar's
-          actual volume-knob law. Render Amps to calibrate this against the real signal level.
+          0 is the quiet end of this test performance; 10 is the loud end. Prepare the amps to calibrate this to the actual signal.
         </div>
 
         <div class="slider-row">
-          <label for="crossover-slider">Crossover point (raw)</label>
-          <span id="crossover-value" class="value-chip">-22.0 dBFS</span>
-        </div>
-        <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
-        <div id="suggested-crossover-note" class="info"></div>
-
-        <div class="slider-row">
-          <label for="transition-slider">Transition width</label>
+          <label for="transition-slider">How gradually should it change?</label>
           <span id="transition-value" class="value-chip">{{ default_transition_width_db }} dB</span>
         </div>
         <input type="range" id="transition-slider" min="2" max="18" step="0.5" value="{{ default_transition_width_db }}" class="slider slider-transition">
@@ -159,10 +227,19 @@
             <button type="button" class="preset-btn" data-value="{{ value }}" aria-pressed="false">{{ name.replace('_', ' ') }}</button>
           {% endfor %}
         </div>
+        <details class="advanced">
+          <summary>Advanced: exact switch level</summary>
+          <div class="slider-row">
+            <label for="crossover-slider">Input level</label>
+            <span id="crossover-value" class="value-chip">-22.0 dBFS</span>
+          </div>
+          <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
+          <div id="suggested-crossover-note" class="info"></div>
+        </details>
       </section>
 
       <section class="card workflow-stage workflow-shape" id="blend-panel-mix" data-mode-panel="blend" hidden>
-        <h2><span class="step">2</span> Fixed mix <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
+        <h2>Always-on mix <span class="cost-badge cost-badge-instant" title="Uses the prepared amps; no new NAM rendering">✓ instant</span></h2>
 
         <div class="slider-row">
           <label for="mix-slider">Amp A / Amp B mix</label>
@@ -170,27 +247,20 @@
         </div>
         <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
         <div class="info">
-          A fixed ratio, independent of playing level -- no crossover envelope.
-          0% is 100% Amp A, 100% is 100% Amp B.
+          Both amps stay present at this ratio, no matter how hard you play.
         </div>
       </section>
 
       <section class="card workflow-stage workflow-shape" id="character-panel" data-mode-panel="character" hidden>
-        <h2><span class="step">2</span> Character design <span class="cost-badge cost-badge-instant">✓ deterministic</span></h2>
-        <div class="info">Uses one level-selected nonlinear donor, then derives broad EQ and compression corrections. It is not a parallel waveform mix.</div>
-        <div class="slider-row"><label for="tone-slider">Tone: Amp A / Amp B</label><span id="tone-value" class="value-chip">50% B</span></div>
+        <h2>Build a combined character <span class="cost-badge cost-badge-instant">✓ instant</span></h2>
+        <div class="info">Choose which amp contributes the broad tone, playing feel, and driven response. This creates one combined character, rather than simply adding two signals together.</div>
+        <div class="slider-row"><label for="tone-slider">Broad tone: Amp A / Amp B</label><span id="tone-value" class="value-chip">50% B</span></div>
         <input type="range" id="tone-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
-        <div class="slider-row"><label for="feel-slider">Feel: Amp A / Amp B</label><span id="feel-value" class="value-chip">50% B</span></div>
+        <div class="slider-row"><label for="feel-slider">Playing feel: Amp A / Amp B</label><span id="feel-value" class="value-chip">50% B</span></div>
         <input type="range" id="feel-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
         <div class="slider-row"><label for="drive-slider">Drive: Amp A / Amp B</label><span id="drive-value" class="value-chip">50% B</span></div>
         <input type="range" id="drive-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
-        <div class="hint">
-          Drive picks a SINGLE donor per sample, not a continuous nonlinear
-          morph: below 50% B, Amp A is the donor; at 50% B and above, Amp B
-          is the donor (with a short crossfade only where the donor actually
-          switches). A "50/50" setting therefore means Amp B, not an even
-          blend -- see docs/blend-mode-fixes.md, Phase 8.
-        </div>
+        <div class="hint">For a clear result, favour one amp for each control. At 50% Drive, Amp B supplies the driven response.</div>
         <details class="advanced"><summary>Advanced: drive morph by input level</summary>
           <div class="slider-row"><label for="drive-low-slider">Low input</label><span id="drive-low-value" class="value-chip">20% B</span></div><input type="range" id="drive-low-slider" min="0" max="100" step="1" value="20" class="slider slider-mix">
           <div class="slider-row"><label for="drive-mid-slider">Mid input</label><span id="drive-mid-value" class="value-chip">50% B</span></div><input type="range" id="drive-mid-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
@@ -199,19 +269,19 @@
         </details>
         <div id="character-readout" class="trim-readout" aria-live="polite">Tone, feel, and drive analyses run from the rendered pair.</div>
 
-        <button id="btn-character-low-level-check" type="button" class="btn btn-secondary btn-block" disabled>Check low-level response</button>
+        <button id="btn-character-low-level-check" type="button" class="btn btn-secondary btn-block" disabled>Check quiet playing</button>
         <div id="character-low-level-status" class="info" aria-live="polite">
-          Sweeps a short excerpt of the rendered DI at 0 to -36&nbsp;dB and confirms this design stays a responsive amplifier at soft playing levels, rather than collapsing to digital silence -- see docs/blend-mode-fixes.md.
+          Checks that the combined character stays responsive when you play softly.
         </div>
         <div id="character-low-level-result" class="generate-result" hidden aria-live="polite"></div>
       </section>
 
       <section class="card workflow-stage workflow-shape">
-        <h2><span class="step">3</span> Level match <span class="cost-badge cost-badge-instant" title="Only recombines the already-rendered amps -- no NAM inference">✓ instant</span></h2>
+        <h2>Keep the level steady <span class="cost-badge cost-badge-instant" title="Uses the prepared amps; no new NAM rendering">✓ instant</span></h2>
 
         <label class="checkbox-row">
           <input type="checkbox" id="auto-level-match" checked>
-          <span id="auto-level-match-label">Auto level match Amp B to Amp A near the crossover</span>
+          <span id="auto-level-match-label">Keep Amp B as loud as Amp A at the changeover</span>
         </label>
 
         <div class="slider-row">
@@ -231,37 +301,33 @@
       <div class="group-label workflow-stage workflow-listen">Compare and finish</div>
 
       <section class="card audition-card workflow-stage workflow-listen">
-        <div class="audition-heading"><div><div class="eyebrow">Audition</div><h2><span class="step">4</span> Hear the current design</h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
-        <p class="audition-intro">Compare Amp A, your current result, and Amp B at the same level. Shape controls use the cached pair, so you can explore without re-running NAM.</p>
+        <div class="audition-heading"><div><div class="eyebrow">Listen</div><h2>Compare the sound</h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
+        <p class="audition-intro">Compare Amp A, the current result, and Amp B at the same level. Adjust the shape controls and listen again.</p>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
           <button id="btn-preview-mix" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
-        <div class="audition-live-row"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Parallel Blend mode">Start instant live mix</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition"> Refresh Result while it is playing</label></div>
-        <div id="live-blend-status" class="info" aria-live="polite">Parallel Blend changes Mix at audio rate. Dynamic and Character modes refresh the exact cached server result while you drag.</div>
+        <div class="audition-live-row"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition"> Update the result while it plays</label></div>
+        <div id="live-blend-status" class="info" aria-live="polite">Always-on mix can change immediately while audio plays. Other modes update the result after you adjust a control.</div>
         <audio id="player" controls></audio>
 
         <div class="slider-row">
-          <label for="test-gain-slider">Test gain (push amp input) <span class="cost-badge cost-badge-auto" title="Changes the actual amp input -- re-renders automatically a moment after you stop dragging">↻ auto re-renders</span></label>
+          <label for="test-gain-slider">Play harder or softer <span class="cost-badge cost-badge-auto" title="Changes the input to both amps, then prepares them again">↻ prepares again</span></label>
           <span id="test-gain-value" class="value-chip">+0.0 dB</span>
         </div>
         <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
         <div id="test-gain-status" class="info" aria-live="polite">
-          An additional REAL gain applied on top of the input profile, before
-          both amps render -- this DI clip's own dynamics may never naturally
-          reach the crossover; drag to stress-test the response. Automatically
-          re-renders (real NAM inference, briefly) and refreshes what's
-          playing -- no separate Render Amps click needed.
+          This tests how the sound responds to a hotter or quieter signal. It prepares both amps again automatically.
         </div>
 
       </section>
 
-      <details class="optional-tools workflow-stage workflow-listen" open>
-        <summary>Finish the sound <span>Cabinet, output level, and safety</span></summary>
+      <details class="optional-tools workflow-stage workflow-listen">
+        <summary>Finish the sound <span>Cabinet and output level</span></summary>
         <div class="finish-tools">
       <section class="card" id="cab-panel">
-        <h2><span class="step">5</span> Cabinet IR <span class="hint">(shared, optional)</span> <span class="cost-badge cost-badge-instant" title="Uploading/toggling the cab never re-runs NAM inference">✓ instant</span></h2>
+        <h2>Cabinet IR <span class="hint">(optional)</span> <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant</span></h2>
 
         <label class="field-label" for="cab-file">Cabinet IR (WAV)</label>
         <input type="file" id="cab-file" accept=".wav" class="file-input">
@@ -269,29 +335,25 @@
 
         <label class="checkbox-row">
           <input type="checkbox" id="cab-preview-enabled" disabled>
-          Use cab in preview
+          Hear the sound through this cabinet
         </label>
         <label class="checkbox-row">
           <input type="checkbox" id="cab-baked" disabled>
-          Bake cab into A2
+          Include this cabinet in the final model
         </label>
 
         <div id="cab-status" class="info" aria-live="polite">Cab: off</div>
       </section>
 
       <section class="card" id="output-gain-panel">
-        <h2><span class="step">6</span> Output gain <span class="hint">(shared, auto by default)</span> <span class="cost-badge cost-badge-instant" title="Runs after the amp combination and cab, before the final safety ceiling -- no NAM inference">✓ instant</span></h2>
+        <h2>Output level <span class="hint">(automatic by default)</span> <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant</span></h2>
         <div class="info">
-          Boosts the combined result up to the training-target safety ceiling
-          (<span id="output-gain-ceiling-dbfs">-0.2</span> dBFS peak) using whatever headroom
-          it isn't already using -- a single fixed gain, never a limiter, so dynamics are
-          preserved exactly (<code>hybrid/safety.py</code>). Applies identically to live
-          preview and the generated A2 target.
+          Keeps the result at a sensible output level without changing its playing dynamics. The same level is used in preview and in the final model.
         </div>
 
         <label class="checkbox-row">
           <input type="checkbox" id="output-gain-auto" checked>
-          Auto (use all available headroom)
+          Set output level automatically
         </label>
 
         <div class="slider-row">
@@ -307,10 +369,10 @@
       </details>
 
       <details id="hybrid-only-diagnostics" class="analysis-panel workflow-stage workflow-listen" data-mode-panel="hybrid">
-        <summary>Open dynamic-hybrid analysis <span>Crossfade journey and expected coverage</span></summary>
+        <summary>See how the changeover behaves <span>Dynamic Hybrid only</span></summary>
         <div class="analysis-tools">
         <section class="card">
-          <h2><span class="step">7</span> The journey between amps</h2>
+          <h2>The journey between amps</h2>
           <div class="legend">
             <span class="legend-item"><i class="swatch swatch-env"></i>Input envelope</span>
             <span class="legend-item"><i class="swatch swatch-band"></i>Transition band</span>
@@ -327,15 +389,8 @@
         </section>
 
         <section class="card">
-          <h2><span class="step">8</span> Expected crossover coverage</h2>
-          <div class="info">
-            For each input profile, the share of ACTIVE playing time (silence
-            excluded) that would land mostly in Amp A, in transition, or mostly
-            in Amp B at the current crossover settings -- a reachability check,
-            not a claim about how it will sound. Updates instantly; does not
-            re-render the amps. The row matching your current input profile is
-            highlighted.
-          </div>
+          <h2>Where the changeover is reached</h2>
+          <div class="info">See how much of this test performance stays with Amp A, changes between the amps, or reaches Amp B. Your current pickup type is highlighted.</div>
           <div id="coverage-warning" class="warning-box" hidden aria-live="assertive"></div>
           <div class="table-wrap">
             <table id="coverage-table" class="coverage-table" hidden>
@@ -353,12 +408,9 @@
       <div class="group-label workflow-stage workflow-create">Create a training target</div>
 
       <section class="card workflow-stage workflow-create">
-        <h2><span class="step">9</span> <span id="create-a2-title">Create Hybrid A2</span></h2>
+        <h2><span id="create-a2-title">Make a Hybrid A2</span></h2>
         <div class="info" id="create-a2-description">
-          Freezes the CURRENT crossover/transition/trim into an immutable
-          design, then blends the official NAM training excitation through
-          it (unmodified by the input profile above -- that's a
-          design/preview-only control, see docs/phase3.md).
+          Turn the sound you chose into training audio for a single NAM model.
         </div>
 
         <label class="field-label" for="training-input-file">Official NAM training input (48&nbsp;kHz mono WAV)</label>
@@ -367,21 +419,21 @@
 
         <label class="field-label" for="model-name">Model name</label>
         <input type="text" id="model-name" class="file-input" maxlength="100" placeholder="e.g. Mesa Mark V Clean + JCM800 Crunch" autocomplete="off">
-        <div class="hint">Used for the bundle, final <code>.nam</code> filename, and embedded NAM model name. Leave blank to use the selected amp names.</div>
+        <div class="hint">Optional. Leave this blank to use the two amp names.</div>
 
-        <button id="btn-generate" class="btn btn-primary btn-block">Generate Training Bundle</button>
+        <button id="btn-generate" class="btn btn-primary btn-block">Create training files</button>
         <div id="generate-status" class="info" aria-live="polite"></div>
         <div id="generate-result" class="generate-result" hidden aria-live="polite"></div>
 
         <div id="a2-training-section" hidden>
           <label class="field-label">Training quality</label>
           <div class="radio-row">
-            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-draft" value="draft"> Draft <span class="hint">(20 epochs, fast preview)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-draft" value="draft"> Quick test <span class="hint">(20 epochs)</span></label>
             <label><input type="radio" name="a2-epoch-preset" id="a2-preset-standard" value="standard" checked> Standard <span class="hint">(60 epochs)</span></label>
-            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-high_def" value="high_def"> High def <span class="hint">(120 epochs, slowest)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-high_def" value="high_def"> High definition <span class="hint">(120 epochs, slowest)</span></label>
           </div>
 
-          <label class="field-label">Training</label>
+          <label class="field-label">Where should it train?</label>
           <div class="radio-row">
             <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Kaggle GPU <span class="hint">(recommended)</span></label>
             <label><input type="radio" name="a2-backend" id="a2-backend-local" value="local"> Local</label>
@@ -393,7 +445,7 @@
               <button id="btn-kaggle-refresh" type="button" class="link-btn">Refresh</button>
             </div>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
-            <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train A2</button>
+            <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train model</button>
             <div id="kaggle-progress-box" class="generate-result" hidden>
               <div id="kaggle-progress-line"><strong id="kaggle-progress-state" aria-live="polite">--</strong></div>
               <div id="kaggle-progress-bar-track" class="progress-track" hidden><div id="kaggle-progress-bar-fill" class="progress-fill"></div></div>
@@ -410,9 +462,10 @@
             <div id="local-training-status" class="info" aria-live="polite">Checking local training environment…</div>
             <div id="local-training-meta" class="hint" aria-live="polite"></div>
             <button id="btn-local-setup" class="btn btn-secondary btn-block" type="button">Set up local training</button>
-            <button id="btn-local-train" class="btn btn-primary btn-block" type="button" disabled>Train locally</button>
+            <button id="btn-local-train" class="btn btn-primary btn-block" type="button" disabled>Train model on this computer</button>
+            <button id="btn-local-cancel" class="btn btn-danger btn-block" type="button" hidden>Stop local process</button>
             <details><summary>Live local-training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
-            <div class="hint">Creates and uses <code>.venv-a2</code>; works on macOS and Windows without copying a command into Terminal.</div>
+            <div class="hint">Sets up the required training environment automatically. No Terminal commands needed.</div>
             <div id="local-result" class="generate-result" hidden aria-live="polite"></div>
           </div>
         </div>
@@ -422,6 +475,19 @@
   </div>
 
   <div id="status" class="status-bar"></div>
+
+  <dialog id="session-manager" class="session-manager" aria-labelledby="session-manager-title">
+    <form method="dialog" class="session-manager-heading"><h2 id="session-manager-title">Sessions</h2><button type="submit" class="btn btn-secondary btn-small">Close</button></form>
+    <p class="info">Sessions use one NAM Mixer JSON format. Saving, automatic bundle saves, export, and import all use this same file; training manifests in <code>work/a2</code> are not sessions.</p>
+    <form id="session-save-form" class="session-save-form">
+      <label for="session-name">Save current session as</label>
+      <input id="session-name" class="select-input" maxlength="80" required placeholder="e.g. Clean to crunch">
+      <button type="submit" class="btn btn-primary btn-small">Save session</button>
+    </form>
+    <div class="session-import-row"><button type="button" id="btn-export-current-session" class="btn btn-secondary btn-small">Save & export current session</button><button type="button" id="btn-import-session" class="btn btn-secondary btn-small">Import session JSON</button><input type="file" id="import-session-file" accept="application/json,.json" hidden></div>
+    <div id="session-manager-status" class="info" aria-live="polite"></div>
+    <div id="session-list" class="session-list" aria-live="polite"></div>
+  </dialog>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

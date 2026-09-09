@@ -10,7 +10,7 @@ const statusEl = document.getElementById("status");
 // transition/level-match controls, the journey/coverage diagnostics, and
 // the Create A2 wording differ per mode. Switching tabs never re-renders.
 let currentMode = "hybrid";
-const modeTabs = document.querySelectorAll(".mode-tab");
+const modeTabs = document.querySelectorAll(".mode-tab[data-mode]");
 const modePanels = document.querySelectorAll("[data-mode-panel]");
 const btnPreviewMix = document.getElementById("btn-preview-mix");
 const autoLevelMatchLabel = document.getElementById("auto-level-match-label");
@@ -18,13 +18,14 @@ const createA2Title = document.getElementById("create-a2-title");
 const createA2Description = document.getElementById("create-a2-description");
 const workflowTabs = document.querySelectorAll(".workflow-tab");
 const workflowHint = document.getElementById("workflow-hint");
+const modeDescription = document.getElementById("mode-description");
 let workflowStage = "configure";
 
 const WORKFLOW_HINTS = {
-  configure: "Add two amps and choose a DI clip to begin.",
-  shape: "Choose how the two rendered amps should work together.",
-  listen: "Compare A, your result, and B. Finish with cabinet and output level if needed.",
-  create: "Freeze the current sound into a training target, then choose where to train it.",
+  configure: "Add two amps and choose a test performance to begin.",
+  shape: "Choose whether the amps change with your playing, stay mixed, or combine their character.",
+  listen: "Compare Amp A, the result, and Amp B. Add a cabinet or adjust output level only if needed.",
+  create: "Turn the sound you chose into one NAM model, then choose where to train it.",
 };
 
 function setWorkflowStage(stage) {
@@ -41,20 +42,17 @@ function setWorkflowStage(stage) {
 workflowTabs.forEach((tab) => tab.addEventListener("click", () => setWorkflowStage(tab.dataset.workflowStage)));
 setWorkflowStage(workflowStage);
 
-const HYBRID_LEVEL_MATCH_LABEL = "Auto level match Amp B to Amp A near the crossover";
-const BLEND_LEVEL_MATCH_LABEL = "Auto level match Amp B to Amp A over active playing";
+const HYBRID_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A at the changeover";
+const BLEND_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A while you play";
 const HYBRID_A2_DESCRIPTION =
-  "Freezes the CURRENT crossover/transition/trim into an immutable design, " +
-  "then blends the official NAM training excitation through it (unmodified " +
-  "by the input profile above -- that's a design/preview-only control, see docs/phase3.md).";
+  "Uses the current changeover and level settings to make a training target from the official NAM input. " +
+  "Your pickup choice shapes preview only; it is not baked into the training input.";
 const BLEND_A2_DESCRIPTION =
-  "Freezes the CURRENT fixed mix/trim into an immutable design, then combines " +
-  "the official NAM training excitation through both amps at that same ratio " +
-  "(unmodified by the input profile above -- that's a design/preview-only control).";
+  "Uses the current fixed mix and level settings to make a training target from the official NAM input. " +
+  "Your pickup choice shapes preview only; it is not baked into the training input.";
 const CHARACTER_A2_DESCRIPTION =
-  "Freezes the measured amp-character analysis plus Tone, Feel, and Drive controls, " +
-  "then builds the same deterministic one-donor teacher for the official input. " +
-  "Character Blend recommends High def (120 epochs).";
+  "Uses the current tone, feel, and drive choices to make a training target from the official NAM input. " +
+  "Character Blend usually benefits from High definition training.";
 
 function applyModeVisibility() {
   modePanels.forEach((el) => {
@@ -62,18 +60,26 @@ function applyModeVisibility() {
   });
   btnPreviewMix.textContent = currentMode === "blend" ? "Blend" : currentMode === "character" ? "Character" : "Hybrid";
   autoLevelMatchLabel.textContent = currentMode === "blend" ? BLEND_LEVEL_MATCH_LABEL : HYBRID_LEVEL_MATCH_LABEL;
-  createA2Title.textContent = currentMode === "blend" ? "Create Blend A2" : currentMode === "character" ? "Create Character A2" : "Create Hybrid A2";
+  createA2Title.textContent = currentMode === "blend" ? "Make a Blend A2" : currentMode === "character" ? "Make a Character A2" : "Make a Hybrid A2";
   createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : currentMode === "character" ? CHARACTER_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
   const auditionMode = document.getElementById("audition-mode");
   auditionMode.textContent = currentMode === "blend" ? "Parallel Blend" : currentMode === "character" ? "Character Blend" : "Dynamic Hybrid";
+  modeDescription.textContent = currentMode === "blend"
+    ? "Both amps are present all the time at one fixed ratio. Use this for a permanent mixed rig."
+    : currentMode === "character"
+      ? "Choose broad tone, playing feel, and drive character from either amp. This creates one combined character."
+      : "Amp A handles quieter playing and Amp B takes over as the input becomes louder. Use this for a clean-to-driven response.";
 }
 
 modeTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
+    // Tools temporarily hides the builder layout. Returning through any
+    // normal design tab must restore it before applying the selected mode.
+    setToolsOpen(false);
     currentMode = tab.dataset.mode;
     modeTabs.forEach((t) => {
       t.classList.toggle("active", t === tab);
-      t.setAttribute("aria-selected", t === tab ? "true" : "false");
+      t.setAttribute("aria-pressed", t === tab ? "true" : "false");
     });
     applyModeVisibility();
     if (workflowStage !== "configure") setWorkflowStage("shape");
@@ -94,6 +100,21 @@ function fmtSigned(x) {
   return (v >= 0 ? "+" : "") + v.toFixed(1);
 }
 
+function formatElapsed(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, "0")}s`;
+}
+
+// Long operations should never look frozen. The caller owns the final status
+// message; stopping the timer deliberately leaves that message intact.
+function showElapsed(statusElement, message) {
+  const started = Date.now();
+  const update = () => { statusElement.textContent = `${message} · ${formatElapsed((Date.now() - started) / 1000)}`; };
+  update();
+  const timer = setInterval(update, 1000);
+  return () => clearInterval(timer);
+}
+
 // Resolved server-side paths for the uploaded .nam files, keyed by "a"/"b" --
 // filled in once each upload completes, read by the Render Amps handler.
 const ampServerPaths = { a: null, b: null };
@@ -107,7 +128,7 @@ async function uploadNam(slot, fileInputId, infoElId) {
     infoEl.textContent = "";
     return;
   }
-  infoEl.textContent = `Uploading ${file.name}...`;
+  const stopElapsed = showElapsed(infoEl, `Uploading ${file.name}`);
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -124,6 +145,8 @@ async function uploadNam(slot, fileInputId, infoElId) {
     setStatus("Loaded " + file.name);
   } catch (err) {
     setStatus("Request failed: " + err, true);
+  } finally {
+    stopElapsed();
   }
 }
 
@@ -159,6 +182,7 @@ function updateCabStatus() {
 }
 
 cabFileInput.addEventListener("change", async () => {
+  resetGeneratedModel("The cabinet changed. Create new training files before starting another training run.");
   const file = cabFileInput.files[0];
   cabServerPath = null;
   cabPreviewEnabled.checked = false;
@@ -170,7 +194,7 @@ cabFileInput.addEventListener("change", async () => {
     updateCabStatus();
     return;
   }
-  cabInfoEl.textContent = `Uploading ${file.name}...`;
+  const stopElapsed = showElapsed(cabInfoEl, `Uploading ${file.name}`);
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -195,6 +219,8 @@ cabFileInput.addEventListener("change", async () => {
     cabInfoEl.textContent = info;
   } catch (err) {
     cabInfoEl.textContent = "Upload failed: " + err;
+  } finally {
+    stopElapsed();
   }
   updateCabStatus();
 });
@@ -270,7 +296,9 @@ function populateProfileSelect() {
 // button gets a pulsing highlight, and the status line names WHAT changed
 // (not a generic "input profile changed" for every case).
 function markProfileStale(reason) {
+  resetGeneratedModel("The source or input settings changed. Create new training files when you are happy with the new sound.");
   if (havePair) {
+    clearAudition();
     previewButtons.forEach((btn) => (btn.disabled = true));
     renderPairBtn.classList.add("btn-render-stale");
     renderStatus.textContent = `${reason || "A setting that affects amp rendering changed"} -- click Render Amps to update.`;
@@ -336,8 +364,9 @@ testGainSlider.addEventListener("input", () => {
   testGainStatus.textContent = "Will re-render shortly...";
   testGainRenderTimer = setTimeout(async () => {
     previewButtons.forEach((btn) => (btn.disabled = true));
+    setRenderBusy(true);
     player.classList.add("player-busy");
-    testGainStatus.textContent = "Pushing amp input (running NAM inference twice)...";
+    const stopElapsed = showElapsed(testGainStatus, "Preparing both amps for the new input level");
     try {
       const data = await doRenderPair();
       applyRenderResult(data, { applySuggestedCrossover: false });
@@ -349,6 +378,8 @@ testGainSlider.addEventListener("input", () => {
       testGainStatus.textContent = "Error: " + err.message;
       setStatus("Test-gain re-render failed.", true);
     } finally {
+      stopElapsed();
+      setRenderBusy(false);
       player.classList.remove("player-busy");
     }
   }, TEST_GAIN_DEBOUNCE_MS);
@@ -379,7 +410,7 @@ const crossoverSlider = document.getElementById("crossover-slider");
 const crossoverValue = document.getElementById("crossover-value");
 const DEFAULT_CROSSOVER_DBFS = crossoverSlider.value;
 // What "Reset" after a suggested-crossover auto-set should actually go back
-// to -- the app's built-in default UNLESS a saved/imported settings file
+  // to -- the app's built-in default UNLESS a saved/imported session
 // most recently supplied a different crossover as your real baseline, in
 // which case that's what "Reset" should mean (see applySessionSettings).
 let crossoverBaseline = { value: DEFAULT_CROSSOVER_DBFS, label: "default" };
@@ -428,13 +459,9 @@ function syncCrossoverKnobFromDb() {
 
 const transitionAroundSwitchNote = document.getElementById("transition-around-switch-note");
 function updateTransitionAroundSwitchNote() {
-  const crossover = parseFloat(crossoverSlider.value);
   const width = parseFloat(transitionSlider.value);
-  const half = width / 2.0;
   transitionAroundSwitchNote.textContent =
-    `Blends over ±${half.toFixed(1)} dB around the switch point above ` +
-    `(${(crossover - half).toFixed(1)} to ${(crossover + half).toFixed(1)} dBFS) -- ` +
-    "outside that band it's fully one amp or the other.";
+    `The change happens across a ${width.toFixed(1)} dB range. Below it you hear Amp A; above it you hear Amp B.`;
 }
 
 function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
@@ -442,14 +469,13 @@ function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
   const p90 = blendEnvelopePercentiles && blendEnvelopePercentiles.p90;
   if (p10 == null || p90 == null || p90 <= p10) {
     crossoverKnobNote.textContent =
-      "0 = quietest playing seen so far, 10 = loudest -- render a pair with more dynamic range to calibrate this.";
+      "0 is the quiet end of this performance; 10 is the loud end. Prepare the amps to calibrate this control.";
     return;
   }
   crossoverKnobCalibration = { minDb: p10, maxDb: p90, calibrated: true };
   crossoverKnobNote.textContent =
-    `Calibrated from this render: 0 ≈ ${p10.toFixed(1)} dBFS (quiet playing), ` +
-    `10 ≈ ${p90.toFixed(1)} dBFS (loud playing) -- an approximate, dB-linear (audio-taper-like) ` +
-    "feel for THIS input, not a simulation of any specific guitar's actual volume-knob law.";
+    `Calibrated from this performance: 0 is about ${p10.toFixed(1)} dBFS (quiet), ` +
+    `10 is about ${p90.toFixed(1)} dBFS (loud). This is a useful playing guide, not a simulation of a particular guitar's volume pot.`;
   syncCrossoverKnobFromDb();
 }
 
@@ -514,6 +540,152 @@ mixSlider.addEventListener("input", () => {
 });
 updateMixValueLabel();
 
+// ---- Tone Wizard ---------------------------------------------------------
+// This is intentionally a thin, reversible guide over the existing controls.
+// It never invents a guitar model or bypasses the render/level-match path.
+const wizardToggle = document.getElementById("btn-wizard-toggle");
+const wizardBody = document.getElementById("wizard-body");
+const wizardInstrument = document.getElementById("wizard-instrument");
+const wizardProfile = document.getElementById("wizard-profile");
+const wizardProfileDescription = document.getElementById("wizard-profile-description");
+const wizardSwitch = document.getElementById("wizard-switch");
+const wizardSwitchValue = document.getElementById("wizard-switch-value");
+const wizardMoreB = document.getElementById("wizard-more-b");
+const wizardMoreBValue = document.getElementById("wizard-more-b-value");
+const wizardDynamicQuestion = document.getElementById("wizard-dynamic-question");
+const wizardFullQuestion = document.getElementById("wizard-full-question");
+const wizardDynamicRoleNote = document.getElementById("wizard-dynamic-role-note");
+const wizardCharacterQuestion = document.getElementById("wizard-character-question");
+const wizardToneSource = document.getElementById("wizard-tone-source");
+const wizardDriveSource = document.getElementById("wizard-drive-source");
+const wizardResult = document.getElementById("wizard-result");
+const wizardAnalyseButton = document.getElementById("btn-wizard-analyse");
+
+function selectedWizardBehaviour() {
+  return document.querySelector('input[name="wizard-behaviour"]:checked').value;
+}
+function populateWizardProfiles({ preserveCurrent = true } = {}) {
+  const profiles = profilesData[wizardInstrument.value] || [];
+  const desired = preserveCurrent && instrumentSelect.value === wizardInstrument.value
+    ? profileSelect.value : profiles[0]?.id;
+  wizardProfile.innerHTML = "";
+  profiles.forEach((profile) => {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.label;
+    wizardProfile.appendChild(option);
+  });
+  wizardProfile.value = desired || "";
+  updateWizardProfileDescription();
+}
+function updateWizardProfileDescription() {
+  const profile = (profilesData[wizardInstrument.value] || []).find((item) => item.id === wizardProfile.value);
+  wizardProfileDescription.textContent = profile
+    ? `${profile.description}${profile.requires_custom_gain ? " Choose its relative level in Advanced controls after applying." : ""}`
+    : "";
+}
+function updateWizardLabels() {
+  wizardSwitchValue.textContent = `${parseFloat(wizardSwitch.value).toFixed(1)} / 10`;
+  wizardMoreBValue.textContent = `${wizardMoreB.value}% Amp B`;
+  const isFixed = selectedWizardBehaviour() === "fixed";
+  const isCharacter = selectedWizardBehaviour() === "character";
+  wizardDynamicQuestion.hidden = isFixed || isCharacter;
+  wizardFullQuestion.hidden = !isFixed;
+  wizardDynamicRoleNote.hidden = isFixed || isCharacter;
+  wizardCharacterQuestion.hidden = !isCharacter;
+}
+function setModeFromWizard(mode) {
+  currentMode = mode;
+  modeTabs.forEach((tab) => {
+    const active = tab.dataset.mode === mode;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  applyModeVisibility();
+}
+
+wizardToggle.addEventListener("click", () => {
+  const isOpen = wizardBody.hidden;
+  wizardBody.hidden = !isOpen;
+  wizardToggle.setAttribute("aria-expanded", String(isOpen));
+  wizardToggle.textContent = isOpen ? "Close wizard" : "Set up a sound";
+  if (isOpen) {
+    wizardInstrument.value = instrumentSelect.value;
+    populateWizardProfiles();
+  }
+});
+wizardSwitch.addEventListener("input", updateWizardLabels);
+wizardMoreB.addEventListener("input", updateWizardLabels);
+wizardInstrument.addEventListener("change", () => populateWizardProfiles({ preserveCurrent: false }));
+wizardProfile.addEventListener("change", updateWizardProfileDescription);
+document.querySelectorAll('input[name="wizard-behaviour"]').forEach((input) => input.addEventListener("change", updateWizardLabels));
+populateWizardProfiles();
+updateWizardLabels();
+
+document.getElementById("btn-wizard-apply").addEventListener("click", () => {
+  const profileId = wizardProfile.value;
+  if (instrumentSelect.value !== wizardInstrument.value) {
+    instrumentSelect.value = wizardInstrument.value;
+    populateProfileSelect();
+  }
+  profileSelect.value = profileId;
+  updateProfileDescription();
+  markProfileStale("Tone Wizard instrument or pickup profile changed");
+
+  const behaviour = selectedWizardBehaviour();
+  if (behaviour === "fixed") {
+    setModeFromWizard("blend");
+    mixSlider.value = wizardMoreB.value;
+    updateMixValueLabel();
+  } else if (behaviour === "character") {
+    setModeFromWizard("character");
+    const toneMix = wizardToneSource.value === "b" ? 100 : 0;
+    const driveMix = wizardDriveSource.value === "b" ? 100 : 0;
+    [["tone", toneMix], ["feel", driveMix], ["drive", driveMix]].forEach(([name, value]) => {
+      document.getElementById(`${name}-slider`).value = value;
+      document.getElementById(`${name}-value`).textContent = `${value}% B`;
+    });
+    document.getElementById("drive-morph-enabled").checked = false;
+  } else {
+    setModeFromWizard("hybrid");
+    crossoverKnobSlider.value = wizardSwitch.value;
+    const crossoverDb = dbFromKnob(wizardSwitch.value);
+    crossoverSlider.value = crossoverDb.toFixed(2);
+    crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
+    syncCrossoverKnobFromDb();
+    transitionSlider.value = behaviour === "smooth" ? "12" : "6";
+    transitionValue.textContent = `${transitionSlider.value} dB`;
+    syncPresetButtonStates();
+    updateTransitionAroundSwitchNote();
+  }
+  scheduleUpdate();
+  scheduleAuditionRefresh();
+  wizardResult.hidden = false;
+  const recipe = behaviour === "character"
+    ? `Character recipe applied: tone from Amp ${wizardToneSource.value.toUpperCase()}, feel and drive from Amp ${wizardDriveSource.value.toUpperCase()}.`
+    : "Starting point applied.";
+  wizardResult.textContent = havePair
+    ? `${recipe} Re-render the amps now so the selected instrument profile drives both NAMs.`
+    : `${recipe} Upload both NAMs and render the amps to calibrate the guitar-volume switch point.`;
+  setWorkflowStage("configure");
+});
+
+wizardAnalyseButton.addEventListener("click", async () => {
+  wizardResult.hidden = false;
+  wizardResult.textContent = "Listening to the rendered pair…";
+  wizardAnalyseButton.disabled = true;
+  try {
+    const resp = await fetch("/api/wizard/insight", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Could not analyse the rendered amps.");
+    wizardResult.textContent = `${data.level_text} ${data.tone_text} ${data.feel_text}`;
+  } catch (err) {
+    wizardResult.textContent = `Analysis unavailable: ${err.message}`;
+  } finally {
+    wizardAnalyseButton.disabled = !havePair;
+  }
+});
+
 const characterSliders = ["tone", "feel", "drive", "drive-low", "drive-mid", "drive-high"];
 characterSliders.forEach((name) => {
   const slider = document.getElementById(`${name}-slider`);
@@ -574,6 +746,16 @@ let lastSourcePlayed = null;
 let previewRequestId = 0;
 let auditionRefreshTimer = null;
 
+function clearAudition() {
+  // Do not leave an old result playing after an upstream setting has changed.
+  previewRequestId += 1;
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+  lastPreviewSource = null;
+  lastSourcePlayed = null;
+}
+
 function scheduleAuditionRefresh(source = "mix") {
   // Refresh can follow an explicit play action, but controls must never cause
   // sound to start by themselves.
@@ -618,8 +800,8 @@ const liveAudition = {
 };
 
 function updateLiveAuditionButton() {
-  if (liveAudition.active) liveBlendButton.textContent = "Stop instant live mix";
-  else liveBlendButton.textContent = currentMode === "blend" ? "Start instant live mix" : "Instant mix: Parallel Blend";
+  if (liveAudition.active) liveBlendButton.textContent = "Stop live mix adjustment";
+  else liveBlendButton.textContent = currentMode === "blend" ? "Adjust the mix while listening" : "Live mix: Always-on mix only";
 }
 
 function splitStereoBuffer(context, decoded, channel) {
@@ -637,7 +819,7 @@ function invalidateLiveAudition(message) {
 async function startLiveBlend() {
   if (!havePair) return;
   if (currentMode !== "blend") {
-    liveBlendStatus.textContent = "Instant audio-rate mixing is available in Parallel Blend. This mode still refreshes the exact Result while you drag.";
+    liveBlendStatus.textContent = "Live mix adjustment is available in Always-on mix. This result updates after you adjust a control.";
     return;
   }
   if (liveAudition.active) {
@@ -646,7 +828,7 @@ async function startLiveBlend() {
     return;
   }
   liveBlendButton.disabled = true;
-  liveBlendStatus.textContent = "Loading cached amp stems...";
+  liveBlendStatus.textContent = "Loading the prepared amps...";
   try {
     const resp = await fetch("/api/live_blend_stems", {
       method: "POST",
@@ -689,7 +871,7 @@ async function startLiveBlend() {
     sourceB.start();
     updateLiveAuditionButton();
     const trim = resp.headers.get("X-Effective-Trim-Db");
-    liveBlendStatus.textContent = `Live A/B blend running — drag Mix for immediate changes (B trim ${fmtSigned(trim)} dB).`;
+    liveBlendStatus.textContent = "Adjust the mix while listening. Changes are immediate.";
   } catch (err) {
     liveAudition.stop();
     liveBlendStatus.textContent = "Live blend unavailable: " + err.message;
@@ -796,23 +978,20 @@ function updateOutputGainReadout(headers) {
   const peakAfter = headers.get("X-Peak-After-Output-Gain-Dbfs");
   const willClip = headers.get("X-Output-Gain-Will-Clip-Preview") === "true";
   outputGainReadout.textContent =
-    `${mode === "auto" ? "Auto" : "Manual"} gain ${fmtSigned(gainDb)} dB` +
-    ` · peak ${parseFloat(peakBefore).toFixed(1)} → ${parseFloat(peakAfter).toFixed(1)} dBFS`;
+    `${mode === "auto" ? "Automatic" : "Manual"} output adjustment: ${fmtSigned(gainDb)} dB`;
   if (willClip) {
     outputGainWarning.hidden = false;
     outputGainWarning.textContent =
       mode === "manual"
-        ? "This manual gain pushes the live preview's peak past -1 dBFS, where preview_safety_limiter HARD-CLIPS " +
-          "(not a soft limiter) -- you'll hear distortion here. The generated training target is separately protected " +
-          "by a gentler, reduce-only ceiling (apply_peak_ceiling), so it won't clip even if this preview does -- but " +
-          "reduce this gain if you want the preview to represent the target accurately."
-        : "Auto gain has pushed the preview peak past -1 dBFS. This shouldn't normally happen -- please report it.";
+        ? "This manual output setting is too high and will distort the preview. Reduce it so what you hear matches the model you will create."
+        : "Automatic output level is unexpectedly too high for preview. Please report this.";
   } else {
     outputGainWarning.hidden = true;
   }
 }
 
 function scheduleUpdate() {
+  resetGeneratedModel("The sound changed. Create new training files before starting another training run.");
   if (!havePair) return;
   clearTimeout(updateTimer);
   updateTimer = setTimeout(() => {
@@ -1099,6 +1278,15 @@ player.addEventListener("ended", () => drawJourney());
 window.addEventListener("resize", () => drawJourney());
 
 const renderPairBtn = document.getElementById("btn-render-pair");
+const renderDependentControls = [
+  "amp-a-file", "amp-b-file", "di-selector", "instrument-select", "input-profile-select",
+  "custom-gain-slider", "calibration-mode-select", "reference-dbu-input",
+  "amp-a-input-gain-slider", "amp-b-input-gain-slider", "test-gain-slider", "btn-wizard-apply",
+].map((id) => document.getElementById(id));
+
+function setRenderBusy(busy) {
+  renderDependentControls.forEach((control) => { if (control) control.disabled = busy; });
+}
 
 // The actual expensive call (real NAM inference) -- shared by the manual
 // "Render Amps" button and the auto-triggered test-gain re-render below.
@@ -1184,6 +1372,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
   liveBlendButton.disabled = false;
   document.getElementById("btn-character-low-level-check").disabled = false;
   havePair = true;
+  wizardAnalyseButton.disabled = false;
   setWorkflowStage("listen");
   updateTrimReadout();
   updateJourney();
@@ -1197,13 +1386,14 @@ renderPairBtn.addEventListener("click", async () => {
   // or just clicking Render Amps again) must never silently discard a
   // crossover the user already set, exactly like the test-gain auto-render
   // below already avoids doing (see its comment). Also covers importing a
-  // settings file THEN clicking Render Amps for the first time this
+  // session THEN clicking Render Amps for the first time this
   // session -- crossoverBaseline.label is no longer "default" once a preset
   // has been loaded (see applySessionSettings), so that imported value
   // survives its first render too, not just subsequent ones.
   const isFirstRenderThisSession = !havePair && crossoverBaseline.label === "default";
   renderPairBtn.disabled = true;
-  renderStatus.textContent = "Rendering (running NAM inference twice)...";
+  setRenderBusy(true);
+  const stopElapsed = showElapsed(renderStatus, "Preparing both amps for comparison");
   renderWarnings.hidden = true;
   previewButtons.forEach((btn) => (btn.disabled = true));
   document.getElementById("btn-character-low-level-check").disabled = true;
@@ -1218,6 +1408,8 @@ renderPairBtn.addEventListener("click", async () => {
     renderStatus.textContent = "Error: " + err.message;
     setStatus("Render failed.", true);
   } finally {
+    stopElapsed();
+    setRenderBusy(false);
     renderPairBtn.disabled = false;
   }
 });
@@ -1288,8 +1480,8 @@ async function refreshTrainingInputStatus() {
     const data = await resp.json();
     trainingInputReady = !!data.ready;
     trainingInputStatus.textContent = data.ready
-      ? `Ready: ${data.path} (${data.frame_count} frames @ ${data.sample_rate} Hz)`
-      : `Missing: ${data.error || "no official training input uploaded yet"}`;
+      ? `Ready: valid training input loaded (${data.sample_rate / 1000} kHz)`
+      : "Add the official NAM training input to continue.";
   } catch (err) {
     trainingInputStatus.textContent = "Could not check training input status: " + err;
   }
@@ -1299,7 +1491,7 @@ refreshTrainingInputStatus();
 trainingInputFile.addEventListener("change", async () => {
   const file = trainingInputFile.files[0];
   if (!file) return;
-  trainingInputStatus.textContent = `Uploading ${file.name}...`;
+  const stopElapsed = showElapsed(trainingInputStatus, `Uploading ${file.name}`);
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -1311,9 +1503,11 @@ trainingInputFile.addEventListener("change", async () => {
       return;
     }
     trainingInputReady = true;
-    trainingInputStatus.textContent = `Ready: ${data.path} (${data.frame_count} frames @ ${data.sample_rate} Hz)`;
+    trainingInputStatus.textContent = `Ready: valid training input loaded (${data.sample_rate / 1000} kHz)`;
   } catch (err) {
     trainingInputStatus.textContent = "Upload failed: " + err;
+  } finally {
+    stopElapsed();
   }
 });
 
@@ -1327,7 +1521,7 @@ characterLowLevelBtn.addEventListener("click", async () => {
   }
   characterLowLevelBtn.disabled = true;
   characterLowLevelResult.hidden = true;
-  characterLowLevelStatus.textContent = "Sweeping 0 to -36 dB (running NAM inference several times on a short excerpt)...";
+  const stopElapsed = showElapsed(characterLowLevelStatus, "Checking how the sound responds to quiet playing");
   try {
     const resp = await fetch("/api/character/low_level_check", {
       method: "POST",
@@ -1339,12 +1533,13 @@ characterLowLevelBtn.addEventListener("click", async () => {
       characterLowLevelStatus.textContent = "Error: " + (data.error || "low-level check failed");
       return;
     }
-    characterLowLevelStatus.textContent = "Low-level response sweep complete.";
+    characterLowLevelStatus.textContent = "Quiet-playing check complete.";
     characterLowLevelResult.hidden = false;
     characterLowLevelResult.innerHTML = renderLowLevelResponseHtml(data.low_level_response);
   } catch (err) {
     characterLowLevelStatus.textContent = "Request failed: " + err;
   } finally {
+    stopElapsed();
     characterLowLevelBtn.disabled = false;
   }
 });
@@ -1361,7 +1556,7 @@ generateBtn.addEventListener("click", async () => {
     return;
   }
   generateBtn.disabled = true;
-  generateStatus.textContent = "Generating training bundle (running NAM inference on the official input)...";
+  const stopElapsed = showElapsed(generateStatus, "Creating training files from the official NAM input");
   generateResult.hidden = true;
   try {
     const resp = await fetch("/api/generate", {
@@ -1386,7 +1581,7 @@ generateBtn.addEventListener("click", async () => {
       setStatus("Training bundle generation failed.", true);
       return;
     }
-    generateStatus.textContent = `Bundle generated: ${data.model_name}`;
+    generateStatus.textContent = `Training files are ready for ${data.model_name}.`;
     generateResult.hidden = false;
     const newWarningsText = data.warnings ? data.warnings.join(" ") : "";
     const alreadyShownAbove =
@@ -1399,22 +1594,30 @@ generateBtn.addEventListener("click", async () => {
         }</div>`
       : "";
     const cabLine = data.cab_summary
-      ? `<div><strong>Cab:</strong> ${data.cab_summary.baked ? "baked into this A2" : "not baked (preview only)"} -- ${data.cab_summary.original_filename}</div>`
+      ? `<div><strong>Cabinet:</strong> ${data.cab_summary.baked ? "included in this model" : "used for preview only"}</div>`
       : "";
     const lowLevelHtml = data.low_level_response ? renderLowLevelResponseHtml(data.low_level_response) : "";
     generateResult.innerHTML = `
-      <div><strong>Bundle:</strong> <code>${data.bundle_dir}</code></div>
-      <div><strong>Final model:</strong> <code>${data.download_filename}</code></div>
-      <div><strong>Target:</strong> <code>${data.target_path}</code> (peak ${data.safety_report.final_peak_dbfs.toFixed(1)} dBFS, safety reduction ${data.safety_report.gain_reduction_db.toFixed(2)} dB)</div>
-      <div><strong>Calibration:</strong> ${data.calibration_summary.effective_mode} (requested ${data.calibration_summary.requested_mode})</div>
+      <div><strong>Ready to train:</strong> ${data.model_name}</div>
+      <div>The final model will be saved as <code>${data.download_filename}</code>.</div>
       ${cabLine}
-      <div><strong>Train it with:</strong> <code>${data.training_command}</code></div>
+      <details><summary>Technical details</summary><div><strong>Training files:</strong> <code>${data.bundle_dir}</code></div><div><strong>Output level:</strong> ${data.safety_report.final_peak_dbfs.toFixed(1)} dBFS</div><div><strong>Calibration:</strong> ${data.calibration_summary.effective_mode}</div></details>
       ${warningsHtml}
       ${lowLevelHtml}
     `;
     setStatus("Training bundle ready.");
 
     lastDesignId = data.design_id;
+    completedNamArtifact = null;
+    activeSessionId = sessionId();
+    activeSessionName = data.model_name;
+    activeSessionGenerated = true;
+    try {
+      await writeSession(await currentSession(data.model_name, true));
+    } catch (err) {
+      // Generation is still valid if its convenience session cannot be saved.
+      console.warn("Could not save generated session:", err);
+    }
     document.getElementById("a2-training-section").hidden = false;
     if (data.default_epoch_preset === "high_def") document.getElementById("a2-preset-high_def").checked = true;
     refreshLocalTraining();
@@ -1423,12 +1626,20 @@ generateBtn.addEventListener("click", async () => {
     generateStatus.textContent = "Request failed: " + err;
     setStatus("Training bundle generation failed.", true);
   } finally {
+    stopElapsed();
     generateBtn.disabled = false;
   }
 });
 
 // --- Kaggle GPU training backend -----------------------------------------
 let lastDesignId = null;
+// Kept with a saved session only after training completes. The file itself
+// remains app-managed on the server; this is a safe, route-based download
+// reference rather than a raw filesystem path.
+let completedNamArtifact = null;
+let activeSessionId = null;
+let activeSessionName = null;
+let activeSessionGenerated = false;
 let kaggleAuthenticated = false;
 let kaggleJobPollTimer = null;
 
@@ -1449,6 +1660,35 @@ const kagglePanel = document.getElementById("kaggle-panel");
 const localPanel = document.getElementById("local-panel");
 let kaggleAuthPollTimer = null;
 let kaggleJobSubmittedAt = null;
+let localTrainingActive = false;
+let kaggleTrainingActive = false;
+
+function trainingIsActive() {
+  return localTrainingActive || kaggleTrainingActive;
+}
+
+function resetGeneratedModel(reason) {
+  // A live training job owns an immutable bundle. Keep its controls and
+  // download state intact even if the user starts exploring a new sound.
+  if (!lastDesignId || trainingIsActive()) return;
+  lastDesignId = null;
+  completedNamArtifact = null;
+  activeSessionId = null;
+  activeSessionName = null;
+  activeSessionGenerated = false;
+  document.getElementById("a2-training-section").hidden = true;
+  kaggleResultEl.hidden = true;
+  localResultEl.hidden = true;
+  if (reason) setStatus(reason);
+}
+
+function syncTrainingControls() {
+  const locked = trainingIsActive();
+  generateBtn.disabled = locked;
+  trainingInputFile.disabled = locked;
+  modelNameInput.disabled = locked;
+  document.querySelectorAll('input[name="a2-epoch-preset"], input[name="a2-backend"]').forEach((input) => { input.disabled = locked; });
+}
 
 // --- Training quality (epoch preset: draft=20 / standard=60 / high_def=120) -
 function selectedEpochPreset() {
@@ -1461,6 +1701,7 @@ const localTrainingMeta = document.getElementById("local-training-meta");
 const localTrainingLog = document.getElementById("local-training-log");
 const localSetupBtn = document.getElementById("btn-local-setup");
 const localTrainBtn = document.getElementById("btn-local-train");
+const localCancelBtn = document.getElementById("btn-local-cancel");
 const localResultEl = document.getElementById("local-result");
 let localTrainingPoll = null;
 // The design a completed "training" state actually belongs to -- captured
@@ -1470,6 +1711,8 @@ let localTrainingDesignId = null;
 
 function renderLocalDownloadResult(designId) {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
+  completedNamArtifact = { type: "local", designId, downloadUrl, filename: "trained-model.nam" };
+  persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
   localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block">Download trained .nam</a>`;
 }
@@ -1482,6 +1725,8 @@ async function refreshLocalTraining() {
       ? "Local training environment is ready."
       : data.state === "not_configured"
         ? "Set up the dedicated local training environment once."
+        : data.state === "cancelled"
+          ? "Local process stopped. You can set up or train again when ready."
         : `Local training: ${data.state.replace("_", " ")}.`;
     localTrainingLog.textContent = data.log_tail || "(no local training output yet)";
     if (data.elapsed_s !== null && data.elapsed_s !== undefined) {
@@ -1493,9 +1738,13 @@ async function refreshLocalTraining() {
     } else {
       localTrainingMeta.textContent = "";
     }
-    localSetupBtn.disabled = data.state === "setting_up" || data.state === "training";
-    localTrainBtn.disabled = !data.ready || !lastDesignId || data.state === "setting_up" || data.state === "training";
-    if (data.state === "setting_up" || data.state === "training") {
+    localTrainingActive = ["setting_up", "training", "cancelling"].includes(data.state);
+    localSetupBtn.disabled = localTrainingActive;
+    localTrainBtn.disabled = !data.ready || !lastDesignId || localTrainingActive;
+    localCancelBtn.hidden = !localTrainingActive;
+    localCancelBtn.disabled = data.state === "cancelling";
+    syncTrainingControls();
+    if (localTrainingActive) {
       if (!localTrainingPoll) localTrainingPoll = setInterval(refreshLocalTraining, 1000);
     } else if (localTrainingPoll) {
       clearInterval(localTrainingPoll); localTrainingPoll = null;
@@ -1531,6 +1780,19 @@ localTrainBtn.addEventListener("click", async () => {
   await refreshLocalTraining();
 });
 
+localCancelBtn.addEventListener("click", async () => {
+  localCancelBtn.disabled = true;
+  localTrainingStatus.textContent = "Stopping the local process…";
+  try {
+    const resp = await fetch("/api/local_training/cancel", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) localTrainingStatus.textContent = data.error || "Could not stop the local process.";
+  } catch (err) {
+    localTrainingStatus.textContent = "Could not stop the local process: " + err;
+  }
+  await refreshLocalTraining();
+});
+
 // A completed job's .nam used to be shown only as a bare server-side path
 // (e.g. work/a2/<design>/kaggle/<job>/output/a2_output/export/hybrid_a2.nam)
 // -- unusable for a user who isn't on the machine running Flask. A direct
@@ -1546,6 +1808,8 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // basename), which previously made the button's label lie about what
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
+  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename };
+  persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   kaggleResultEl.innerHTML = `
     <a href="${downloadUrl}" download class="btn btn-primary btn-block">Download ${namFilename}</a>
     <div class="hint" title="${data.output_nam_path || ""}">Full path: <code>${data.output_nam_path || "(unknown)"}</code></div>
@@ -1627,6 +1891,8 @@ async function refreshKaggleStatus() {
     kaggleStatusEl.textContent = `Connected ✓  CLI ${data.cli_version || "?"}  GPU: NVIDIA T4  Quota: ${quota}`;
 
     const activeJob = data.job && data.job.state && !["complete", "failed"].includes(data.job.state);
+    kaggleTrainingActive = !!activeJob;
+    syncTrainingControls();
     trainA2Btn.disabled = !!activeJob;
     if (activeJob) {
       pollKaggleJob(data.job.design_id, data.job.job_id);
@@ -1696,6 +1962,8 @@ trainA2Btn.addEventListener("click", async () => {
     return;
   }
   trainA2Btn.disabled = true;
+  kaggleTrainingActive = true;
+  syncTrainingControls();
   kaggleJobSubmittedAt = Date.now();
   renderKaggleProgress("Uploading training pair...", null);
   kaggleResultEl.hidden = true;
@@ -1707,12 +1975,16 @@ trainA2Btn.addEventListener("click", async () => {
     });
     const data = await resp.json();
     if (!resp.ok) {
+      kaggleTrainingActive = false;
+      syncTrainingControls();
       renderKaggleProgress("Error: " + (data.error || "training request failed"), null);
       trainA2Btn.disabled = false;
       return;
     }
     pollKaggleJob(lastDesignId, data.job_id);
   } catch (err) {
+    kaggleTrainingActive = false;
+    syncTrainingControls();
     renderKaggleProgress("Request failed: " + err, null);
     trainA2Btn.disabled = false;
   }
@@ -1745,18 +2017,24 @@ function pollKaggleJob(designId, jobId) {
         return;
       }
       kaggleLastJobData = data;
+      kaggleTrainingActive = !["complete", "failed"].includes(data.state);
+      syncTrainingControls();
       renderKaggleProgress(data.state, data);
 
       if (data.state === "complete") {
         clearInterval(kaggleJobPollTimer);
         clearInterval(kaggleTickTimer);
         trainA2Btn.disabled = false;
+        kaggleTrainingActive = false;
+        syncTrainingControls();
         renderKaggleDownloadResult(designId, jobId, data);
         setStatus("Kaggle A2 training complete.");
       } else if (data.state === "failed") {
         clearInterval(kaggleJobPollTimer);
         clearInterval(kaggleTickTimer);
         trainA2Btn.disabled = false;
+        kaggleTrainingActive = false;
+        syncTrainingControls();
         renderKaggleProgress("Failed: " + (data.error || "unknown error"), data);
         setStatus("Kaggle A2 training failed.", true);
       }
@@ -1768,17 +2046,11 @@ function pollKaggleJob(designId, jobId) {
   kaggleJobPollTimer = setInterval(poll, KAGGLE_JOB_POLL_MS);
 }
 
-// ---- Save/Load settings ----
-// Browser-local (localStorage) snapshot of every control on the page, for
-// quickly restoring a test setup instead of re-picking amp files and
-// re-dragging every slider. Amp/cab files are NOT re-uploaded -- it stores
-// the server-side paths /api/nam/upload and /api/cab/upload already
-// resolved (see ampServerPaths/cabServerPath above), which stay valid as
-// long as work/uploaded_nam and work/uploaded_cab on the server still have
-// those files. It never triggers a render -- the user still clicks Render
-// Amps, same as any other settings change, so a stale/missing file on disk
-// surfaces as the normal render-failure error rather than silently.
-const SESSION_SETTINGS_KEY = "hybridNamBuilder.settings.v1";
+// ---- Sessions -------------------------------------------------------------
+// File-backed library of named control snapshots. Amp/cab files are NOT
+// re-uploaded -- a session stores the app-managed paths already resolved by
+// /api/nam/upload and /api/cab/upload. Loading never renders automatically,
+// so a stale or missing file is reported by the normal Render Amps flow.
 
 function collectSessionSettings() {
   return {
@@ -1832,9 +2104,9 @@ function applySessionSettings(s) {
   referenceDbuInput.value = s.referenceDbu;
   testGainSlider.value = s.testGainDb;
   testGainValue.textContent = `${fmtSigned(testGainSlider.value)} dB`;
-  ampAInputGainSlider.value = s.ampAInputGainDb || 0;
+  ampAInputGainSlider.value = s.ampAInputGainDb;
   ampAInputGainValue.textContent = `${fmtSigned(ampAInputGainSlider.value)} dB`;
-  ampBInputGainSlider.value = s.ampBInputGainDb || 0;
+  ampBInputGainSlider.value = s.ampBInputGainDb;
   ampBInputGainValue.textContent = `${fmtSigned(ampBInputGainSlider.value)} dB`;
 
   crossoverSlider.value = s.crossover;
@@ -1870,11 +2142,9 @@ function applySessionSettings(s) {
   cabBaked.checked = s.cab.baked;
   updateCabStatus();
 
-  // outputGainAuto defaults to true (auto) for settings files saved before
-  // this field existed, matching the production default in hybrid/design.py.
-  outputGainAutoCheckbox.checked = s.outputGainAuto !== false;
+  outputGainAutoCheckbox.checked = s.outputGainAuto;
   outputGainManualSlider.disabled = outputGainAutoCheckbox.checked;
-  outputGainManualSlider.value = s.outputGainManualDb || 0;
+  outputGainManualSlider.value = s.outputGainManualDb;
   outputGainManualValue.textContent = `${fmtSigned(outputGainManualSlider.value)} dB`;
 
   document.getElementById("model-name").value = s.modelName || "";
@@ -1884,7 +2154,7 @@ function applySessionSettings(s) {
     currentMode = s.mode;
     modeTabs.forEach((t) => {
       t.classList.toggle("active", t === tab);
-      t.setAttribute("aria-selected", t === tab ? "true" : "false");
+      t.setAttribute("aria-pressed", t === tab ? "true" : "false");
     });
     applyModeVisibility();
   }
@@ -1901,63 +2171,344 @@ function applySessionSettings(s) {
 }
 
 const sessionSettingsStatus = document.getElementById("session-settings-status");
+const sessionManager = document.getElementById("session-manager");
+const sessionList = document.getElementById("session-list");
+const sessionManagerStatus = document.getElementById("session-manager-status");
+const sessionNameInput = document.getElementById("session-name");
 
-document.getElementById("btn-save-settings").addEventListener("click", () => {
-  try {
-    localStorage.setItem(SESSION_SETTINGS_KEY, JSON.stringify(collectSessionSettings()));
-    sessionSettingsStatus.textContent = `Saved ${new Date().toLocaleTimeString()}`;
-  } catch (err) {
-    sessionSettingsStatus.textContent = "Save failed: " + err;
+async function readSessions() {
+  const response = await fetch("/api/sessions");
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "could not list sessions");
+  return data;
+}
+
+async function writeSession(session) {
+  const response = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(session) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "could not save session");
+  return data;
+}
+
+function sessionId() {
+  return globalThis.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function bytesToBase64(bytes) {
+  let text = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    text += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
-});
+  return btoa(text);
+}
 
-document.getElementById("btn-load-settings").addEventListener("click", () => {
-  const raw = localStorage.getItem(SESSION_SETTINGS_KEY);
-  if (!raw) {
-    sessionSettingsStatus.textContent = "No saved settings in this browser.";
+async function portableArtifact() {
+  if (!completedNamArtifact) return null;
+  if (completedNamArtifact.nam_base64) return completedNamArtifact;
+  if (!completedNamArtifact.downloadUrl) throw new Error("the completed NAM is no longer available to include in this session");
+  const response = await fetch(completedNamArtifact.downloadUrl);
+  if (!response.ok) throw new Error("could not include the completed NAM in this session");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return { filename: completedNamArtifact.filename || "model.nam", nam_base64: bytesToBase64(bytes) };
+}
+
+async function currentSession(name, generated = activeSessionGenerated) {
+  return {
+    type: "nam-mixer-session", version: 1,
+    id: activeSessionId || sessionId(), name, savedAt: new Date().toISOString(),
+    settings: collectSessionSettings(), designId: lastDesignId,
+    artifact: await portableArtifact(), ...(generated ? { generated: true } : {}),
+  };
+}
+
+async function persistActiveSession() {
+  if (!activeSessionId) return;
+  const name = activeSessionName || document.getElementById("model-name").value.trim() || "Generated session";
+  await writeSession(await currentSession(name));
+}
+
+function sessionSummary(session) {
+  const settings = session.settings || {};
+  const amps = [settings.ampA?.label, settings.ampB?.label].filter(Boolean).join(" / ") || "No amps selected";
+  const mode = { hybrid: "Dynamic Hybrid", blend: "Parallel Blend", character: "Character Blend" }[settings.mode] || "Unknown mode";
+  return { amps, mode, di: settings.diFile || "No test performance", artifact: session.artifact };
+}
+
+function downloadSessionNam(artifact) {
+  const link = document.createElement("a");
+  link.href = artifact.downloadUrl;
+  link.download = artifact.filename || "model.nam";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function downloadSessionJson(session) {
+  const link = document.createElement("a");
+  link.href = `/api/sessions/${encodeURIComponent(session.id)}/download`;
+  link.download = `${(session.name || "nam-mixer-session").replace(/[^a-z0-9_-]+/gi, "-")}.nam-mixer-session.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function importedSession(raw, filename) {
+  if (!raw || typeof raw !== "object") throw new Error("file does not contain a session");
+  const session = { ...raw };
+  if (session.type !== "nam-mixer-session" || session.version !== 1) throw new Error("unsupported session file");
+  if (!session.settings || typeof session.settings !== "object") throw new Error("session has no settings");
+  // Imported sessions are a new server-side record; keep their content but
+  // assign a fresh id so importing cannot overwrite an existing session.
+  session.id = sessionId();
+  session.name = String(session.name || filename.replace(/\.json$/i, "") || "Imported session").slice(0, 80);
+  session.savedAt = typeof session.savedAt === "string" ? session.savedAt : new Date().toISOString();
+  session.designId = session.designId || null;
+  session.artifact = session.artifact || null;
+  session.generated = false;
+  return session;
+}
+
+async function renderSessions() {
+  const sessions = await readSessions();
+  sessionList.replaceChildren();
+  if (!sessions.length) {
+    const empty = document.createElement("p");
+    empty.className = "info";
+    empty.textContent = "No saved sessions yet.";
+    sessionList.append(empty);
     return;
   }
-  try {
-    applySessionSettings(JSON.parse(raw));
-    sessionSettingsStatus.textContent = `Loaded ${new Date().toLocaleTimeString()}`;
-  } catch (err) {
-    sessionSettingsStatus.textContent = "Load failed: " + err;
+  for (const session of sessions) {
+    const summary = sessionSummary(session);
+    const card = document.createElement("article"); card.className = "session-card";
+    const heading = document.createElement("div"); heading.className = "session-card-heading";
+    const name = document.createElement("strong"); name.textContent = session.name || "Untitled session";
+    const saved = document.createElement("time");
+    const date = new Date(session.savedAt);
+    saved.dateTime = Number.isNaN(date.valueOf()) ? "" : date.toISOString();
+    saved.textContent = Number.isNaN(date.valueOf()) ? "Unknown save time" : date.toLocaleString();
+    heading.append(name, saved);
+    const actions = document.createElement("div"); actions.className = "session-card-actions";
+    const details = document.createElement("div"); details.className = "session-details"; details.hidden = true;
+    const settings = session.settings || {};
+    const shape = settings.mode === "blend"
+      ? `Mix: ${settings.mix ?? "—"}% Amp B`
+      : settings.mode === "character"
+        ? `Tone: ${settings.character?.tone ?? "—"}% Amp B; Feel: ${settings.character?.feel ?? "—"}% Amp B; Drive: ${settings.character?.drive ?? "—"}% Amp B`
+        : `Changeover: ${settings.crossover ?? "—"} dBFS; Transition: ${settings.transition ?? "—"} dB`;
+    details.textContent = `Mode: ${summary.mode} · Amps: ${summary.amps} · Test performance: ${summary.di} · Input profile: ${settings.inputProfileId || "—"} · ${shape} · Level match: ${settings.autoLevelMatch ? "on" : "off"} · Cabinet: ${settings.cab?.path ? "selected" : "off"}${summary.artifact ? ` · NAM: ${summary.artifact.filename || "available"}` : " · No completed NAM recorded"}`;
+    const detailButton = document.createElement("button"); detailButton.type = "button"; detailButton.className = "btn btn-secondary btn-small"; detailButton.textContent = "Details";
+    detailButton.addEventListener("click", () => { details.hidden = !details.hidden; detailButton.textContent = details.hidden ? "Details" : "Hide details"; });
+    const loadButton = document.createElement("button"); loadButton.type = "button"; loadButton.className = "btn btn-primary btn-small"; loadButton.textContent = "Load";
+    loadButton.addEventListener("click", () => {
+      try {
+        applySessionSettings(session.settings);
+        lastDesignId = session.designId || null;
+        completedNamArtifact = session.artifact || null;
+        activeSessionId = session.id;
+        activeSessionName = session.name;
+        activeSessionGenerated = session.generated === true;
+        sessionManager.close();
+        sessionSettingsStatus.textContent = `Loaded ${session.name || "session"}`;
+        setStatus(`Loaded ${session.name || "session"}.`);
+      } catch (err) { sessionManagerStatus.textContent = "Could not load this session: " + err; }
+    });
+    const deleteButton = document.createElement("button"); deleteButton.type = "button"; deleteButton.className = "btn btn-secondary btn-small"; deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", async () => {
+      const deleteMessage = session.generated
+        ? `Delete “${session.name || "Untitled session"}” and its entire training bundle? This removes all files under work/a2/${session.designId}.`
+        : `Delete “${session.name || "Untitled session"}”? This removes its saved session file.`;
+      if (!confirm(deleteMessage)) return;
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+        if (!response.ok) throw new Error((await response.json()).error || "could not delete session");
+        sessionManagerStatus.textContent = "Session deleted.";
+        await renderSessions();
+      } catch (err) { sessionManagerStatus.textContent = "Delete failed: " + err; }
+    });
+    const exportButton = document.createElement("button"); exportButton.type = "button"; exportButton.className = "btn btn-secondary btn-small"; exportButton.textContent = "Export JSON";
+    exportButton.addEventListener("click", () => downloadSessionJson(session));
+    actions.append(detailButton, loadButton, exportButton);
+    if (summary.artifact?.downloadUrl) {
+      const downloadButton = document.createElement("button"); downloadButton.type = "button"; downloadButton.className = "btn btn-secondary btn-small"; downloadButton.textContent = "Download NAM";
+      downloadButton.addEventListener("click", () => downloadSessionNam(summary.artifact));
+      actions.append(downloadButton);
+    }
+    if (summary.artifact?.toolPath) {
+      const toolsButton = document.createElement("button"); toolsButton.type = "button"; toolsButton.className = "btn btn-secondary btn-small"; toolsButton.textContent = "Open in NAM Tools";
+      toolsButton.addEventListener("click", async () => {
+        sessionManager.close(); setToolsOpen(true);
+        await setToolNam({ path: summary.artifact.toolPath }, summary.artifact.filename || "Session NAM");
+      });
+      actions.append(toolsButton);
+    }
+    actions.append(deleteButton);
+    card.append(heading, actions, details); sessionList.append(card);
   }
+}
+
+document.getElementById("btn-manage-sessions").addEventListener("click", async () => {
+  sessionManagerStatus.textContent = "";
+  if (!sessionManager.open) sessionManager.showModal();
+  sessionNameInput.focus();
+  try { await renderSessions(); } catch (err) { sessionManagerStatus.textContent = "Could not load sessions: " + err; }
 });
 
-// File-based export/import -- same shape as the localStorage save/load
-// above, just as a portable .json instead of browser-local storage, so a
-// settings file can be handed to someone else or reloaded after clearing
-// site data.
-document.getElementById("btn-export-settings").addEventListener("click", () => {
+document.getElementById("session-save-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = sessionNameInput.value.trim();
+  if (!name) return;
   try {
-    const blob = new Blob([JSON.stringify(collectSessionSettings(), null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "hybrid-nam-builder-settings.json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    sessionSettingsStatus.textContent = `Exported ${new Date().toLocaleTimeString()}`;
-  } catch (err) {
-    sessionSettingsStatus.textContent = "Export failed: " + err;
-  }
+    const session = await currentSession(name);
+    activeSessionId = session.id;
+    activeSessionName = name;
+    await writeSession(session);
+    sessionNameInput.value = "";
+    sessionManagerStatus.textContent = `Saved “${name}”.`;
+    sessionSettingsStatus.textContent = `Saved ${name}`;
+    await renderSessions();
+  } catch (err) { sessionManagerStatus.textContent = "Save failed: " + err; }
 });
 
-const importSettingsFileInput = document.getElementById("import-settings-file");
-document.getElementById("btn-import-settings").addEventListener("click", () => importSettingsFileInput.click());
-importSettingsFileInput.addEventListener("change", async () => {
-  const file = importSettingsFileInput.files[0];
-  importSettingsFileInput.value = "";
+document.getElementById("btn-export-current-session").addEventListener("click", async () => {
+  const name = sessionNameInput.value.trim() || `Session ${new Date().toLocaleString()}`;
+  try {
+    if (!activeSessionId) activeSessionId = sessionId();
+    activeSessionName = name;
+    const session = await writeSession(await currentSession(name));
+    sessionNameInput.value = "";
+    sessionManagerStatus.textContent = `Saved and exported “${name}”.`;
+    sessionSettingsStatus.textContent = `Saved ${name}`;
+    downloadSessionJson(session);
+    await renderSessions();
+  } catch (err) { sessionManagerStatus.textContent = "Export failed: " + err; }
+});
+
+const importSessionFileInput = document.getElementById("import-session-file");
+document.getElementById("btn-import-session").addEventListener("click", () => importSessionFileInput.click());
+importSessionFileInput.addEventListener("change", async () => {
+  const file = importSessionFileInput.files[0];
+  importSessionFileInput.value = "";
   if (!file) return;
   try {
-    applySessionSettings(JSON.parse(await file.text()));
-    sessionSettingsStatus.textContent = `Imported ${file.name}`;
+    const session = importedSession(JSON.parse(await file.text()), file.name);
+    await writeSession(session);
+    sessionManagerStatus.textContent = `Imported ${session.name}.`;
+    sessionSettingsStatus.textContent = `Imported ${session.name}`;
+    await renderSessions();
   } catch (err) {
-    sessionSettingsStatus.textContent = "Import failed: " + err;
+    sessionManagerStatus.textContent = "Import failed: " + err;
   }
 });
 
 updateBackendPanels();
+
+// ---- NAM Tools: all file writes happen through the server's strict
+// approved-path validator; this UI only selects an app-managed source NAM. ----
+const toolsTab = document.getElementById("tab-tools");
+const toolsPanel = document.getElementById("nam-tools-panel");
+const toolEditors = document.getElementById("tool-editors");
+const toolInfo = document.getElementById("tool-nam-info");
+const toolResult = document.getElementById("tool-result");
+let toolNamPath = null;
+let originalToolMetadata = {};
+let toolLoudnessDb = null;
+const toolVolumeSlider = document.getElementById("tool-volume-slider");
+const toolVolumeValue = document.getElementById("tool-volume-value");
+const toolVolumeBaseline = document.getElementById("tool-volume-baseline");
+const toolCalibrationStatus = document.getElementById("tool-calibration-status");
+
+function setToolsOpen(open) {
+  toolsPanel.hidden = !open;
+  document.querySelectorAll(".workflow-nav, .tone-wizard, .layout").forEach((el) => { el.hidden = open; });
+  document.getElementById("mode-description").hidden = open;
+  toolsTab.classList.toggle("active", open);
+  toolsTab.setAttribute("aria-pressed", open ? "true" : "false");
+}
+function showToolResult(data) {
+  toolResult.hidden = false;
+  toolResult.replaceChildren();
+  const changed = document.createElement("div");
+  changed.textContent = `Validated changes: ${data.changed_paths.join(", ")}`;
+  const link = document.createElement("a"); link.href = data.download_url; link.download = data.filename; link.className = "btn btn-primary"; link.textContent = `Download ${data.filename}`;
+  toolResult.append(changed, link);
+  if (data.warning) { const warning = document.createElement("div"); warning.className = "warning-box"; warning.textContent = data.warning; toolResult.append(warning); }
+}
+function updateToolVolumeReadout() { toolVolumeValue.textContent = `${Number(toolVolumeSlider.value).toFixed(1)} dB`; }
+async function setToolNam(data, label) {
+  const response = await fetch("/api/nam/tools/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: data.path }) });
+  const inspection = await response.json();
+  if (!response.ok) { toolInfo.textContent = `Error: ${inspection.error}`; return; }
+  toolNamPath = inspection.path;
+  originalToolMetadata = inspection.metadata || {};
+  toolLoudnessDb = Number.isFinite(inspection.loudness_db) ? inspection.loudness_db : null;
+  const fieldMap = {
+    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by", gear_type: "tool-meta-gear-type",
+    gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
+  };
+  Object.entries(fieldMap).forEach(([key, id]) => { document.getElementById(id).value = originalToolMetadata[key] ?? ""; });
+  const calibration = inspection.calibration || {};
+  toolCalibrationStatus.textContent = calibration.status === "Calibrated NAM"
+    ? `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`
+    : "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
+  if (toolLoudnessDb !== null) {
+    toolVolumeSlider.value = Math.max(Number(toolVolumeSlider.min), Math.min(Number(toolVolumeSlider.max), toolLoudnessDb));
+    toolVolumeSlider.disabled = false;
+    toolVolumeBaseline.textContent = `Current measured loudness: ${toolLoudnessDb.toFixed(1)} dB. Drag to choose the final level.`;
+  } else {
+    toolVolumeSlider.disabled = true;
+    toolVolumeBaseline.textContent = "This NAM has no measured loudness metadata, so an absolute output slider cannot be set safely.";
+  }
+  updateToolVolumeReadout();
+  toolEditors.hidden = false;
+  toolInfo.textContent = `${label} — ${inspection.architecture || "NAM"}; ${inspection.head_scales.length} recognised output scale${inspection.head_scales.length === 1 ? "" : "s"}.`;
+  toolResult.hidden = true;
+}
+toolsTab.addEventListener("click", () => setToolsOpen(true));
+document.getElementById("btn-close-tools").addEventListener("click", () => setToolsOpen(false));
+document.getElementById("btn-tool-upload").addEventListener("click", async () => {
+  const file = document.getElementById("tool-nam-file").files[0];
+  if (!file) { toolInfo.textContent = "Choose a .nam file first."; return; }
+  const form = new FormData(); form.append("file", file);
+  const response = await fetch("/api/nam/upload", { method: "POST", body: form });
+  const data = await response.json();
+  if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
+  await setToolNam(data, file.name);
+});
+document.getElementById("btn-tool-generated").addEventListener("click", async () => {
+  const response = await fetch("/api/nam/tools/generated"); const data = await response.json();
+  if (!response.ok || !data.path) { toolInfo.textContent = data.error || "No locally generated NAM is available yet."; return; }
+  const inspect = await fetch("/api/nam/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: data.path }) });
+  const summary = await inspect.json();
+  if (!inspect.ok) { toolInfo.textContent = `Error: ${summary.error}`; return; }
+  await setToolNam({ ...summary, path: data.path }, data.filename);
+});
+toolVolumeSlider.addEventListener("input", updateToolVolumeReadout);
+document.getElementById("btn-tool-volume").addEventListener("click", async () => {
+  if (!toolNamPath || toolLoudnessDb === null) { toolInfo.textContent = "This NAM needs measured loudness metadata for the absolute output slider."; return; }
+  const db_change = Number(toolVolumeSlider.value) - toolLoudnessDb;
+  const response = await fetch("/api/nam/tools/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath, db_change }) });
+  const data = await response.json();
+  if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
+  showToolResult(data);
+});
+document.getElementById("btn-tool-metadata").addEventListener("click", async () => {
+  if (!toolNamPath) return;
+  const metadata = {};
+  const fieldMap = {
+    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by", gear_type: "tool-meta-gear-type",
+    gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
+  };
+  Object.entries(fieldMap).forEach(([key, id]) => {
+    const raw = document.getElementById(id).value.trim();
+    const value = raw;
+    const previous = originalToolMetadata[key] ?? "";
+    if (value !== previous) metadata[key] = value === "" ? null : value;
+  });
+  if (!Object.keys(metadata).length) { toolInfo.textContent = "Enter at least one metadata field."; return; }
+  const response = await fetch("/api/nam/tools/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath, metadata }) });
+  const data = await response.json();
+  if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
+  showToolResult(data);
+});

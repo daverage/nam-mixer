@@ -46,6 +46,8 @@ body {
 }
 
 .topbar { max-width: 1100px; margin: 0 auto 1.5rem; }
+.brand-lockup { display: flex; align-items: center; gap: 0.55rem; }
+.brand-logo { width: 2.15rem; height: 2.15rem; object-fit: contain; flex: none; }
 h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
 .tagline { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
 
@@ -93,6 +95,37 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
   border-bottom-color: var(--accent);
 }
 .mode-tab:hover:not(.active) { color: var(--text); }
+.mode-description { max-width: 1100px; margin: -0.7rem auto 1rem; color: var(--text-muted); font-size: 0.8rem; line-height: 1.35; }
+.nam-tools { max-width: 1100px; margin: 0 auto 1.25rem; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 1.1rem 1.25rem; }
+.tools-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.tools-heading h2 { margin: 0; color: var(--text); font-size: 1rem; text-transform: none; letter-spacing: normal; }
+.tool-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
+.tools-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.tools-grid h3 { margin: 0; font-size: 0.9rem; }
+.tools-grid .btn { margin-top: 0.85rem; }
+.tool-result { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; background: var(--track); font-size: 0.82rem; line-height: 1.5; }
+@media (max-width: 620px) { .tools-grid { grid-template-columns: 1fr; } }
+
+.tone-wizard {
+  max-width: 1100px;
+  margin: 0 auto 1.25rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--panel) 92%, var(--accent) 8%), var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 0.9rem 1.1rem;
+}
+.tone-wizard-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.tone-wizard h2 { margin: 0; color: var(--text); font-size: 0.95rem; text-transform: none; letter-spacing: normal; }
+.wizard-intro { margin: 0.8rem 0; color: var(--text-muted); font-size: 0.84rem; line-height: 1.4; }
+.wizard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.wizard-grid fieldset { margin: 0; min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 0.75rem; }
+.wizard-grid legend { padding: 0 0.25rem; color: var(--text-muted); font-size: 0.76rem; font-weight: 700; }
+.wizard-grid label { display: block; margin: 0.34rem 0; font-size: 0.8rem; line-height: 1.3; }
+.wizard-grid output { float: right; color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.wizard-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.9rem; }
+.wizard-result { margin-top: 0.75rem; padding: 0.65rem 0.75rem; border-radius: 8px; background: var(--track); font-size: 0.82rem; line-height: 1.4; }
+@media (max-width: 620px) { .wizard-grid { grid-template-columns: 1fr; } }
 
 .layout {
   max-width: 1100px;
@@ -333,6 +366,8 @@ input[type="range"].slider::-moz-range-thumb {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-block { width: 100%; margin-top: 0.9rem; }
 .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: transparent; }
+.btn-danger:hover:not(:disabled) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 
 .btn-render-stale {
   box-shadow: 0 0 0 3px rgba(224, 133, 20, 0.35);
@@ -629,6 +664,20 @@ details.advanced summary:hover { color: var(--text); }
 }
 .session-settings-menu .btn { text-align: left; }
 .session-settings-menu .info { margin: 0.15rem 0 0; }
+.session-manager { width: min(42rem, calc(100vw - 2rem)); max-height: min(44rem, calc(100vh - 2rem)); color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 1rem; }
+.session-manager::backdrop { background: rgb(0 0 0 / 55%); }
+.session-manager-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
+.session-manager-heading h2 { margin: 0; }
+.session-save-form { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.5rem; margin: 1rem 0 0.5rem; }
+.session-save-form label { grid-column: 1 / -1; font-size: 0.82rem; font-weight: 650; }
+.session-import-row { margin: 0.25rem 0 0.75rem; }
+.session-list { display: grid; gap: 0.65rem; margin-top: 0.75rem; }
+.session-card { border: 1px solid var(--border); border-radius: 9px; padding: 0.7rem; }
+.session-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.session-card-heading strong { overflow-wrap: anywhere; }
+.session-card-heading time { color: var(--text-muted); font-size: 0.75rem; white-space: nowrap; }
+.session-card-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.session-details { margin-top: 0.55rem; color: var(--text-muted); font-size: 0.82rem; line-height: 1.45; }
 
 body[data-workflow-stage] .workflow-stage { display: none; }
 body[data-workflow-stage="configure"] .workflow-configure,

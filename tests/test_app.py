@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json as jsonlib
+import base64
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +54,14 @@ def _write_fake_nam(path, input_level_dbu=None):
     path.write_text(jsonlib.dumps(data))
 
 
+def _write_tool_nam(path):
+    path.write_text(jsonlib.dumps({
+        "architecture": "SlimmableContainer",
+        "config": {"submodels": [{"model": {"config": {"head_scale": 0.0051461088670930214, "weights": [1]}, "metadata": {"loudness": -22.8}}}]},
+        "metadata": {"loudness": -22.7, "gain": 3.0},
+    }))
+
+
 def _render_body(amp_a, amp_b, **overrides):
     body = {
         "amp_a_path": str(amp_a),
@@ -71,6 +80,107 @@ def test_preview_without_render_pair_first_returns_400(client):
     resp = client.post("/api/preview", json={"source": "a"})
     assert resp.status_code == 400
     assert "render" in resp.get_json()["error"].lower()
+
+
+def test_oversized_upload_returns_a_clear_json_error(client, monkeypatch):
+    monkeypatch.setitem(app_module.app.config, "MAX_CONTENT_LENGTH", 1)
+    response = client.post(
+        "/api/nam/upload",
+        data={"file": (io.BytesIO(b"{}"), "too-large.nam")},
+    )
+    assert response.status_code == 413
+    assert response.get_json()["error"] == "upload exceeds the 256 MiB limit"
+
+
+def test_file_backed_session_embeds_nam_for_download_and_tools(client, tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"
+    model_dir = session_dir / "models"
+    model_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    nam_bytes = jsonlib.dumps({"architecture": "WaveNet", "config": {"head_scale": 1.0}}).encode()
+    session = {
+        "type": "nam-mixer-session", "version": 1,
+        "id": "saved-session", "name": "Saved session", "savedAt": "2026-09-09T10:00:00Z",
+        "settings": {"mode": "hybrid"},
+        "artifact": {"filename": "saved.nam", "nam_base64": base64.b64encode(nam_bytes).decode()},
+    }
+    saved = client.post("/api/sessions", json=session)
+    assert saved.status_code == 201
+    listed = client.get("/api/sessions").get_json()
+    assert listed[0]["artifact"]["downloadUrl"] == "/api/sessions/saved-session/nam/download"
+    assert listed[0]["artifact"]["toolPath"] == str(model_dir / "saved-session.nam")
+    assert "nam_base64" not in listed[0]["artifact"]
+    assert client.get("/api/sessions/saved-session/nam/download").data == nam_bytes
+    tool_inspect = client.post("/api/nam/tools/inspect", json={"path": listed[0]["artifact"]["toolPath"]})
+    assert tool_inspect.status_code == 200
+    assert client.delete("/api/sessions/saved-session").status_code == 204
+    assert not (model_dir / "saved-session.nam").exists()
+
+
+def test_generated_session_is_stored_in_and_deletes_its_bundle(client, tmp_path, monkeypatch):
+    a2_dir = tmp_path / "a2"
+    bundle = a2_dir / "demo"
+    bundle.mkdir(parents=True)
+    (bundle / "training_manifest.json").write_text(jsonlib.dumps({"mode": "hybrid", "model_name": "Demo", "amp_a": {}, "amp_b": {}, "design": {}}))
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    listed = client.get("/api/sessions").get_json()
+    assert listed[0]["generated"] is True
+    assert (bundle / "nam-mixer-session.json").is_file()
+    assert client.delete(f"/api/sessions/{listed[0]['id']}").status_code == 204
+    assert not bundle.exists()
+
+
+def test_nam_volume_tool_writes_only_a_new_validated_file(client, tmp_path):
+    source = tmp_path / "Mesa.nam"
+    _write_tool_nam(source)
+    uploaded = client.post("/api/nam/upload", data={"file": (io.BytesIO(source.read_bytes()), "Mesa.nam")}).get_json()
+    response = client.post("/api/nam/tools/volume", json={"path": uploaded["path"], "db_change": 6})
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["changed_paths"] == [
+        "config.submodels[0].model.config.head_scale",
+        "config.submodels[0].model.metadata.loudness",
+        "metadata.loudness",
+    ]
+    assert data["filename"] == "Mesa_+6dB.nam"
+    downloaded = client.get(data["download_url"])
+    assert downloaded.status_code == 200
+    edited = jsonlib.loads(downloaded.data)
+    assert edited["metadata"]["gain"] == 3.0
+    assert edited["config"]["submodels"][0]["model"]["config"]["weights"] == [1]
+
+
+def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
+    source = tmp_path / "Meta.nam"
+    _write_tool_nam(source)
+    uploaded = client.post("/api/nam/upload", data={"file": (io.BytesIO(source.read_bytes()), "Meta.nam")}).get_json()
+    response = client.post("/api/nam/tools/metadata", json={"path": uploaded["path"], "metadata": {"name": "Battery", "modeled_by": "Test", "gear_model": "Mark IIC+"}})
+    assert response.status_code == 200
+    edited = jsonlib.loads(client.get(response.get_json()["download_url"]).data)
+    assert edited["metadata"]["name"] == "Battery"
+    assert edited["metadata"]["modeled_by"] == "Test"
+    assert edited["metadata"]["gear_model"] == "Mark IIC+"
+    assert edited["metadata"]["gain"] == 3.0
+
+
+def test_wizard_insight_requires_a_rendered_pair(client):
+    app_module._rendered_pair_cache["pair"] = None
+    resp = client.post("/api/wizard/insight")
+    assert resp.status_code == 400
+    assert "render" in resp.get_json()["error"].lower()
+
+
+def test_wizard_insight_describes_a_rendered_pair(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+
+    resp = client.post("/api/wizard/insight")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert {"level_text", "tone_text", "feel_text", "amp_a", "amp_b"} <= data.keys()
 
 
 def test_live_blend_stems_returns_trimmed_stereo_pair_without_rerender(client, tmp_path):
@@ -467,6 +577,8 @@ def test_generate_blend_mode_produces_bundle_with_mode_blend(client, isolated_tr
         manifest = jsonlib.load(f)
     assert manifest["mode"] == "blend"
     assert manifest["design"]["mix_b"] == pytest.approx(0.4)
+    assert manifest["artifact_filename"] == "a_and_b_Parallel_Blend.nam"
+    assert data["download_filename"] == "a_and_b_Parallel_Blend.nam"
 
 
 def test_generate_baked_cab_records_provenance(client, isolated_training_paths, tmp_path):

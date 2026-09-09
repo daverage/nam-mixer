@@ -127,13 +127,10 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         mix_b = manifest.get("design", {}).get("mix_b")
         ratio = f" {round((1 - mix_b) * 100)}-{round(mix_b * 100)}" if mix_b is not None else ""
         name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
-        gear_model = f"{amp_a_name} + {amp_b_name}{ratio}"
     elif mode == "character":
         name = f"Character Blend {amp_a_name} + {amp_b_name}"
-        gear_model = f"Character Blend {amp_a_name} + {amp_b_name}"
     else:
         name = f"Hybrid {amp_a_name} -> {amp_b_name}"
-        gear_model = f"{amp_a_name} -> {amp_b_name}"
 
     # `model_name` is supplied by the builder UI/API and is persisted in the
     # manifest.  Prefer it for the name displayed by NAM tools; retain the
@@ -142,9 +139,10 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     return {
         "name": model_name,
-        "modeled_by": "Hybrid NAM Builder",
-        "gear_make": "Hybrid" if mode == "hybrid" else "Character Blend" if mode == "character" else "Blend",
-        "gear_model": gear_model,
+        # This identifies the creator of the generated NAM.  Do not invent
+        # a physical manufacturer/model for a synthetic hybrid; those remain
+        # blank for the user to enter in the official metadata editor.
+        "modeled_by": "NAM Mixer",
         # tone_type/output_level_dbu deliberately absent -- see
         # scripts/train_a2.py's _build_user_metadata docstring for why.
         "input_level_dbu": input_level_dbu,

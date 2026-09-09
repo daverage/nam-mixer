@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -21,6 +22,7 @@ class LocalTrainingManager:
         self.started_at: float | None = None
         self.finished_at: float | None = None
         self.exit_code: int | None = None
+        self.cancel_requested = False
         self._lock = threading.Lock()
 
     @property
@@ -31,6 +33,7 @@ class LocalTrainingManager:
         self.log.clear()
         self.state = state
         self.started_at, self.finished_at, self.exit_code = time.time(), None, None
+        self.cancel_requested = False
         # Without this, an op unimplemented on MPS raises a hard error instead
         # of falling back to CPU for that op -- surfaces as training dying
         # almost immediately with ~0 CPU time consumed and no output.
@@ -50,9 +53,13 @@ class LocalTrainingManager:
             "MPLBACKEND": "Agg",
             "PYTHONUNBUFFERED": "1",
         }
+        process_group_options = (
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if os.name == "nt" else {"start_new_session": True}
+        )
         self.process = subprocess.Popen(
             command, cwd=self.repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, env=env,
+            text=True, bufsize=1, env=env, **process_group_options,
         )
         threading.Thread(target=self._collect, daemon=True).start()
 
@@ -64,7 +71,29 @@ class LocalTrainingManager:
         code = self.process.wait()
         with self._lock:
             self.exit_code, self.finished_at = code, time.time()
-            self.state = "complete" if code == 0 else "failed"
+            self.state = "cancelled" if self.cancel_requested else ("complete" if code == 0 else "failed")
+
+    def cancel(self) -> None:
+        """Stop the app-owned setup or training subprocess, escalating if needed."""
+        with self._lock:
+            process = self.process
+            if process is None or process.poll() is not None:
+                raise RuntimeError("No local setup or training process is running.")
+            self.cancel_requested = True
+            self.state = "cancelling"
+            self.log.append("Cancellation requested — stopping local process…")
+        if os.name == "nt":
+            process.terminate()
+        else:
+            os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                process.kill()
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
 
     def setup(self) -> None:
         if self.process and self.process.poll() is None:
@@ -98,7 +127,7 @@ class LocalTrainingManager:
 
     def status(self) -> dict:
         running = bool(self.process and self.process.poll() is None)
-        state = self.state if running or self.state in ("complete", "failed") else ("ready" if self.python.is_file() else "not_configured")
+        state = self.state if running or self.state in ("complete", "failed", "cancelled") else ("ready" if self.python.is_file() else "not_configured")
         with self._lock:
             tail = "\n".join(self.log)
         matches = re.findall(r"[Ee]poch\s+(\d+)\s*/\s*(\d+)", tail)

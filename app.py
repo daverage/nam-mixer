@@ -1,6 +1,6 @@
 """Hybrid NAM Builder -- Flask app entry point.
 
-Experimental proof-of-concept. See README.md for the overall concept and current
+Local beta application. See README.md for the overall concept and current
 limitations. Run with:
 
     python app.py
@@ -9,16 +9,20 @@ then open http://127.0.0.1:5000/ in a browser.
 """
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
 import os
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import soundfile as sf
 from flask import Flask, Response, jsonify, render_template, request, send_file
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
@@ -48,10 +52,12 @@ from hybrid.kaggle_training import (
 from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
 from hybrid.nam_loader import load_nam
+from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError, render
 from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
 from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
+from hybrid.wizard import summarise_amp_pair
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
 # We warn rather than silently clip or normalize -- see docs/INPUT_PROFILE_RESEARCH.md.
@@ -73,11 +79,27 @@ TRAINING_INPUT_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
 A2_OUTPUT_DIR = WORK_DIR / "a2"
 A2_OUTPUT_DIR.mkdir(exist_ok=True)
+NAM_TOOL_OUTPUT_DIR = WORK_DIR / "nam_tools"
+NAM_TOOL_OUTPUT_DIR.mkdir(exist_ok=True)
+SESSION_DIR = WORK_DIR / "sessions"
+SESSION_DIR.mkdir(exist_ok=True)
+SESSION_MODEL_DIR = SESSION_DIR / "models"
+SESSION_MODEL_DIR.mkdir(exist_ok=True)
 
 _kaggle_manager = KaggleJobManager(A2_OUTPUT_DIR)
 _local_training_manager = LocalTrainingManager(BASE_DIR, A2_OUTPUT_DIR)
 
 app = Flask(__name__)
+# This app accepts audio and model uploads, so leave enough room for a normal
+# training input while preventing an accidental or hostile unbounded upload
+# from exhausting the local process's memory/disk.
+app.config["MAX_CONTENT_LENGTH"] = 256 * 1024 * 1024
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def upload_too_large(_error: RequestEntityTooLarge):
+    """Return the API's normal JSON error shape for oversized uploads."""
+    return jsonify({"error": "upload exceeds the 256 MiB limit"}), 413
 
 # Single-process, single-user local tool (see README) -- a module-level cache
 # for the last-rendered amp pair is the whole point of splitting
@@ -175,6 +197,326 @@ def api_nam_inspect():
     except (OSError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(model.summary())
+
+
+def _tool_source_path(raw_path: str) -> Path:
+    """Accept only NAMs managed by this local app, never arbitrary disk paths."""
+    try:
+        path = Path(raw_path).resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise NamToolError("NAM file does not exist") from exc
+    allowed_roots = (NAM_UPLOAD_DIR.resolve(), A2_OUTPUT_DIR.resolve(), NAM_TOOL_OUTPUT_DIR.resolve(), SESSION_MODEL_DIR.resolve())
+    if path.suffix.lower() != ".nam" or not any(path.is_relative_to(root) for root in allowed_roots):
+        raise NamToolError("choose an uploaded or generated .nam file")
+    return path
+
+
+def _session_path(session_id: str) -> Path:
+    """Resolve an app-owned session JSON path without accepting traversal."""
+    safe_id = secure_filename(session_id)
+    if not safe_id or safe_id != session_id:
+        raise ValueError("invalid session id")
+    return SESSION_DIR / f"{safe_id}.nam-mixer.json"
+
+
+def _session_model_path(session_id: str) -> Path:
+    _session_path(session_id)  # validates the id with the same policy
+    return SESSION_MODEL_DIR / f"{session_id}.nam"
+
+
+def _generated_session_path(bundle_dir: Path) -> Path:
+    return bundle_dir / "nam-mixer-session.json"
+
+
+def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
+    """Convert an existing A2 bundle into the canonical session record once."""
+    design = manifest.get("design") or {}
+    mode = manifest.get("mode", "hybrid")
+    amp_a, amp_b = manifest.get("amp_a") or {}, manifest.get("amp_b") or {}
+    def number(value, default=0):
+        return default if value is None else value
+    def fraction(value, default=0.5):
+        try:
+            return default if value is None else float(value)
+        except (TypeError, ValueError):
+            return default
+    settings = {
+        "mode": mode,
+        "ampA": {"path": amp_a.get("path"), "label": amp_a.get("filename", "Amp A")},
+        "ampB": {"path": amp_b.get("path"), "label": amp_b.get("filename", "Amp B")},
+        "diFile": design.get("design_di_file", ""),
+        "instrument": design.get("instrument_type", "guitar"),
+        "inputProfileId": design.get("design_reference_profile_id", "vintage_humbucker"),
+        "customGainDb": "0", "calibrationMode": (manifest.get("calibration") or {}).get("requested_mode", "auto"),
+        "referenceDbu": str((manifest.get("calibration") or {}).get("reference_input_level_dbu", 12.0)),
+        "testGainDb": "0", "ampAInputGainDb": str(number(design.get("amp_a_input_gain_db"))),
+        "ampBInputGainDb": str(number(design.get("amp_b_input_gain_db"))),
+        "crossover": str(number(design.get("crossover_dbfs"), -20.0)),
+        "transition": str(number(design.get("transition_width_db"), 8.0)),
+        "mix": str(round(fraction(design.get("mix_b")) * 100)),
+        "character": {"tone": str(round(fraction(design.get("tone_mix_b")) * 100)), "feel": str(round(fraction(design.get("feel_mix_b")) * 100)), "drive": str(round(fraction(design.get("drive_mix_b")) * 100))},
+        "driveMorphEnabled": bool(design.get("drive_low_mix_b") is not None),
+        "autoLevelMatch": True, "ampBTrim": str(number(design.get("manual_trim_db"))),
+        "cab": {"path": None, "label": "", "previewEnabled": False, "baked": bool((manifest.get("cab") or {}).get("baked", False))},
+        "outputGainAuto": True, "outputGainManualDb": "0", "modelName": manifest.get("model_name", bundle_dir.name),
+    }
+    artifact = None
+    output_path = Path(str((manifest.get("training") or {}).get("output_nam_path", "")))
+    if output_path.is_file():
+        artifact = {"filename": manifest.get("artifact_filename", output_path.name), "nam_base64": base64.b64encode(output_path.read_bytes()).decode()}
+    session_id = f"generated-{secure_filename(bundle_dir.name)}"
+    return {"type": "nam-mixer-session", "version": 1, "id": session_id, "name": manifest.get("model_name", bundle_dir.name), "savedAt": datetime.fromtimestamp(bundle_dir.stat().st_mtime, timezone.utc).isoformat(), "settings": settings, "designId": bundle_dir.name, "artifact": artifact, "generated": True, "bundlePath": str(bundle_dir)}
+
+
+def _session_payload(data: object) -> tuple[str, dict]:
+    if not isinstance(data, dict) or not isinstance(data.get("settings"), dict):
+        raise ValueError("session must contain a settings object")
+    session_id = data.get("id")
+    name = data.get("name")
+    saved_at = data.get("savedAt")
+    if data.get("type") != "nam-mixer-session" or data.get("version") != 1:
+        raise ValueError("unsupported session file")
+    if not isinstance(session_id, str) or not isinstance(name, str) or not name.strip() or not isinstance(saved_at, str):
+        raise ValueError("session must have id, name, and savedAt fields")
+    artifact = data.get("artifact")
+    if artifact is not None and (not isinstance(artifact, dict) or not isinstance(artifact.get("nam_base64"), str)):
+        raise ValueError("a completed session must embed its NAM data")
+    _session_path(session_id)
+    return session_id, data
+
+
+def _materialize_session_nam(session_id: str, session: dict) -> None:
+    """Store an optional embedded NAM alongside its portable session JSON."""
+    artifact = session.get("artifact")
+    model_path = _session_model_path(session_id)
+    if not isinstance(artifact, dict) or not artifact.get("nam_base64"):
+        model_path.unlink(missing_ok=True)
+        return
+    encoded = artifact.get("nam_base64")
+    if not isinstance(encoded, str):
+        raise ValueError("session NAM data must be base64 text")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise ValueError("session NAM data is invalid") from exc
+    if not raw:
+        raise ValueError("session NAM data is empty")
+    model_path.write_bytes(raw)
+
+
+def _session_for_client(session: dict) -> dict:
+    """Add local, non-portable routes without changing the stored JSON."""
+    client_session = dict(session)
+    artifact = session.get("artifact")
+    if isinstance(artifact, dict):
+        artifact = dict(artifact)
+        # The embedded NAM stays on disk; never send its base64 payload in a
+        # session-list response just to render a row in the manager.
+        artifact.pop("nam_base64", None)
+        model_path = _session_model_path(str(session["id"]))
+        if model_path.is_file():
+            artifact["downloadUrl"] = f"/api/sessions/{session['id']}/nam/download"
+            artifact["toolPath"] = str(model_path)
+        client_session["artifact"] = artifact
+    return client_session
+
+
+@app.route("/api/sessions", methods=["GET"])
+def api_sessions():
+    sessions = []
+    for path in SESSION_DIR.glob("*.nam-mixer.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            session_id, session = _session_payload(data)
+            if path == _session_path(session_id):
+                sessions.append(_session_for_client(session))
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("Ignoring invalid session file: %s", path.name)
+    for bundle_dir in (path.parent for path in A2_OUTPUT_DIR.glob("*/training_manifest.json")):
+        generated_path = _generated_session_path(bundle_dir)
+        try:
+            if generated_path.is_file():
+                session = json.loads(generated_path.read_text(encoding="utf-8"))
+            else:
+                manifest = json.loads((bundle_dir / "training_manifest.json").read_text(encoding="utf-8"))
+                session = _session_from_manifest(manifest, bundle_dir)
+                generated_path.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+            session_id, session = _session_payload(session)
+            _materialize_session_nam(session_id, session)
+            sessions.append(_session_for_client(session))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Ignoring invalid generated session in %s: %s", bundle_dir, exc)
+    sessions.sort(key=lambda session: str(session["savedAt"]), reverse=True)
+    return jsonify(sessions)
+
+
+@app.route("/api/sessions", methods=["POST"])
+def api_session_save():
+    try:
+        session_id, session = _session_payload(request.get_json(force=True))
+        _materialize_session_nam(session_id, session)
+        if session.get("generated"):
+            design_id = secure_filename(str(session.get("designId") or ""))
+            bundle_dir = A2_OUTPUT_DIR / design_id
+            if not design_id or not (bundle_dir / "training_manifest.json").is_file():
+                raise ValueError("generated session bundle not found")
+            path = _generated_session_path(bundle_dir)
+        else:
+            path = _session_path(session_id)
+        path.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+    except (TypeError, ValueError, OSError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_session_for_client(session)), 201
+
+
+def _find_session_record(session_id: str) -> tuple[Path, dict, Path | None] | None:
+    try:
+        path = _session_path(session_id)
+    except ValueError:
+        return None
+    if path.is_file():
+        try:
+            return path, json.loads(path.read_text(encoding="utf-8")), None
+        except (OSError, json.JSONDecodeError):
+            return None
+    for bundle_dir in (p.parent for p in A2_OUTPUT_DIR.glob("*/training_manifest.json")):
+        candidate = _generated_session_path(bundle_dir)
+        if candidate.is_file():
+            try:
+                session = json.loads(candidate.read_text(encoding="utf-8"))
+                if session.get("id") == session_id:
+                    return candidate, session, bundle_dir
+            except (OSError, json.JSONDecodeError):
+                continue
+    return None
+
+
+@app.route("/api/sessions/<session_id>", methods=["DELETE"])
+def api_session_delete(session_id: str):
+    found = _find_session_record(session_id)
+    if found is None:
+        try: _session_path(session_id)
+        except ValueError as exc: return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": "session not found"}), 404
+    path, _session, bundle_dir = found
+    if bundle_dir is not None:
+        shutil.rmtree(bundle_dir)
+    else:
+        path.unlink()
+    _session_model_path(session_id).unlink(missing_ok=True)
+    return "", 204
+
+
+@app.route("/api/sessions/<session_id>/download", methods=["GET"])
+def api_session_download(session_id: str):
+    found = _find_session_record(session_id)
+    if found is None:
+        return jsonify({"error": "session not found"}), 404
+    path, _session, _bundle = found
+    return send_file(path, as_attachment=True, download_name=path.name, mimetype="application/json")
+
+
+@app.route("/api/sessions/<session_id>/nam/download", methods=["GET"])
+def api_session_nam_download(session_id: str):
+    try:
+        path = _session_model_path(session_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not path.is_file():
+        return jsonify({"error": "this session has no embedded NAM"}), 404
+    try:
+        session = json.loads(_session_path(session_id).read_text(encoding="utf-8"))
+        filename = secure_filename(str((session.get("artifact") or {}).get("filename") or "model.nam"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        filename = "model.nam"
+    return send_file(path, as_attachment=True, download_name=filename or "model.nam")
+
+
+def _nam_tool_output(source: Path, suffix: str) -> Path:
+    # ``secure_filename`` strips '+', but a signed dB suffix is useful and is
+    # part of the promised output name. The source stem remains sanitised and
+    # the suffix is generated server-side, never supplied as a filename.
+    filename = f"{secure_filename(source.stem)}_{suffix}.nam"
+    return NAM_TOOL_OUTPUT_DIR / filename
+
+
+def _write_checked_nam(original: dict, edited: dict, expected_paths: list[str], output: Path) -> None:
+    # Serialise/re-open before exposing the file. This catches invalid JSON and
+    # proves formatting did not turn the safe in-memory edit into a wider change.
+    save_nam(edited, output)
+    try:
+        persisted = load_nam_json(output)
+        if compare_changes(original, persisted) != expected_paths:
+            raise NamToolError("saved file failed the approved-path validation")
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise
+
+
+@app.route("/api/nam/tools/generated", methods=["GET"])
+def api_nam_tool_generated():
+    """Expose the most recently generated local NAM to the Tools panel."""
+    candidates = list(A2_OUTPUT_DIR.rglob("*.nam"))
+    if not candidates:
+        return jsonify({"path": None})
+    newest = max(candidates, key=lambda path: path.stat().st_mtime)
+    return jsonify({"path": str(newest), "filename": newest.name})
+
+
+@app.route("/api/nam/tools/inspect", methods=["POST"])
+def api_nam_tool_inspect():
+    """Return the editable standard metadata and actual output baseline."""
+    data = request.get_json(force=True)
+    try:
+        source = _tool_source_path(str(data.get("path", "")))
+        raw = load_nam_json(source)
+        return jsonify({"path": str(source), "filename": source.name, **describe_nam_tools(raw)})
+    except (OSError, ValueError, NamToolError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/nam/tools/volume", methods=["POST"])
+def api_nam_tool_volume():
+    data = request.get_json(force=True)
+    try:
+        source = _tool_source_path(str(data.get("path", "")))
+        db_change = float(data.get("db_change"))
+        original = load_nam_json(source)
+        edited, expected_paths, multiplier = apply_volume_change(original, db_change)
+        suffix = f"{db_change:+g}dB"
+        output = _nam_tool_output(source, suffix)
+        _write_checked_nam(original, edited, expected_paths, output)
+    except (TypeError, ValueError, OSError, NamToolError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"filename": output.name, "download_url": f"/api/nam/tools/download/{output.name}",
+                    "architecture": original.get("architecture"), "db_change": db_change,
+                    "multiplier": multiplier, "changed_paths": expected_paths,
+                    "warning": "Large output boosts may clip in a host or target hardware." if db_change > 12 else None})
+
+
+@app.route("/api/nam/tools/metadata", methods=["POST"])
+def api_nam_tool_metadata():
+    data = request.get_json(force=True)
+    try:
+        source = _tool_source_path(str(data.get("path", "")))
+        original = load_nam_json(source)
+        edited, expected_paths = apply_metadata_changes(original, data.get("metadata"))
+        output = _nam_tool_output(source, "metadata")
+        _write_checked_nam(original, edited, expected_paths, output)
+    except (TypeError, ValueError, OSError, NamToolError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"filename": output.name, "download_url": f"/api/nam/tools/download/{output.name}",
+                    "changed_paths": expected_paths})
+
+
+@app.route("/api/nam/tools/download/<filename>", methods=["GET"])
+def api_nam_tool_download(filename: str):
+    if filename != Path(filename).name:
+        return jsonify({"error": "invalid NAM filename"}), 400
+    path = NAM_TOOL_OUTPUT_DIR / filename
+    if not path.is_file():
+        return jsonify({"error": "edited NAM file not found"}), 404
+    return send_file(path, as_attachment=True, download_name=path.name)
 
 
 @app.route("/api/cab/upload", methods=["POST"])
@@ -597,6 +939,22 @@ def _parse_hybrid_params(data: dict):
     return crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level
 
 
+def api_wizard_insight():
+    """Describe the cached pair for the guided UI, using measured audio only."""
+    pair: RenderedPair | None = _rendered_pair_cache["pair"]
+    if pair is None:
+        return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
+    config = CharacterAnalysisConfig()
+    analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
+    return jsonify(summarise_amp_pair(analysis_a, analysis_b))
+
+
+@app.post("/api/wizard/insight")
+def api_wizard_insight_route():
+    return api_wizard_insight()
+
+
 @app.route("/api/blend_info", methods=["POST"])
 def api_blend_info():
     """Report the auto/manual/effective trim breakdown for the current
@@ -948,6 +1306,15 @@ def api_local_training_start():
     return jsonify(_local_training_manager.status()), 202
 
 
+@app.post("/api/local_training/cancel")
+def api_local_training_cancel():
+    try:
+        _local_training_manager.cancel()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_local_training_manager.status()), 202
+
+
 @app.route("/api/local_training/download", methods=["GET"])
 def api_local_training_download():
     """Serves a locally-trained .nam as a browser download, mirroring
@@ -1041,8 +1408,12 @@ def api_generate():
     if not requested_name:
         amp_a_name = Path(amp_a_path).stem
         amp_b_name = Path(amp_b_path).stem
-        joiner = " + " if mode in ("blend", "character") else " to "
-        requested_name = f"{amp_a_name}{joiner}{amp_b_name}"
+        mode_label = {
+            "hybrid": "Dynamic Hybrid",
+            "blend": "Parallel Blend",
+            "character": "Character Blend",
+        }[mode]
+        requested_name = f"{amp_a_name} and {amp_b_name} {mode_label}"
     if len(requested_name) > 100:
         return jsonify({"error": "model_name must be 100 characters or fewer"}), 400
     design_id = secure_filename(requested_name)
