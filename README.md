@@ -7,6 +7,23 @@ Beta 1.1 adds a dedicated **Sessions** project library alongside the three
 design modes, so saved designs and completed training artifacts are easier to
 return to without interrupting the builder workflow.
 
+NAM Mixer is a local, privacy-friendly Flask app: your amp captures, DI files,
+and generated training material stay on your computer unless you explicitly
+send a training job to Kaggle. The browser UI has no build step.
+
+## At a glance
+
+| Area | What you can do |
+| --- | --- |
+| Sources | Choose two NAM captures, a preview DI, pickup/input profile, calibration, and per-amp trims. |
+| Three design modes | Build a level-driven **Dynamic Hybrid**, constant-ratio **Parallel Blend**, or deterministic **Character Blend** with tone, feel, and drive controls. |
+| Audition | Render once, then audition A/B and the result, test gain, coverage, level matching, optional alignment, output safety, and a cabinet IR. |
+| Create and train | Generate a target from the official NAM training input, bake the cabinet when wanted, then train locally or on a private Kaggle GPU. |
+| Sessions and Tools | Save, inspect, import/export, and restore settings; download generated NAMs; safely adjust output volume and supported metadata. |
+
+The app never claims that a completed training run sounds identical to its
+teacher. Always listen to and validate exported models.
+
 ## What this is
 
 NAM Mixer is a small local tool for building a **dynamic transition,
@@ -335,10 +352,15 @@ hybrid-nam-builder/
 │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
 │   ├── blend.py            -- the dynamic crossfade itself
 │   ├── fixed_blend.py      -- Parallel Blend mode (fixed-ratio combination)
+│   ├── character_blend.py  -- Character Blend teacher and low-level check
 │   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
-│   ├── training_target.py         -- Dynamic Hybrid A2 training-target generation
-│   ├── blend_training_target.py   -- Parallel Blend A2 training-target generation
-│   ├── receptive_field.py -- mode/cab-aware temporal-dependency accounting
+│   ├── training_target.py  -- Dynamic Hybrid A2 training-target generation
+│   ├── blend_training_target.py -- Parallel Blend A2 target generation
+│   ├── character_training_target.py -- Character Blend A2 target generation
+│   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
+│   ├── kaggle_training.py  -- private Kaggle GPU job and local validation
+│   ├── nam_tools.py        -- safe output-volume and metadata editing
+│   ├── wizard.py           -- guided setup flow shared by the UI modes
 │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
 │   └── metadata.py         -- hybrid provenance metadata (JSON sidecar)
 ├── native/nam_render/      -- C++ NAM inference tool (NeuralAmpModelerCore), see its README
@@ -427,3 +449,11 @@ input/output dBu. Export date, trainer details, and measured loudness remain
 untouched; use the Output volume slider for loudness. New NAMs identify their
 creator as `NAM Mixer`; physical gear make/model and tone metadata are left
 blank until the user can provide factual values.
+
+## License and attribution
+
+NAM Mixer is copyright © 2026 Andrzej Marczewski and is released under the
+[MIT License](LICENSE). The bundled genre/style DI recordings are credited and
+documented separately in [`assets/di/README.md`](assets/di/README.md); their
+upstream terms continue to apply. Neural Amp Modeler, NAMCore, and other
+third-party components retain their own copyrights and licenses.
