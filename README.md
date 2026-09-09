@@ -286,46 +286,48 @@ Kaggle training is available from the UI after authenticating the Kaggle CLI.
 If macOS has reserved port 5000 (for example, AirPlay Receiver), run
 `PORT=5001 python3 app.py` and open <http://127.0.0.1:5001>.
 
-## Beta limitations
+## Current status and limitations
 
-- **NAM inference is implemented, via a native tool, not torch.**
-  `hybrid/render.py` shells out to `nam_render` (`native/nam_render/`), a
-  small C++ CLI built against
-  [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore)
-  (the same inference core the official NAM plugin uses). This avoids
-  depending on the Python `neural-amp-modeler`/torch package for inference
-  entirely, and avoids guessing at the `.nam` → model-class mapping, since
-  NAMCore's own `nam::get_dsp()` loader is the reference implementation. See
-  `native/nam_render/README.md` for how to build it. `hybrid/render.py`
-  renders real `.nam` files end-to-end and is wired into the Flask preview
-  and training-bundle routes.
-- `.nam` file **parsing and calibration metadata** (`input_level_dbu`/
-  `output_level_dbu` where present) IS implemented (`hybrid/nam_loader.py`) —
-  older/uncalibrated files are read fine, just reported as
-  "Calibration metadata unavailable" rather than rejected.
-- The envelope follower, blend/crossfade math, level-match trim calculation,
-  alignment correction, and safety/peak-ceiling logic are all implemented and
-  unit-tested (`hybrid/*.py`, `tests/`) against synthetic signals. `render.py`
-  has been smoke-tested against real Fender/JCM800 `.nam` captures, but the
-  full pipeline (render → level-match → blend) hasn't been exercised
-  end-to-end with real renders yet.
-- **A/B alignment (`hybrid/align.py`) is optional and disabled by default**
-  (`align_to_reference(..., enabled=False)`). It cross-correlates Amp A's
-  render directly against Amp B's render, which can misread a genuine
-  tonal/phase difference between dissimilar amps (e.g. clean vs. heavily
-  distorted) as latency and "correct" for something that isn't actually a
-  timing offset. It stays available (`enabled=True`) for later use, but only
-  once we've verified what latency guarantees, if any, the official NAM
-  inference API actually makes — see that module's docstring.
-- The Flask app (`app.py`) and UI (`templates/index.html`, `static/`) now
-  wire up real rendering, preview, and target generation end-to-end (`/api/render_pair`,
-  `/api/preview`, `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
-  `/api/profile_coverage`, `/api/generate`).
-- Character Blend is a deterministic teacher-design system, not a claim that
-  the resulting A2 will perceptually match its target without validation.
-- No automated audio-quality/tone judgment is attempted anywhere in this
-  project; only mechanical sanity checks (NaN/Inf, clipping, silence,
-  alignment, discontinuities — see `hybrid/safety.py` and `tests/`).
+### Implemented
+
+- **Real NAM inference:** `hybrid/render.py` calls the native `nam_render`
+  C++ CLI in `native/nam_render/`, built against
+  [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore).
+  This keeps inference independent of Python `torch`/`neural-amp-modeler` and
+  lets NAMCore remain authoritative for `.nam` model loading. Build steps are
+  in `native/nam_render/README.md`.
+- **`.nam` loading and calibration:** `hybrid/nam_loader.py` reads model
+  metadata, including `input_level_dbu` and `output_level_dbu` when present.
+  Older or uncalibrated files remain usable and are reported as having
+  unavailable calibration metadata.
+- **The complete app workflow:** the Flask app and browser UI connect real
+  rendering, preview, coverage analysis, all three design modes, cabinet IR,
+  Sessions, target generation, local training, and optional private Kaggle
+  training. The main routes include `/api/render_pair`, `/api/preview`,
+  `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
+  `/api/profile_coverage`, and `/api/generate`.
+- **Mechanical safeguards:** envelope following, blend math, level matching,
+  optional alignment, receptive-field checks, NaN/Inf and silence checks, and
+  non-limiting training-target peak control are implemented and covered by
+  automated tests against synthetic signals.
+
+### Important validation boundaries
+
+- The native renderer has been smoke-tested with real Fender/JCM800 captures,
+  while most automated pipeline tests use mocked renders. Real source-model
+  combinations can still expose latency, calibration, or musical problems;
+  listen to every preview and validate every exported model against its target.
+- **A/B alignment is deliberately off by default.**
+  `hybrid/align.py` cross-correlates the two rendered signals, so a tonal or
+  phase difference between dissimilar amps can look like latency. Enable it
+  only when the timing behavior of the source models is known.
+- Character Blend is a deterministic teacher design, not a perceptual-match
+  guarantee. No automated system judges tone, feel, or musical quality; the
+  checks can only catch mechanical problems such as clipping, discontinuities,
+  silence, or non-finite samples.
+- Local A2 training needs the separate environment described in
+  `requirements-training.txt`. Kaggle training needs a configured Kaggle
+  account and network access; neither is required to run the preview UI.
 
 ## Safety: training target vs. live preview
 
