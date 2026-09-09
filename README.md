@@ -1,7 +1,11 @@
 # NAM Mixer
 
-**Status: beta local tool. It renders source NAMs through NAMCore and
+**Status: Beta 1.1 local tool. It renders source NAMs through NAMCore and
 generates trainable A2 bundles; listen and validate every generated model.**
+
+Beta 1.1 adds a dedicated **Sessions** project library alongside the three
+design modes, so saved designs and completed training artifacts are easier to
+return to without interrupting the builder workflow.
 
 ## What this is
 
@@ -172,6 +176,20 @@ tools remain shared across all three design modes.
    Both paths validate the exported `.nam` identically: loading and
    rendering it (Full and Lite) through the existing native NAMCore renderer
    and comparing against the training target.
+
+## Sessions
+
+The **Sessions** tab is a project library, not a popup. Use it to save the
+current controls under a name, load or inspect an earlier design, export a
+portable NAM Mixer JSON file, import one, or delete a session. Generated
+training bundles are also saved as sessions automatically so their completed
+NAM can be downloaded again or opened in **Tools**.
+
+A session restores the selected settings and app-managed NAM/cabinet file
+references, but it deliberately does not render automatically. After loading,
+use **Render Amps** to rebuild the pair and verify that the referenced files
+are still available. Training manifests under `work/a2` are separate from
+sessions and are not interchangeable with session JSON files.
 
 ## Design modes and the shared Cabinet stage
 

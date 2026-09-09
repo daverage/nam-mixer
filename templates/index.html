@@ -18,13 +18,7 @@
     <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" aria-pressed="false">Parallel Blend</button>
     <button type="button" class="mode-tab" id="tab-character" data-mode="character" aria-pressed="false">Character Blend</button>
     <button type="button" class="mode-tab" id="tab-tools" aria-pressed="false" aria-controls="nam-tools-panel">Tools</button>
-    <details class="session-settings">
-      <summary>Project</summary>
-      <div class="session-settings-menu">
-        <button type="button" id="btn-manage-sessions" class="btn btn-secondary btn-small" title="Save, inspect, load, download, or delete browser-local sessions">Sessions</button>
-        <span id="session-settings-status" class="info" aria-live="polite"></span>
-      </div>
-    </details>
+    <button type="button" class="mode-tab" id="tab-sessions" aria-pressed="false" aria-controls="sessions-panel">Sessions</button>
   </nav>
   <p id="mode-description" class="mode-description" aria-live="polite"></p>
 
@@ -476,8 +470,8 @@
 
   <div id="status" class="status-bar"></div>
 
-  <dialog id="session-manager" class="session-manager" aria-labelledby="session-manager-title">
-    <form method="dialog" class="session-manager-heading"><h2 id="session-manager-title">Sessions</h2><button type="submit" class="btn btn-secondary btn-small">Close</button></form>
+  <section id="sessions-panel" class="sessions-panel" hidden aria-labelledby="sessions-panel-title">
+    <div class="session-manager-heading"><div><div class="eyebrow">Project library</div><h2 id="sessions-panel-title">Sessions</h2><span id="session-settings-status" class="info" aria-live="polite"></span></div><button type="button" id="btn-close-sessions" class="btn btn-secondary btn-small">Back to builder</button></div>
     <p class="info">Sessions use one NAM Mixer JSON format. Saving, automatic bundle saves, export, and import all use this same file; training manifests in <code>work/a2</code> are not sessions.</p>
     <form id="session-save-form" class="session-save-form">
       <label for="session-name">Save current session as</label>
@@ -487,7 +481,7 @@
     <div class="session-import-row"><button type="button" id="btn-export-current-session" class="btn btn-secondary btn-small">Save & export current session</button><button type="button" id="btn-import-session" class="btn btn-secondary btn-small">Import session JSON</button><input type="file" id="import-session-file" accept="application/json,.json" hidden></div>
     <div id="session-manager-status" class="info" aria-live="polite"></div>
     <div id="session-list" class="session-list" aria-live="polite"></div>
-  </dialog>
+  </section>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

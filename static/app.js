@@ -73,9 +73,10 @@ function applyModeVisibility() {
 
 modeTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
-    // Tools temporarily hides the builder layout. Returning through any
-    // normal design tab must restore it before applying the selected mode.
+    // Utility tabs temporarily hide the builder layout. Returning through a
+    // design tab restores it before applying the selected mode.
     setToolsOpen(false);
+    setSessionsOpen(false);
     currentMode = tab.dataset.mode;
     modeTabs.forEach((t) => {
       t.classList.toggle("active", t === tab);
@@ -2171,7 +2172,7 @@ function applySessionSettings(s) {
 }
 
 const sessionSettingsStatus = document.getElementById("session-settings-status");
-const sessionManager = document.getElementById("session-manager");
+const sessionsPanel = document.getElementById("sessions-panel");
 const sessionList = document.getElementById("session-list");
 const sessionManagerStatus = document.getElementById("session-manager-status");
 const sessionNameInput = document.getElementById("session-name");
@@ -2309,7 +2310,6 @@ async function renderSessions() {
         activeSessionId = session.id;
         activeSessionName = session.name;
         activeSessionGenerated = session.generated === true;
-        sessionManager.close();
         sessionSettingsStatus.textContent = `Loaded ${session.name || "session"}`;
         setStatus(`Loaded ${session.name || "session"}.`);
       } catch (err) { sessionManagerStatus.textContent = "Could not load this session: " + err; }
@@ -2338,7 +2338,7 @@ async function renderSessions() {
     if (summary.artifact?.toolPath) {
       const toolsButton = document.createElement("button"); toolsButton.type = "button"; toolsButton.className = "btn btn-secondary btn-small"; toolsButton.textContent = "Open in NAM Tools";
       toolsButton.addEventListener("click", async () => {
-        sessionManager.close(); setToolsOpen(true);
+        setSessionsOpen(false); setToolsOpen(true);
         await setToolNam({ path: summary.artifact.toolPath }, summary.artifact.filename || "Session NAM");
       });
       actions.append(toolsButton);
@@ -2348,12 +2348,13 @@ async function renderSessions() {
   }
 }
 
-document.getElementById("btn-manage-sessions").addEventListener("click", async () => {
+document.getElementById("tab-sessions").addEventListener("click", async () => {
   sessionManagerStatus.textContent = "";
-  if (!sessionManager.open) sessionManager.showModal();
+  setSessionsOpen(true);
   sessionNameInput.focus();
   try { await renderSessions(); } catch (err) { sessionManagerStatus.textContent = "Could not load sessions: " + err; }
 });
+document.getElementById("btn-close-sessions").addEventListener("click", () => setSessionsOpen(false));
 
 document.getElementById("session-save-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2408,6 +2409,7 @@ updateBackendPanels();
 // approved-path validator; this UI only selects an app-managed source NAM. ----
 const toolsTab = document.getElementById("tab-tools");
 const toolsPanel = document.getElementById("nam-tools-panel");
+const sessionsTab = document.getElementById("tab-sessions");
 const toolEditors = document.getElementById("tool-editors");
 const toolInfo = document.getElementById("tool-nam-info");
 const toolResult = document.getElementById("tool-result");
@@ -2421,10 +2423,27 @@ const toolCalibrationStatus = document.getElementById("tool-calibration-status")
 
 function setToolsOpen(open) {
   toolsPanel.hidden = !open;
+  if (open) {
+    sessionsPanel.hidden = true;
+    sessionsTab.classList.remove("active");
+    sessionsTab.setAttribute("aria-pressed", "false");
+  }
   document.querySelectorAll(".workflow-nav, .tone-wizard, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
   toolsTab.classList.toggle("active", open);
   toolsTab.setAttribute("aria-pressed", open ? "true" : "false");
+}
+function setSessionsOpen(open) {
+  sessionsPanel.hidden = !open;
+  if (open) {
+    toolsPanel.hidden = true;
+    toolsTab.classList.remove("active");
+    toolsTab.setAttribute("aria-pressed", "false");
+  }
+  document.querySelectorAll(".workflow-nav, .tone-wizard, .layout").forEach((el) => { el.hidden = open; });
+  document.getElementById("mode-description").hidden = open;
+  sessionsTab.classList.toggle("active", open);
+  sessionsTab.setAttribute("aria-pressed", open ? "true" : "false");
 }
 function showToolResult(data) {
   toolResult.hidden = false;

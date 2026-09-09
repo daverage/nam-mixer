@@ -4,24 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Design modes
 
-The app has two design modes, both sharing Amp A/B, the preview DI, input
+The app has three design modes, all sharing Amp A/B, the preview DI, input
 profile/calibration, render, test gain, Listen controls, the Cabinet IR
 stage, official training input, A2 quality, and training -- switching modes
 never re-runs NAM inference (see `hybrid/pipeline.py`'s `RenderedPair`,
-reused by both):
+reused by all):
 
 - **Dynamic Hybrid** (the original/default mode): `hybrid/blend.py` +
   `hybrid/design.py` + `hybrid/training_target.py` -- level-driven crossfade,
   unchanged maths from before Fixed Blend existed.
-- **Fixed Blend**: `hybrid/fixed_blend.py` + `hybrid/blend_training_target.py`
+- **Parallel Blend**: `hybrid/fixed_blend.py` + `hybrid/blend_training_target.py`
   -- Amp A/Amp B combined at one constant user-chosen ratio
   (`result = A*(1-mix_b) + B*mix_b`), independent of playing level, no
   crossover envelope. Its own auto level-match
   (`hybrid.fixed_blend.compute_active_trim`) uses the DI's ACTIVE playing
   material (via `hybrid.coverage.active_signal_mask`), not a crossover band.
+- **Character Blend**: `hybrid/character_blend.py` +
+  `hybrid/character_training_target.py` -- creates a deterministic teacher
+  from one level-selected drive donor plus measured tone/feel corrections;
+  it is not a parallel waveform mix. Its low-level response sweep is a hard
+  preflight gate for bundle generation, preventing a hard gate from being
+  baked into a training target.
 
-A third, mode-independent stage, **Cabinet IR** (`hybrid/cab_ir.py`), sits
-AFTER the amp combination in either mode: ordinary causal FIR convolution,
+A mode-independent **Cabinet IR** stage (`hybrid/cab_ir.py`) sits AFTER the
+amp combination in every mode: ordinary causal FIR convolution,
 optionally preview-only or "baked" into the generated A2 target via the same
 `apply_cab_ir` function on the COMPLETE prepared IR (never shortened) in
 both cases.
@@ -243,17 +249,28 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     hashing) so the two modes' bundles stay structurally identical; only the
     combination step (fixed mix vs. level-driven crossfade) and the
     manifest's `design`/`mode` section differ.
-17. **`cab_ir.py`** is the shared Cabinet IR stage used by BOTH modes,
+17. **`character_blend.py`** is the Character Blend design mode: it derives
+    a deterministic teacher from a single level-selected drive donor and
+    measured tone/feel corrections. `CharacterBlendDesign` freezes the
+    analysis and controls; `evaluate_low_level_response` guards against a
+    low-level dead zone before a target is generated.
+18. **`character_training_target.py`** generates Character Blend A2 targets
+    using the shared training-input, cabinet, output-safety, and receptive
+    field helpers. It records the low-level sweep in the manifest and checks
+    the exported Full model against that sweep during validation.
+19. **`cab_ir.py`** is the shared Cabinet IR stage used by all modes,
     applied AFTER the amp combination: `load_and_prepare_cab_ir`/
     `get_prepared_cab_ir` (mono downmix, leading-silence trim, resample,
     cached by content hash) and `apply_cab_ir` (causal FIR convolution,
     truncated to the source length) are the exact same functions used for
     live preview and for baking into a training target -- never two
     subtly-different code paths. `CabDesign` (frozen, attached as an
-    optional `cab` field on both `HybridDesign` and `BlendDesign`) carries
+    optional `cab` field on `HybridDesign`, `BlendDesign`, and
+    `CharacterBlendDesign`) carries
     preview/baked provenance.
-18. **`receptive_field.py`**'s `combine_required_history` is the mode-aware
-    (Hybrid includes the crossover-envelope branch; Blend doesn't) combiner
+20. **`receptive_field.py`**'s `combine_required_history` is the mode-aware
+    (Hybrid and Character include the bounded-envelope branch; Parallel Blend
+    doesn't) combiner
     that returns BOTH the CORE `hard_required_samples` (Amp A/B [+
     envelope], no cab) and a baked cab's `formal_total_required_samples`
     (`hard + (L-1)` SERIAL, not another parallel branch, since the FIR runs
@@ -273,6 +290,13 @@ as the actual input for generating a real A2 training pair; see README.md's
 "Preview DIs vs. NAM training material" section for the distinction.
 
 `work/` is a gitignored scratch output directory.
+
+The **Sessions** tab is a file-backed project library. It stores named,
+portable NAM Mixer JSON records under `work/sessions`; generated bundles also
+carry a session record under `work/a2`. Loading settings never renders them
+automatically, and completed models can be embedded in/exported with a
+session. Training manifests are not session files and must not be imported as
+such.
 
 `assets/nam_models/` holds the user's own `.nam` amp capture files (e.g. a
 Fender clean + a JCM800 high-gain capture) used as Amp A/Amp B inputs. These
@@ -308,10 +332,10 @@ At the end of each major change, commit and push the repo
 
 ## Codebase-memory MCP index
 
-This repo is indexed in the `codebase-memory-mcp` knowledge graph as project
-`C-Users-daver-Documents-GitHub-hybrid-nam-builder`. That index is a snapshot
-pinned to a commit, not something that updates itself — treat it the same way
-as `git status`/`git log`: cheap to check, easy to go stale.
+This repo is indexed in the `codebase-memory-mcp` knowledge graph as
+`Users-andrzejmarczewski-Documents-GitHub-hybrid-nam-builder`. Treat the
+index as a snapshot: check its recorded commit against `HEAD` before relying
+on structural results.
 
 - **At the start of a session** (or before relying on `search_graph`,
   `trace_path`, `get_architecture`, etc. for this repo), call
@@ -320,9 +344,8 @@ as `git status`/`git log`: cheap to check, easy to go stale.
   the graph is stale for whatever changed since.
 - **After any commit that changes code structure** (new/renamed/deleted
   functions, files, or modules — not just docs/comments), re-run
-  `mcp__codebase-memory-mcp__index_repository` with
-  `repo_path: C:\Users\daver\Documents\GitHub\hybrid-nam-builder` to refresh
-  it. A quick way to check first whether it's worth re-indexing:
+  `mcp__codebase-memory-mcp__index_repository` with the current repository
+  path to refresh it. A quick way to check first whether it's worth re-indexing:
   `mcp__codebase-memory-mcp__detect_changes` against the last-indexed SHA.
 - Prefer the graph tools (`search_graph`, `trace_path`, `get_code_snippet`,
   `query_graph`) for structural questions about this codebase over plain
