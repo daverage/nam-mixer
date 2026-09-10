@@ -1,28 +1,63 @@
 # NAM Mixer
 
-**Status: Beta 1.1 local tool. It renders source NAMs through NAMCore and
-generates trainable A2 bundles; listen and validate every generated model.**
+**Blend two [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) captures into one new amp — playable live, and trainable into a single standalone `.nam` model.**
 
-Beta 1.1 adds a dedicated **Sessions** project library alongside the three
-design modes, so saved designs and completed training artifacts are easier to
-return to without interrupting the builder workflow.
+Ever wanted a clean Fender that opens up into a Marshall crunch the harder you
+dig in, without switching presets? NAM Mixer renders two of your own `.nam`
+captures through the same real NAMCore inference engine used by the official
+plugin, blends the results using one of three design modes, and lets you
+train the blend into a brand-new NAM model that stands on its own — no
+switching, no source models required at inference time.
 
-NAM Mixer is a local, privacy-friendly Flask app: your amp captures, DI files,
-and generated training material stay on your computer unless you explicitly
-send a training job to Kaggle. The browser UI has no build step.
+Everything runs locally as a small Flask app with no build step: your amp
+captures, DI files, and generated training material never leave your
+computer unless you explicitly send a training job to your own Kaggle
+account for free GPU time.
 
-## At a glance
+**Status: Beta. It renders source NAMs through real NAMCore inference and
+generates trainable A2 bundles end to end — listen to and validate every
+generated model before you trust it.**
 
-| Area | What you can do |
+## Why this exists
+
+Splitting your tone across two amp captures — a clean voice for verses, a
+driven one for choruses — usually means a preset switch, a MIDI patch change,
+or an A/B/Y box. NAM Mixer instead builds a **continuous, level-driven
+transition** between two captures, so the amp itself responds to how hard you
+play, the way a real tube amp's character shifts with picking dynamics. It
+then lets you freeze that behavior into one trained model, so the hybrid
+becomes something you can load anywhere a NAM runs.
+
+## Features
+
+| | |
 | --- | --- |
-| Sources | Choose two NAM captures, a preview DI, pickup/input profile, calibration, and per-amp trims. |
-| Three design modes | Build a level-driven **Dynamic Hybrid**, constant-ratio **Parallel Blend**, or deterministic **Character Blend** with tone, feel, and drive controls. |
-| Audition | Render once, then audition A/B and the result, test gain, coverage, level matching, optional alignment, output safety, and a cabinet IR. |
-| Create and train | Generate a target from the official NAM training input, bake the cabinet when wanted, then train locally or on a private Kaggle GPU. |
-| Sessions and Tools | Save, inspect, import/export, and restore settings; download generated NAMs; safely adjust output volume and supported metadata. |
+| 🎚️ **Three design modes** | **Dynamic Hybrid** — level-driven crossfade between Amp A and Amp B. **Parallel Blend** — constant-ratio mix of both amps, independent of playing level. **Character Blend** — a deterministic teacher built from one drive-selected donor plus measured tone/feel corrections. |
+| 🎧 **Real NAM inference** | Amps are rendered through the same [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore) C++ engine the official plugin uses — not a reimplementation, not an approximation. |
+| 🔊 **Live audition** | A/B the two source amps against the blended result over a bundled library of real guitar/bass performances, with input-profile simulation, test gain, coverage analysis, and an optional cabinet IR — all without re-running inference on every tweak. |
+| 🧠 **Train a real model** | Generate a proper training bundle from the official NAM training excitation and train a new A2 model on it — locally, or with one click on a private Kaggle GPU. |
+| ✅ **Built-in validation** | Every exported model is re-rendered and compared against its frozen teacher (ESR, RMS, peak, quiet-response) so you know exactly how close the trained model landed, not just that training finished. |
+| 💾 **Sessions library** | Save, reload, import/export, and revisit designs and completed models without losing your place. |
+| 🔒 **Local-first & private** | No cloud dependency, no telemetry, no account required. Kaggle training is fully opt-in and uses your own credentials and quota. |
 
 The app never claims that a completed training run sounds identical to its
 teacher. Always listen to and validate exported models.
+
+## Contents
+
+- [Why this exists](#why-this-exists) · [Features](#features)
+- [What this is](#what-this-is) · [This is NOT model-weight merging](#this-is-not-model-weight-merging)
+- [How the blend works](#why-the-dry-inputs-level-controls-the-transition):
+  [dry-input level](#why-the-dry-inputs-level-controls-the-transition),
+  [level matching](#why-automatic-level-matching-is-needed),
+  [input profile vs. crossover vs. calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
+- [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
+- [Workflow](#workflow) · [Sessions](#sessions) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
+- [macOS quick start](#macos-quick-start) · [Running it](#running-it)
+- [Current status and limitations](#current-status-and-limitations)
+- [Safety: training target vs. live preview](#safety-training-target-vs-live-preview)
+- [Project layout](#project-layout) · [NAM Tools](#nam-tools-output-volume-and-metadata)
+- [License and attribution](#license-and-attribution)
 
 ## What this is
 
@@ -249,22 +284,34 @@ exact same `apply_cab_ir` function on the COMPLETE prepared IR (never a
 shortened one), so what you hear in preview with "Use cab in preview"
 checked is exactly what gets trained if you also check "Bake cab into A2".
 
-**Receptive-field policy: hard core check vs. advisory cabinet check.**
-Amp A/Amp B (+, for Hybrid, the bounded crossover envelope) are the CORE
+**Receptive-field policy: one hard check, two advisory ones.** Amp A/Amp B
+(+, for Hybrid and Character, the bounded crossover envelope) are the CORE
 dependency — this must fit inside the destination A2's actual receptive
-field, or generation/training is refused exactly as before. A baked cabinet
-adds `len(ir) - 1` samples of *serial* temporal dependency ON TOP of that
-core (see `hybrid/receptive_field.py`'s `combine_required_history`), and
-this FORMAL total is always calculated and reported — but it is only
-advisory: since we're training an A2 to *approximate* the rendered teacher
-target rather than compiling its signal graph exactly, a baked cab whose
-formal total exceeds the A2's receptive field does NOT block training. It
-means the A2 will learn an approximation of the post-cab response within its
-available temporal capacity, and `scripts/train_a2.py`/the Kaggle cloud
-worker print a "CABINET APPROXIMATION" notice explaining exactly that —
+field, or generation/training is refused exactly as before. Two further
+dependencies are always calculated and reported honestly, but never block
+training by themselves, because in both cases the A2 is being trained to
+*approximate* the rendered teacher rather than to compile its signal graph
+exactly:
+
+- **Character processing.** Character Blend's donor transitions, smoothing,
+  and correction filters add their own formal temporal dependency
+  (`formal_character_required_samples`). If it exceeds the A2's receptive
+  field, training still proceeds as an approximation — the Full/Lite export
+  and quiet-response checks stay authoritative for judging the result.
+- **Baked cabinet.** A baked cabinet adds `len(ir) - 1` samples of *serial*
+  temporal dependency on top of the core (see `hybrid/receptive_field.py`'s
+  `combine_required_history`). A baked cab whose formal total exceeds the
+  A2's receptive field does not block training either — the A2 learns an
+  approximation of the post-cab response within its available capacity.
+
+Either case prints an explicit "CABINET APPROXIMATION" or "CHARACTER
+APPROXIMATION" notice from `scripts/train_a2.py`/the Kaggle cloud worker —
 validate the result by listening and by checking the printed ESR/RMS
-metrics against the baked target. The exact same full-length IR is used for
-preview and for baking in either case; only the training-time gating differs.
+metrics against the baked target. The exact same full-length cabinet IR is
+used for preview and for baking in either case; only the training-time
+gating differs. Local and Kaggle training implement this policy
+independently but are kept from silently diverging by
+`tests/test_receptive_field_parity.py`.
 
 Because raw WAV/FIR length is a poor proxy for how much of a captured IR is
 actually audible signal, the Cabinet card also reports cumulative-energy
@@ -402,14 +449,23 @@ python3 -m pytest -q
 # `pytest -q` works too; pytest.ini resolves the repository modules.
 ```
 
-The test suite covers `hybrid/envelope.py`, `hybrid/blend.py`,
-`hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`, and
-`hybrid/nam_loader.py` against synthetic signals and does not require torch,
-`neural-amp-modeler`, or the native `nam_render` tool to be built.
-`tests/test_render.py` exercises real NAM inference and is skipped
-automatically unless both `native/nam_render` has been built (see its
+The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
+`hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`,
+`hybrid/nam_loader.py`, `hybrid/input_profiles.py`, `hybrid/calibration.py`,
+`hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`,
+`hybrid/training_target.py`, `hybrid/fixed_blend.py`,
+`hybrid/blend_training_target.py`, `hybrid/character_blend.py`,
+`hybrid/character_training_target.py`, `hybrid/cab_ir.py`,
+`hybrid/receptive_field.py`, `hybrid/a2_training_settings.py`, and
+`hybrid/kaggle_training.py` against synthetic signals and mocked renders —
+none of it requires torch, `neural-amp-modeler`, or the native `nam_render`
+tool to be built. `tests/test_render.py` exercises real NAM inference and is
+skipped automatically unless both `native/nam_render` has been built (see its
 README) and a real `.nam` file is present at
 `assets/nam_models/FenderSuperReverb1977_Clean.nam`.
+`tests/test_receptive_field_parity.py` loads the local and Kaggle trainers
+side by side and fails the suite if their receptive-field policies ever
+diverge, rather than letting that drift go unnoticed.
 
 For repeatable opt-in real-render coverage across all three design modes, use
 the explicit harness rather than relying on that personal-model test:
