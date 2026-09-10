@@ -215,7 +215,7 @@ def _resolve_baked_cab_fir_samples(manifest: dict, cab: dict, sample_rate: int) 
 
 
 def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
-    """CORE (hard) vs. baked-CABINET (formal/advisory) receptive-field
+    """CORE (hard) vs. Character/CABINET (formal/advisory) receptive-field
     policy -- see docs/blend-mode.md's cabinet-approximation-policy section
     for the full rationale this implements. Two separate questions:
 
@@ -224,7 +224,9 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
        the installed A2's actual receptive field? This is a HARD
        requirement: failing it aborts training (`assert_required_history_fits`).
 
-    2. If a cab is baked, does ALSO adding its serial FIR history
+    2. For Character Blend, its added smoothing/transition/correction history
+       is recorded and may require approximation, but never disables training.
+       If a cab is baked, does ALSO adding its serial FIR history
        (`fir_length - 1` samples) keep the FORMAL total within the A2's
        receptive field? This is calculated and reported honestly, but it
        NEVER gates training by itself -- exceeding it means the A2 will
@@ -257,6 +259,16 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
         except (OSError, ValueError, ReceptiveFieldUnavailable) as exc:
             print(f"WARNING: could not compute {label}'s receptive field ({amp_path}): {exc}")
 
+    character_branches = {}
+    if mode == "character":
+        recorded_branches = (manifest.get("receptive_field") or {}).get("branch_samples") or {}
+        for label, samples in recorded_branches.items():
+            if str(label).startswith("character_") and samples is not None:
+                character_branches[str(label)] = int(samples)
+        qualification = (manifest.get("receptive_field") or {}).get("history_qualification")
+        if qualification:
+            print(f"WARNING: {qualification}")
+
     if not branch_samples:
         print("WARNING: no branch dependency could be determined -- skipping receptive-field check.")
         return {}
@@ -268,7 +280,8 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
         print(f"  {label:<12} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
     print(f"  {'hard core':<12} {hard_required:>6} samples ({hard_required / sample_rate * 1000:6.1f} ms)")
 
-    # The CORE dependency is a HARD requirement -- unlike a baked cab below,
+    # The CORE dependency is a HARD requirement -- unlike Character processing
+    # and a baked cab below,
     # this is never relaxed to an advisory warning. A2's temporal capacity
     # was the whole reason the crossover envelope was bounded/causal and why
     # the source amps are what they are; if the core teacher itself doesn't
@@ -295,7 +308,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
 
     result = {
         "mode": mode,
-        "branch_samples": branch_samples,
+        "branch_samples": {**branch_samples, **character_branches},
         "hard_required_samples": hard_required,
         "a2_receptive_field_samples": rf.receptive_field_samples,
         "a2_submodels": rf.submodel_names,
@@ -305,7 +318,29 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
         "cab_fir_history_samples": 0,
         "formal_total_required_samples": hard_required,
         "cab_requires_approximation": False,
+        "character_requires_approximation": False,
     }
+
+    formal_character = hard_required
+    if character_branches:
+        formal_character = max(hard_required, *character_branches.values())
+        result["formal_character_required_samples"] = formal_character
+        print("\nCharacter processing dependency:")
+        for label, samples in character_branches.items():
+            print(f"  {label:<28} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
+        print(f"  {'formal Character':<28} {formal_character:>6} samples ({formal_character / sample_rate * 1000:6.1f} ms)")
+        if formal_character > rf.receptive_field_samples:
+            result["character_requires_approximation"] = True
+            print(
+                "\nCHARACTER APPROXIMATION:\n"
+                f"  Character processing extends the teacher dependency to {formal_character} samples, beyond "
+                f"the A2 receptive field of {rf.receptive_field_samples} samples.\n"
+                "  Training will continue for every backend and epoch preset. Validate Full and Lite exports "
+                "against the frozen teacher and by listening."
+            )
+        else:
+            print(f"  Character processing fits inside the A2 receptive field ({formal_character} <= {rf.receptive_field_samples}).")
+        result["formal_total_required_samples"] = formal_character
 
     cab = manifest.get("cab") or {}
     if not cab.get("baked"):
@@ -315,7 +350,8 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     if not cab_fir_samples:
         return result
 
-    formal_total = hard_required + cab_fir_samples
+    cab_formal = hard_required + cab_fir_samples
+    formal_total = formal_character + cab_fir_samples
     result.update({
         "cab_baked": True,
         "cab_fir_length_samples": cab_fir_length,
@@ -335,22 +371,22 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
 
     # The formal total is NEVER a hard gate -- see function docstring. Only
     # report/record whether A2 is being asked to approximate the cab.
-    if formal_total > rf.receptive_field_samples:
+    if cab_formal > rf.receptive_field_samples:
         result["cab_requires_approximation"] = True
         print(
             "\nCABINET APPROXIMATION:\n"
             f"  The core {mode.capitalize()} target fits within the A2 receptive field "
             f"({hard_required} / {rf.receptive_field_samples} samples).\n"
-            f"  The baked cabinet extends the teacher's formal temporal dependency to "
-            f"{formal_total} samples, beyond the A2 receptive field of {rf.receptive_field_samples} samples.\n"
+            f"  The baked cabinet extends the hard-core dependency to {cab_formal} samples, beyond "
+            f"the A2 receptive field of {rf.receptive_field_samples} samples.\n"
             "  Training will continue: the cabinet response will be approximated by the A2 within its "
             "available temporal capacity.\n"
             "  Validate the resulting model against the baked target and by listening."
         )
     else:
         print(
-            f"  Formal total also fits inside the A2 receptive field "
-            f"({formal_total} <= {rf.receptive_field_samples}) -- no approximation needed for the cab."
+            f"  Cabinet-adjusted core fits inside the A2 receptive field "
+            f"({cab_formal} <= {rf.receptive_field_samples}) -- no additional cabinet approximation needed."
         )
 
     return result
@@ -521,7 +557,7 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
     return {"path": str(nam_path), "sample_rate": sr, "frame_count": len(rendered), "rendered": rendered}
 
 
-def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int) -> "dict | None":
+def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float = 0.0) -> "dict | None":
     """Thin wrapper over `hybrid.character_training_target.check_full_low_
     level_response` (docs/blend-mode-fixes.md, Phases 10-11) that also prints
     a verdict line -- the actual sweep/comparison logic is shared with
@@ -530,10 +566,18 @@ def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Pa
     docstring). Only meaningful for Character Blend bundles that recorded a
     `low_level_response` section; returns None otherwise.
     """
-    result = character_training_target.check_full_low_level_response(manifest, nam_path, input_path, sample_rate)
+    try:
+        result = character_training_target.check_export_low_level_response(
+            manifest, nam_path, input_path, sample_rate, variant=variant, slim=slim,
+        )
+    except (NamRenderError, OSError, ValueError) as exc:
+        result = {"state": "unavailable", "pass": None, "variant": variant, "reason": f"quiet validation could not run: {exc}"}
     if result is not None:
-        verdict = "PASS" if result["pass"] else "FAIL -- trained Full A2 developed a low-level response gap vs. the teacher"
-        print(f"Character Blend low-level response (Full A2 vs teacher): max error {result['max_error_db']:.1f} dB -- {verdict}")
+        if result.get("pass") is None:
+            print(f"Character Blend low-level response ({variant} vs teacher): UNAVAILABLE -- {result['reason']}")
+        else:
+            verdict = "PASS" if result["pass"] else "FAIL -- exported A2 differs from the frozen teacher"
+            print(f"Character Blend low-level response ({variant} vs teacher): max error {result['max_error_db']:.1f} dB -- {verdict}")
     return result
 
 
@@ -594,7 +638,12 @@ def main(argv=None) -> int:
 
         full_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=False)
         full_metrics = compare_to_target(full_result["rendered"], target_path)
-        low_level_response_check = check_full_low_level_response(manifest, nam_path, input_path, sample_rate)
+        low_level_response_checks = {}
+        full_quiet = check_full_low_level_response(
+            manifest, nam_path, input_path, sample_rate, variant="full", slim=0.0,
+        )
+        if full_quiet is not None:
+            low_level_response_checks["full"] = full_quiet
 
         lite_metrics = None
         lite_validation = None
@@ -602,6 +651,11 @@ def main(argv=None) -> int:
             lite_result = validate_exported_nam(nam_path, input_path, sample_rate, slim=True)
             lite_metrics = compare_to_target(lite_result["rendered"], target_path)
             lite_validation = {"rendered_ok": True, "metrics": lite_metrics}
+            lite_quiet = check_full_low_level_response(
+                manifest, nam_path, input_path, sample_rate, variant="lite", slim=1.0,
+            )
+            if lite_quiet is not None:
+                low_level_response_checks["lite"] = lite_quiet
         except TrainingAbort as exc:
             print(f"Lite/slim validation skipped or failed: {exc}")
             lite_validation = {"rendered_ok": False, "error": str(exc)}
@@ -609,8 +663,11 @@ def main(argv=None) -> int:
         validation_report = build_validation_report(
             _sha256_file(nam_path),
             {"full": {"rendered_ok": True, "metrics": full_metrics}, "lite": lite_validation},
-            quiet_playing=low_level_response_check,
-            cabinet=manifest.get("receptive_field", {}).get("cab", {"baked": False, "approximation": None}),
+            quiet_playing=low_level_response_checks or None,
+            cabinet={
+                **manifest.get("receptive_field", {}).get("cab", {"baked": False}),
+                "approximation": rf_check.get("cab_requires_approximation"),
+            },
         )
 
         if rf_check.get("cab_requires_approximation"):
@@ -633,8 +690,9 @@ def main(argv=None) -> int:
         }
         if rf_check:
             manifest["receptive_field_check"] = rf_check
-        if low_level_response_check:
-            manifest["low_level_response_check"] = low_level_response_check
+        if low_level_response_checks:
+            manifest["low_level_response_checks"] = low_level_response_checks
+            manifest["low_level_response_check"] = low_level_response_checks.get("full")
         manifest.pop("_bundle_dir", None)
         manifest.pop("_input_path", None)
         manifest.pop("_target_path", None)

@@ -1,5 +1,5 @@
 """Local/cloud parity for the receptive-field policy: CORE dependency is a
-HARD gate, a baked cabinet's FORMAL total is advisory-only -- see
+HARD gate; Character processing and a baked cabinet's FORMAL totals are advisory -- see
 docs/blend-mode.md's cabinet-approximation-policy section. Both
 `scripts/train_a2.py::check_receptive_field` (imports hybrid/, recomputes
 Amp A/B RF from the actual .nam files) and
@@ -143,6 +143,38 @@ def test_both_reject_core_overflow_regardless_of_cab(tmp_path, local_mod, cloud_
 
     with pytest.raises(cloud_mod.CloudTrainingError):
         cloud_mod.check_receptive_field(cloud_manifest, 48000)
+
+
+def test_both_train_character_when_only_character_processing_overflows(tmp_path, local_mod, cloud_mod, monkeypatch):
+    local_manifest, cloud_manifest = _matching_manifests(tmp_path, mode="character")
+    for manifest in (local_manifest, cloud_manifest):
+        manifest["design"] = {"envelope_max_history_ms": 0.02}
+        manifest.setdefault("receptive_field", {}).setdefault("branch_samples", {}).update({
+            "envelope": 1,
+            "character_amp_a_correction": 67,
+            "character_drive_control": 231,
+        })
+
+    monkeypatch.setattr(
+        local_mod, "assert_required_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": 3, "submodel_names": ["fake"]})(),
+    )
+    local_result = local_mod.check_receptive_field(local_manifest, 48000)
+
+    class _FakeResource:
+        def read_text(self, encoding="utf-8"):
+            return json.dumps({"net": {"config": {"submodels": [
+                {"name": "fake", "config": {"layers": [{"kernel_sizes": [3], "dilations": [1]}]}}
+            ]}}})
+
+    import importlib.resources as importlib_resources
+    monkeypatch.setattr(importlib_resources, "files", lambda pkg: type("F", (), {"joinpath": lambda self, name: _FakeResource()})())
+    cloud_result = cloud_mod.check_receptive_field(cloud_manifest, 48000)
+
+    for result in (local_result, cloud_result):
+        assert result["hard_required_samples"] == 3
+        assert result["formal_character_required_samples"] == 231
+        assert result["character_requires_approximation"] is True
 
 
 def test_both_report_no_approximation_when_formal_total_also_fits(tmp_path, local_mod, cloud_mod, monkeypatch):

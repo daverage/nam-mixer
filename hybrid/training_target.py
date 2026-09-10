@@ -440,7 +440,7 @@ def compute_receptive_field_record(
     # "Do not hide or falsify the RF numbers."
     cab_requires_approximation: Optional[bool] = None
     a2_rf_at_generation_time: Optional[int] = None
-    if cab_baked and cab_fir_samples:
+    if (cab_baked and cab_fir_samples) or mode == "character":
         try:
             a2_rf_at_generation_time = compute_a2_receptive_field().receptive_field_samples
         except ReceptiveFieldUnavailable:
@@ -473,22 +473,52 @@ def compute_receptive_field_record(
     if mode == "character":
         from .character_blend import character_temporal_history_samples
 
-        character_history = character_temporal_history_samples(sample_rate, character_envelope_smoothing_ms or 40.0)
-        # Envelope -> smoothing -> donor-transition is serial control history;
-        # the correction FIR is serial with each source amp path.  Those three
-        # paths are parallel at the teacher output, hence their maximum.
-        control_history = (envelope_samples or 0) + character_history["drive_smoothing_serial_samples"] + character_history["donor_transition_serial_samples"]
+        smoothing_ms = 40.0 if character_envelope_smoothing_ms is None else character_envelope_smoothing_ms
+        character_history = character_temporal_history_samples(sample_rate, smoothing_ms)
+        # The control path is envelope -> drive smoothing -> donor transition
+        # -> compensation smoothing -> correction FIR. The FIR also follows
+        # either selected amp path. These paths meet at the teacher output and
+        # therefore take a parallel maximum, while stages within each path add.
+        control_history = (
+            (envelope_samples or 0)
+            + character_history["drive_smoothing_serial_samples"]
+            + character_history["donor_transition_serial_samples"]
+            + character_history["compensation_smoothing_serial_samples"]
+            + character_history["correction_fir_serial_samples"]
+        )
         extra_branches = {
             "character_amp_a_correction": amp_a_samples + character_history["correction_fir_serial_samples"],
             "character_amp_b_correction": amp_b_samples + character_history["correction_fir_serial_samples"],
             "character_drive_control": control_history,
         }
-    record = combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples, extra_branches)
+    # Character processing is deliberately trainable as an approximation in
+    # the standard packed A2, just like a baked cabinet.  Keep the source amps
+    # and bounded envelope as the hard gate; record the longer Character
+    # teacher dependency separately so both trainers can warn without
+    # disabling any backend or epoch preset.
+    record = combine_required_history(mode, amp_a_samples, amp_b_samples, envelope_samples, cab_fir_samples)
+    if extra_branches:
+        record["branch_samples"].update(extra_branches)
+        formal_character = max(record["hard_required_samples"], *extra_branches.values())
+        record["formal_character_required_samples"] = formal_character
+        record["character_requires_approximation"] = (
+            a2_rf_at_generation_time is not None and formal_character > a2_rf_at_generation_time
+        )
+        record["formal_total_required_samples"] = formal_character + cab_fir_samples
+        record["total_required_samples"] = record["formal_total_required_samples"]
     if character_history is not None:
         record["character_temporal_history"] = character_history
+        record["exact_history_bounded"] = False
+        record["history_qualification"] = (
+            "Character donor transitions settle within the recorded transition window after the last switch, "
+            "but repeated mid-ramp reversals retain explicit state beyond a finite input window. The numeric "
+            "hard requirement is the stable-settling dependency, not a claim of exact finite-memory equivalence."
+        )
     record["cab"] = cab_record
     if a2_rf_at_generation_time is not None:
-        cab_requires_approximation = record["formal_total_required_samples"] > a2_rf_at_generation_time
+        cab_requires_approximation = (
+            record["hard_required_samples"] + cab_fir_samples > a2_rf_at_generation_time
+        )
         record["a2_receptive_field_samples_at_generation_time"] = a2_rf_at_generation_time
     record["cab_requires_approximation"] = cab_requires_approximation
     return record

@@ -78,6 +78,7 @@ modeTabs.forEach((tab) => {
     setToolsOpen(false);
     setSessionsOpen(false);
     currentMode = tab.dataset.mode;
+    invalidateLiveAudition("Design mode changed — live blend stopped.");
     modeTabs.forEach((t) => {
       t.classList.toggle("active", t === tab);
       t.setAttribute("aria-pressed", t === tab ? "true" : "false");
@@ -249,6 +250,7 @@ updateCabStatus();
 
 const profilesData = JSON.parse(document.getElementById("input-profiles-data").textContent);
 const instrumentSelect = document.getElementById("instrument-select");
+let instrumentExplicitlySelected = false;
 const profileSelect = document.getElementById("input-profile-select");
 const profileDescription = document.getElementById("input-profile-description");
 const customGainRow = document.getElementById("custom-gain-row");
@@ -296,7 +298,8 @@ function populateProfileSelect() {
 // staleness impossible to miss: preview buttons disable, the Render Amps
 // button gets a pulsing highlight, and the status line names WHAT changed
 // (not a generic "input profile changed" for every case).
-function markProfileStale(reason) {
+function markProfileStale(reason, { preserveAudition = false } = {}) {
+  if (!preserveAudition) pendingAuditionResume = null;
   resetGeneratedModel("The source or input settings changed. Create new training files when you are happy with the new sound.");
   // This is the single invalidation boundary for every setting that changes
   // NAM inference.  A warning alone must never leave old audio usable.
@@ -320,11 +323,13 @@ document.getElementById("amp-a-file").addEventListener("change", () => markProfi
 document.getElementById("amp-b-file").addEventListener("change", () => markProfileStale("Amp B changed"));
 
 instrumentSelect.addEventListener("change", () => {
+  instrumentExplicitlySelected = true;
   populateProfileSelect();
   markProfileStale("Instrument changed");
   updateCoverage();
 });
 profileSelect.addEventListener("change", () => {
+  instrumentExplicitlySelected = true;
   updateProfileDescription();
   markProfileStale("Input profile changed");
   updateCoverage();
@@ -367,12 +372,16 @@ ampBInputGainSlider.addEventListener("input", () => {
 const testGainStatus = document.getElementById("test-gain-status");
 const TEST_GAIN_DEBOUNCE_MS = 600;
 let testGainRenderTimer = null;
+let pendingAuditionResume = null;
 
 testGainSlider.addEventListener("input", () => {
   testGainValue.textContent = `${fmtSigned(testGainSlider.value)} dB`;
   const shouldRender = havePair || testGainRenderTimer !== null;
+  if (lastPreviewSource) pendingAuditionResume = {
+    source: lastPreviewSource, position: player.currentTime || 0, playing: !player.paused,
+  };
   if (testGainRenderTimer) clearTimeout(testGainRenderTimer);
-  markProfileStale("Test gain changed");
+  markProfileStale("Test gain changed", { preserveAudition: true });
   if (!shouldRender) return;
   const requestGeneration = renderGeneration;
   testGainStatus.textContent = "Will re-render shortly...";
@@ -388,8 +397,10 @@ testGainSlider.addEventListener("input", () => {
       if (requestGeneration !== renderGeneration) return;
       applyRenderResult(data, { applySuggestedCrossover: false });
       testGainStatus.textContent = `Updated -- input peak ${data.input_peak_dbfs.toFixed(1)} dBFS.`;
-      if (lastPreviewSource) {
-        await preview(lastPreviewSource); // refresh whatever's currently loaded/playing
+      if (pendingAuditionResume) {
+        const resume = pendingAuditionResume;
+        pendingAuditionResume = null;
+        await preview(resume.source, { resumeState: resume, quiet: true });
       }
     } catch (err) {
       testGainStatus.textContent = "Error: " + err.message;
@@ -408,6 +419,7 @@ testGainSlider.addEventListener("input", () => {
 const diSelector = document.getElementById("di-selector");
 
 function applyInstrumentHintFromDi() {
+  if (instrumentExplicitlySelected) return;
   const desired = diSelector.value.startsWith("bass_") ? "bass" : "guitar";
   if (instrumentSelect.value !== desired) {
     instrumentSelect.value = desired;
@@ -418,6 +430,7 @@ function applyInstrumentHintFromDi() {
 diSelector.addEventListener("change", () => {
   applyInstrumentHintFromDi();
   markProfileStale("DI clip changed");
+  invalidateModelComparison("The musical test performance changed. Build the comparison again.");
 });
 
 applyInstrumentHintFromDi();
@@ -613,6 +626,7 @@ function updateWizardLabels() {
 }
 function setModeFromWizard(mode) {
   currentMode = mode;
+  invalidateLiveAudition("Design mode changed — live blend stopped.");
   modeTabs.forEach((tab) => {
     const active = tab.dataset.mode === mode;
     tab.classList.toggle("active", active);
@@ -639,7 +653,8 @@ document.querySelectorAll('input[name="wizard-behaviour"]').forEach((input) => i
 populateWizardProfiles();
 updateWizardLabels();
 
-document.getElementById("btn-wizard-apply").addEventListener("click", () => {
+function applyWizardSettings() {
+  instrumentExplicitlySelected = true;
   const profileId = wizardProfile.value;
   if (instrumentSelect.value !== wizardInstrument.value) {
     instrumentSelect.value = wizardInstrument.value;
@@ -668,6 +683,7 @@ document.getElementById("btn-wizard-apply").addEventListener("click", () => {
     crossoverKnobSlider.value = wizardSwitch.value;
     const crossoverDb = dbFromKnob(wizardSwitch.value);
     crossoverSlider.value = crossoverDb.toFixed(2);
+    crossoverBaseline = { value: crossoverSlider.value, label: "wizard" };
     crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
     syncCrossoverKnobFromDb();
     transitionSlider.value = behaviour === "smooth" ? "12" : "6";
@@ -685,7 +701,8 @@ document.getElementById("btn-wizard-apply").addEventListener("click", () => {
     ? `${recipe} Re-render the amps now so the selected instrument profile drives both NAMs.`
     : `${recipe} Upload both NAMs and render the amps to calibrate the guitar-volume switch point.`;
   setWorkflowStage("configure");
-});
+}
+document.getElementById("btn-wizard-apply").addEventListener("click", applyWizardSettings);
 
 wizardAnalyseButton.addEventListener("click", async () => {
   wizardResult.hidden = false;
@@ -748,6 +765,9 @@ const liveBlendStatus = document.getElementById("live-blend-status");
 const autoAuditionToggle = document.getElementById("auto-audition");
 const trimReadout = document.getElementById("trim-readout");
 const renderStatus = document.getElementById("render-status");
+const rendererRetryButton = document.getElementById("btn-renderer-retry");
+const rendererHelp = document.getElementById("renderer-help");
+const rendererPath = document.getElementById("renderer-path");
 const journeyCanvas = document.getElementById("journey-canvas");
 const journeyTooltip = document.getElementById("journey-tooltip");
 const journeyEmpty = document.getElementById("journey-empty");
@@ -766,18 +786,39 @@ let previewRequestId = 0;
 let auditionRefreshTimer = null;
 
 async function refreshRendererReadiness() {
+  rendererRetryButton.disabled = true;
+  renderStatus.textContent = "Checking the native renderer…";
   try {
     const resp = await fetch("/api/renderer/readiness");
     const data = await resp.json();
-    if (!data.verified) {
-      renderStatus.textContent = `Renderer unavailable: ${data.error}. Build native/nam_render (see its README), then click Render Amps to retry.`;
+    if (data.verified) {
+      renderStatus.textContent = "Renderer ready.";
+      renderStatus.dataset.rendererState = "ready";
+      rendererRetryButton.hidden = true;
+      rendererHelp.hidden = true;
+      rendererPath.textContent = data.path ? `Verified executable: ${data.path}` : "";
+    } else {
+      const state = data.found ? "unusable" : "missing";
+      renderStatus.dataset.rendererState = state;
+      renderStatus.textContent = data.found
+        ? `Renderer found but could not be verified: ${data.error}`
+        : `Renderer is not installed or could not be found: ${data.error}`;
+      rendererPath.textContent = data.path ? `Found executable: ${data.path}` : "No executable path was found.";
+      rendererRetryButton.hidden = false;
+      rendererHelp.hidden = false;
     }
     return data;
   } catch (err) {
     renderStatus.textContent = `Could not verify the renderer: ${err}`;
-    return { verified: false };
+    renderStatus.dataset.rendererState = "check-failed";
+    rendererRetryButton.hidden = false;
+    rendererHelp.hidden = false;
+    return { found: false, verified: false, error: String(err) };
+  } finally {
+    rendererRetryButton.disabled = false;
   }
 }
+rendererRetryButton.addEventListener("click", refreshRendererReadiness);
 refreshRendererReadiness();
 
 function clearAudition() {
@@ -793,10 +834,10 @@ function clearAudition() {
   lastSourcePlayed = null;
 }
 
-function scheduleAuditionRefresh(source = "mix") {
+function scheduleAuditionRefresh(source = lastPreviewSource) {
   // Refresh can follow an explicit play action, but controls must never cause
   // sound to start by themselves.
-  if (!havePair || !autoAuditionToggle.checked || liveAudition.active || player.paused) return;
+  if (!source || !havePair || !autoAuditionToggle.checked || liveAudition.active || player.paused) return;
   clearTimeout(auditionRefreshTimer);
   auditionRefreshTimer = setTimeout(() => preview(source, { preservePosition: true, quiet: true }), 140);
 }
@@ -813,6 +854,9 @@ const liveAudition = {
   gainA: null,
   gainB: null,
   compressor: null,
+  outputGain: null,
+  stems: null,
+  mixB: 0.5,
   stop() {
     this.requestId += 1;
     [this.sourceA, this.sourceB].forEach((source) => {
@@ -820,10 +864,14 @@ const liveAudition = {
     });
     this.active = false;
     this.sourceA = this.sourceB = this.gainA = this.gainB = null;
+    this.outputGain = this.stems = null;
+    liveBlendButton.disabled = !havePair;
     updateLiveAuditionButton();
   },
   setMix(mixB, immediate = false) {
     if (!this.active) return;
+    this.mixB = mixB;
+    this.updateOutputGain(immediate);
     const now = this.context.currentTime;
     if (immediate) {
       this.gainA.gain.cancelScheduledValues(now);
@@ -835,6 +883,34 @@ const liveAudition = {
     // A short ramp prevents zipper/click artefacts while dragging.
     this.gainA.gain.setTargetAtTime(1 - mixB, now, 0.012);
     this.gainB.gain.setTargetAtTime(mixB, now, 0.012);
+  },
+  updateOutputGain(immediate = false) {
+    if (!this.active || !this.outputGain || !this.stems) return;
+    const a = this.stems.getChannelData(0);
+    const b = this.stems.getChannelData(1);
+    let peak = 0;
+    for (let i = 0; i < a.length; i++) {
+      peak = Math.max(peak, Math.abs(a[i] * (1 - this.mixB) + b[i] * this.mixB));
+    }
+    const beforeDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+    const params = outputGainParamsBody();
+    // Match compute_auto_output_gain_db: boost only, targeting -3 dBFS.
+    const gainDb = params.output_gain_mode === "auto"
+      ? (peak > 0 ? Math.max(0, -3 - beforeDb) : 0)
+      : params.manual_output_gain_db;
+    const gain = 10 ** (gainDb / 20);
+    const now = this.context.currentTime;
+    this.outputGain.gain.cancelScheduledValues(now);
+    if (immediate) this.outputGain.gain.setValueAtTime(gain, now);
+    else this.outputGain.gain.setTargetAtTime(gain, now, 0.012);
+    const values = {
+      "X-Output-Gain-Mode": params.output_gain_mode,
+      "X-Output-Gain-Db": String(gainDb),
+      "X-Peak-Before-Output-Gain-Dbfs": String(beforeDb),
+      "X-Peak-After-Output-Gain-Dbfs": String(beforeDb + gainDb),
+      "X-Output-Gain-Will-Clip-Preview": String(beforeDb + gainDb > -1),
+    };
+    updateOutputGainReadout({ get: (name) => values[name] ?? null });
   },
 };
 
@@ -872,7 +948,9 @@ async function startLiveBlend() {
     const resp = await fetch("/api/live_blend_stems", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ render_id: activeRenderId, ...blendParamsBody(), ...cabParamsBody() }),
+      // Keep stems unscaled; browser gain follows current controls even while
+      // this request is loading, and auto gain follows the live mix ratio.
+      body: JSON.stringify({ render_id: activeRenderId, ...blendParamsBody(), ...cabParamsBody(), output_gain_mode: "manual", manual_output_gain_db: 0 }),
     });
     if (!resp.ok) throw new Error((await resp.json()).error || "Could not load live stems.");
     const Context = window.AudioContext || window.webkitAudioContext;
@@ -881,7 +959,7 @@ async function startLiveBlend() {
     liveAudition.context = context;
     await context.resume();
     const decoded = await context.decodeAudioData(await (await resp.blob()).arrayBuffer());
-    if (requestId !== liveAudition.requestId || !havePair) return;
+    if (requestId !== liveAudition.requestId || !havePair || currentMode !== "blend") return;
     if (decoded.numberOfChannels < 2) throw new Error("Live stem response was not stereo.");
     player.pause();
     const sourceA = context.createBufferSource();
@@ -891,33 +969,36 @@ async function startLiveBlend() {
     sourceA.loop = sourceB.loop = true;
     const gainA = context.createGain();
     const gainB = context.createGain();
+    const outputGain = context.createGain();
     const compressor = context.createDynamicsCompressor();
     compressor.threshold.value = -3;
     compressor.knee.value = 4;
     compressor.ratio.value = 12;
     compressor.attack.value = 0.003;
     compressor.release.value = 0.12;
-    sourceA.connect(gainA).connect(compressor);
-    sourceB.connect(gainB).connect(compressor);
+    sourceA.connect(gainA).connect(outputGain);
+    sourceB.connect(gainB).connect(outputGain);
+    outputGain.connect(compressor);
     compressor.connect(context.destination);
     liveAudition.sourceA = sourceA;
     liveAudition.sourceB = sourceB;
     liveAudition.gainA = gainA;
     liveAudition.gainB = gainB;
     liveAudition.compressor = compressor;
+    liveAudition.outputGain = outputGain;
+    liveAudition.stems = decoded;
     liveAudition.active = true;
     liveAudition.setMix(parseInt(mixSlider.value, 10) / 100.0, true);
     sourceA.start();
     sourceB.start();
     updateLiveAuditionButton();
-    const trim = resp.headers.get("X-Effective-Trim-Db");
     liveBlendStatus.textContent = "Adjust the mix while listening. Changes are immediate.";
   } catch (err) {
     if (requestId !== liveAudition.requestId) return;
     liveAudition.stop();
     liveBlendStatus.textContent = "Live blend unavailable: " + err.message;
   } finally {
-    liveBlendButton.disabled = !havePair;
+    if (requestId === liveAudition.requestId) liveBlendButton.disabled = !havePair;
   }
 }
 
@@ -999,11 +1080,13 @@ function outputGainParamsBody() {
 
 outputGainAutoCheckbox.addEventListener("change", () => {
   outputGainManualSlider.disabled = outputGainAutoCheckbox.checked;
+  liveAudition.updateOutputGain();
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
 outputGainManualSlider.addEventListener("input", () => {
   outputGainManualValue.textContent = `${fmtSigned(outputGainManualSlider.value)} dB`;
+  liveAudition.updateOutputGain();
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
@@ -1348,7 +1431,8 @@ async function doRenderPair() {
   const input_profile_id = profileSelect.value;
   const custom_input_gain_db = profile && profile.requires_custom_gain ? parseFloat(customGainSlider.value) : null;
   const calibration_mode = calibrationModeSelect.value;
-  const reference_input_level_dbu = parseFloat(referenceDbuInput.value) || 12.0;
+  const parsedReferenceDbu = parseFloat(referenceDbuInput.value);
+  const reference_input_level_dbu = Number.isFinite(parsedReferenceDbu) ? parsedReferenceDbu : 12.0;
   const test_gain_db = parseFloat(testGainSlider.value) || 0.0;
   const amp_a_input_gain_db = parseFloat(ampAInputGainSlider.value) || 0.0;
   const amp_b_input_gain_db = parseFloat(ampBInputGainSlider.value) || 0.0;
@@ -1465,15 +1549,15 @@ renderPairBtn.addEventListener("click", async () => {
 
 let lastPreviewSource = null;
 
-async function preview(requestedSource, { preservePosition = false, quiet = false } = {}) {
+async function preview(requestedSource, { preservePosition = false, quiet = false, resumeState = null } = {}) {
   if (!havePair || !activeRenderId) return;
   // "mix" means "whichever design mode's combined result is active" --
   // resolves to the active design source without a separate approximation.
   const source = requestedSource === "mix" ? currentMode : requestedSource;
-  lastPreviewSource = source;
+  lastPreviewSource = requestedSource;
   const requestId = ++previewRequestId;
-  const wasPlaying = !player.paused;
-  const resumeAt = preservePosition && Number.isFinite(player.currentTime) ? player.currentTime : 0;
+  const wasPlaying = resumeState ? resumeState.playing : !player.paused;
+  const resumeAt = resumeState ? resumeState.position : preservePosition && Number.isFinite(player.currentTime) ? player.currentTime : 0;
   const modeParams = ["hybrid", "blend", "character"].includes(source) ? currentModeParamsBody() : {};
   const outputGainParams = ["hybrid", "blend", "character"].includes(source) ? outputGainParamsBody() : {};
   const body = { source, render_id: activeRenderId, ...modeParams, ...cabParamsBody(), ...outputGainParams };
@@ -1679,6 +1763,8 @@ generateBtn.addEventListener("click", async () => {
     lastDesignId = data.design_id;
     completedNamArtifact = null;
     completedValidationReport = null;
+    invalidateModelComparison("");
+    syncComparisonPanel();
     activeSessionId = sessionId();
     activeSessionName = data.model_name;
     activeSessionGenerated = true;
@@ -1740,12 +1826,13 @@ function trainingIsActive() {
 }
 
 function resetGeneratedModel(reason) {
-  // A live training job owns an immutable bundle. Keep its controls and
-  // download state intact even if the user starts exploring a new sound.
-  if (!lastDesignId || trainingIsActive()) return;
+  // Running jobs and completed artifacts own a frozen bundle. Keep their
+  // identity while editing the preview, including choosing a comparison DI.
+  if (!lastDesignId || trainingIsActive() || completedNamArtifact) return;
   lastDesignId = null;
   completedNamArtifact = null;
   completedValidationReport = null;
+  invalidateModelComparison("");
   activeSessionId = null;
   activeSessionName = null;
   activeSessionGenerated = false;
@@ -1783,17 +1870,137 @@ let localTrainingPoll = null;
 let localTrainingDesignId = null;
 let completedValidationReport = null;
 
+const comparisonPanel = document.getElementById("model-comparison-panel");
+const comparisonBuildBtn = document.getElementById("btn-build-comparison");
+const comparisonStopBtn = document.getElementById("btn-stop-comparison");
+const comparisonSwitches = document.getElementById("comparison-switches");
+const comparisonStatus = document.getElementById("comparison-status");
+const comparisonMetrics = document.getElementById("comparison-metrics");
+const comparisonMetricsBody = document.getElementById("comparison-metrics-body");
+let comparisonRequestGeneration = 0;
+let comparisonPlayback = null;
+let comparisonData = null;
+
+function stopModelComparison(invalidateRequest = false) {
+  if (invalidateRequest) {
+    comparisonRequestGeneration += 1;
+    comparisonBuildBtn.disabled = false;
+  }
+  if (comparisonPlayback) {
+    try { comparisonPlayback.source.stop(); } catch (_) { /* already stopped */ }
+    comparisonPlayback.context.close().catch(() => {});
+    comparisonPlayback = null;
+  }
+}
+
+function invalidateModelComparison(message = "") {
+  stopModelComparison(true);
+  comparisonData = null;
+  if (comparisonSwitches) comparisonSwitches.hidden = true;
+  if (comparisonMetrics) comparisonMetrics.hidden = true;
+  if (comparisonStatus && message) comparisonStatus.textContent = message;
+}
+
+function syncComparisonPanel() {
+  comparisonPanel.hidden = !(completedNamArtifact && lastDesignId);
+}
+
+function selectComparisonSource(id) {
+  if (!comparisonPlayback || !comparisonData) return;
+  const selected = comparisonData.variants.find((item) => item.id === id && Number.isInteger(item.channel));
+  if (!selected) return;
+  const now = comparisonPlayback.context.currentTime;
+  comparisonPlayback.gains.forEach((gain, index) => gain.gain.setValueAtTime(index === selected.channel ? 1 : 0, now));
+  document.querySelectorAll("[data-comparison-source]").forEach((button) => {
+    button.disabled = !comparisonData.variants.some((item) => item.id === button.dataset.comparisonSource && Number.isInteger(item.channel));
+    button.setAttribute("aria-pressed", button.dataset.comparisonSource === id ? "true" : "false");
+  });
+  comparisonStatus.textContent = `Playing ${id === "teacher" ? "the frozen teacher" : id === "full" ? "Full model" : "Lite model"} at actual output level.`;
+}
+
+function comparisonMetricsHtml(data) {
+  return data.variants.filter((item) => item.id !== "teacher").map((item) => {
+    if (!item.metrics) return `<div><strong>${escapeHtml(item.id)}:</strong> unavailable — ${escapeHtml(item.error || "not exported")}</div>`;
+    return `<div><strong>${escapeHtml(item.id)}:</strong> raw ESR ${Number(item.metrics.raw_esr).toFixed(4)} · gain-normalized ESR ${Number(item.metrics.gain_normalized_esr).toFixed(4)} · RMS difference ${Number(item.metrics.rms_difference).toFixed(5)} · peak difference ${Number(item.metrics.peak_difference).toFixed(5)}</div>`;
+  }).join("");
+}
+
+async function buildModelComparison() {
+  if (!completedNamArtifact || !lastDesignId) return;
+  stopModelComparison(true);
+  const generation = comparisonRequestGeneration;
+  comparisonBuildBtn.disabled = true;
+  comparisonStatus.textContent = "Rendering the frozen teacher, Full, and Lite on the selected musical performance…";
+  comparisonSwitches.hidden = true;
+  comparisonMetrics.hidden = true;
+  const inputGain = Number(document.querySelector('input[name="comparison-level"]:checked')?.value || 0);
+  const body = { design_id: lastDesignId, di_file: diSelector.value, input_gain_db: inputGain };
+  if (completedNamArtifact.toolPath) body.model_path = completedNamArtifact.toolPath;
+  try {
+    const response = await fetch("/api/comparison", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (generation !== comparisonRequestGeneration) return;
+    if (!response.ok) throw new Error(data.error || "comparison could not be built");
+    const audioResponse = await fetch(data.audio_url, { cache: "no-store" });
+    if (!audioResponse.ok) throw new Error("comparison audio expired before playback");
+    const bytes = await audioResponse.arrayBuffer();
+    if (generation !== comparisonRequestGeneration) return;
+    const Context = window.AudioContext || window.webkitAudioContext;
+    const context = new Context();
+    const decoded = await context.decodeAudioData(bytes);
+    if (generation !== comparisonRequestGeneration) { await context.close(); return; }
+    const source = context.createBufferSource();
+    const splitter = context.createChannelSplitter(decoded.numberOfChannels);
+    const gains = Array.from({ length: decoded.numberOfChannels }, () => context.createGain());
+    source.buffer = decoded;
+    source.loop = true;
+    source.connect(splitter);
+    gains.forEach((gain, index) => { gain.gain.value = index === 0 ? 1 : 0; splitter.connect(gain, index); gain.connect(context.destination); });
+    source.start(context.currentTime + 0.03);
+    comparisonPlayback = { context, source, gains };
+    comparisonData = data;
+    comparisonMetricsBody.innerHTML = comparisonMetricsHtml(data);
+    comparisonMetrics.hidden = false;
+    comparisonSwitches.hidden = false;
+    selectComparisonSource("teacher");
+  } catch (err) {
+    if (generation === comparisonRequestGeneration) comparisonStatus.textContent = "Comparison unavailable: " + err.message;
+  } finally {
+    if (generation === comparisonRequestGeneration) comparisonBuildBtn.disabled = false;
+  }
+}
+
+comparisonBuildBtn.addEventListener("click", buildModelComparison);
+comparisonStopBtn.addEventListener("click", () => { stopModelComparison(true); comparisonStatus.textContent = "Comparison stopped."; });
+document.querySelectorAll("[data-comparison-source]").forEach((button) => button.addEventListener("click", () => selectComparisonSource(button.dataset.comparisonSource)));
+document.querySelectorAll('input[name="comparison-level"]').forEach((input) => input.addEventListener("change", () => invalidateModelComparison("Playing level changed. Build the comparison again.")));
+
+function escapeHtml(value) {
+  const node = document.createElement("span");
+  node.textContent = String(value ?? "");
+  return node.innerHTML;
+}
+
 function validationSummaryHtml(report) {
   if (!report) return `<div class="warning-box">Validation report unavailable for this export.</div>`;
   const label = report.state === "passed" ? "Technical validation passed" : report.state === "needs_attention" ? "Validation needs attention" : "Validation unavailable";
-  const checks = (report.checks || []).map((check) => `${check.id.replaceAll("_", " ")}: ${check.state}`).join(" · ");
-  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${report.summary || ""}<br><small>${checks}</small></div>`;
+  const checks = (report.checks || []).map((check) => `${escapeHtml(check.id).replaceAll("_", " ")}: ${escapeHtml(check.state)}`).join(" · ");
+  const detailRows = (report.checks || []).map((check) => {
+    const metrics = check.metrics && Object.keys(check.metrics).length
+      ? `<pre class="log-tail">${escapeHtml(JSON.stringify(check.metrics, null, 2))}</pre>` : "";
+    return `<div><strong>${escapeHtml(check.id).replaceAll("_", " ")} — ${escapeHtml(check.state)}</strong><br><span>${escapeHtml(check.reason || "")}</span>${metrics}</div>`;
+  }).join("");
+  const cabinet = report.cabinet?.note ? `<div><strong>Cabinet:</strong> ${escapeHtml(report.cabinet.note)}</div>` : "";
+  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
 }
 
 function renderLocalDownloadResult(designId, validationReport = null) {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
   completedNamArtifact = { type: "local", designId, downloadUrl, filename: "trained-model.nam" };
   completedValidationReport = validationReport;
+  syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
   localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block">Download trained .nam</a>${validationSummaryHtml(validationReport)}`;
@@ -1836,16 +2043,26 @@ async function refreshLocalTraining() {
     } else if (data.state !== "complete") {
       localResultEl.hidden = true;
     }
-  } catch (err) { localTrainingStatus.textContent = "Could not check local training: " + err; }
+  } catch (err) {
+    localTrainingStatus.textContent = "Could not check local training: " + err;
+    localSetupBtn.disabled = false;
+    localTrainBtn.disabled = false;
+  }
 }
 
 localSetupBtn.addEventListener("click", async () => {
   localSetupBtn.disabled = true;
   localTrainingStatus.textContent = "Creating the dedicated environment and installing training packages…";
-  const resp = await fetch("/api/local_training/setup", { method: "POST" });
-  const data = await resp.json();
-  if (!resp.ok) localTrainingStatus.textContent = data.error || "Local setup could not start.";
-  await refreshLocalTraining();
+  try {
+    const resp = await fetch("/api/local_training/setup", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) localTrainingStatus.textContent = data.error || "Local setup could not start.";
+  } catch (err) {
+    localTrainingStatus.textContent = "Local setup could not start: " + err.message;
+    localSetupBtn.disabled = false;
+  } finally {
+    await refreshLocalTraining();
+  }
 });
 
 localTrainBtn.addEventListener("click", async () => {
@@ -1853,13 +2070,19 @@ localTrainBtn.addEventListener("click", async () => {
   localTrainBtn.disabled = true;
   localResultEl.hidden = true;
   localTrainingDesignId = lastDesignId;
-  const resp = await fetch("/api/local_training/start", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ design_id: lastDesignId, epoch_preset: selectedEpochPreset() }),
-  });
-  const data = await resp.json();
-  if (!resp.ok) localTrainingStatus.textContent = data.error || "Local training could not start.";
-  await refreshLocalTraining();
+  try {
+    const resp = await fetch("/api/local_training/start", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ design_id: lastDesignId, epoch_preset: selectedEpochPreset() }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) localTrainingStatus.textContent = data.error || "Local training could not start.";
+  } catch (err) {
+    localTrainingStatus.textContent = "Local training could not start: " + err.message;
+    localTrainBtn.disabled = false;
+  } finally {
+    await refreshLocalTraining();
+  }
 });
 
 localCancelBtn.addEventListener("click", async () => {
@@ -1890,8 +2113,9 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // basename), which previously made the button's label lie about what
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
-  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename };
+  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename, toolPath: data.output_nam_path || null };
   completedValidationReport = data.local_validation?.validation_report || null;
+  syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   kaggleResultEl.innerHTML = `
     <a href="${downloadUrl}" download class="btn btn-primary btn-block">Download ${namFilename}</a>
@@ -2120,6 +2344,7 @@ function pollKaggleJob(designId, jobId) {
         kaggleTrainingActive = false;
         syncTrainingControls();
         renderKaggleProgress("Failed: " + (data.error || "unknown error"), data);
+        if (data.output_available) renderKaggleDownloadResult(designId, jobId, data);
         setStatus("Kaggle A2 training failed.", true);
       }
     } catch (err) {
@@ -2172,6 +2397,7 @@ function collectSessionSettings() {
 }
 
 function applySessionSettings(s) {
+  instrumentExplicitlySelected = true;
   ampServerPaths.a = s.ampA.path;
   ampServerPaths.b = s.ampB.path;
   document.getElementById("amp-a-info").textContent = s.ampA.path ? `${s.ampA.label} (restored)` : "";
@@ -2313,7 +2539,7 @@ function sessionSummary(session) {
   const settings = session.settings || {};
   const amps = [settings.ampA?.label, settings.ampB?.label].filter(Boolean).join(" / ") || "No amps selected";
   const mode = { hybrid: "Dynamic Hybrid", blend: "Parallel Blend", character: "Character Blend" }[settings.mode] || "Unknown mode";
-  return { amps, mode, di: settings.diFile || "No test performance", artifact: session.artifact };
+  return { amps, mode, di: settings.diFile || "No test performance", artifact: session.artifact, validation: session.validationReport || null };
 }
 
 function downloadSessionNam(artifact) {
@@ -2378,7 +2604,10 @@ async function renderSessions() {
       : settings.mode === "character"
         ? `Tone: ${settings.character?.tone ?? "—"}% Amp B; Feel: ${settings.character?.feel ?? "—"}% Amp B; Drive: ${settings.character?.drive ?? "—"}% Amp B`
         : `Changeover: ${settings.crossover ?? "—"} dBFS; Transition: ${settings.transition ?? "—"} dB`;
-    details.textContent = `Mode: ${summary.mode} · Amps: ${summary.amps} · Test performance: ${summary.di} · Input profile: ${settings.inputProfileId || "—"} · ${shape} · Level match: ${settings.autoLevelMatch ? "on" : "off"} · Cabinet: ${settings.cab?.path ? "selected" : "off"}${summary.artifact ? ` · NAM: ${summary.artifact.filename || "available"}` : " · No completed NAM recorded"}`;
+    const validationText = summary.validation
+      ? ` · Validation: ${summary.validation.state || "unavailable"} — ${summary.validation.summary || "no summary"}`
+      : summary.artifact ? " · Validation report unavailable" : "";
+    details.textContent = `Mode: ${summary.mode} · Amps: ${summary.amps} · Test performance: ${summary.di} · Input profile: ${settings.inputProfileId || "—"} · ${shape} · Level match: ${settings.autoLevelMatch ? "on" : "off"} · Cabinet: ${settings.cab?.path ? "selected" : "off"}${summary.artifact ? ` · NAM: ${summary.artifact.filename || "available"}` : " · No completed NAM recorded"}${validationText}`;
     const detailButton = document.createElement("button"); detailButton.type = "button"; detailButton.className = "btn btn-secondary btn-small"; detailButton.textContent = "Details";
     detailButton.addEventListener("click", () => { details.hidden = !details.hidden; detailButton.textContent = details.hidden ? "Details" : "Hide details"; });
     const loadButton = document.createElement("button"); loadButton.type = "button"; loadButton.className = "btn btn-primary btn-small"; loadButton.textContent = "Load";
@@ -2388,6 +2617,9 @@ async function renderSessions() {
         lastDesignId = session.designId || null;
         completedNamArtifact = session.artifact || null;
         completedValidationReport = session.validationReport || null;
+        invalidateModelComparison("");
+        syncComparisonPanel();
+        if (completedNamArtifact && lastDesignId) document.getElementById("a2-training-section").hidden = false;
         activeSessionId = session.id;
         activeSessionName = session.name;
         activeSessionGenerated = session.generated === true;
@@ -2533,6 +2765,12 @@ function showToolResult(data) {
   changed.textContent = `Validated changes: ${data.changed_paths.join(", ")}`;
   const link = document.createElement("a"); link.href = data.download_url; link.download = data.filename; link.className = "btn btn-primary"; link.textContent = `Download ${data.filename}`;
   toolResult.append(changed, link);
+  if (data.validation_report_invalidated) {
+    const validation = document.createElement("div");
+    validation.className = "warning-box";
+    validation.textContent = "This edited NAM has different bytes from its source. Any earlier validation report does not apply; validate the edited export separately.";
+    toolResult.append(validation);
+  }
   if (data.warning) { const warning = document.createElement("div"); warning.className = "warning-box"; warning.textContent = data.warning; toolResult.append(warning); }
 }
 function updateToolVolumeReadout() { toolVolumeValue.textContent = `${Number(toolVolumeSlider.value).toFixed(1)} dB`; }

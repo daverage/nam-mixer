@@ -33,14 +33,19 @@ optionally preview-only or "baked" into the generated A2 target via the same
 both cases.
 
 **Receptive-field policy (`hybrid.receptive_field.combine_required_history`)
-has two tiers, not one:**
+has three tiers:**
 
 - **CORE (hard gate).** Amp A/Amp B RF (+ the bounded crossover envelope,
-  Hybrid only) -- `hard_required_samples`. This MUST fit inside the
+  Hybrid and Character only) -- `hard_required_samples`. This MUST fit inside the
   destination A2's actual receptive field; failing it aborts
   generation/training exactly as before, via
   `assert_required_history_fits` (renamed from `assert_envelope_history_fits`,
   which remains as a back-compat alias).
+- **Character processing (advisory only).** Character donor transitions,
+  smoothing, and correction filters are reported as
+  `formal_character_required_samples`. If they exceed A2's receptive field,
+  every backend and epoch preset still trains an approximation and the Full,
+  Lite, and quiet-response validation checks remain authoritative.
 - **Baked cabinet (advisory only).** A baked cab adds `len(ir) - 1` samples
   of SERIAL temporal dependency on top of the core --
   `formal_total_required_samples`. This is always calculated and reported
@@ -256,8 +261,10 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     low-level dead zone before a target is generated.
 18. **`character_training_target.py`** generates Character Blend A2 targets
     using the shared training-input, cabinet, output-safety, and receptive
-    field helpers. It records the low-level sweep in the manifest and checks
-    the exported Full model against that sweep during validation.
+    field helpers. It records a schema-versioned, hash-bound processed
+    reference excerpt and checks both Full and Lite exports with identical
+    warm-up/scoring windows. Fixed level offset and quiet-response collapse
+    are reported separately.
 19. **`cab_ir.py`** is the shared Cabinet IR stage used by all modes,
     applied AFTER the amp combination: `load_and_prepare_cab_ir`/
     `get_prepared_cab_ir` (mono downmix, leading-silence trim, resample,
@@ -281,6 +288,11 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     dependency exceeds the destination A2's actual receptive field; a baked
     cab's formal overflow is reported (never hidden, never silently
     truncated) but training continues as an approximation.
+21. **`validation.py` / `validation_report.py`** reconstruct frozen teachers,
+    replay baked-cab/output/safety processing exactly once, render Full/Lite,
+    and produce the shared schema-v2 technical report. The in-app held-out
+    comparison uses the same metrics and stores synchronized stems in a
+    content-hash-bound cache; it never reads current shape controls.
 
 `assets/di/` contains real recorded genre/style DI guitar/bass performances
 (sourced from the NAMtoClo project — see `assets/di/README.md`) used for
@@ -295,8 +307,9 @@ The **Sessions** tab is a file-backed project library. It stores named,
 portable NAM Mixer JSON records under `work/sessions`; generated bundles also
 carry a session record under `work/a2`. Loading settings never renders them
 automatically, and completed models can be embedded in/exported with a
-session. Training manifests are not session files and must not be imported as
-such.
+session. A validation report is restored only when its model SHA-256 matches
+the embedded NAM. Training manifests are not session files and must not be
+imported as such.
 
 `assets/nam_models/` holds the user's own `.nam` amp capture files (e.g. a
 Fender clean + a JCM800 high-gain capture) used as Amp A/Amp B inputs. These
@@ -315,7 +328,7 @@ project fixtures like `assets/di/*.wav`.
   directly against Amp B's render, which can misread a genuine tonal/phase
   difference between dissimilar amps (e.g. clean vs. heavily distorted) as
   latency. Pass `enabled=False` (skips correction, still length-matches) until
-  real NAM inference is wired in and the official inference API's latency
+  a valid latency policy has been established and the renderer's latency
   behavior is understood — see the module docstring.
 - The bundled `assets/di/*.wav` genre clips were found to be mostly
   normalized around a common RMS level by their original source, so their

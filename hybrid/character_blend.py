@@ -43,8 +43,15 @@ def character_temporal_history_samples(sample_rate: int, smoothing_ms: float) ->
     correction_fir = 64
     return {
         "drive_smoothing_serial_samples": smoothing,
+        "compensation_smoothing_serial_samples": smoothing,
         "donor_transition_serial_samples": transition,
         "correction_fir_serial_samples": correction_fir,
+        # A stable request settles after the finite transition above. Because
+        # a mid-ramp reversal must restart from the current weight, an
+        # arbitrarily long sequence of reversals can retain state from before
+        # that window. Record this explicitly instead of claiming an exact
+        # finite receptive history that the state machine does not have.
+        "donor_transition_exact_history_bounded": False,
     }
 
 
@@ -266,12 +273,17 @@ def _causal_donor_weight(drive_b: np.ndarray, sample_rate: int) -> np.ndarray:
 def _select_donor(a: np.ndarray, b: np.ndarray, drive_b: np.ndarray, sample_rate: int, *, semantics_version: int = CHARACTER_TEACHER_SEMANTICS_VERSION) -> np.ndarray:
     """Select the thresholded Drive donor with versioned transition semantics."""
     n = len(drive_b)
-    if semantics_version >= CHARACTER_TEACHER_SEMANTICS_VERSION:
+    if semantics_version == CHARACTER_TEACHER_SEMANTICS_VERSION:
         weight_b = _causal_donor_weight(drive_b, sample_rate)
         return (a[:n] * (1.0 - weight_b) + b[:n] * weight_b).astype(np.float64)
 
-    # Legacy bundles retain their historical centred transition.  Do not use
-    # this path for newly frozen designs.
+    if semantics_version != 1:
+        raise ValueError(
+            f"unsupported Character Blend teacher semantics version {semantics_version}; "
+            f"supported versions are 1 and {CHARACTER_TEACHER_SEMANTICS_VERSION}"
+        )
+    # Version-1 bundles retain their historical centred transition.  Do not
+    # use this path for newly frozen designs.
     donor = np.where(drive_b >= 0.5, b, a).astype(np.float64)
     changes = np.flatnonzero(np.diff((drive_b >= .5).astype(np.int8))) + 1
     fade = max(1, int(sample_rate * .01))
@@ -312,7 +324,12 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     analysis_b = analysis_b or _analysis_from_design(design.analysis_b) or analyse_rendered_audio(dry, b, pair.sample_rate, config)
     levels = np.array([x.input_gain_db for x in analysis_a.levels])
     drive_b = _smooth(_drive_curve(design, envelope, levels), pair.sample_rate, design.envelope_smoothing_ms)
-    donor_weight_b = _causal_donor_weight(drive_b, pair.sample_rate) if design.teacher_semantics_version >= CHARACTER_TEACHER_SEMANTICS_VERSION else (drive_b >= 0.5).astype(np.float64)
+    if design.teacher_semantics_version not in (1, CHARACTER_TEACHER_SEMANTICS_VERSION):
+        raise ValueError(
+            f"unsupported Character Blend teacher semantics version {design.teacher_semantics_version}; "
+            f"supported versions are 1 and {CHARACTER_TEACHER_SEMANTICS_VERSION}"
+        )
+    donor_weight_b = _causal_donor_weight(drive_b, pair.sample_rate) if design.teacher_semantics_version == CHARACTER_TEACHER_SEMANTICS_VERSION else (drive_b >= 0.5).astype(np.float64)
     donor = _select_donor(a, b, drive_b, pair.sample_rate, semantics_version=design.teacher_semantics_version)
     gain_a = np.array([x.compression_gain_db for x in analysis_a.levels]); gain_b = np.array([x.compression_gain_db for x in analysis_b.levels])
     target_gain = gain_a * (1 - _clamp(design.feel_mix_b)) + gain_b * _clamp(design.feel_mix_b)

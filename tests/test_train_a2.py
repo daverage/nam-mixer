@@ -163,6 +163,41 @@ def test_check_receptive_field_uses_max_across_envelope_and_amp_branches(tmp_pat
     assert result["hard_required_samples"] == amp_b_rf
 
 
+def test_check_receptive_field_character_uses_recorded_teacher_branches(tmp_path, monkeypatch):
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
+    manifest = {
+        "mode": "character",
+        "design": {"envelope_max_history_ms": 1.0},
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "receptive_field": {
+            "branch_samples": {
+                "amp_a": 3,
+                "amp_b": 3,
+                "envelope": 48,
+                "character_drive_control": 231,
+                "character_amp_a_correction": 67,
+            },
+            "history_qualification": "stateful test qualification",
+        },
+    }
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        return type("R", (), {"receptive_field_samples": samples + 1, "submodel_names": ["fake"]})()
+
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
+    result = train_a2.check_receptive_field(manifest, 48000)
+
+    assert captured["samples"] == 48
+    assert result["hard_required_samples"] == 48
+    assert result["formal_character_required_samples"] == 231
+    assert result["character_requires_approximation"] is True
+    assert result["branch_samples"]["character_drive_control"] == 231
+
+
 def test_check_receptive_field_warns_but_continues_when_amp_path_missing(tmp_path, monkeypatch):
     manifest = {"design": {"envelope_max_history_ms": 80.0}}  # no amp_a/amp_b paths
     monkeypatch.setattr(
@@ -423,13 +458,13 @@ def test_check_full_low_level_response_delegates_to_shared_helper_and_prints_ver
     nam_path, input_path = tmp_path / "model.nam", tmp_path / "input.wav"
 
     canned = {"max_error_db": 3.0, "pass": True, "dead_zone_detected": False}
-    monkeypatch.setattr(train_a2.character_training_target, "check_full_low_level_response", lambda *a, **k: canned)
+    monkeypatch.setattr(train_a2.character_training_target, "check_export_low_level_response", lambda *a, **k: canned)
 
     result = train_a2.check_full_low_level_response(manifest, nam_path, input_path, 48000)
     assert result is canned
     assert "PASS" in capsys.readouterr().out
 
-    monkeypatch.setattr(train_a2.character_training_target, "check_full_low_level_response", lambda *a, **k: None)
+    monkeypatch.setattr(train_a2.character_training_target, "check_export_low_level_response", lambda *a, **k: None)
     assert train_a2.check_full_low_level_response(manifest, nam_path, input_path, 48000) is None
 
 

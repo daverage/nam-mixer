@@ -46,7 +46,7 @@ from typing import Optional
 import numpy as np
 
 from .a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
-from .character_training_target import check_full_low_level_response
+from .character_training_target import check_export_low_level_response
 from .nam_loader import load_nam
 from .render import NamRenderError, render
 from .validation import compute_esr_metrics
@@ -1175,6 +1175,11 @@ class KaggleJobManager:
             save_job(self.a2_output_dir, job)
             return
 
+        # The remote training process produced an artifact. Record it before
+        # local assessment so a missing renderer or other validation problem
+        # cannot make the export disappear from the user.
+        job.output_nam_path = str(nam_path)
+        job.output_nam_sha256 = _sha256_file(nam_path)
         try:
             bundle_dir = self.a2_output_dir / job.design_id
             manifest_path = bundle_dir / "training_manifest.json"
@@ -1189,11 +1194,21 @@ class KaggleJobManager:
         except (NamRenderError, OSError, ValueError) as exc:
             job.state = "failed"
             job.error = f"local validation of downloaded model failed: {exc}"
+            from .validation_report import build_validation_report
+            unavailable = {"rendered_ok": False, "state": "unavailable", "error": str(exc)}
+            job.local_validation = {
+                "sha256": job.output_nam_sha256,
+                "validation_error": str(exc),
+                "validation_report": build_validation_report(
+                    job.output_nam_sha256,
+                    {"full": unavailable, "lite": unavailable},
+                    quiet_playing=None,
+                ),
+            }
             save_job(self.a2_output_dir, job)
             return
 
         job.local_validation = validation
-        job.output_nam_path = str(nam_path)
         job.output_nam_sha256 = validation["sha256"]
         job.state = "complete"
         save_job(self.a2_output_dir, job)
@@ -1305,16 +1320,25 @@ def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_
             continue
         report[label] = {"rendered_ok": True, "metrics": compute_esr_metrics(rendered, target_audio)}
 
-    low_level_response_check = None
+    low_level_response_checks = {}
     if manifest is not None:
-        low_level_response_check = check_full_low_level_response(manifest, nam_path, training_input_path, sr)
-        if low_level_response_check is not None:
-            report["low_level_response_check"] = low_level_response_check
+        for label, slim in (("full", 0.0), ("lite", 1.0)):
+            try:
+                result = check_export_low_level_response(
+                    manifest, nam_path, training_input_path, sr, variant=label, slim=slim,
+                )
+            except (NamRenderError, OSError, ValueError) as exc:
+                result = {"state": "unavailable", "pass": None, "variant": label, "reason": f"quiet validation could not run: {exc}"}
+            if result is not None:
+                low_level_response_checks[label] = result
+        if low_level_response_checks:
+            report["low_level_response_checks"] = low_level_response_checks
+            report["low_level_response_check"] = low_level_response_checks.get("full")
 
     from .validation_report import build_validation_report
     report["validation_report"] = build_validation_report(
         report["sha256"], {"full": report.get("full"), "lite": report.get("lite")},
-        quiet_playing=low_level_response_check,
+        quiet_playing=low_level_response_checks or None,
         cabinet=(manifest or {}).get("receptive_field", {}).get("cab", {"baked": False, "approximation": None}),
     )
 

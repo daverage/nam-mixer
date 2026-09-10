@@ -238,7 +238,8 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
        (the packed A2 config of the neural-amp-modeler version actually
        installed in THIS kernel; `ensure_nam_installed()` must have run
        first). Failing this raises `CloudTrainingError` -- training aborts.
-    2. A baked cabinet's FORMAL total (core + FIR history) is calculated and
+    2. Character processing beyond the base branches and a baked cabinet's
+       FORMAL total (core + FIR history) are calculated and
        reported honestly, but NEVER gates training by itself -- exceeding
        the A2's receptive field means A2 will approximate the post-cab
        response within its available temporal capacity, not that training
@@ -249,13 +250,22 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
         print("WARNING: manifest has no receptive_field record -- skipping receptive-field check.")
         return {}
 
-    branch_samples = {k: v for k, v in (rf_record.get("branch_samples") or {}).items() if v is not None}
+    all_branch_samples = {k: int(v) for k, v in (rf_record.get("branch_samples") or {}).items() if v is not None}
+    mode = manifest.get("mode", "hybrid")
+    branch_samples = {
+        k: v for k, v in all_branch_samples.items()
+        if mode != "character" or not str(k).startswith("character_")
+    }
+    character_branches = {
+        k: v for k, v in all_branch_samples.items() if mode == "character" and str(k).startswith("character_")
+    }
     if not branch_samples:
         print("WARNING: receptive_field.branch_samples is empty/unavailable -- skipping receptive-field check.")
         return {}
 
     hard_required = max(branch_samples.values())
-    mode = manifest.get("mode", "hybrid")
+    if mode == "character" and rf_record.get("history_qualification"):
+        print(f"WARNING: {rf_record['history_qualification']}")
 
     print(f"Core target dependency by branch (mode={mode}):")
     for label, samples in branch_samples.items():
@@ -300,7 +310,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
 
     result = {
         "mode": mode,
-        "branch_samples": branch_samples,
+        "branch_samples": all_branch_samples,
         "hard_required_samples": hard_required,
         "a2_receptive_field_samples": best_samples,
         "a2_submodels": names,
@@ -309,7 +319,29 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
         "cab_fir_history_samples": 0,
         "formal_total_required_samples": hard_required,
         "cab_requires_approximation": False,
+        "character_requires_approximation": False,
     }
+
+    formal_character = hard_required
+    if character_branches:
+        formal_character = max(hard_required, *character_branches.values())
+        result["formal_character_required_samples"] = formal_character
+        result["formal_total_required_samples"] = formal_character
+        print("\nCharacter processing dependency:")
+        for label, samples in character_branches.items():
+            print(f"  {label:<28} {samples:>6} samples ({samples / sample_rate * 1000:6.1f} ms)")
+        print(f"  {'formal Character':<28} {formal_character:>6} samples ({formal_character / sample_rate * 1000:6.1f} ms)")
+        if formal_character > best_samples:
+            result["character_requires_approximation"] = True
+            print(
+                "\nCHARACTER APPROXIMATION:\n"
+                f"  Character processing extends the teacher dependency to {formal_character} samples, beyond "
+                f"the A2 receptive field of {best_samples} samples.\n"
+                "  Training will continue for every backend and epoch preset. Validate Full and Lite exports "
+                "against the frozen teacher and by listening."
+            )
+        else:
+            print(f"  Character processing fits inside the A2 receptive field ({formal_character} <= {best_samples}).")
 
     cab = manifest.get("cab") or {}
     if not cab.get("baked"):
@@ -319,7 +351,8 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     if not cab_fir_samples:
         return result
 
-    formal_total = hard_required + cab_fir_samples
+    cab_formal = hard_required + cab_fir_samples
+    formal_total = formal_character + cab_fir_samples
     result.update({
         "cab_baked": True,
         "cab_fir_history_samples": cab_fir_samples,
@@ -332,22 +365,22 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
 
     # The formal total is NEVER a hard gate -- only report/record whether A2
     # is being asked to approximate the cab.
-    if formal_total > best_samples:
+    if cab_formal > best_samples:
         result["cab_requires_approximation"] = True
         print(
             "\nCABINET APPROXIMATION:\n"
             f"  The core {mode.capitalize()} target fits within the A2 receptive field "
             f"({hard_required} / {best_samples} samples).\n"
-            f"  The baked cabinet extends the teacher's formal temporal dependency to "
-            f"{formal_total} samples, beyond the A2 receptive field of {best_samples} samples.\n"
+            f"  The baked cabinet extends the hard-core dependency to {cab_formal} samples, beyond "
+            f"the A2 receptive field of {best_samples} samples.\n"
             "  Training will continue: the cabinet response will be approximated by the A2 within its "
             "available temporal capacity.\n"
             "  Validate the resulting model against the baked target and by listening."
         )
     else:
         print(
-            f"  Formal total also fits inside the A2 receptive field "
-            f"({formal_total} <= {best_samples}) -- no approximation needed for the cab."
+            f"  Cabinet-adjusted core fits inside the A2 receptive field "
+            f"({cab_formal} <= {best_samples}) -- no additional cabinet approximation needed."
         )
 
     return result

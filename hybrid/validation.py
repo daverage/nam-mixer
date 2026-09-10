@@ -11,6 +11,7 @@ environment.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -24,6 +25,8 @@ from .character_blend import CharacterBlendDesign, build_character_blend
 from .envelope import BoundedEnvelopeConfig, bounded_causal_envelope_db
 from .nam_loader import load_nam
 from .render import render
+from .cab_ir import apply_cab_ir, get_prepared_cab_ir
+from .safety import apply_output_gain
 
 
 @dataclass
@@ -33,6 +36,69 @@ class ReferenceHybridResult:
     amp_b: np.ndarray
     envelope_db: np.ndarray
     alignment_offset_samples: int
+
+
+_DESIGN_FILES = {
+    "hybrid": ("hybrid_design.json", HybridDesign),
+    "blend": ("blend_design.json", BlendDesign),
+    "character": ("character_design.json", CharacterBlendDesign),
+}
+
+
+def load_frozen_design(bundle_dir: str | Path, manifest: dict):
+    """Load the exact design snapshot saved beside a training manifest.
+
+    A manifest intentionally contains a reporting-oriented subset of design
+    fields, so reconstructing a teacher from that subset could silently pick
+    modern defaults.  Comparisons therefore require the canonical frozen
+    design JSON written when the target was generated.
+    """
+    mode = manifest.get("mode", "hybrid")
+    try:
+        filename, design_type = _DESIGN_FILES[mode]
+    except KeyError as exc:
+        raise ValueError(f"unsupported saved design mode: {mode!r}") from exc
+    path = Path(bundle_dir) / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"saved {mode} design is unavailable: {path.name}")
+    design = design_type.read_json(path)
+    if design.mode != mode:
+        raise ValueError(f"saved design mode {design.mode!r} does not match manifest mode {mode!r}")
+    return design
+
+
+def render_processed_reference(design, manifest: dict, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Render the frozen teacher with the target's post-processing exactly once.
+
+    Source calibration and per-amp trims are part of the teacher functions.
+    The trained A2 receives neither.  A baked cab, the fixed generation-time
+    output gain, and the reduce-only target peak gain are then reproduced in
+    their original order so this is level-equivalent to the learned target.
+    """
+    mode = manifest.get("mode", getattr(design, "mode", "hybrid"))
+    renderer = {
+        "hybrid": render_reference_hybrid,
+        "blend": render_reference_blend,
+        "character": render_reference_character,
+    }.get(mode)
+    if renderer is None:
+        raise ValueError(f"unsupported saved design mode: {mode!r}")
+    result = renderer(design, dry, sample_rate)
+    processed = np.asarray(result.hybrid, dtype=np.float32)
+
+    cab = getattr(design, "cab", None)
+    if cab is not None and cab.baked:
+        if not cab.ir_working_path:
+            raise FileNotFoundError("baked cabinet has no saved working path")
+        processed = apply_cab_ir(processed, get_prepared_cab_ir(cab.ir_working_path, sample_rate))
+
+    output_gain_db = float((manifest.get("output_gain") or {}).get("applied_gain_db") or 0.0)
+    peak_reduction_db = float((manifest.get("target") or {}).get("global_safety_gain_reduction_db") or 0.0)
+    processed = apply_output_gain(processed, output_gain_db - peak_reduction_db).astype(np.float32)
+    return ReferenceHybridResult(
+        processed, result.amp_a, result.amp_b, result.envelope_db,
+        result.alignment_offset_samples,
+    )
 
 
 def _render_frozen_sources(design, dry: np.ndarray, sample_rate: int):

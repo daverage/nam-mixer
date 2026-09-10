@@ -1346,17 +1346,30 @@ def test_validate_downloaded_model_runs_low_level_response_check_when_manifest_i
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"
     target_path = tmp_path / "target.wav"
-    audio = np.zeros(4800, dtype=np.float32)
+    audio = np.full(4800, 0.1, dtype=np.float32)
     sf.write(input_path, audio, 48000, subtype="FLOAT")
     sf.write(target_path, audio, 48000, subtype="FLOAT")
+    excerpt_path = tmp_path / "export_validation_reference_input.wav"
+    sf.write(excerpt_path, audio, 48000, subtype="FLOAT")
 
     monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
     monkeypatch.setattr(kaggle_training, "render", _fake_render)
     monkeypatch.setattr(character_training_target, "render", _fake_render)
 
-    manifest = {"mode": "character", "export_validation_reference": {"levels_db": [0.0], "teacher_output_rms_dbfs": [-120.0], "frame_start": 0, "frame_count": len(audio)}}
+    manifest = {"mode": "character", "export_validation_reference": {
+        "schema_version": 2, "levels_db": [0.0], "teacher_output_rms_dbfs": [-20.0],
+        "sample_rate": 48000, "frame_start": 0, "frame_count": len(audio),
+        "score_frame_start": 0, "score_frame_count": len(audio),
+        "input_excerpt_path": excerpt_path.name,
+        "input_excerpt_sha256": kaggle_training._sha256_file(excerpt_path),
+        "source_training_input_sha256": kaggle_training._sha256_file(input_path),
+        "amp_a_sha256": "a" * 64, "amp_b_sha256": "b" * 64,
+        "cab_baked": False, "teacher_semantics_version": 2,
+        "processing_version": "character-export-reference-v2",
+    }}
     report = kaggle_training.validate_downloaded_model(nam_path, input_path, target_path, manifest=manifest)
     assert "low_level_response_check" in report
+    assert set(report["low_level_response_checks"]) == {"full", "lite"}
 
     report_without_manifest = kaggle_training.validate_downloaded_model(nam_path, input_path, target_path)
     assert "low_level_response_check" not in report_without_manifest
@@ -1455,6 +1468,25 @@ def test_download_and_validate_missing_nam_fails_clearly(tmp_path):
 
     assert job.state == "failed"
     assert "no .nam file" in job.error
+
+
+def test_validation_failure_preserves_downloaded_export_and_unavailable_report(monkeypatch, tmp_path):
+    cli = _DownloadStubCli(nam_name="imperfect.nam", training_result={"success": True})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    _write_bundle_wavs(tmp_path, "d1")
+    monkeypatch.setattr(
+        kaggle_training, "validate_downloaded_model",
+        lambda *args, **kwargs: (_ for _ in ()).throw(kaggle_training.NamRenderError("renderer temporarily unavailable")),
+    )
+
+    manager._download_and_validate(job)
+
+    assert job.state == "failed"
+    assert Path(job.output_nam_path).is_file()
+    assert job.output_nam_sha256 == kaggle_training._sha256_file(Path(job.output_nam_path))
+    assert job.local_validation["validation_report"]["state"] == "unavailable"
+    assert "temporarily unavailable" in job.local_validation["validation_error"]
 
 
 def test_download_and_validate_download_failure_still_fails_clearly(tmp_path):

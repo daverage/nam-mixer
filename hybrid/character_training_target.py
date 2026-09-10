@@ -20,6 +20,7 @@ from .training_target import (
     A2_TARGET_PEAK_CEILING_DBFS, TargetSafetyReport, TrainingBundle, TrainingInputError,
     _git_commit, _sha256_file, compute_receptive_field_record, maybe_bake_cab, validate_training_input,
 )
+from .validation_report import DEFAULT_VALIDATION_POLICY
 
 HYBRID_BUILDER_VERSION = "character-blend-v2"
 # Bounded so the sweep (Phases 4-5, docs/blend-mode-fixes.md) costs a fixed
@@ -27,7 +28,10 @@ HYBRID_BUILDER_VERSION = "character-blend-v2"
 # input is -- it is a sanity check on the teacher's low-level response, not
 # a re-render of the whole excitation file.
 LOW_LEVEL_CHECK_REFERENCE_SECONDS = 5.0
-EXPORT_VALIDATION_REFERENCE_SCHEMA_VERSION = 1
+EXPORT_VALIDATION_REFERENCE_SCHEMA_VERSION = 2
+EXPORT_VALIDATION_WARMUP_SECONDS = 0.25
+EXPORT_VALIDATION_SCORE_SECONDS = 4.0
+EXPORT_VALIDATION_MIN_SCORE_SECONDS = 0.5
 
 
 def evaluate_bundle_low_level_response(design, amp_a, amp_b, calibration, official_input, sample_rate) -> LowLevelResponseCheck:
@@ -44,23 +48,40 @@ def evaluate_bundle_low_level_response(design, amp_a, amp_b, calibration, offici
     return evaluate_low_level_response(build_pair_at_gain, design)
 
 
-def _select_reference_excerpt(audio: np.ndarray, sample_rate: int) -> tuple[np.ndarray, int]:
+def _select_reference_excerpt(audio: np.ndarray, sample_rate: int) -> tuple[np.ndarray, int, int, int]:
     """Choose a deterministic energetic excerpt instead of blindly using t=0.
 
     The official excitation may begin with silence.  Score one-second windows
     by RMS and select the earliest highest-energy contiguous five-second
     region; reject material that contains no useful excitation.
     """
-    frames = min(len(audio), int(sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS))
-    if frames <= 0:
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim != 1 or len(audio) <= 0 or not np.all(np.isfinite(audio)):
         raise TrainingInputError("cannot build validation reference from an empty training input")
-    window = max(1, int(sample_rate))
-    starts = range(0, max(1, len(audio) - frames + 1), window)
-    start = max(starts, key=lambda offset: float(np.mean(np.square(audio[offset:offset + frames], dtype=np.float64))))
-    excerpt = np.asarray(audio[start:start + frames], dtype=np.float32)
-    if float(np.sqrt(np.mean(np.square(excerpt, dtype=np.float64)))) < 1e-7:
+    min_score = max(1, int(round(sample_rate * EXPORT_VALIDATION_MIN_SCORE_SECONDS)))
+    if len(audio) < min_score:
+        raise TrainingInputError(
+            f"training input is too short for exported-model validation; need at least {min_score} frames"
+        )
+    warmup = min(int(round(sample_rate * EXPORT_VALIDATION_WARMUP_SECONDS)), len(audio) - min_score)
+    score_frames = min(int(round(sample_rate * EXPORT_VALIDATION_SCORE_SECONDS)), len(audio) - warmup)
+    last_start = len(audio) - score_frames
+    step = max(1, int(sample_rate))
+    starts = list(range(warmup, last_start + 1, step))
+    if not starts or starts[-1] != last_start:
+        starts.append(last_start)
+    score_start = max(
+        starts,
+        key=lambda offset: float(np.mean(np.square(audio[offset:offset + score_frames], dtype=np.float64))),
+    )
+    excerpt_start = score_start - warmup
+    excerpt = np.asarray(audio[excerpt_start:score_start + score_frames], dtype=np.float32)
+    scored = excerpt[warmup:warmup + score_frames]
+    rms = float(np.sqrt(np.mean(np.square(scored, dtype=np.float64))))
+    active_frames = int(np.count_nonzero(np.abs(scored) >= 1e-6))
+    if rms < 1e-7 or active_frames < min(64, len(scored)):
         raise TrainingInputError("training input has no useful excitation for exported-model validation")
-    return excerpt, int(start)
+    return excerpt, int(excerpt_start), int(warmup), int(score_frames)
 
 
 def build_export_validation_reference(design, amp_a, amp_b, calibration, official_input, sample_rate: int, *, output_gain_db: float, peak_reduction_db: float) -> tuple[dict, np.ndarray]:
@@ -70,7 +91,7 @@ def build_export_validation_reference(design, amp_a, amp_b, calibration, officia
     cabinet (when selected), frozen output gain, and the one fixed target peak
     reduction.  None of these values are recomputed per level.
     """
-    excerpt, start = _select_reference_excerpt(official_input, sample_rate)
+    excerpt, start, score_start, score_count = _select_reference_excerpt(official_input, sample_rate)
     teacher_rms = []
     peak_scale = db_to_amplitude(-peak_reduction_db)
     for gain_db in (0.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0):
@@ -80,7 +101,8 @@ def build_export_validation_reference(design, amp_a, amp_b, calibration, officia
         teacher = build_character_blend(SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=sample_rate), design).blend
         teacher = maybe_bake_cab(teacher, design.cab, sample_rate)
         teacher = apply_output_gain(teacher, output_gain_db) * peak_scale
-        rms = float(np.sqrt(np.mean(np.square(teacher, dtype=np.float64))))
+        scored_teacher = teacher[score_start:score_start + score_count]
+        rms = float(np.sqrt(np.mean(np.square(scored_teacher, dtype=np.float64))))
         teacher_rms.append(float(max(20.0 * np.log10(max(rms, 1e-10)), -90.0)))
     return {
         "schema_version": EXPORT_VALIDATION_REFERENCE_SCHEMA_VERSION,
@@ -89,15 +111,20 @@ def build_export_validation_reference(design, amp_a, amp_b, calibration, officia
         "sample_rate": sample_rate,
         "frame_start": start,
         "frame_count": len(excerpt),
+        "score_frame_start": score_start,
+        "score_frame_count": score_count,
+        "warmup_policy": "render the complete saved excerpt, score only score_frame_start:score_frame_count",
         "input_gain_db": {"amp_a": calibration.amp_a_gain_db + design.amp_a_input_gain_db, "amp_b": calibration.amp_b_gain_db + design.amp_b_input_gain_db},
         "output_gain_db": output_gain_db,
         "peak_reduction_db": peak_reduction_db,
         "cab_baked": bool(design.cab and design.cab.baked),
         "teacher_semantics_version": design.teacher_semantics_version,
+        "processing_version": "character-export-reference-v2",
+        "validation_policy": dict(DEFAULT_VALIDATION_POLICY),
     }, excerpt
 
 
-def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int) -> "dict | None":
+def check_export_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int, *, variant: str, slim: float) -> "dict | None":
     """Re-run the teacher's low-level response sweep (docs/blend-mode-fixes.md,
     Phases 10-11) through an exported Full A2 and compare its output RMS at
     each level against the teacher's OWN recorded RMS (the `low_level_response`
@@ -110,36 +137,95 @@ def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_r
     identical bar. Returns None for non-Character-Blend or older manifests
     without a recorded `low_level_response`.
     """
-    teacher = manifest.get("export_validation_reference")
-    if not teacher or manifest.get("mode") != "character":
+    if manifest.get("mode") != "character":
         return None
-    input_audio, sr = sf.read(str(input_path), dtype="float32", always_2d=False)
-    start = int(teacher.get("frame_start", 0))
+    teacher = manifest.get("export_validation_reference")
+    if not teacher:
+        return {"state": "unavailable", "reason": "legacy bundle has no equivalent validation reference", "pass": None, "variant": variant}
+    if teacher.get("schema_version") != EXPORT_VALIDATION_REFERENCE_SCHEMA_VERSION:
+        return {"state": "unavailable", "reason": f"unsupported or legacy validation reference schema {teacher.get('schema_version')!r}", "pass": None, "variant": variant}
+    excerpt_name = teacher.get("input_excerpt_path")
+    if not isinstance(excerpt_name, str) or Path(excerpt_name).name != excerpt_name:
+        return {"state": "unavailable", "reason": "validation reference excerpt path is invalid", "pass": None, "variant": variant}
+    excerpt_path = Path(input_path).parent / excerpt_name
+    if not excerpt_path.is_file() or _sha256_file(excerpt_path) != teacher.get("input_excerpt_sha256"):
+        return {"state": "unavailable", "reason": "validation reference excerpt is missing or its hash does not match", "pass": None, "variant": variant}
+    reference, sr = sf.read(str(excerpt_path), dtype="float32", always_2d=False)
     frame_count = int(teacher.get("frame_count", 0))
-    reference = input_audio[start:start + frame_count]
-    if len(reference) != frame_count or frame_count <= 0:
-        return {"state": "unavailable", "reason": "validation reference excerpt is unavailable", "pass": None}
+    score_start = int(teacher.get("score_frame_start", -1))
+    score_count = int(teacher.get("score_frame_count", 0))
+    levels = teacher.get("levels_db") or []
+    teacher_rms = teacher.get("teacher_output_rms_dbfs") or []
+    valid = (
+        reference.ndim == 1 and np.all(np.isfinite(reference)) and len(reference) == frame_count
+        and sr == sample_rate == teacher.get("sample_rate") and score_start >= 0 and score_count > 0
+        and score_start + score_count <= len(reference) and len(levels) == len(teacher_rms) > 0
+        and np.all(np.isfinite(np.asarray(levels, dtype=float)))
+        and np.all(np.isfinite(np.asarray(teacher_rms, dtype=float)))
+        and teacher.get("processing_version") == "character-export-reference-v2"
+        and teacher.get("teacher_semantics_version") in (1, 2)
+        and all(isinstance(teacher.get(name), str) and len(teacher[name]) == 64 for name in ("amp_a_sha256", "amp_b_sha256", "source_training_input_sha256"))
+    )
+    if teacher.get("source_training_input_sha256") != _sha256_file(input_path):
+        valid = False
+    if teacher.get("cab_baked") and not (
+        isinstance(teacher.get("cab_sha256"), str) and len(teacher["cab_sha256"]) == 64
+    ):
+        valid = False
+    if not valid:
+        return {"state": "unavailable", "reason": "validation reference metadata or audio is invalid", "pass": None, "variant": variant}
     model = load_nam(nam_path)
 
-    full_rms_dbfs = []
-    for gain_db in teacher["levels_db"]:
+    output_rms_dbfs = []
+    policy = {**DEFAULT_VALIDATION_POLICY, **(teacher.get("validation_policy") or {})}
+    floor_dbfs = float(policy["silence_floor_dbfs"])
+    for gain_db in levels:
         scaled = (reference * db_to_amplitude(gain_db)).astype(np.float32)
-        rendered = render(model, scaled, sr)
-        rms = float(np.sqrt(np.mean(np.square(rendered, dtype=np.float64))))
-        full_rms_dbfs.append(float(max(20.0 * np.log10(max(rms, 1e-10)), -90.0)))
+        rendered = render(model, scaled, sr, slim=slim)
+        scored = rendered[score_start:score_start + score_count]
+        rms = float(np.sqrt(np.mean(np.square(scored, dtype=np.float64))))
+        output_rms_dbfs.append(float(max(20.0 * np.log10(max(rms, 1e-12)), floor_dbfs)))
 
-    errors_db = [float(abs(full - teach)) for full, teach in zip(full_rms_dbfs, teacher["teacher_output_rms_dbfs"])]
-    max_error_db = max(errors_db) if errors_db else 0.0
-    # The teacher's own dead-zone status is the baseline: only flag the
-    # TRAINED model going silent when the teacher itself did not.
-    dead_zone_detected = bool(any(rms <= -89.999 for rms in full_rms_dbfs) and not teacher.get("dead_zone_detected"))
-    passed = bool(not dead_zone_detected and max_error_db < 20.0)
+    signed_errors = np.asarray(output_rms_dbfs) - np.asarray(teacher_rms)
+    level_offset_db = float(np.median(signed_errors))
+    shape_errors = signed_errors - level_offset_db
+    absolute_errors = np.abs(signed_errors)
+    max_error_db = float(np.max(absolute_errors))
+    max_shape_error_db = float(np.max(np.abs(shape_errors)))
+    relative_errors = signed_errors - signed_errors[0]
+    max_extra_quiet_attenuation_db = float(max(0.0, -float(np.min(relative_errors))))
+    dead_zone_detected = bool(
+        any(rms <= floor_dbfs + 1e-6 and teach > floor_dbfs + 1e-6 for rms, teach in zip(output_rms_dbfs, teacher_rms))
+    )
+    failures = []
+    if max_error_db > policy["max_absolute_level_error_db"]:
+        failures.append(f"absolute level error {max_error_db:.2f} dB exceeds {policy['max_absolute_level_error_db']:.2f} dB")
+    if max_shape_error_db > policy["max_response_shape_error_db"]:
+        failures.append(f"response-shape error {max_shape_error_db:.2f} dB exceeds {policy['max_response_shape_error_db']:.2f} dB")
+    if max_extra_quiet_attenuation_db > policy["max_extra_quiet_attenuation_db"]:
+        failures.append(f"extra quiet attenuation {max_extra_quiet_attenuation_db:.2f} dB exceeds {policy['max_extra_quiet_attenuation_db']:.2f} dB")
+    if dead_zone_detected:
+        failures.append("export becomes silent at a level where the teacher remains active")
+    passed = not failures
     return {
         "state": "passed" if passed else "failed",
-        "levels_db": teacher["levels_db"], "teacher_output_rms_dbfs": teacher["teacher_output_rms_dbfs"],
-        "full_output_rms_dbfs": full_rms_dbfs, "full_error_db": errors_db,
-        "max_error_db": max_error_db, "dead_zone_detected": dead_zone_detected, "pass": passed,
+        "variant": variant, "slim": slim, "levels_db": levels,
+        "teacher_output_rms_dbfs": teacher_rms, "output_rms_dbfs": output_rms_dbfs,
+        "signed_level_errors_db": signed_errors.tolist(), "absolute_level_errors_db": absolute_errors.tolist(),
+        "level_offset_db": level_offset_db, "response_shape_errors_db": shape_errors.tolist(),
+        "max_error_db": max_error_db, "max_shape_error_db": max_shape_error_db,
+        "max_extra_quiet_attenuation_db": max_extra_quiet_attenuation_db,
+        "dead_zone_detected": dead_zone_detected, "policy": policy,
+        "reason": "; ".join(failures) if failures else "level and quiet-response metrics are within policy",
+        "pass": passed,
     }
+
+
+def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int) -> "dict | None":
+    """Backward-compatible Full-variant entry point for existing callers."""
+    return check_export_low_level_response(
+        manifest, nam_path, input_path, sample_rate, variant="full", slim=0.0,
+    )
 
 
 def build_character_training_manifest(design, amp_a, amp_b, amp_a_sha256, amp_b_sha256, calibration, training_input, safety, receptive_field, warnings, low_level_response: LowLevelResponseCheck, output_gain: "dict | None" = None):
@@ -206,6 +292,14 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
         "character", amp_a, amp_b, input_info.sample_rate, design.cab,
         bounded_envelope_max_history_ms(), design.envelope_smoothing_ms,
     )
+    available_rf = receptive.get("a2_receptive_field_samples_at_generation_time")
+    if available_rf is not None and receptive.get(
+        "formal_character_required_samples", receptive.get("hard_required_samples", 0)
+    ) > available_rf:
+        warnings.append(
+            "Character processing extends beyond the standard A2 receptive field. Training will continue as an "
+            "approximation; validate the Full and Lite exports against the frozen teacher and by listening."
+        )
     output_gain_record = {
         "mode": design.output_gain_mode,
         "requested_manual_gain_db": design.manual_output_gain_db if design.output_gain_mode == "manual" else None,
@@ -213,7 +307,14 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
         "applied_gain_db": output_gain_db,
     }
     manifest = build_character_training_manifest(design, amp_a, amp_b, a_sha, b_sha, calibration, input_info, safety, receptive, warnings, low_level_response, output_gain=output_gain_record)
-    validation_reference.update({"input_excerpt_path": reference_out.name, "input_excerpt_sha256": _sha256_file(reference_out), "amp_a_sha256": a_sha, "amp_b_sha256": b_sha, "cab_sha256": design.cab.sha256 if design.cab else None})
+    validation_reference.update({
+        "input_excerpt_path": reference_out.name,
+        "input_excerpt_sha256": _sha256_file(reference_out),
+        "source_training_input_sha256": input_info.sha256,
+        "amp_a_sha256": a_sha,
+        "amp_b_sha256": b_sha,
+        "cab_sha256": design.cab.sha256 if design.cab else None,
+    })
     manifest["export_validation_reference"] = validation_reference
     manifest_out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return TrainingBundle(output_directory, input_out, raw_out, final_out, None, manifest_out, design, safety, input_info, warnings, manifest)

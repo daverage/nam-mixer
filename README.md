@@ -191,8 +191,10 @@ tools remain shared across all three design modes.
      `scripts/setup_a2_env.ps1` — never the app's own Python environment).
 
    Both paths validate the exported `.nam` identically: loading and
-   rendering it (Full and Lite) through the existing native NAMCore renderer
-   and comparing against the training target.
+   rendering its Full and Lite branches through the existing native NAMCore
+   renderer, recording raw/gain-normalized ESR, and checking quiet response
+   against an equivalent processed reference when one is available. Training
+   completion and technical validation quality are reported separately.
 
 ## Sessions
 
@@ -200,7 +202,11 @@ The **Sessions** tab is a project library, not a popup. Use it to save the
 current controls under a name, load or inspect an earlier design, export a
 portable NAM Mixer JSON file, import one, or delete a session. Generated
 training bundles are also saved as sessions automatically so their completed
-NAM can be downloaded again or opened in **Tools**.
+NAM can be downloaded again or opened in **Tools**. Validation reports are
+bound to the completed NAM's SHA-256; editing the NAM invalidates that report.
+A completed bundle also offers a synchronized Teacher/Full/Lite comparison on
+the selected musical DI at normal or quiet input level. It reconstructs the
+teacher from the saved design, never from current controls.
 
 A session restores the selected settings and app-managed NAM/cabinet file
 references, but it deliberately does not render automatically. After loading,
@@ -306,6 +312,9 @@ If macOS has reserved port 5000 (for example, AirPlay Receiver), run
   training. The main routes include `/api/render_pair`, `/api/preview`,
   `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
   `/api/profile_coverage`, and `/api/generate`.
+- **Renderer readiness:** the app performs a cheap `--help` launch check before
+  preview inference, distinguishes missing from unusable executables, shows
+  expandable setup help, and can retry after installation without a restart.
 - **Mechanical safeguards:** envelope following, blend math, level matching,
   optional alignment, receptive-field checks, NaN/Inf and silence checks, and
   non-limiting training-target peak control are implemented and covered by
@@ -313,8 +322,12 @@ If macOS has reserved port 5000 (for example, AirPlay Receiver), run
 
 ### Important validation boundaries
 
-- The native renderer has been smoke-tested with real Fender/JCM800 captures,
-  while most automated pipeline tests use mocked renders. Real source-model
+- The Phase 4 real-render harness passed with two distinct local source models,
+  two musical DIs, all three design modes, cabinet on/off, and input levels of
+  -12/0/+12 dB. It produced deterministic rerenders and exact frozen-teacher
+  equivalence for that run. Auto-calibrated cases were unavailable because
+  those source files did not declare input-level metadata. Most automated
+  pipeline tests still use mocked renders. Other real source-model
   combinations can still expose latency, calibration, or musical problems;
   listen to every preview and validate every exported model against its target.
 - **A/B alignment is deliberately off by default.**
@@ -360,6 +373,8 @@ hybrid-nam-builder/
 │   ├── blend_training_target.py -- Parallel Blend A2 target generation
 │   ├── character_training_target.py -- Character Blend A2 target generation
 │   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
+│   ├── validation.py        -- frozen-teacher/model rendering and shared metrics
+│   ├── validation_report.py -- versioned Full/Lite/quiet quality reports
 │   ├── kaggle_training.py  -- private Kaggle GPU job and local validation
 │   ├── nam_tools.py        -- safe output-volume and metadata editing
 │   ├── wizard.py           -- guided setup flow shared by the UI modes
@@ -410,7 +425,10 @@ python3 scripts/real_render_regression.py \
 
 It writes listenable stems and `real_render_report.json` beneath ignored
 `work/`; `--release` fails if prerequisites are missing or a checked case is
-invalid/silent. The Phase 4 implementation was exercised with this command.
+invalid/silent. The Phase 4 implementation was exercised with this command in
+release mode: 6 cases and 36 listenable artifacts passed, with no invariant or
+determinism failures. Calibration combinations remain explicitly unavailable
+when both source models lack `input_level_dbu` metadata.
 
 `torch`/`neural-amp-modeler` are no longer in `requirements.txt` — inference
 is handled entirely by the native `nam_render` tool now. They only matter for

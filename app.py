@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 import uuid
 from functools import wraps
@@ -62,6 +63,7 @@ from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError, find_nam_render_exe, render
 from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
 from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
+from hybrid.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
 from hybrid.wizard import summarise_amp_pair
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
@@ -116,6 +118,13 @@ _rendered_pair_cache: dict = {
 }
 _rendered_pair_lock = threading.RLock()
 
+# Completed-model musical comparisons are intentionally separate from the
+# live-preview cache.  Each entry is content-bound and addressed by an opaque
+# id, so a late audio request can never receive stems from a newer comparison.
+_comparison_cache: dict[str, dict] = {}
+_comparison_cache_lock = threading.RLock()
+_MAX_COMPARISON_CACHE_ENTRIES = 4
+
 
 def _sha256_path(path: str | Path) -> str:
     """Hash a source asset for render identity/provenance, not its filename."""
@@ -126,7 +135,34 @@ def _sha256_path(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: str, amp_b_path: str, di_file: str, settings: dict) -> dict:
+def _retain_render_source(path: str | Path) -> tuple[Path, str]:
+    """Copy and hash the same byte stream before inference can consume it.
+
+    Retained assets are content-addressed and kept for frozen bundle provenance.
+    Changing an uploaded/original file cannot change an existing render's source.
+    """
+    source_path = Path(path)
+    root = WORK_DIR / "render_sources"
+    root.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    temporary = None
+    try:
+        with source_path.open("rb") as source, tempfile.NamedTemporaryFile(dir=root, delete=False) as target:
+            temporary = Path(target.name)
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+                target.write(block)
+        sha256 = digest.hexdigest()
+        destination = root / sha256 / source_path.name
+        destination.parent.mkdir(exist_ok=True)
+        os.replace(temporary, destination)
+        return destination, sha256
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: str, amp_b_path: str, di_file: str, settings: dict, source_hashes: dict, source_paths: dict) -> dict:
     """Atomically publish a complete pair only after both renders succeeded."""
     snapshot = {
         "render_id": uuid.uuid4().hex,
@@ -136,10 +172,8 @@ def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: st
         "di_file": di_file,
         "amp_a_summary": amp_a.summary(),
         "amp_b_summary": amp_b.summary(),
-        "source_hashes": {
-            "amp_a": _sha256_path(amp_a_path), "amp_b": _sha256_path(amp_b_path),
-            "di": _sha256_path(DI_DIR / di_file),
-        },
+        "source_hashes": dict(source_hashes),
+        "source_paths": dict(source_paths),
         "settings": settings,
     }
     with _rendered_pair_lock:
@@ -357,11 +391,31 @@ def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
         "outputGainAuto": True, "outputGainManualDb": "0", "modelName": manifest.get("model_name", bundle_dir.name),
     }
     artifact = None
+    validation_report = None
+    validation_warning = None
     output_path = Path(str((manifest.get("training") or {}).get("output_nam_path", "")))
     if output_path.is_file():
-        artifact = {"filename": manifest.get("artifact_filename", output_path.name), "nam_base64": base64.b64encode(output_path.read_bytes()).decode()}
+        output_bytes = output_path.read_bytes()
+        output_sha256 = hashlib.sha256(output_bytes).hexdigest()
+        artifact = {
+            "filename": manifest.get("artifact_filename", output_path.name),
+            "nam_base64": base64.b64encode(output_bytes).decode(),
+            "sha256": output_sha256,
+        }
+        candidate_report = (manifest.get("training") or {}).get("validation_report")
+        if isinstance(candidate_report, dict) and candidate_report.get("model_sha256") == output_sha256:
+            validation_report = candidate_report
+        elif candidate_report is not None:
+            validation_warning = "Stored validation report did not match the generated NAM and was not restored."
     session_id = f"generated-{secure_filename(bundle_dir.name)}"
-    return {"type": "nam-mixer-session", "version": 1, "id": session_id, "name": manifest.get("model_name", bundle_dir.name), "savedAt": datetime.fromtimestamp(bundle_dir.stat().st_mtime, timezone.utc).isoformat(), "settings": settings, "designId": bundle_dir.name, "artifact": artifact, "generated": True, "bundlePath": str(bundle_dir)}
+    return {
+        "type": "nam-mixer-session", "version": 1, "id": session_id,
+        "name": manifest.get("model_name", bundle_dir.name),
+        "savedAt": datetime.fromtimestamp(bundle_dir.stat().st_mtime, timezone.utc).isoformat(),
+        "settings": settings, "designId": bundle_dir.name, "artifact": artifact,
+        "validationReport": validation_report, "validationReportWarning": validation_warning,
+        "generated": True, "bundlePath": str(bundle_dir),
+    }
 
 
 def _session_payload(data: object) -> tuple[str, dict]:
@@ -385,7 +439,12 @@ def _materialize_session_nam(session_id: str, session: dict) -> None:
     """Store an optional embedded NAM alongside its portable session JSON."""
     artifact = session.get("artifact")
     model_path = _session_model_path(session_id)
+    validation_report = session.get("validationReport")
+    if validation_report is not None and not isinstance(validation_report, dict):
+        raise ValueError("session validationReport must be an object")
     if not isinstance(artifact, dict) or not artifact.get("nam_base64"):
+        if validation_report is not None:
+            raise ValueError("a validation report requires its embedded NAM artifact")
         model_path.unlink(missing_ok=True)
         return
     encoded = artifact.get("nam_base64")
@@ -397,6 +456,13 @@ def _materialize_session_nam(session_id: str, session: dict) -> None:
         raise ValueError("session NAM data is invalid") from exc
     if not raw:
         raise ValueError("session NAM data is empty")
+    sha256 = hashlib.sha256(raw).hexdigest()
+    declared_sha256 = artifact.get("sha256")
+    if declared_sha256 is not None and declared_sha256 != sha256:
+        raise ValueError("session NAM hash does not match its embedded data")
+    if validation_report is not None and validation_report.get("model_sha256") != sha256:
+        raise ValueError("session validation report belongs to a different NAM artifact")
+    artifact["sha256"] = sha256
     model_path.write_bytes(raw)
 
 
@@ -495,6 +561,15 @@ def api_session_delete(session_id: str):
         except ValueError as exc: return jsonify({"error": str(exc)}), 400
         return jsonify({"error": "session not found"}), 404
     path, _session, bundle_dir = found
+    design_id = _session.get("designId") if isinstance(_session, dict) else None
+    if design_id:
+        active_kaggle = find_active_job(A2_OUTPUT_DIR, design_id)
+        if active_kaggle is not None and active_kaggle.state not in ("complete", "failed"):
+            return jsonify({"error": "cannot delete a session while its Kaggle training job is active"}), 409
+        local_state = _local_training_manager.status()
+        if local_training_design_id := getattr(_local_training_manager, "design_id", None):
+            if local_training_design_id == design_id and local_state["state"] in ("setting_up", "training", "cancelling"):
+                return jsonify({"error": "cannot delete a session while its local training job is active"}), 409
     if bundle_dir is not None:
         shutil.rmtree(bundle_dir)
     else:
@@ -587,6 +662,8 @@ def api_nam_tool_volume():
     return jsonify({"filename": output.name, "download_url": f"/api/nam/tools/download/{output.name}",
                     "architecture": original.get("architecture"), "db_change": db_change,
                     "multiplier": multiplier, "changed_paths": expected_paths,
+                    "source_sha256": _sha256_path(source), "output_sha256": _sha256_path(output),
+                    "validation_report_invalidated": True,
                     "warning": "Large output boosts may clip in a host or target hardware." if db_change > 12 else None})
 
 
@@ -602,7 +679,8 @@ def api_nam_tool_metadata():
     except (TypeError, ValueError, OSError, NamToolError) as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"filename": output.name, "download_url": f"/api/nam/tools/download/{output.name}",
-                    "changed_paths": expected_paths})
+                    "changed_paths": expected_paths, "source_sha256": _sha256_path(source),
+                    "output_sha256": _sha256_path(output), "validation_report_invalidated": True})
 
 
 @app.route("/api/nam/tools/download/<filename>", methods=["GET"])
@@ -745,6 +823,207 @@ def _load_di(di_file: str):
     return audio, sample_rate
 
 
+def _comparison_bundle(design_id: str) -> tuple[Path, Path, dict]:
+    safe_id = secure_filename(design_id)
+    if not safe_id or safe_id != design_id:
+        raise ValueError("invalid design_id")
+    bundle_dir = A2_OUTPUT_DIR / safe_id
+    manifest_path = bundle_dir / "training_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError("training manifest is unavailable") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("training manifest is unreadable") from exc
+    return bundle_dir, manifest_path, manifest
+
+
+def _verified_comparison_source(record: dict, label: str) -> Path:
+    raw_path, expected = record.get("path"), record.get("sha256")
+    if not raw_path or not expected:
+        raise FileNotFoundError(f"saved {label} source provenance is incomplete")
+    path = Path(raw_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"saved {label} source is no longer available")
+    if _sha256_path(path) != expected:
+        raise ValueError(f"saved {label} source no longer matches its recorded hash")
+    return path
+
+
+def _comparison_model_path(data: dict, manifest: dict) -> tuple[Path, str]:
+    raw_path = data.get("model_path") or (manifest.get("training") or {}).get("output_nam_path")
+    if not raw_path:
+        raise FileNotFoundError("this design has no completed model")
+    try:
+        path = _tool_source_path(str(raw_path))
+    except NamToolError as exc:
+        raise ValueError(str(exc)) from exc
+    actual = _sha256_path(path)
+    declared = (manifest.get("training") or {}).get("output_nam_sha256")
+    # A supplied session/tool copy may legitimately live at a different path,
+    # but it must still be the exact model produced for this design.
+    if declared and actual != declared:
+        raise ValueError("selected model does not match the saved design's exported NAM hash")
+    return path, actual
+
+
+@app.post("/api/comparison")
+def api_create_comparison():
+    """Build hash-bound teacher/Full/Lite stems on a musical DI.
+
+    This endpoint never reads the current builder controls.  It uses the
+    design snapshot and post-processing numbers saved with the training
+    target, which prevents a completed model being compared with a subtly
+    different teacher after the user edits or restores a session.
+    """
+    data = request.get_json(force=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "comparison request must be a JSON object", "code": "invalid_comparison_request"}), 400
+    design_id = str(data.get("design_id") or "")
+    try:
+        bundle_dir, manifest_path, manifest = _comparison_bundle(design_id)
+    except FileNotFoundError as exc:
+        if data.get("model_path"):
+            return jsonify({
+                "error": f"Teacher reconstruction is unavailable: {exc}. The embedded NAM remains usable and downloadable.",
+                "code": "teacher_sources_unavailable", "model_available": True,
+            }), 409
+        return jsonify({"error": str(exc), "code": "comparison_unavailable"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "invalid_comparison_request"}), 400
+    try:
+        model_path, model_sha256 = _comparison_model_path(data, manifest)
+        di_file = str(data.get("di_file") or "")
+        dry, sample_rate = _load_di(di_file)
+        input_gain_db = float(data.get("input_gain_db", 0.0))
+        if not np.isfinite(input_gain_db) or not -60.0 <= input_gain_db <= 24.0:
+            raise ValueError("input_gain_db must be a finite number from -60 to +24 dB")
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc), "code": "comparison_unavailable"}), 404
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc), "code": "invalid_comparison_request"}), 400
+
+    # Keep interaction responsive and cache memory bounded. This is still
+    # held-out musical material; it is never substituted for training input.
+    dry = np.asarray(dry[: int(sample_rate * 12.0)], dtype=np.float32)
+    if not len(dry):
+        return jsonify({"error": "selected musical DI is empty", "code": "invalid_comparison_request"}), 400
+    dry = (dry * (10.0 ** (input_gain_db / 20.0))).astype(np.float32)
+    di_path = DI_DIR / di_file
+
+    try:
+        design = load_frozen_design(bundle_dir, manifest)
+        # Validate the paths actually consumed by the frozen teacher, not only
+        # potentially stale display paths in the manifest.
+        amp_a_record, amp_b_record = manifest.get("amp_a") or {}, manifest.get("amp_b") or {}
+        _verified_comparison_source({**amp_a_record, "path": design.amp_a_path}, "Amp A")
+        _verified_comparison_source({**amp_b_record, "path": design.amp_b_path}, "Amp B")
+        cab = getattr(design, "cab", None)
+        if cab is not None and cab.baked:
+            _verified_comparison_source(
+                {"path": cab.ir_working_path, "sha256": cab.sha256}, "baked cabinet IR"
+            )
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        return jsonify({
+            "error": f"Teacher reconstruction is unavailable: {exc}. The trained NAM remains usable and downloadable.",
+            "code": "teacher_sources_unavailable",
+            "model_available": True,
+        }), 409
+
+    identity_record = {
+        "schema_version": 1,
+        "design_id": design_id,
+        "mode": manifest.get("mode", "hybrid"),
+        "manifest_sha256": _sha256_path(manifest_path),
+        "design_sha256": _sha256_path(bundle_dir / _DESIGN_FILE_BY_MODE(manifest.get("mode", "hybrid"))),
+        "model_sha256": model_sha256,
+        "di_sha256": _sha256_path(di_path),
+        "di_file": di_file,
+        "input_gain_db": input_gain_db,
+        "sample_rate": int(sample_rate),
+        "frames": int(len(dry)),
+        "baked_cab_sha256": getattr(getattr(design, "cab", None), "sha256", None)
+            if getattr(getattr(design, "cab", None), "baked", False) else None,
+        "audition_cab_sha256": None,
+    }
+    identity = hashlib.sha256(json.dumps(identity_record, sort_keys=True).encode()).hexdigest()
+    with _comparison_cache_lock:
+        for comparison_id, cached in _comparison_cache.items():
+            if cached["identity"] == identity:
+                return jsonify({**cached["response"], "comparison_id": comparison_id, "cache_hit": True})
+
+    try:
+        teacher = render_processed_reference(design, manifest, dry, sample_rate).hybrid
+        full = render_trained_a2(model_path, dry, sample_rate, slim=0.0)
+    except Exception as exc:
+        logger.exception("Failed to build teacher/Full comparison")
+        return jsonify({"error": f"comparison render failed: {exc}", "code": "comparison_render_failed"}), 422
+
+    n = min(len(teacher), len(full), len(dry))
+    if n <= 0 or not np.all(np.isfinite(teacher[:n])) or not np.all(np.isfinite(full[:n])):
+        return jsonify({"error": "comparison produced empty or non-finite audio", "code": "comparison_render_failed"}), 422
+    teacher, full = teacher[:n].astype(np.float32), full[:n].astype(np.float32)
+    channels = [teacher, full]
+    variants = [{"id": "teacher", "channel": 0}, {
+        "id": "full", "channel": 1, "metrics": compute_esr_metrics(full, teacher),
+    }]
+    lite_error = None
+    try:
+        lite = render_trained_a2(model_path, dry, sample_rate, slim=1.0)[:n].astype(np.float32)
+        if len(lite) != n or not np.all(np.isfinite(lite)):
+            raise ValueError("Lite render produced empty or non-finite audio")
+        channels.append(lite)
+        variants.append({"id": "lite", "channel": 2, "metrics": compute_esr_metrics(lite, teacher)})
+    except Exception as exc:
+        lite_error = str(exc)
+        variants.append({"id": "lite", "state": "unavailable", "error": lite_error})
+
+    response = {
+        "identity": identity,
+        "identity_fields": identity_record,
+        "mode": identity_record["mode"],
+        "sample_rate": int(sample_rate),
+        "frames": n,
+        "duration_s": n / float(sample_rate),
+        "input_gain_db": input_gain_db,
+        "actual_output_levels": True,
+        "audition_cab": None,
+        "variants": variants,
+        "audio_url": None,
+    }
+    comparison_id = uuid.uuid4().hex
+    response["audio_url"] = f"/api/comparison/{comparison_id}/audio"
+    with _comparison_cache_lock:
+        while len(_comparison_cache) >= _MAX_COMPARISON_CACHE_ENTRIES:
+            _comparison_cache.pop(next(iter(_comparison_cache)))
+        _comparison_cache[comparison_id] = {
+            "identity": identity, "audio": np.column_stack(channels), "response": response,
+        }
+    return jsonify({**response, "comparison_id": comparison_id, "cache_hit": False})
+
+
+def _DESIGN_FILE_BY_MODE(mode: str) -> str:
+    try:
+        return {"hybrid": "hybrid_design.json", "blend": "blend_design.json", "character": "character_design.json"}[mode]
+    except KeyError as exc:
+        raise ValueError(f"unsupported saved design mode: {mode!r}") from exc
+
+
+@app.get("/api/comparison/<comparison_id>/audio")
+def api_comparison_audio(comparison_id: str):
+    with _comparison_cache_lock:
+        cached = _comparison_cache.get(comparison_id)
+    if cached is None:
+        return jsonify({"error": "comparison audio expired; build it again"}), 404
+    buf = io.BytesIO()
+    sf.write(buf, cached["audio"], cached["response"]["sample_rate"], format="WAV", subtype="FLOAT")
+    buf.seek(0)
+    return Response(buf.read(), mimetype="audio/wav", headers={
+        "X-Comparison-Identity": cached["identity"],
+        "Cache-Control": "no-store",
+    })
+
+
 @app.route("/api/render_pair", methods=["POST"])
 def api_render_pair():
     """Render both amps against the chosen DI clip and cache the result.
@@ -787,13 +1066,20 @@ def api_render_pair():
         return jsonify({"error": f"unknown calibration_mode: {calibration_mode!r} (expected 'auto' or 'raw')"}), 400
 
     try:
+        amp_a_path, amp_a_hash = _retain_render_source(amp_a_path)
+        amp_b_path, amp_b_hash = _retain_render_source(amp_b_path)
         amp_a = load_nam(amp_a_path)
         amp_b = load_nam(amp_b_path)
     except (OSError, ValueError) as exc:
         return jsonify({"error": f"failed to load .nam file: {exc}"}), 400
 
     try:
-        dry, sample_rate = _load_di(di_file)
+        if di_file not in {p.name for p in DI_DIR.glob("*.wav")}:
+            raise ValueError(f"unknown DI file: {di_file!r}")
+        di_path, di_hash = _retain_render_source(DI_DIR / di_file)
+        dry, sample_rate = sf.read(di_path, dtype="float32")
+        if dry.ndim > 1:
+            dry = dry[:, 0]
     except (OSError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -823,7 +1109,9 @@ def api_render_pair():
         return jsonify({"error": str(exc)}), 500
 
     snapshot = _publish_render_snapshot(
-        pair, amp_a, amp_b, amp_a_path=amp_a_path, amp_b_path=amp_b_path, di_file=di_file,
+        pair, amp_a, amp_b, amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path), di_file=di_file,
+        source_hashes={"amp_a": amp_a_hash, "amp_b": amp_b_hash, "di": di_hash},
+        source_paths={"amp_a": str(amp_a_path), "amp_b": str(amp_b_path), "di": str(di_path)},
         settings={
             "instrument_type": instrument_type, "input_profile_id": input_profile_id,
             "input_profile_gain_db": input_profile_gain_db, "custom_input_gain_db": custom_input_gain_db,
@@ -1362,12 +1650,30 @@ def api_live_blend_stems():
         amp_a = apply_cab_ir(amp_a, cab)
         amp_b = apply_cab_ir(amp_b, cab)
 
+    # Keep live fixed-blend auditioning in step with the shared post-combination
+    # output-gain controls used by preview and training. The gain is linear, so
+    # applying it to both stems preserves every mix ratio in the browser.
+    try:
+        output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    combined = amp_a * (1.0 - mix_b) + amp_b * mix_b
+    if output_gain_mode == "manual":
+        output_gain_db = manual_output_gain_db
+    else:
+        output_gain_db, _ = compute_auto_output_gain_db(combined, A2_TARGET_PEAK_CEILING_DBFS)
+    gain = 10.0 ** (output_gain_db / 20.0)
+    amp_a *= gain
+    amp_b *= gain
+
     buf = io.BytesIO()
     sf.write(buf, np.column_stack((amp_a, amp_b)), pair.sample_rate, format="WAV", subtype="FLOAT")
     buf.seek(0)
     return Response(buf.read(), mimetype="audio/wav", headers={
         "X-Auto-Trim-Db": f"{result.auto_trim_db:.3f}",
         "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
+        "X-Output-Gain-Mode": output_gain_mode,
+        "X-Output-Gain-Db": f"{output_gain_db:.3f}",
         "X-Live-Audition": "fixed-blend-stems",
     })
 
@@ -1621,6 +1927,7 @@ def api_generate():
     bundle.manifest["preview_render_provenance"] = {
         "render_id": snapshot["render_id"],
         "source_hashes": snapshot["source_hashes"],
+        "source_paths": snapshot["source_paths"],
         "render_settings": snapshot["settings"],
     }
     with open(bundle.training_manifest_path, "w", encoding="utf-8") as f:
@@ -1681,6 +1988,7 @@ def _job_dict_for_client(job) -> dict:
     basename) than what the browser actually saves."""
     data = job.to_dict()
     data["download_filename"] = _suggested_nam_filename(job.design_id)
+    data["output_available"] = bool(job.output_nam_path and Path(job.output_nam_path).is_file())
     return data
 
 
@@ -1800,7 +2108,7 @@ def api_kaggle_job_download(job_id: str):
     job = load_job(A2_OUTPUT_DIR, design_id, job_id)
     if job is None:
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
-    if job.state != "complete" or not job.output_nam_path:
+    if not job.output_nam_path:
         return jsonify({"error": f"job {job_id!r} has no downloadable model yet (state={job.state})"}), 400
 
     nam_path = Path(job.output_nam_path)

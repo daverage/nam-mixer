@@ -9,6 +9,8 @@ real A2 training" for anything that needs the actual package).
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 import hybrid.receptive_field as receptive_field
@@ -209,3 +211,22 @@ def test_combine_required_history_includes_explicit_character_parallel_paths():
     )
     assert record["hard_required_samples"] == 164
     assert record["branch_samples"]["character_drive_control"] == 130
+
+
+def test_character_record_counts_both_smoothers_and_fir_on_control_path(monkeypatch):
+    from hybrid.training_target import compute_receptive_field_record
+    import hybrid.training_target as target_module
+
+    model = SimpleNamespace(path="synthetic.nam")
+    monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda _model: 100)
+    record = compute_receptive_field_record(
+        "character", model, model, 1000, None,
+        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0,
+    )
+    # 80 envelope + 39 drive smoothing + 9 transition + 39 compensation
+    # smoothing + 64 correction FIR.
+    assert record["branch_samples"]["character_drive_control"] == 231
+    assert record["hard_required_samples"] == 100
+    assert record["formal_character_required_samples"] == 231
+    assert record["exact_history_bounded"] is False
+    assert "repeated mid-ramp reversals" in record["history_qualification"]

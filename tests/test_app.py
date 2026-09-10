@@ -10,7 +10,9 @@ from __future__ import annotations
 import io
 import json as jsonlib
 import base64
+import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -46,6 +48,7 @@ def client():
     # Don't leak a rendered pair into unrelated tests/sessions.
     app_module._rendered_pair_cache["pair"] = None
     app_module._rendered_pair_cache["snapshot"] = None
+    app_module._comparison_cache.clear()
 
 
 def _write_fake_nam(path, input_level_dbu=None):
@@ -104,6 +107,35 @@ def test_renderer_readiness_accepts_namcore_usage_exit(client, monkeypatch):
     }
 
 
+def test_renderer_readiness_distinguishes_found_but_unusable_binary(client, monkeypatch):
+    class Result:
+        returncode, stdout, stderr = 126, "", "permission denied"
+    monkeypatch.setattr(app_module, "find_nam_render_exe", lambda: Path("/tmp/broken-renderer"))
+    monkeypatch.setattr(app_module.subprocess, "run", lambda *args, **kwargs: Result())
+    assert client.get("/api/renderer/readiness").get_json() == {
+        "found": True, "verified": False, "path": "/tmp/broken-renderer", "error": "permission denied",
+    }
+
+
+def test_renderer_readiness_can_recover_on_retry_without_server_restart(client, monkeypatch):
+    calls = 0
+    def find_renderer():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise app_module.NamRenderError("not installed")
+        return Path("/tmp/nam_render")
+    class Result:
+        returncode, stdout, stderr = 1, "Usage: render <model.nam> <input.wav>", ""
+    monkeypatch.setattr(app_module, "find_nam_render_exe", find_renderer)
+    monkeypatch.setattr(app_module.subprocess, "run", lambda *args, **kwargs: Result())
+
+    assert client.get("/api/renderer/readiness").get_json()["verified"] is False
+    recovered = client.get("/api/renderer/readiness").get_json()
+    assert recovered["verified"] is True
+    assert recovered["path"] == "/tmp/nam_render"
+
+
 def test_oversized_upload_returns_a_clear_json_error(client, monkeypatch):
     monkeypatch.setitem(app_module.app.config, "MAX_CONTENT_LENGTH", 1)
     response = client.post(
@@ -116,10 +148,13 @@ def test_oversized_upload_returns_a_clear_json_error(client, monkeypatch):
 
 def test_file_backed_session_embeds_nam_for_download_and_tools(client, tmp_path, monkeypatch):
     session_dir = tmp_path / "sessions"
+    a2_dir = tmp_path / "a2"
+    a2_dir.mkdir()
     model_dir = session_dir / "models"
     model_dir.mkdir(parents=True)
     monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
     monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
     nam_bytes = jsonlib.dumps({"architecture": "WaveNet", "config": {"head_scale": 1.0}}).encode()
     session = {
         "type": "nam-mixer-session", "version": 1,
@@ -132,12 +167,63 @@ def test_file_backed_session_embeds_nam_for_download_and_tools(client, tmp_path,
     listed = client.get("/api/sessions").get_json()
     assert listed[0]["artifact"]["downloadUrl"] == "/api/sessions/saved-session/nam/download"
     assert listed[0]["artifact"]["toolPath"] == str(model_dir / "saved-session.nam")
+    assert listed[0]["artifact"]["sha256"] == hashlib.sha256(nam_bytes).hexdigest()
     assert "nam_base64" not in listed[0]["artifact"]
     assert client.get("/api/sessions/saved-session/nam/download").data == nam_bytes
     tool_inspect = client.post("/api/nam/tools/inspect", json={"path": listed[0]["artifact"]["toolPath"]})
     assert tool_inspect.status_code == 200
     assert client.delete("/api/sessions/saved-session").status_code == 204
     assert not (model_dir / "saved-session.nam").exists()
+
+
+def test_session_validation_report_must_match_embedded_nam(client, tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"
+    model_dir = session_dir / "models"
+    model_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    nam_bytes = b'{"architecture":"WaveNet","config":{}}'
+    sha256 = hashlib.sha256(nam_bytes).hexdigest()
+    base = {
+        "type": "nam-mixer-session", "version": 1, "id": "bound-report",
+        "name": "Bound report", "savedAt": "2026-09-10T10:00:00Z",
+        "settings": {"mode": "hybrid"},
+        "artifact": {"filename": "model.nam", "nam_base64": base64.b64encode(nam_bytes).decode()},
+    }
+    mismatched = {
+        **base,
+        "validationReport": {"schema_version": 2, "model_sha256": "0" * 64, "state": "passed"},
+    }
+    rejected = client.post("/api/sessions", json=mismatched)
+    assert rejected.status_code == 400
+    assert "different NAM artifact" in rejected.get_json()["error"]
+
+    matching = {
+        **base,
+        "validationReport": {"schema_version": 2, "model_sha256": sha256, "state": "passed"},
+    }
+    saved = client.post("/api/sessions", json=matching)
+    assert saved.status_code == 201
+    restored = client.get("/api/sessions").get_json()[0]
+    assert restored["artifact"]["sha256"] == sha256
+    assert restored["validationReport"]["model_sha256"] == sha256
+
+
+def test_session_rejects_declared_artifact_hash_mismatch(client, tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"
+    model_dir = session_dir / "models"
+    model_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    session = {
+        "type": "nam-mixer-session", "version": 1, "id": "bad-hash",
+        "name": "Bad hash", "savedAt": "2026-09-10T10:00:00Z",
+        "settings": {},
+        "artifact": {"filename": "model.nam", "nam_base64": base64.b64encode(b"model").decode(), "sha256": "f" * 64},
+    }
+    response = client.post("/api/sessions", json=session)
+    assert response.status_code == 400
+    assert not (model_dir / "bad-hash.nam").exists()
 
 
 def test_generated_session_is_stored_in_and_deletes_its_bundle(client, tmp_path, monkeypatch):
@@ -151,6 +237,31 @@ def test_generated_session_is_stored_in_and_deletes_its_bundle(client, tmp_path,
     assert (bundle / "nam-mixer-session.json").is_file()
     assert client.delete(f"/api/sessions/{listed[0]['id']}").status_code == 204
     assert not bundle.exists()
+
+
+def test_rejected_training_start_preserves_running_bundle_protection(client, tmp_path, monkeypatch):
+    from hybrid.local_training import LocalTrainingManager
+
+    a2_dir = tmp_path / "a2"
+    for design in ("running-A", "other-B"):
+        bundle = a2_dir / design
+        bundle.mkdir(parents=True)
+        (bundle / "training_manifest.json").write_text(jsonlib.dumps({"mode": "hybrid", "amp_a": {}, "amp_b": {}, "design": {}}))
+    manager = LocalTrainingManager(tmp_path, a2_dir)
+    manager.manifest_path = a2_dir / "running-A" / "training_manifest.json"
+    manager.process = SimpleNamespace(poll=lambda: None)
+    manager.state = "training"
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module, "_local_training_manager", manager)
+    sessions = client.get("/api/sessions").get_json()
+    running_session = next(item for item in sessions if item["designId"] == "running-A")
+
+    response = client.post("/api/local_training/start", json={"design_id": "other-B"})
+    assert response.status_code == 400
+    assert manager.design_id == "running-A"
+    response = client.delete(f"/api/sessions/{running_session['id']}")
+    assert response.status_code == 409
+    assert manager.manifest_path.is_file()
 
 
 def test_nam_volume_tool_writes_only_a_new_validated_file(client, tmp_path):
@@ -280,6 +391,43 @@ def test_render_pair_applies_test_gain_db_as_real_additional_gain(client, tmp_pa
     data1 = resp1.get_json()
     assert data1["test_gain_db"] == 12.0
     assert data1["input_peak_dbfs"] > data0["input_peak_dbfs"]
+
+
+def test_render_and_generation_retain_identical_source_bytes(client, tmp_path, isolated_training_paths, monkeypatch):
+    training_path, _ = isolated_training_paths
+    _write_training_wav(training_path)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path / "work")
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    original = amp_a.read_bytes()
+    observed_paths = []
+
+    def changing_original(model, audio, sample_rate):
+        # Simulate replacement during native inference. The retained model
+        # is already separate, and later generation must consume those bytes.
+        amp_a.write_text("replaced during inference")
+        assert model.path.read_bytes() == original
+        observed_paths.append(model.path)
+        return np.asarray(audio, dtype=np.float32).copy()
+
+    monkeypatch.setattr(pipeline, "render", changing_original)
+    monkeypatch.setattr(training_target, "render", changing_original)
+    rendered = client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+    assert rendered.status_code == 200
+    identity = rendered.get_json()
+    expected_hash = hashlib.sha256(original).hexdigest()
+    assert identity["source_hashes"]["amp_a"] == expected_hash
+    generated = client.post("/api/generate", json={
+        "render_id": identity["render_id"], "model_name": "Frozen source regression",
+    })
+    assert generated.status_code == 200
+    manifest = jsonlib.loads(Path(generated.get_json()["manifest_path"]).read_text())
+    provenance = manifest["preview_render_provenance"]
+    assert provenance["source_hashes"] == identity["source_hashes"]
+    assert Path(provenance["source_paths"]["amp_a"]).read_bytes() == original
+    assert len(observed_paths) == 4
+    assert observed_paths[:2] == observed_paths[2:]
 
 
 def test_render_pair_rejects_non_numeric_test_gain_db(client, tmp_path):
@@ -419,6 +567,119 @@ def _write_training_wav(path, n=4800, sample_rate=48000):
     audio = (0.3 * rng.uniform(-1, 1, n)).astype(np.float32)
     sf.write(path, audio, sample_rate, subtype="FLOAT")
     return path
+
+
+def _comparison_bundle(tmp_path, monkeypatch):
+    a2_dir, di_dir = tmp_path / "a2", tmp_path / "di"
+    bundle = a2_dir / "design-1"
+    bundle.mkdir(parents=True)
+    di_dir.mkdir()
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module, "DI_DIR", di_dir)
+    _write_training_wav(di_dir / "held-out.wav", n=1000)
+    amp_a, amp_b, model = bundle / "a.nam", bundle / "b.nam", bundle / "model.nam"
+    for path in (amp_a, amp_b, model):
+        _write_fake_nam(path)
+    from hybrid.design import HybridDesign
+    HybridDesign(
+        str(amp_a), str(amp_b), crossover_dbfs=-20.0, calibration_mode="raw",
+    ).write_json(bundle / "hybrid_design.json")
+    sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    manifest = {
+        "mode": "hybrid",
+        "amp_a": {"path": str(amp_a), "sha256": sha(amp_a)},
+        "amp_b": {"path": str(amp_b), "sha256": sha(amp_b)},
+        "cab": {"selected": False},
+        "output_gain": {"applied_gain_db": 0.0},
+        "target": {"global_safety_gain_reduction_db": 0.0},
+        "training": {"output_nam_path": str(model), "output_nam_sha256": sha(model)},
+    }
+    (bundle / "training_manifest.json").write_text(jsonlib.dumps(manifest))
+    return bundle, amp_a, amp_b, model
+
+
+def test_comparison_builds_synchronised_teacher_full_lite_stems(client, tmp_path, monkeypatch):
+    _bundle, _a, _b, model = _comparison_bundle(tmp_path, monkeypatch)
+    seen = []
+    monkeypatch.setattr(app_module, "render_processed_reference", lambda design, manifest, dry, sr: SimpleNamespace(hybrid=dry * 2.0))
+    def fake_model(path, dry, sr, slim=None):
+        seen.append((Path(path), slim, float(dry[0])))
+        return dry * (2.0 if slim == 0.0 else 1.5)
+    monkeypatch.setattr(app_module, "render_trained_a2", fake_model)
+
+    response = client.post("/api/comparison", json={
+        "design_id": "design-1", "di_file": "held-out.wav", "input_gain_db": -6,
+    })
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["actual_output_levels"] is True
+    assert [variant["id"] for variant in data["variants"]] == ["teacher", "full", "lite"]
+    assert data["variants"][1]["metrics"]["raw_esr"] == pytest.approx(0.0)
+    assert [entry[1] for entry in seen] == [0.0, 1.0]
+    assert all(entry[0] == model for entry in seen)
+    audio_response = client.get(data["audio_url"])
+    audio, sample_rate = sf.read(io.BytesIO(audio_response.data), dtype="float32", always_2d=True)
+    assert sample_rate == 48000
+    assert audio.shape == (1000, 3)
+    np.testing.assert_allclose(audio[:, 0], audio[:, 1], atol=1e-6)
+
+
+def test_comparison_missing_teacher_source_keeps_model_available(client, tmp_path, monkeypatch):
+    _bundle, amp_a, _b, _model = _comparison_bundle(tmp_path, monkeypatch)
+    amp_a.unlink()
+    called = False
+    def should_not_render(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("inference must not start")
+    monkeypatch.setattr(app_module, "render_trained_a2", should_not_render)
+
+    response = client.post("/api/comparison", json={"design_id": "design-1", "di_file": "held-out.wav"})
+
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "teacher_sources_unavailable"
+    assert response.get_json()["model_available"] is True
+    assert called is False
+
+
+def test_imported_model_without_original_bundle_explains_teacher_is_unavailable(client, tmp_path, monkeypatch):
+    a2_dir = tmp_path / "a2"
+    a2_dir.mkdir()
+    model = a2_dir / "embedded-copy.nam"
+    _write_fake_nam(model)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+
+    response = client.post("/api/comparison", json={
+        "design_id": "missing-design", "model_path": str(model), "di_file": "anything.wav",
+    })
+
+    assert response.status_code == 409
+    data = response.get_json()
+    assert data["code"] == "teacher_sources_unavailable"
+    assert data["model_available"] is True
+    assert "embedded NAM remains usable" in data["error"]
+
+
+def test_comparison_cache_identity_changes_with_gain_and_lite_can_be_unavailable(client, tmp_path, monkeypatch):
+    _comparison_bundle(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_module, "render_processed_reference", lambda design, manifest, dry, sr: SimpleNamespace(hybrid=dry))
+    def fake_model(path, dry, sr, slim=None):
+        if slim == 1.0:
+            raise RuntimeError("export has no Lite branch")
+        return dry
+    monkeypatch.setattr(app_module, "render_trained_a2", fake_model)
+    body = {"design_id": "design-1", "di_file": "held-out.wav", "input_gain_db": 0}
+
+    first = client.post("/api/comparison", json=body).get_json()
+    second = client.post("/api/comparison", json=body).get_json()
+    quieter = client.post("/api/comparison", json={**body, "input_gain_db": -24}).get_json()
+
+    assert first["cache_hit"] is False and second["cache_hit"] is True
+    assert first["comparison_id"] == second["comparison_id"]
+    assert quieter["identity"] != first["identity"]
+    assert first["variants"][2]["state"] == "unavailable"
+    assert first["variants"][1]["metrics"]["raw_esr"] == pytest.approx(0.0)
 
 
 def test_training_input_status_missing_by_default(client, isolated_training_paths):

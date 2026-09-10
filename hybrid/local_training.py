@@ -28,6 +28,11 @@ class LocalTrainingManager:
         self._lock = threading.Lock()
 
     @property
+    def design_id(self) -> str | None:
+        """The accepted training manifest owns the job, never a pending request."""
+        return self.manifest_path.parent.name if self.manifest_path else None
+
+    @property
     def python(self) -> Path:
         return self.venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
@@ -100,6 +105,9 @@ class LocalTrainingManager:
     def setup(self) -> None:
         if self.process and self.process.poll() is None:
             raise RuntimeError("Local setup or training is already running.")
+        # Setup completion is not training completion; never expose a report
+        # left over from the preceding training run.
+        self.manifest_path = None
         # A tiny Python bootstrap avoids shell quoting and works on Windows/macOS.
         bootstrap = (
             "import subprocess,sys,pathlib; "
@@ -125,8 +133,13 @@ class LocalTrainingManager:
             raise RuntimeError("Local setup or training is already running.")
         if not self.python.is_file():
             raise RuntimeError("Local A2 environment is not ready. Click Set up local training first.")
+        previous_manifest = self.manifest_path
         self.manifest_path = manifest
-        self._start([str(self.python), "scripts/train_a2.py", str(manifest), "--epoch-preset", preset, "--progress"], "training")
+        try:
+            self._start([str(self.python), "scripts/train_a2.py", str(manifest), "--epoch-preset", preset, "--progress"], "training")
+        except Exception:
+            self.manifest_path = previous_manifest
+            raise
 
     def status(self) -> dict:
         running = bool(self.process and self.process.poll() is None)

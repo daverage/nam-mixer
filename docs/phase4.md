@@ -339,11 +339,12 @@ for the design that actually produced the trained model.
 
 ## Completion checklist
 
-- [ ] 1. Session/render consistency is enforced by frontend and backend.
-- [ ] 2. Character Blend donor transitions are causal and versioned.
-- [ ] 3. Quiet-playing validation compares equivalent processed signals.
-- [ ] 4. Quality results are distinct from job completion and visible in Sessions/UI.
-- [ ] 5. Real-render harness exists and its actual execution status is recorded.
-- [ ] 6. Held-out musical comparison works with correct signal-chain semantics.
-- [ ] 7. Renderer readiness and recovery are clear before rendering.
-- [ ] Final regression checks, documentation, and compatibility notes are complete.
+- [x] 1. Session/render consistency is enforced by frontend and backend.
+- [x] 2. Character Blend donor transitions are causal and versioned.
+- [x] 3. Quiet-playing validation compares equivalent processed signals.
+- [x] 4. Quality results are distinct from job completion and visible in Sessions/UI.
+- [x] 5. Real-render harness exists and its actual execution status is recorded.
+- [x] 6. Held-out musical comparison works with correct signal-chain semantics.
+- [x] 7. Renderer readiness and recovery are clear before rendering.
+- [ ] Final acceptance: automated regression checks and documentation are complete;
+  interactive browser checks remain pending (no connected browser was available).

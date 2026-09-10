@@ -51,6 +51,42 @@ def test_character_teacher_is_deterministic_and_not_parallel_sum():
     assert np.isfinite(one).all()
 
 
+def test_full_character_teacher_is_prefix_invariant_with_frozen_analysis():
+    """Offline full-clip analysis is frozen before testing runtime causality."""
+    full = _pair(n=4096, sample_rate=48000)
+    configured = CharacterBlendDesign(
+        "a.nam", "b.nam", tone_mix_b=.35, feel_mix_b=.65,
+        drive_low_mix_b=.2, drive_mid_mix_b=.8, drive_high_mix_b=.3,
+        envelope_smoothing_ms=4.0,
+    )
+    analysed = build_character_blend(full, configured)
+    frozen = freeze_character_design(
+        full, analysed, "a.nam", "b.nam", tone_mix_b=.35,
+        feel_mix_b=.65, drive_low_mix_b=.2, drive_mid_mix_b=.8,
+        drive_high_mix_b=.3, envelope_smoothing_ms=4.0,
+    )
+    boundary = 2048
+    prefix_pair = SimpleNamespace(
+        **{**full.__dict__, "dry": full.dry[:boundary], "amp_a": full.amp_a[:boundary], "amp_b": full.amp_b[:boundary]}
+    )
+    changed = _pair(n=4096, sample_rate=48000)
+    changed.dry[:boundary] = full.dry[:boundary]
+    changed.amp_a[:boundary] = full.amp_a[:boundary]
+    changed.amp_b[:boundary] = full.amp_b[:boundary]
+    changed.dry[boundary:] *= -0.7
+    changed.amp_a[boundary:] = 0.75
+    changed.amp_b[boundary:] = -0.5
+
+    short = build_character_blend(prefix_pair, frozen).blend
+    long = build_character_blend(changed, frozen).blend[:boundary]
+
+    np.testing.assert_allclose(short, long, rtol=2e-6, atol=2e-7)
+    assert np.array_equal(
+        build_character_blend(changed, frozen).blend,
+        build_character_blend(changed, frozen).blend,
+    )
+
+
 def test_drive_curve_is_smooth_and_freeze_roundtrips(tmp_path):
     pair = _pair()
     design = CharacterBlendDesign("a.nam", "b.nam", drive_low_mix_b=.1, drive_mid_mix_b=.5, drive_high_mix_b=.9)
@@ -219,6 +255,33 @@ def test_drive_donor_causal_ramp_handles_reversal_without_a_jump():
     assert weight[-1] == 0.0
 
 
+@pytest.mark.parametrize("initial,target", [(0.0, 1.0), (1.0, 0.0)])
+def test_drive_donor_settles_within_documented_bound(initial, target):
+    sample_rate = 1000
+    ramp_samples = 10
+    drive = np.full(2 + ramp_samples + 2, initial)
+    drive[2:] = target
+    weight = _causal_donor_weight(drive, sample_rate)
+    assert weight[1] == initial
+    assert weight[2 + ramp_samples - 1] == target
+    assert np.all(weight[2 + ramp_samples - 1:] == target)
+    assert np.all((weight >= 0.0) & (weight <= 1.0))
+
+
+@pytest.mark.parametrize("value", [0.0, 1.0])
+@pytest.mark.parametrize("length", [0, 1, 3])
+def test_drive_donor_constant_and_short_clip_boundaries(value, length):
+    drive = np.full(length, value)
+    weight = _causal_donor_weight(drive, 1000)
+    assert len(weight) == length
+    assert np.all(weight == value)
+
+
+def test_unknown_teacher_semantics_are_rejected():
+    with pytest.raises(ValueError, match="unsupported Character Blend teacher semantics"):
+        _select_donor(np.zeros(4), np.ones(4), np.zeros(4), 1000, semantics_version=99)
+
+
 def test_character_design_without_semantics_version_loads_as_legacy(tmp_path):
     path = tmp_path / "legacy-character.json"
     path.write_text('{"amp_a_path":"a.nam","amp_b_path":"b.nam"}')
@@ -229,6 +292,8 @@ def test_character_temporal_history_reports_serial_dependencies():
     history = character_temporal_history_samples(1000, 40.0)
     assert history == {
         "drive_smoothing_serial_samples": 39,
+        "compensation_smoothing_serial_samples": 39,
         "donor_transition_serial_samples": 9,
         "correction_fir_serial_samples": 64,
+        "donor_transition_exact_history_bounded": False,
     }

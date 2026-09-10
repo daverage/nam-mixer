@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -18,7 +19,7 @@ def _exe_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
+requires_native_model = pytest.mark.skipif(
     not (MODEL_PATH.is_file() and _exe_available()),
     reason=(
         "requires a real .nam model in assets/nam_models/ (gitignored, "
@@ -28,6 +29,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@requires_native_model
 def test_render_real_model_length_and_sanity():
     model = load_nam(MODEL_PATH)
     sample_rate = int(model.sample_rate or 48000)
@@ -41,6 +43,7 @@ def test_render_real_model_length_and_sanity():
     assert np.max(np.abs(out)) > 0
 
 
+@requires_native_model
 def test_render_is_deterministic():
     """Same DI through the same model twice should produce identical (or
     extremely close) output -- establishing this before generating any real
@@ -56,9 +59,12 @@ def test_render_is_deterministic():
     np.testing.assert_allclose(out1, out2, atol=1e-6)
 
 
-def test_render_rejects_stereo_input():
-    model = load_nam(MODEL_PATH)
-    sample_rate = int(model.sample_rate or 48000)
+def test_render_rejects_stereo_input(monkeypatch):
+    import hybrid.render as render_module
+
+    monkeypatch.setattr(render_module, "find_nam_render_exe", lambda: Path("unused-renderer"))
+    model = SimpleNamespace(path=Path("unused-model.nam"))
+    sample_rate = 48000
     stereo = np.zeros((100, 2), dtype=np.float32)
     with pytest.raises(NamRenderError):
         render(model, stereo, sample_rate)
@@ -71,6 +77,21 @@ def test_render_missing_exe_raises_nam_render_error(monkeypatch):
         raise NamRenderError("not found")
 
     monkeypatch.setattr(render_module, "find_nam_render_exe", _raise)
-    model = load_nam(MODEL_PATH)
+    model = SimpleNamespace(path=Path("unused-model.nam"))
     with pytest.raises(NamRenderError):
         render(model, np.zeros(100, dtype=np.float32), 48000)
+
+
+def test_renderer_env_override(monkeypatch, tmp_path):
+    executable = tmp_path / "nam_render"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    monkeypatch.setenv("NAM_RENDER_EXE", str(executable))
+    assert find_nam_render_exe() == executable
+
+
+def test_renderer_env_override_rejects_non_executable(monkeypatch, tmp_path):
+    configured = tmp_path / "missing-renderer"
+    monkeypatch.setenv("NAM_RENDER_EXE", str(configured))
+    with pytest.raises(NamRenderError, match="NAM_RENDER_EXE"):
+        find_nam_render_exe()

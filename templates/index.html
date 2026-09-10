@@ -190,7 +190,15 @@
         </details>
 
         <button id="btn-render-pair" class="btn btn-primary btn-block">Prepare amps for comparison</button>
-        <div id="render-status" class="info" aria-live="polite"></div>
+        <div class="status-row">
+          <div id="render-status" class="info" aria-live="polite"></div>
+          <button id="btn-renderer-retry" type="button" class="link-btn" hidden>Check again</button>
+        </div>
+        <details id="renderer-help" hidden>
+          <summary>Renderer setup help</summary>
+          <p class="info">Preview rendering needs the local NAMCore command-line renderer. Build the target in <code>native/nam_render</code>, or set <code>NAM_RENDER_EXE</code> to an executable renderer path, then choose “Check again”. This check only launches <code>--help</code>; it never renders a model or installs software.</p>
+          <div id="renderer-path" class="hint"></div>
+        </details>
         <div id="render-warnings" class="warning-box" hidden aria-live="assertive"></div>
       </section>
 
@@ -302,7 +310,7 @@
           <button id="btn-preview-mix" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
-        <div class="audition-live-row"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition"> Update the result while it plays</label></div>
+        <div class="audition-live-row"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition" checked> Update the result while it plays</label></div>
         <div id="live-blend-status" class="info" aria-live="polite">Always-on mix can change immediately while audio plays. Other modes update the result after you adjust a control.</div>
         <audio id="player" controls></audio>
 
@@ -461,6 +469,24 @@
             <details><summary>Live local-training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
             <div class="hint">Sets up the required training environment automatically. No Terminal commands needed.</div>
             <div id="local-result" class="generate-result" hidden aria-live="polite"></div>
+          </div>
+
+          <div id="model-comparison-panel" class="generate-result" hidden>
+            <div class="field-label">Hear the finished model on musical material</div>
+            <p class="info">Uses the selected test performance and the frozen design that produced this NAM. Playback keeps the real output levels.</p>
+            <div class="radio-row" aria-label="Comparison input level">
+              <label><input type="radio" name="comparison-level" value="0" checked> Normal playing</label>
+              <label><input type="radio" name="comparison-level" value="-24"> Quiet playing <span class="hint">(-24 dB)</span></label>
+            </div>
+            <button id="btn-build-comparison" type="button" class="btn btn-secondary btn-block">Build held-out comparison</button>
+            <div id="comparison-switches" class="radio-row" hidden aria-label="Comparison source">
+              <button type="button" class="btn btn-secondary btn-small" data-comparison-source="teacher">Teacher</button>
+              <button type="button" class="btn btn-secondary btn-small" data-comparison-source="full">Full</button>
+              <button type="button" class="btn btn-secondary btn-small" data-comparison-source="lite">Lite</button>
+              <button id="btn-stop-comparison" type="button" class="btn btn-secondary btn-small">Stop</button>
+            </div>
+            <div id="comparison-status" class="info" aria-live="polite"></div>
+            <details id="comparison-metrics" hidden><summary>Technical differences</summary><div id="comparison-metrics-body" class="hint"></div></details>
           </div>
         </div>
       </section>

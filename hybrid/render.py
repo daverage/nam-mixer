@@ -20,6 +20,7 @@ It requires no torch or neural-amp-modeler installation.
 from __future__ import annotations
 
 import shutil
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -52,6 +53,12 @@ class RenderNotImplementedError(NamRenderError):
 
 def find_nam_render_exe() -> Path:
     """Locate the built nam_render executable, or raise NamRenderError."""
+    configured = os.environ.get("NAM_RENDER_EXE")
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+        raise NamRenderError(f"NAM_RENDER_EXE is set but is not an executable file: {candidate}")
     for candidate in _NAM_RENDER_EXE_CANDIDATES:
         if candidate.is_file():
             return candidate
