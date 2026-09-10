@@ -54,7 +54,7 @@ teacher. Always listen to and validate exported models.
   [level matching](#why-automatic-level-matching-is-needed),
   [input profile vs. crossover vs. calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
 - [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
-- [Workflow](#workflow) · [Sessions](#sessions) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
+- [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
 - [macOS quick start](#macos-quick-start) · [Running it](#running-it)
 - [Current status and limitations](#current-status-and-limitations)
 - [Safety: training target vs. live preview](#safety-training-target-vs-live-preview)
@@ -219,10 +219,9 @@ tools remain shared across all three design modes.
    (+ `hybrid_target_raw.wav` for comparison), `hybrid.hybrid.json`, and
    `training_manifest.json` under `work/a2/<design_id>/`.
    Then train a real A2 (PackedWaveNet) model on the bundle, either:
-   - **Kaggle GPU** (recommended, one-click from the "Create A2" card after a
-     one-time `pip install kaggle && kaggle auth login` — see
-     `docs/kaggle_training.md`), which trains on a private Kaggle T4 GPU and
-     downloads/verifies the result automatically, or
+   - **Kaggle GPU** (recommended — no local Torch install, trains on a free
+     private Kaggle T4) — see [Setting up Kaggle GPU training](#setting-up-kaggle-gpu-training)
+     below, or
    - **Local**, with `scripts/train_a2.py` (needs a separate Torch/
      `neural-amp-modeler` environment — see `requirements-training.txt` /
      `scripts/setup_a2_env.ps1` — never the app's own Python environment).
@@ -232,6 +231,39 @@ tools remain shared across all three design modes.
    renderer, recording raw/gain-normalized ESR, and checking quiet response
    against an equivalent processed reference when one is available. Training
    completion and technical validation quality are reported separately.
+
+### Setting up Kaggle GPU training
+
+Kaggle GPU is optional — the preview/design UI and local training work fully
+without it. To enable the one-click "Train A2" button on the "Create A2"
+card:
+
+1. **Have (or create) a free [Kaggle](https://www.kaggle.com) account.**
+2. **Verify your phone number** on
+   [kaggle.com/settings](https://www.kaggle.com/settings) (Account tab) —
+   Kaggle requires this before it will grant GPU/TPU accelerator quota to any
+   account, regardless of how you submit the job. This is the step people
+   most often miss.
+3. **Install and authenticate the Kaggle CLI**, once, in your normal shell
+   (this is separate from the app's own Python environment — no `kaggle`
+   import ever runs inside this app, only the CLI as a subprocess):
+   ```bash
+   pip install kaggle
+   kaggle auth login
+   ```
+   This opens a browser to sign in and stores a credential locally
+   (`~/.kaggle/kaggle.json` or `KAGGLE_API_TOKEN`) that the Kaggle CLI
+   manages entirely on its own — NAM Mixer never reads, stores, or logs it.
+4. Reload the "Create A2" card in the app; it should show **"Connected ✓"**
+   and enable the **Train A2 (Kaggle)** button.
+
+Each training run stages a private, uniquely-named Kaggle dataset + kernel
+under your account, polls it without blocking the app, downloads the result,
+and re-validates it locally before calling the job complete — see
+[`docs/kaggle_training.md`](docs/kaggle_training.md) for the full mechanics,
+troubleshooting, and how to recover a job that trained but failed to
+download. Kaggle's free T4 quota is weekly and account-wide; the "Create A2"
+card shows your remaining quota before you submit.
 
 ## Sessions
 
