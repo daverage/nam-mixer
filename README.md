@@ -55,7 +55,7 @@ teacher. Always listen to and validate exported models.
   [input profile vs. crossover vs. calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
 - [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
 - [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
-- [macOS quick start](#macos-quick-start) · [Running it](#running-it)
+- [Quick start](#quick-start) (macOS, Linux, Windows) · [Running it](#running-it)
 - [Current status and limitations](#current-status-and-limitations)
 - [Safety: training target vs. live preview](#safety-training-target-vs-live-preview)
 - [Project layout](#project-layout) · [NAM Tools](#nam-tools-output-volume-and-metadata)
@@ -224,7 +224,8 @@ tools remain shared across all three design modes.
      below, or
    - **Local**, with `scripts/train_a2.py` (needs a separate Torch/
      `neural-amp-modeler` environment — see `requirements-training.txt` /
-     `scripts/setup_a2_env.ps1` — never the app's own Python environment).
+     `scripts/setup_a2_env.sh` (macOS/Linux) / `scripts/setup_a2_env.ps1`
+     (Windows) — never the app's own Python environment).
 
    Both paths validate the exported `.nam` identically: loading and
    rendering its Full and Lite branches through the existing native NAMCore
@@ -352,10 +353,19 @@ actually audible signal, the Cabinet card also reports cumulative-energy
 diagnostics (e.g. "99.9% energy by: 42.7 ms" for a nominally-500ms IR) —
 purely informational, never used to shorten the actual convolution.
 
-## macOS quick start
+## Quick start
 
-Requires Python 3.10+, Xcode Command Line Tools, CMake 3.18+, and internet
-access the first time the native renderer downloads NAMCore.
+Every platform needs the same three things: **Python 3.10+**, a **C++20
+compiler**, and **CMake 3.18+** (to build the native `nam_render` inference
+tool — see `native/nam_render/README.md`). The first build downloads
+NeuralAmpModelerCore + its dependencies (a few hundred MB, one-time), so
+you'll need internet access for that step. Pick your platform below.
+
+<details open>
+<summary><strong>macOS</strong></summary>
+
+Install Xcode's Command Line Tools if you haven't already
+(`xcode-select --install`), then:
 
 ```bash
 python3 -m venv .venv
@@ -366,12 +376,68 @@ cmake --build native/nam_render/build --config Release --target nam_render -j 4
 python3 app.py
 ```
 
-Open <http://127.0.0.1:5000>. The app discovers the resulting
-`native/nam_render/build/nam_render` automatically. Local A2 training still
-needs the separate training environment documented in `requirements-training.txt`;
-Kaggle training is available from the UI after authenticating the Kaggle CLI.
 If macOS has reserved port 5000 (for example, AirPlay Receiver), run
-`PORT=5001 python3 app.py` and open <http://127.0.0.1:5001>.
+`PORT=5001 python3 app.py` instead and open <http://127.0.0.1:5001>.
+
+</details>
+
+<details>
+<summary><strong>Linux</strong></summary>
+
+Install a C++ toolchain and CMake via your distro's package manager, e.g. on
+Debian/Ubuntu:
+
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential cmake python3-venv
+```
+
+Then the same steps as macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+cmake --build native/nam_render/build --config Release --target nam_render -j "$(nproc)"
+python3 app.py
+```
+
+</details>
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+Install [CMake](https://cmake.org/download/) and the "Desktop development
+with C++" workload from the
+[Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
+(the MSVC toolchain `nam_render` needs). Then, in PowerShell:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+cmake --build native/nam_render/build --config Release --target nam_render
+python app.py
+```
+
+This produces `native/nam_render/build/Release/nam_render.exe`. If
+`Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
+
+</details>
+
+Then open <http://127.0.0.1:5000> — the app discovers the `nam_render`
+executable it just built automatically, wherever CMake put it for your
+platform. From here:
+
+- **Live preview/design/audition works immediately** — no further setup.
+- **Local A2 training** needs a separate, dedicated training environment
+  (never the app's own Python environment — see `requirements-training.txt`):
+  run `scripts/setup_a2_env.sh` (macOS/Linux) or `scripts/setup_a2_env.ps1`
+  (Windows) to create it, then follow the Torch install command it prints
+  for your platform/GPU.
+- **Kaggle GPU training** needs no local training environment at all — see
+  [Setting up Kaggle GPU training](#setting-up-kaggle-gpu-training) above.
 
 ## Current status and limitations
 
@@ -472,8 +538,10 @@ hybrid-nam-builder/
 
 ## Running it
 
+See [Quick start](#quick-start) above for first-time setup on your
+platform. Once dependencies are installed and `nam_render` is built:
+
 ```bash
-pip install -r requirements.txt
 python app.py
 # open http://127.0.0.1:5000/
 ```
