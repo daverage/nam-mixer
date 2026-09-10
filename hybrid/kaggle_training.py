@@ -1203,6 +1203,7 @@ class KaggleJobManager:
                     job.output_nam_sha256,
                     {"full": unavailable, "lite": unavailable},
                     quiet_playing=None,
+                    mode=(bundle_manifest or {}).get("mode"),
                 ),
             }
             save_job(self.a2_output_dir, job)
@@ -1339,6 +1340,7 @@ def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_
     report["validation_report"] = build_validation_report(
         report["sha256"], {"full": report.get("full"), "lite": report.get("lite")},
         quiet_playing=low_level_response_checks or None,
+        mode=(manifest or {}).get("mode"),
         cabinet=(manifest or {}).get("receptive_field", {}).get("cab", {"baked": False, "approximation": None}),
     )
 

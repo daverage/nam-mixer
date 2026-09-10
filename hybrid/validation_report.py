@@ -42,12 +42,18 @@ def _variant_quality_check(variant: str, result: Optional[dict], policy: dict) -
     }
 
 
-def build_validation_report(model_sha256: str, variants: dict, *, quiet_playing: Optional[dict] = None, cabinet: Optional[dict] = None, policy: Optional[dict] = None) -> dict:
+def build_validation_report(model_sha256: str, variants: dict, *, quiet_playing: Optional[dict] = None, cabinet: Optional[dict] = None, policy: Optional[dict] = None, mode: Optional[str] = None) -> dict:
     """Normalize Full/Lite validation into an honest aggregate outcome.
 
     Metrics are measurements, not a claim of perceptual equivalence.  A
     rendering failure is a failed check; absent/legacy evidence is explicitly
     unavailable, never a green pass.
+
+    The quiet-playing check only exists for Character Blend bundles (its
+    low-level-response sweep -- see CLAUDE.md "Design modes"). For any other
+    `mode`, its absence is expected, not a gap in coverage, so it is reported
+    as `not_applicable` and does NOT downgrade the overall `state` the way a
+    genuinely missing/unavailable check does.
     """
     effective_policy = {**DEFAULT_VALIDATION_POLICY, **(policy or {})}
     checks = []
@@ -64,10 +70,22 @@ def build_validation_report(model_sha256: str, variants: dict, *, quiet_playing:
         checks.append(_variant_quality_check(variant, result, effective_policy))
 
     quiet_variants = quiet_playing if quiet_playing and any(k in quiet_playing for k in ("full", "lite")) else {"full": quiet_playing}
+    quiet_applicable = mode == "character"
     for variant in ("full", "lite"):
         quiet = quiet_variants.get(variant)
         check_id = f"{variant}_quiet_playing"
-        if quiet is None:
+        if quiet is None and not quiet_applicable:
+            checks.append({
+                "id": check_id,
+                "state": "not_applicable",
+                "reason": (
+                    "The quiet-playing check only exists for Character Blend, which measures response at a "
+                    "level-selected drive donor and checks it doesn't collapse at low playing level. Dynamic "
+                    "Hybrid and Parallel Blend targets have no equivalent low-level reference to compare "
+                    "against, so this check does not apply to this mode."
+                ),
+            })
+        elif quiet is None:
             checks.append({"id": check_id, "state": "unavailable", "reason": "no equivalent validation reference result"})
         elif quiet.get("pass") is True:
             checks.append({"id": check_id, "state": "passed", "reason": "quiet response is within the documented policy", "metrics": quiet})
@@ -78,6 +96,8 @@ def build_validation_report(model_sha256: str, variants: dict, *, quiet_playing:
 
     states = {check["state"] for check in checks}
     state = "needs_attention" if "failed" in states else "unavailable" if "unavailable" in states else "passed"
+    # "not_applicable" checks (quiet-playing on non-Character modes) are
+    # expected absences, not missing coverage -- they never downgrade `state`.
     cabinet_record = dict(cabinet or {"baked": False, "approximation": None})
     approximation = cabinet_record.get("approximation", cabinet_record.get("cab_requires_approximation"))
     cabinet_record["approximation"] = approximation

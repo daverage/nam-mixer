@@ -193,7 +193,33 @@ def test_validation_report_separates_completion_quality_and_unavailable_checks()
     assert states == {
         "full_render": "passed", "full_quality": "unavailable",
         "lite_render": "failed", "lite_quality": "unavailable",
-        "full_quiet_playing": "unavailable", "lite_quiet_playing": "unavailable",
+        "full_quiet_playing": "not_applicable", "lite_quiet_playing": "not_applicable",
     }
     assert report["schema_version"] == 2
     assert report["policy"]["max_raw_esr"] == 0.25
+
+
+def test_quiet_playing_not_applicable_does_not_downgrade_overall_state():
+    report = build_validation_report(
+        "model-hash",
+        {"full": {"rendered_ok": True, "metrics": {"raw_esr": 0.1, "gain_normalized_esr": 0.05}},
+         "lite": {"rendered_ok": True, "metrics": {"raw_esr": 0.1, "gain_normalized_esr": 0.05}}},
+        mode="hybrid",
+    )
+    assert report["state"] == "passed"
+    states = {check["id"]: check["state"] for check in report["checks"]}
+    assert states["full_quiet_playing"] == "not_applicable"
+    assert states["lite_quiet_playing"] == "not_applicable"
+
+
+def test_quiet_playing_missing_for_character_mode_is_genuinely_unavailable():
+    report = build_validation_report(
+        "model-hash",
+        {"full": {"rendered_ok": True, "metrics": {"raw_esr": 0.1, "gain_normalized_esr": 0.05}},
+         "lite": {"rendered_ok": True, "metrics": {"raw_esr": 0.1, "gain_normalized_esr": 0.05}}},
+        mode="character",
+    )
+    assert report["state"] == "unavailable"
+    states = {check["id"]: check["state"] for check in report["checks"]}
+    assert states["full_quiet_playing"] == "unavailable"
+    assert states["lite_quiet_playing"] == "unavailable"

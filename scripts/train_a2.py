@@ -664,6 +664,7 @@ def main(argv=None) -> int:
             _sha256_file(nam_path),
             {"full": {"rendered_ok": True, "metrics": full_metrics}, "lite": lite_validation},
             quiet_playing=low_level_response_checks or None,
+            mode=manifest.get("mode"),
             cabinet={
                 **manifest.get("receptive_field", {}).get("cab", {"baked": False}),
                 "approximation": rf_check.get("cab_requires_approximation"),
