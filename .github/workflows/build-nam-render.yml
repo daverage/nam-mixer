@@ -15,6 +15,9 @@ name: Build nam_render
 #   binaries after a NAMCore version bump in CMakeLists.txt without cutting
 #   a full tag).
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [master]
