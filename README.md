@@ -355,80 +355,107 @@ purely informational, never used to shorten the actual convolution.
 
 ## Quick start
 
-Every platform needs the same three things: **Python 3.10+**, a **C++20
-compiler**, and **CMake 3.18+** (to build the native `nam_render` inference
-tool — see `native/nam_render/README.md`). The first build downloads
-NeuralAmpModelerCore + its dependencies (a few hundred MB, one-time), so
-you'll need internet access for that step. Pick your platform below.
+Every platform needs **Python 3.10+** plus a working `nam_render` — the
+native NAM inference executable. You don't need a C++ compiler to get one:
+CI builds `nam_render` for macOS, Linux, and Windows on every release (see
+`.github/workflows/build-nam-render.yml`), so downloading a prebuilt binary
+is the default path below. Building from source is the fallback, for a
+platform/architecture CI doesn't cover or if you'd rather not run a
+downloaded binary.
 
 <details open>
 <summary><strong>macOS</strong></summary>
-
-Install Xcode's Command Line Tools if you haven't already
-(`xcode-select --install`), then:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
-cmake --build native/nam_render/build --config Release --target nam_render -j 4
+scripts/download_nam_render.sh
 python3 app.py
 ```
 
 If macOS has reserved port 5000 (for example, AirPlay Receiver), run
 `PORT=5001 python3 app.py` instead and open <http://127.0.0.1:5001>.
 
+<details>
+<summary>Build from source instead</summary>
+
+Requires Xcode's Command Line Tools (`xcode-select --install`) and
+CMake 3.18+. The first build downloads NeuralAmpModelerCore + its
+dependencies (a few hundred MB, one-time):
+
+```bash
+cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+cmake --build native/nam_render/build --config Release --target nam_render -j 4
+```
+
+</details>
 </details>
 
 <details>
 <summary><strong>Linux</strong></summary>
 
-Install a C++ toolchain and CMake via your distro's package manager, e.g. on
-Debian/Ubuntu:
-
-```bash
-sudo apt-get update && sudo apt-get install -y build-essential cmake python3-venv
-```
-
-Then the same steps as macOS:
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
-cmake --build native/nam_render/build --config Release --target nam_render -j "$(nproc)"
+scripts/download_nam_render.sh
 python3 app.py
 ```
 
+<details>
+<summary>Build from source instead</summary>
+
+Requires a C++ toolchain and CMake 3.18+, e.g. on Debian/Ubuntu:
+
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential cmake
+```
+
+Then:
+
+```bash
+cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+cmake --build native/nam_render/build --config Release --target nam_render -j "$(nproc)"
+```
+
+</details>
 </details>
 
 <details>
 <summary><strong>Windows</strong></summary>
 
-Install [CMake](https://cmake.org/download/) and the "Desktop development
-with C++" workload from the
-[Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
-(the MSVC toolchain `nam_render` needs). Then, in PowerShell:
-
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
-cmake --build native/nam_render/build --config Release --target nam_render
+powershell -ExecutionPolicy Bypass -File scripts/download_nam_render.ps1
 python app.py
 ```
 
-This produces `native/nam_render/build/Release/nam_render.exe`. If
-`Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
+If `Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
 
+<details>
+<summary>Build from source instead</summary>
+
+Requires [CMake](https://cmake.org/download/) and the "Desktop development
+with C++" workload from the
+[Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
+(the MSVC toolchain `nam_render` needs), then:
+
+```powershell
+cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+cmake --build native/nam_render/build --config Release --target nam_render
+```
+
+This produces `native/nam_render/build/Release/nam_render.exe`.
+
+</details>
 </details>
 
 Then open <http://127.0.0.1:5000> — the app discovers the `nam_render`
-executable it just built automatically, wherever CMake put it for your
-platform. From here:
+executable it just downloaded/built automatically, wherever it landed for
+your platform. From here:
 
 - **Live preview/design/audition works immediately** — no further setup.
 - **Local A2 training** needs a separate, dedicated training environment

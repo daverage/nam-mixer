@@ -1,5 +1,11 @@
 # nam_render (native)
 
+Prefer not to build this yourself? `scripts/download_nam_render.sh` (macOS/
+Linux) / `scripts/download_nam_render.ps1` (Windows) fetch a prebuilt binary
+from this repo's GitHub Releases instead — see the README's "Quick start".
+CI builds and attaches these binaries automatically on every
+`nam-render-v*` tag (`.github/workflows/build-nam-render.yml`).
+
 A small C++ CLI wrapper that gives `hybrid/render.py` real NAM inference,
 without needing torch or the Python `neural-amp-modeler` package installed.
 It links directly against [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore)

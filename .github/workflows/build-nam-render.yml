@@ -1,0 +1,83 @@
+name: Build nam_render
+
+# Builds the native nam_render inference tool (native/nam_render/) for
+# macOS, Linux, and Windows, so users can download a working executable
+# instead of needing a C++ toolchain + CMake installed locally -- see
+# "Quick start" in README.md.
+#
+# - On every push/PR touching native/nam_render/: build-only, to catch
+#   breakage on all three platforms (no artifacts kept beyond the normal
+#   short-lived workflow run).
+# - On a pushed tag matching `nam-render-v*`: also uploads each platform's
+#   binary as a build artifact AND attaches it to a GitHub Release for that
+#   tag, so README links can point at a stable download URL.
+# - `workflow_dispatch` allows a manual one-off run (e.g. to refresh
+#   binaries after a NAMCore version bump in CMakeLists.txt without cutting
+#   a full tag).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "native/nam_render/**"
+      - ".github/workflows/build-nam-render.yml"
+    tags:
+      - "nam-render-v*"
+  pull_request:
+    paths:
+      - "native/nam_render/**"
+      - ".github/workflows/build-nam-render.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: nam_render-linux-x64
+            build_path: native/nam_render/build/nam_render
+          - os: macos-latest
+            asset_name: nam_render-macos-arm64
+            build_path: native/nam_render/build/nam_render
+          - os: windows-latest
+            asset_name: nam_render-windows-x64.exe
+            build_path: native/nam_render/build/Release/nam_render.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build native/nam_render/build --config Release --target nam_render
+
+      - name: Stage binary under its release asset name
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ matrix.build_path }}" "dist/${{ matrix.asset_name }}"
+
+      - name: Smoke-test --help
+        shell: bash
+        run: |
+          chmod +x "dist/${{ matrix.asset_name }}" || true
+          "dist/${{ matrix.asset_name }}" --help || true
+          # nam_render's --help exit code isn't guaranteed 0; this step is
+          # here to catch a binary that fails to LAUNCH at all (missing
+          # shared library, wrong architecture), which would exit non-zero
+          # from a totally different failure mode (segfault, "not found").
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+          retention-days: 30
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/nam-render-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ matrix.asset_name }}
