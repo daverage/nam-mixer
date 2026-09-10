@@ -18,6 +18,8 @@ account for free GPU time.
 generates trainable A2 bundles end to end — listen to and validate every
 generated model before you trust it.**
 
+![NAM Mixer's Dynamic Hybrid tab, with the guided Tone Wizard open](assets/screenshot.png)
+
 ## Why this exists
 
 Splitting your tone across two amp captures — a clean voice for verses, a
