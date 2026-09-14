@@ -8,6 +8,11 @@ work/*
 # Personal amp captures -- not project fixtures like assets/di/*.wav.
 assets/nam_models/*.nam
 
+# Personal cab IR captures / official training excitation, except the one
+# example cab IR the README documents by name.
+assets/nam_models/*.wav
+!assets/nam_models/V30 LL 4FB 4x12 SM57 1.00in 0.0in SA73.wav
+
 # Locally exported sessions can contain machine-specific file paths.
 presets/
 

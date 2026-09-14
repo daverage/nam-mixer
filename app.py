@@ -698,7 +698,7 @@ def api_cab_upload():
     """Accept a cabinet IR WAV picked in the browser, save it under
     work/uploaded_cab/, and return its parsed metadata plus the server-side
     path used by /api/preview and /api/generate's cab params -- see
-    hybrid/cab_ir.py and docs/blend-mode.md "CAB UPLOAD / STORAGE".
+    hybrid/cab_ir.py and docs/history/blend-mode.md "CAB UPLOAD / STORAGE".
 
     Prepares the IR against the currently-rendered pair's sample rate (if
     any) purely to report prepared/trimmed info back to the UI -- this is
@@ -742,7 +742,7 @@ def api_cab_upload():
             "prepared_frame_count": prepared.prepared_frame_count,
             "prepared_duration_ms": prepared.prepared_duration_ms,
             "leading_samples_trimmed": prepared.leading_samples_trimmed,
-            # Diagnostic-only cabinet energy profile (docs/blend-mode.md
+            # Diagnostic-only cabinet energy profile (docs/history/blend-mode.md
             # "CABINET ENERGY ANALYSIS") -- how much of this IR is actually
             # meaningful signal vs. raw WAV/FIR length. Never used to alter
             # the actual convolution.
@@ -763,7 +763,7 @@ def api_cab_upload():
 def _parse_cab_params(data: dict, pair_sample_rate: int):
     """Shared cab-preview parsing for /api/preview (source=a/b/hybrid/blend).
     Returns a `PreparedCabIr` or None. Cab is a SHARED, mode-independent
-    post-amp stage -- see docs/blend-mode.md "SHARED CABINET IR STAGE"."""
+    post-amp stage -- see docs/history/blend-mode.md "SHARED CABINET IR STAGE"."""
     cab_path = data.get("cab_path")
     cab_enabled = bool(data.get("cab_preview_enabled", False))
     if not cab_path or not cab_enabled:
@@ -781,7 +781,7 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     preview_enabled = bool(data.get("cab_preview_enabled", False))
     baked = bool(data.get("cab_baked", False))
     if baked:
-        # Baking without preview is never allowed (docs/blend-mode.md "CAB
+        # Baking without preview is never allowed (docs/history/blend-mode.md "CAB
         # UI": "If Bake cab into A2 is enabled, automatically ensure Use cab
         # in preview is also enabled") -- enforced server-side too, not just
         # in the UI, so provenance can never record a baked-but-unaudited cab.
@@ -1284,7 +1284,7 @@ def _build_character_result(pair: RenderedPair, data: dict):
 @require_current_render_id
 def api_character_low_level_check():
     """Pre-flight low-level response sweep for the CURRENT Character Blend
-    controls (docs/blend-mode-fixes.md, Phase 6) -- lets the UI show whether
+    controls (docs/history/blend-mode-fixes.md, Phase 6) -- lets the UI show whether
     this design is healthy across a soft-playing gain sweep before the user
     spends time generating a bundle/training on Kaggle. Uses the exact same
     build_character_blend() as preview and the training-bundle gate (Phase 7)."""
@@ -1390,7 +1390,7 @@ def api_blend_info():
 def api_mix_info():
     """Mode-aware trim/mix readout, for both design modes -- the generic
     replacement for /api/blend_info now that "Blend" is a real design mode
-    (see docs/blend-mode.md "API": /api/blend_info is kept as a
+    (see docs/history/blend-mode.md "API": /api/blend_info is kept as a
     backwards-compatible Hybrid-only alias, never removed). Cheap for both
     modes -- no NAM inference, safe on every slider move.
     """
@@ -1498,7 +1498,7 @@ def api_preview():
     no NAM inference here, so this is safe to call on every crossover/
     transition/trim/mix slider move. If `cab_preview_enabled` and `cab_path`
     are given, the SAME shared cab is applied to Amp A, Amp B, AND the
-    Hybrid/Blend result (see docs/blend-mode.md "CAB PREVIEW SEMANTICS") so
+    Hybrid/Blend result (see docs/history/blend-mode.md "CAB PREVIEW SEMANTICS") so
     A/Result/B comparisons stay fair -- applied AFTER the amp combination,
     BEFORE preview_safety_limiter (playback safety net only -- never used on
     a training target, see hybrid/safety.py).
