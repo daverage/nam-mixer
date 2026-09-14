@@ -366,8 +366,8 @@ downloaded binary.
 After first-time setup below, `scripts/run.sh` (macOS/Linux) or
 `scripts/run.ps1` (Windows) is a one-line way to relaunch later — it creates/
 activates `.venv`, installs/updates dependencies only when
-`requirements.txt` has changed, and starts the app; it does not fetch
-`nam_render` for you.
+`requirements.txt` has changed, opens the browser on the selected local port,
+and starts the app; it does not fetch `nam_render` for you.
 
 <details open>
 <summary><strong>macOS</strong></summary>
@@ -377,11 +377,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 scripts/download_nam_render.sh
-python3 app.py
+scripts/run.sh
 ```
 
-If macOS has reserved port 5000 (for example, AirPlay Receiver), run
-`PORT=5001 python3 app.py` instead and open <http://127.0.0.1:5001>.
+If macOS has reserved port 5000 (for example, AirPlay Receiver), `scripts/run.sh`
+automatically chooses the next free local port. To force a specific port, run
+`PORT=5001 scripts/run.sh`.
 
 <details>
 <summary>Build from source instead</summary>
@@ -406,7 +407,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 scripts/download_nam_render.sh
-python3 app.py
+scripts/run.sh
 ```
 
 <details>
@@ -436,7 +437,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File scripts/download_nam_render.ps1
-python app.py
+powershell -ExecutionPolicy Bypass -File scripts/run.ps1
 ```
 
 If `Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
@@ -459,9 +460,10 @@ This produces `native/nam_render/build/Release/nam_render.exe`.
 </details>
 </details>
 
-Then open <http://127.0.0.1:5000> — the app discovers the `nam_render`
-executable it just downloaded/built automatically, wherever it landed for
-your platform. From here:
+Then run `scripts/run.sh` (macOS/Linux) or `scripts/run.ps1` (Windows) — the
+launcher opens the browser on the selected local port, and the app discovers
+the `nam_render` executable it just downloaded/built automatically, wherever
+it landed for your platform. From here:
 
 - **Live preview/design/audition works immediately** — no further setup.
 - **Local A2 training** needs a separate, dedicated training environment
@@ -575,8 +577,8 @@ See [Quick start](#quick-start) above for first-time setup on your
 platform. Once dependencies are installed and `nam_render` is built:
 
 ```bash
-python app.py
-# open http://127.0.0.1:5000/
+scripts/run.sh
+# or: PORT=5001 scripts/run.sh
 ```
 
 ```bash
