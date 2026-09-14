@@ -363,6 +363,12 @@ is the default path below. Building from source is the fallback, for a
 platform/architecture CI doesn't cover or if you'd rather not run a
 downloaded binary.
 
+After first-time setup below, `scripts/run.sh` (macOS/Linux) or
+`scripts/run.ps1` (Windows) is a one-line way to relaunch later — it creates/
+activates `.venv`, installs/updates dependencies only when
+`requirements.txt` has changed, and starts the app; it does not fetch
+`nam_render` for you.
+
 <details open>
 <summary><strong>macOS</strong></summary>
 
@@ -659,9 +665,9 @@ above +12 dB are allowed but may clip in a host or target hardware.
 The same safe operation is available from a terminal:
 
 ```sh
-python3 nam_volume.py Mesa_Boogie.nam +3
-python3 nam_volume.py Mesa_Boogie.nam +6 --dry-run
-python3 nam_volume.py Mesa_Boogie.nam -6 --output Mesa_Boogie_quieter.nam
+python3 scripts/nam_volume.py Mesa_Boogie.nam +3
+python3 scripts/nam_volume.py Mesa_Boogie.nam +6 --dry-run
+python3 scripts/nam_volume.py Mesa_Boogie.nam -6 --output Mesa_Boogie_quieter.nam
 ```
 
 The metadata editor loads and can safely change every official NAM A2
