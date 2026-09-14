@@ -2157,4 +2157,4 @@ def api_kaggle_job_cleanup(job_id: str):
 if __name__ == "__main__":
     # Keep the local tool safe and single-process by default.  Opt into the
     # Flask debugger/reloader explicitly while developing.
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG") == "1")
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5002")), debug=os.environ.get("FLASK_DEBUG") == "1")
