@@ -784,6 +784,12 @@ const rendererHelp = document.getElementById("renderer-help");
 const rendererPath = document.getElementById("renderer-path");
 const journeyCanvas = document.getElementById("journey-canvas");
 const journeyTooltip = document.getElementById("journey-tooltip");
+// The chart is drawn while its <details> may still be collapsed (0x0 canvas
+// at that point, since a closed <details> reports zero size) -- redraw with
+// the already-fetched data once the user actually opens it.
+document.getElementById("hybrid-only-diagnostics").addEventListener("toggle", (evt) => {
+  if (evt.target.open) drawJourney();
+});
 const journeyEmpty = document.getElementById("journey-empty");
 const coverageTable = document.getElementById("coverage-table");
 const coverageTbody = document.getElementById("coverage-tbody");
