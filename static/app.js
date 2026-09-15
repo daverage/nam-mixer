@@ -1503,7 +1503,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
   havePair = true;
   syncTrainingControls();
   wizardAnalyseButton.disabled = false;
-  setWorkflowStage("listen");
+  setWorkflowStage("shape");
   updateTrimReadout();
   updateJourney();
   updateCoverage();
