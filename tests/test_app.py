@@ -179,9 +179,12 @@ def test_file_backed_session_embeds_nam_for_download_and_tools(client, tmp_path,
 def test_session_validation_report_must_match_embedded_nam(client, tmp_path, monkeypatch):
     session_dir = tmp_path / "sessions"
     model_dir = session_dir / "models"
+    a2_output_dir = tmp_path / "a2"
     model_dir.mkdir(parents=True)
+    a2_output_dir.mkdir()
     monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
     monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_output_dir)
     nam_bytes = b'{"architecture":"WaveNet","config":{}}'
     sha256 = hashlib.sha256(nam_bytes).hexdigest()
     base = {
