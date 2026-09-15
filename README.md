@@ -442,6 +442,14 @@ powershell -ExecutionPolicy Bypass -File scripts/run.ps1
 
 If `Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
 
+> **Don't double-click `nam_render.exe`.** It's a command-line helper tool
+> that `hybrid/render.py` calls automatically with the right arguments — it's
+> not the app. Double-clicking it in File Explorer runs it with no
+> arguments, so it prints a usage error and the console window closes
+> instantly, which looks like a crash but isn't one. Always launch the app
+> itself via `scripts/run.ps1` (or `python app.py`); that's what finds and
+> invokes `nam_render.exe` for you behind the scenes.
+
 <details>
 <summary>Build from source instead</summary>
 
