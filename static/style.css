@@ -199,19 +199,6 @@ h2 {
   .cost-badge-instant { background: rgba(90, 210, 140, 0.16); color: #5ad28c; }
 }
 
-.step {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.15rem;
-  height: 1.15rem;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: 0.65rem;
-  font-weight: 700;
-}
-
 .info { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.35rem; line-height: 1.4; }
 .info code { background: var(--track); padding: 0.05rem 0.3rem; border-radius: 3px; font-size: 0.78rem; }
 

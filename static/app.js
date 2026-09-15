@@ -39,7 +39,14 @@ function setWorkflowStage(stage) {
   workflowHint.textContent = WORKFLOW_HINTS[stage];
 }
 
-workflowTabs.forEach((tab) => tab.addEventListener("click", () => setWorkflowStage(tab.dataset.workflowStage)));
+workflowTabs.forEach((tab) => tab.addEventListener("click", () => {
+  const stage = tab.dataset.workflowStage;
+  if ((stage === "listen" || stage === "create") && !havePair) {
+    workflowHint.textContent = "Prepare your amps first (step 1) before moving on.";
+    return;
+  }
+  setWorkflowStage(stage);
+}));
 setWorkflowStage(workflowStage);
 
 const HYBRID_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A at the changeover";
