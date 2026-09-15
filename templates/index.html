@@ -13,14 +13,10 @@
     <p class="tagline">Combine two NAM captures into one sound that responds the way you want to play.</p>
   </header>
 
-  <nav class="mode-tabs" aria-label="Design mode">
-    <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" aria-pressed="true">Dynamic Hybrid</button>
-    <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" aria-pressed="false">Parallel Blend</button>
-    <button type="button" class="mode-tab" id="tab-character" data-mode="character" aria-pressed="false">Character Blend</button>
+  <nav class="mode-tabs utility-tabs" aria-label="Utilities">
     <button type="button" class="mode-tab" id="tab-tools" aria-pressed="false" aria-controls="nam-tools-panel">Tools</button>
     <button type="button" class="mode-tab" id="tab-sessions" aria-pressed="false" aria-controls="sessions-panel">Sessions</button>
   </nav>
-  <p id="mode-description" class="mode-description" aria-live="polite"></p>
 
   <section id="nam-tools-panel" class="nam-tools" hidden aria-labelledby="nam-tools-title">
     <div class="tools-heading"><div><div class="eyebrow">Safe file editing</div><h2 id="nam-tools-title">NAM Tools</h2></div><button type="button" id="btn-close-tools" class="btn btn-secondary btn-small">Back to builder</button></div>
@@ -55,57 +51,14 @@
 
   <nav class="workflow-nav" aria-label="Builder workflow">
     <button type="button" class="workflow-tab active" data-workflow-stage="configure"><span>1</span> Choose amps</button>
-    <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>2</span> Shape the sound</button>
-    <button type="button" class="workflow-tab" data-workflow-stage="listen"><span>3</span> Listen</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="compare"><span>2</span> Compare amps</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>3</span> Shape the sound</button>
     <button type="button" class="workflow-tab" data-workflow-stage="create"><span>4</span> Make a model</button>
     <p id="workflow-hint" class="workflow-hint">Add two amps and a test performance to begin.</p>
   </nav>
-
-  <section class="tone-wizard workflow-stage workflow-configure" aria-labelledby="wizard-title">
-    <div class="tone-wizard-heading">
-      <div><div class="eyebrow">Guided setup</div><h2 id="wizard-title">Tone Wizard</h2></div>
-      <button type="button" id="btn-wizard-toggle" class="btn btn-secondary btn-small" aria-expanded="false" aria-controls="wizard-body">Set up a sound</button>
-    </div>
-    <div id="wizard-body" hidden>
-      <p class="wizard-intro">Answer a few musical questions to set a starting point. You can refine everything later.</p>
-      <div class="wizard-grid">
-        <fieldset><legend>What is driving the amps?</legend>
-          <label for="wizard-instrument">Instrument</label>
-          <select id="wizard-instrument" class="select-input">
-            <option value="guitar">Guitar</option>
-            <option value="bass">Bass</option>
-          </select>
-          <label for="wizard-profile">Pickup / input type</label>
-          <select id="wizard-profile" class="select-input"></select>
-          <div id="wizard-profile-description" class="info"></div>
-        </fieldset>
-        <fieldset><legend>How should the two amps behave?</legend>
-          <label><input type="radio" name="wizard-behaviour" value="dynamic" checked> Clean-to-driven as I turn up</label>
-          <label><input type="radio" name="wizard-behaviour" value="smooth"> A broad, smooth dynamic blend</label>
-          <label><input type="radio" name="wizard-behaviour" value="fixed"> A constant A/B mix</label>
-          <label><input type="radio" name="wizard-behaviour" value="character"> Take tone from one amp and feel/drive from the other</label>
-        </fieldset>
-        <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend>
-          <label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label>
-          <input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover">
-          <div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div>
-        </fieldset>
-        <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend>
-          <label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label>
-          <input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix">
-        </fieldset>
-        <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
-        <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend>
-          <label for="wizard-tone-source">Broad tone / EQ comes from</label>
-          <select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select>
-          <label for="wizard-drive-source">Feel and drive response comes from</label>
-          <select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select>
-          <div class="info">For an AC30 in Amp A and a JCM800 in Amp B, choose Amp A for tone and Amp B for feel/drive.</div>
-        </fieldset>
-      </div>
-      <div class="wizard-actions"><button type="button" id="btn-wizard-apply" class="btn btn-primary">Apply this starting point</button><button type="button" id="btn-wizard-analyse" class="btn btn-secondary" disabled>Explain my rendered amps</button></div>
-      <div id="wizard-result" class="wizard-result" hidden aria-live="polite"></div>
-    </div>
+  <section id="render-stale-callout" class="render-stale-callout" hidden aria-live="assertive">
+    <div><strong>Preview needs rebuilding.</strong> <span id="render-stale-message">A source setting changed.</span></div>
+    <button type="button" id="btn-rebuild-preview" class="btn btn-primary btn-small">Rebuild now</button>
   </section>
 
   <div class="layout">
@@ -202,9 +155,45 @@
         <div id="render-warnings" class="warning-box" hidden aria-live="assertive"></div>
       </section>
 
+      <section class="tone-wizard workflow-stage workflow-configure" aria-labelledby="wizard-title">
+        <div class="tone-wizard-heading">
+          <div><div class="eyebrow">Optional help</div><h2 id="wizard-title">Help me choose settings</h2></div>
+          <button type="button" id="btn-wizard-toggle" class="btn btn-secondary btn-small" aria-expanded="false" aria-controls="wizard-body">Choose settings</button>
+        </div>
+        <div id="wizard-body" hidden>
+          <p class="wizard-intro">Answer a few musical questions to set a starting point. You can refine everything later.</p>
+          <div class="wizard-grid">
+            <fieldset><legend>What is driving the amps?</legend>
+              <label for="wizard-instrument">Instrument</label>
+              <select id="wizard-instrument" class="select-input"><option value="guitar">Guitar</option><option value="bass">Bass</option></select>
+              <label for="wizard-profile">Pickup / input type</label><select id="wizard-profile" class="select-input"></select><div id="wizard-profile-description" class="info"></div>
+            </fieldset>
+            <fieldset><legend>How should the two amps behave?</legend>
+              <label><input type="radio" name="wizard-behaviour" value="dynamic" checked> Clean-to-driven as I turn up</label><label><input type="radio" name="wizard-behaviour" value="smooth"> A broad, smooth dynamic blend</label><label><input type="radio" name="wizard-behaviour" value="fixed"> A constant A/B mix</label><label><input type="radio" name="wizard-behaviour" value="character"> Take tone from one amp and feel/drive from the other</label>
+            </fieldset>
+            <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend><label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label><input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover"><div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div></fieldset>
+            <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend><label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label><input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix"></fieldset>
+            <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
+            <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend><label for="wizard-tone-source">Broad tone / EQ comes from</label><select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select><label for="wizard-drive-source">Feel and drive response comes from</label><select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select><div class="info">For an AC30 in Amp A and a JCM800 in Amp B, choose Amp A for tone and Amp B for feel/drive.</div></fieldset>
+          </div>
+          <div class="wizard-actions"><button type="button" id="btn-wizard-apply" class="btn btn-primary">Apply this starting point</button><button type="button" id="btn-wizard-analyse" class="btn btn-secondary" disabled>Explain my rendered amps</button></div>
+          <div id="wizard-result" class="wizard-result" hidden aria-live="polite"></div>
+        </div>
+      </section>
+
       <script id="input-profiles-data" type="application/json">
         {{ {"guitar": guitar_profiles, "bass": bass_profiles} | tojson }}
       </script>
+
+      <section class="card workflow-stage workflow-shape design-mode-picker" aria-labelledby="design-mode-title">
+        <h2 id="design-mode-title">How should these amps combine?</h2>
+        <nav class="mode-tabs design-mode-tabs" aria-label="How the amps combine">
+          <button type="button" class="mode-tab active" id="tab-hybrid" data-mode="hybrid" aria-pressed="true">Changes as you play harder</button>
+          <button type="button" class="mode-tab" id="tab-blend" data-mode="blend" aria-pressed="false">Always mixed</button>
+          <button type="button" class="mode-tab" id="tab-character" data-mode="character" aria-pressed="false">Combine tone and feel</button>
+        </nav>
+        <p id="mode-description" class="mode-description" aria-live="polite"></p>
+      </section>
 
       <section class="card workflow-stage workflow-shape" id="hybrid-panel-crossover" data-mode-panel="hybrid">
         <h2>When should it change? <span class="cost-badge cost-badge-instant" title="Uses the prepared amps; no new NAM rendering">✓ instant</span></h2>
@@ -300,32 +289,34 @@
 
     <main class="col col-main">
 
-      <div class="group-label workflow-stage workflow-listen">Compare and finish</div>
+      <div class="group-label workflow-stage workflow-compare">Compare your amp choices</div>
 
-      <section class="card audition-card workflow-stage workflow-listen">
-        <div class="audition-heading"><div><div class="eyebrow">Listen</div><h2>Compare the sound</h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
-        <p class="audition-intro">Compare Amp A, the current result, and Amp B at the same level. Adjust the shape controls and listen again.</p>
+      <section class="card audition-card workflow-stage workflow-compare workflow-shape">
+        <div class="audition-heading"><div><div class="eyebrow compare-only">Start here</div><div class="eyebrow shape-only">Listen and refine</div><h2><span class="compare-only">Hear your two amps</span><span class="shape-only">Compare the sound</span></h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
+        <p class="audition-intro compare-only">Listen to each amp on the same performance before deciding how they should combine.</p>
+        <p class="audition-intro shape-only">Adjust the controls below, then compare Amp A, your result, and Amp B at the same level.</p>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
-          <button id="btn-preview-mix" class="btn btn-amp btn-hybrid" disabled>Hybrid</button>
+          <button id="btn-preview-mix" class="btn btn-amp btn-hybrid shape-only" disabled>Hybrid</button>
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
-        <div class="audition-live-row"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition" checked> Update the result while it plays</label></div>
-        <div id="live-blend-status" class="info" aria-live="polite">Always-on mix can change immediately while audio plays. Other modes update the result after you adjust a control.</div>
+        <button id="btn-continue-shape" type="button" class="btn btn-primary compare-only">Shape this sound</button>
+        <div class="audition-live-row shape-only"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition" checked> Update the result while it plays</label></div>
+        <div id="live-blend-status" class="info shape-only" aria-live="polite">Always-on mix can change immediately while audio plays. Other modes update the result after you adjust a control.</div>
         <audio id="player" controls></audio>
 
-        <div class="slider-row">
+        <div class="slider-row shape-only">
           <label for="test-gain-slider">Play harder or softer <span class="cost-badge cost-badge-auto" title="Changes the input to both amps, then prepares them again">↻ prepares again</span></label>
           <span id="test-gain-value" class="value-chip">+0.0 dB</span>
         </div>
-        <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain">
-        <div id="test-gain-status" class="info" aria-live="polite">
+        <input type="range" id="test-gain-slider" min="-24" max="24" step="0.5" value="0" class="slider slider-gain shape-only">
+        <div id="test-gain-status" class="info shape-only" aria-live="polite">
           This tests how the sound responds to a hotter or quieter signal. It prepares both amps again automatically.
         </div>
 
       </section>
 
-      <details class="optional-tools workflow-stage workflow-listen" open>
+      <details class="optional-tools workflow-stage workflow-shape" open>
         <summary>Finish the sound <span>Add a cabinet IR (optional), and set output level</span></summary>
         <div class="finish-tools">
       <section class="card" id="cab-panel">
@@ -371,7 +362,7 @@
         </div>
       </details>
 
-      <details id="hybrid-only-diagnostics" class="analysis-panel workflow-stage workflow-listen" data-mode-panel="hybrid">
+      <details id="hybrid-only-diagnostics" class="analysis-panel workflow-stage workflow-shape" data-mode-panel="hybrid">
         <summary>See how the changeover behaves <span>Dynamic Hybrid only</span></summary>
         <div class="analysis-tools">
         <section class="card">
@@ -429,17 +420,17 @@
         <div id="generate-result" class="generate-result" hidden aria-live="polite"></div>
 
         <div id="a2-training-section" hidden>
-          <label class="field-label">Training quality</label>
+          <label class="field-label">Choose model detail</label>
           <div class="radio-row">
-            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-draft" value="draft"> Quick test <span class="hint">(20 epochs)</span></label>
-            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-standard" value="standard" checked> Standard <span class="hint">(60 epochs)</span></label>
-            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-high_def" value="high_def"> High definition <span class="hint">(120 epochs, slowest)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-draft" value="draft"> Quick check <span class="hint">(20 epochs, fastest)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-standard" value="standard" checked> Recommended balance <span class="hint">(60 epochs)</span></label>
+            <label><input type="radio" name="a2-epoch-preset" id="a2-preset-high_def" value="high_def"> Maximum detail <span class="hint">(120 epochs, slowest)</span></label>
           </div>
 
-          <label class="field-label">Where should it train?</label>
+          <label class="field-label">Choose where to train this model</label>
           <div class="radio-row">
-            <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Kaggle GPU <span class="hint">(recommended)</span></label>
-            <label><input type="radio" name="a2-backend" id="a2-backend-local" value="local"> Local</label>
+            <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Use a cloud GPU <span class="hint">(Kaggle, recommended)</span></label>
+            <label><input type="radio" name="a2-backend" id="a2-backend-local" value="local"> Use this computer</label>
           </div>
 
           <div id="kaggle-panel">

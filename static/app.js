@@ -19,12 +19,16 @@ const createA2Description = document.getElementById("create-a2-description");
 const workflowTabs = document.querySelectorAll(".workflow-tab");
 const workflowHint = document.getElementById("workflow-hint");
 const modeDescription = document.getElementById("mode-description");
+const staleCallout = document.getElementById("render-stale-callout");
+const staleBannerMessage = document.getElementById("render-stale-message");
+const rebuildPreviewButton = document.getElementById("btn-rebuild-preview");
 let workflowStage = "configure";
+let statusClearTimer = null;
 
 const WORKFLOW_HINTS = {
   configure: "Add two amps and choose a test performance to begin.",
-  shape: "Choose whether the amps change with your playing, stay mixed, or combine their character.",
-  listen: "Compare Amp A, the result, and Amp B. Add a cabinet or adjust output level only if needed.",
+  compare: "Listen to Amp A and Amp B on the same performance before you shape the result.",
+  shape: "Choose how the amps combine, then listen as you refine the result.",
   create: "Turn the sound you chose into one NAM model, then choose where to train it.",
 };
 
@@ -41,13 +45,15 @@ function setWorkflowStage(stage) {
 
 workflowTabs.forEach((tab) => tab.addEventListener("click", () => {
   const stage = tab.dataset.workflowStage;
-  if ((stage === "listen" || stage === "create") && !havePair) {
+  if ((stage === "compare" || stage === "shape" || stage === "create") && !havePair) {
     workflowHint.textContent = "Prepare your amps first (step 1) before moving on.";
     return;
   }
   setWorkflowStage(stage);
 }));
 setWorkflowStage(workflowStage);
+
+document.getElementById("btn-continue-shape").addEventListener("click", () => setWorkflowStage("shape"));
 
 const HYBRID_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A at the changeover";
 const BLEND_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A while you play";
@@ -91,7 +97,7 @@ modeTabs.forEach((tab) => {
       t.setAttribute("aria-pressed", t === tab ? "true" : "false");
     });
     applyModeVisibility();
-    if (workflowStage !== "configure") setWorkflowStage("shape");
+    if (workflowStage === "create") setWorkflowStage("shape");
     // Switching modes never re-renders NAM inference -- just recompute the
     // (already-rendered) mix/journey/coverage panels for the new mode.
     scheduleUpdate();
@@ -100,8 +106,25 @@ modeTabs.forEach((tab) => {
 applyModeVisibility();
 
 function setStatus(msg, isError) {
+  clearTimeout(statusClearTimer);
   statusEl.textContent = msg;
   statusEl.style.color = isError ? "#c0362c" : "";
+  if (msg && !isError) {
+    statusClearTimer = setTimeout(() => {
+      if (statusEl.textContent === msg) statusEl.textContent = "";
+    }, 6000);
+  }
+}
+
+function isCalibrationOnlyWarning(warnings) {
+  return warnings.length > 0 && warnings.every((warning) => warning.startsWith("Input calibration unavailable"));
+}
+
+function renderWarningText(warnings) {
+  if (isCalibrationOnlyWarning(warnings)) {
+    return "Calibration data is unavailable in one or both captures. The preview uses each capture's recorded digital level.";
+  }
+  return warnings.join(" ");
 }
 
 function fmtSigned(x) {
@@ -313,6 +336,7 @@ function populateProfileSelect() {
 // button gets a pulsing highlight, and the status line names WHAT changed
 // (not a generic "input profile changed" for every case).
 function markProfileStale(reason, { preserveAudition = false } = {}) {
+  const wasCurrentPreview = havePair;
   if (!preserveAudition) pendingAuditionResume = null;
   resetGeneratedModel("The source or input settings changed. Create new training files when you are happy with the new sound.");
   // This is the single invalidation boundary for every setting that changes
@@ -331,6 +355,11 @@ function markProfileStale(reason, { preserveAudition = false } = {}) {
   syncTrainingControls();
   renderPairBtn.classList.add("btn-render-stale");
   renderStatus.textContent = `${reason || "A setting that affects amp rendering changed"} -- click Render Amps to update.`;
+  if (wasCurrentPreview) {
+    staleBannerMessage.textContent = `${reason || "A source setting"} changed. The current preview can no longer be used.`;
+    staleCallout.hidden = false;
+    renderPairBtn.textContent = "Rebuild amp preview";
+  }
 }
 
 document.getElementById("amp-a-file").addEventListener("change", () => markProfileStale("Amp A changed"));
@@ -1423,6 +1452,11 @@ player.addEventListener("ended", () => drawJourney());
 window.addEventListener("resize", () => drawJourney());
 
 const renderPairBtn = document.getElementById("btn-render-pair");
+rebuildPreviewButton.addEventListener("click", () => {
+  rebuildPreviewButton.disabled = true;
+  setWorkflowStage("configure");
+  renderPairBtn.click();
+});
 const renderDependentControls = [
   "amp-a-file", "amp-b-file", "di-selector", "instrument-select", "input-profile-select",
   "custom-gain-slider", "calibration-mode-select", "reference-dbu-input",
@@ -1487,7 +1521,8 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
   updateCrossoverKnobCalibration(data.blend_envelope_percentiles);
   if (data.warnings && data.warnings.length) {
     renderWarnings.hidden = false;
-    renderWarnings.textContent = data.warnings.join(" ");
+    renderWarnings.className = isCalibrationOnlyWarning(data.warnings) ? "info-box" : "warning-box";
+    renderWarnings.textContent = renderWarningText(data.warnings);
   } else {
     renderWarnings.hidden = true;
   }
@@ -1521,9 +1556,11 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
   liveBlendButton.disabled = false;
   document.getElementById("btn-character-low-level-check").disabled = false;
   havePair = true;
+  staleCallout.hidden = true;
+  renderPairBtn.textContent = "Prepare amps for comparison";
   syncTrainingControls();
   wizardAnalyseButton.disabled = false;
-  setWorkflowStage("shape");
+  setWorkflowStage("compare");
   updateTrimReadout();
   updateJourney();
   updateCoverage();
@@ -1564,6 +1601,7 @@ renderPairBtn.addEventListener("click", async () => {
     stopElapsed();
     setRenderBusy(false);
     renderPairBtn.disabled = false;
+    rebuildPreviewButton.disabled = false;
   }
 });
 
@@ -1757,13 +1795,15 @@ generateBtn.addEventListener("click", async () => {
     generateStatus.textContent = `Training files are ready for ${data.model_name}.`;
     generateResult.hidden = false;
     const newWarningsText = data.warnings ? data.warnings.join(" ") : "";
+    const displayWarningsText = data.warnings ? renderWarningText(data.warnings) : "";
     const alreadyShownAbove =
-      newWarningsText && !renderWarnings.hidden && renderWarnings.textContent === newWarningsText;
+      newWarningsText && !renderWarnings.hidden && renderWarnings.textContent === displayWarningsText;
+    const warningsAreCalibrationOnly = isCalibrationOnlyWarning(data.warnings || []);
     const warningsHtml = newWarningsText
-      ? `<div class="warning-box">${
+      ? `<div class="${warningsAreCalibrationOnly ? "info-box" : "warning-box"}">${
           alreadyShownAbove
-            ? "Same calibration caveat shown above in Amps &amp; Input applies to this bundle."
-            : newWarningsText
+            ? "The same calibration guidance shown in Choose amps applies to these training files."
+            : renderWarningText(data.warnings)
         }</div>`
       : "";
     const cabLine = data.cab_summary
@@ -2644,6 +2684,8 @@ async function renderSessions() {
         activeSessionName = session.name;
         activeSessionGenerated = session.generated === true;
         sessionSettingsStatus.textContent = `Loaded ${session.name || "session"}`;
+        setSessionsOpen(false);
+        setWorkflowStage("configure");
         setStatus(`Loaded ${session.name || "session"}.`);
       } catch (err) { sessionManagerStatus.textContent = "Could not load this session: " + err; }
     });
