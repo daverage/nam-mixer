@@ -325,11 +325,12 @@
 
       </section>
 
-      <details class="optional-tools workflow-stage workflow-listen">
-        <summary>Finish the sound <span>Cabinet and output level</span></summary>
+      <details class="optional-tools workflow-stage workflow-listen" open>
+        <summary>Finish the sound <span>Add a cabinet IR (optional), and set output level</span></summary>
         <div class="finish-tools">
       <section class="card" id="cab-panel">
-        <h2>Cabinet IR <span class="hint">(optional)</span> <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant</span></h2>
+        <h2>Cabinet IR <span class="hint">(optional)</span> <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant, no need to re-render</span></h2>
+        <p class="info">Adding a cabinet never re-runs the amps -- it's applied on top of what you've already prepared. But if you already made training files, you must click <strong>Create training files</strong> again after changing anything here for the cabinet to be included.</p>
 
         <label class="field-label" for="cab-file">Cabinet IR (WAV)</label>
         <input type="file" id="cab-file" accept=".wav" class="file-input">

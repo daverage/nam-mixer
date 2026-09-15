@@ -230,6 +230,12 @@ cabFileInput.addEventListener("change", async () => {
 cabPreviewEnabled.addEventListener("change", () => {
   if (!cabPreviewEnabled.checked) cabBaked.checked = false; // bake requires preview
   updateCabStatus();
+  // Does NOT require re-rendering the amps (cab runs after amp combination),
+  // but it DOES change what the final exported model would contain, so any
+  // already-generated training files are now stale for this setting -- same
+  // invalidation boundary as the cab-file-upload handler above, see
+  // resetGeneratedModel's docstring.
+  resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
   invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
   if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
@@ -238,6 +244,7 @@ cabBaked.addEventListener("change", () => {
   // is also enabled" -- docs/blend-mode.md "CAB UI".
   if (cabBaked.checked) cabPreviewEnabled.checked = true;
   updateCabStatus();
+  resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
   invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
   if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
