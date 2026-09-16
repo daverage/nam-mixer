@@ -163,7 +163,7 @@ def check_export_low_level_response(manifest: dict, nam_path, input_path, sample
         and np.all(np.isfinite(np.asarray(levels, dtype=float)))
         and np.all(np.isfinite(np.asarray(teacher_rms, dtype=float)))
         and teacher.get("processing_version") == "character-export-reference-v2"
-        and teacher.get("teacher_semantics_version") in (1, 2)
+        and teacher.get("teacher_semantics_version") in (1, 2, 3)
         and all(isinstance(teacher.get(name), str) and len(teacher[name]) == 64 for name in ("amp_a_sha256", "amp_b_sha256", "source_training_input_sha256"))
     )
     if teacher.get("source_training_input_sha256") != _sha256_file(input_path):

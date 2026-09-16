@@ -18,11 +18,15 @@ from .envelope import bounded_causal_envelope_db, bounded_envelope_max_history_m
 _EPS = 1e-10
 
 # Version 1 used a centred donor crossfade, which made the output before a
-# switch depend on future control samples.  Version 2 starts a bounded ramp at
-# the switch instead.  Keep the old value readable so existing bundles are not
-# silently reinterpreted when they are opened again.
-CHARACTER_TEACHER_SEMANTICS_VERSION = 2
+# switch depend on future control samples. Version 2 starts a bounded ramp at
+# the switch instead. Version 3 makes Drive continuous in a 35-65% transition
+# region using two bounded residual paths. Keep the old values readable so
+# existing bundles are not silently reinterpreted when they are opened again.
+CHARACTER_TEACHER_SEMANTICS_VERSION = 3
 DONOR_TRANSITION_MS = 10.0
+SOFT_DONOR_LOW = 0.35
+SOFT_DONOR_HIGH = 0.65
+DRIVE_RESIDUAL_LIMIT_DB = -6.0
 
 
 def _clamp(value: float) -> float: return max(0.0, min(1.0, float(value)))
@@ -270,17 +274,67 @@ def _causal_donor_weight(drive_b: np.ndarray, sample_rate: int) -> np.ndarray:
     return np.clip(weights, 0.0, 1.0)
 
 
+def _soft_donor_weight(drive_b: np.ndarray) -> np.ndarray:
+    """Map Drive to a continuous Amp-B weight inside the v3 soft region.
+
+    The smoothstep has zero slope at both boundaries, so entering or leaving
+    the morph region cannot introduce a control discontinuity. Outside the
+    region the source donor remains exact A or exact B.
+    """
+    drive = np.asarray(drive_b, dtype=np.float64)
+    x = np.clip((drive - SOFT_DONOR_LOW) / (SOFT_DONOR_HIGH - SOFT_DONOR_LOW), 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def _bounded_residual_scale(donor: np.ndarray, residual: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Return a causal residual limit relative to the donor's local RMS.
+
+    Using the complete clip's RMS here would let future playing change earlier
+    teacher samples. The same bounded causal envelope used elsewhere in the
+    teacher keeps this path prefix-invariant and smoothly level-dependent.
+    """
+    donor_db = bounded_causal_envelope_db(donor, sample_rate)
+    residual_db = bounded_causal_envelope_db(residual, sample_rate)
+    scale_db = np.minimum(0.0, donor_db + DRIVE_RESIDUAL_LIMIT_DB - residual_db)
+    scale = 10.0 ** (scale_db / 20.0)
+    return np.where(np.abs(residual) <= _EPS, 1.0, scale)
+
+
+def _continuous_drive_donor(a: np.ndarray, b: np.ndarray, weight_b: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Construct the v3 nonlinear carrier from two bounded residual paths.
+
+    This is deliberately not the unbounded ``A*(1-w) + B*w`` used by
+    Parallel Blend. Each source is treated as a carrier and receives a
+    globally RMS-bounded residual from the other amp. Crossfading those two
+    candidates keeps the result continuous, preserves exact endpoints, and
+    prevents a large phase/level difference from dominating the midpoint.
+    """
+    n = len(weight_b)
+    a = np.asarray(a[:n], dtype=np.float64)
+    b = np.asarray(b[:n], dtype=np.float64)
+    residual_ab = b - a
+    scale_a = _bounded_residual_scale(a, residual_ab, sample_rate)
+    scale_b = _bounded_residual_scale(b, -residual_ab, sample_rate)
+    w = np.asarray(weight_b, dtype=np.float64)
+    from_a = a + w * scale_a * residual_ab
+    from_b = b - (1.0 - w) * scale_b * residual_ab
+    return (from_a * (1.0 - w) + from_b * w).astype(np.float64)
+
+
 def _select_donor(a: np.ndarray, b: np.ndarray, drive_b: np.ndarray, sample_rate: int, *, semantics_version: int = CHARACTER_TEACHER_SEMANTICS_VERSION) -> np.ndarray:
-    """Select the thresholded Drive donor with versioned transition semantics."""
+    """Construct the Drive carrier with versioned transition semantics."""
     n = len(drive_b)
-    if semantics_version == CHARACTER_TEACHER_SEMANTICS_VERSION:
+    if semantics_version == 3:
+        weight_b = _soft_donor_weight(drive_b)
+        return _continuous_drive_donor(a, b, weight_b, sample_rate)
+    if semantics_version == 2:
         weight_b = _causal_donor_weight(drive_b, sample_rate)
         return (a[:n] * (1.0 - weight_b) + b[:n] * weight_b).astype(np.float64)
 
     if semantics_version != 1:
         raise ValueError(
             f"unsupported Character Blend teacher semantics version {semantics_version}; "
-            f"supported versions are 1 and {CHARACTER_TEACHER_SEMANTICS_VERSION}"
+            f"supported versions are 1, 2 and {CHARACTER_TEACHER_SEMANTICS_VERSION}"
         )
     # Version-1 bundles retain their historical centred transition.  Do not
     # use this path for newly frozen designs.
@@ -324,12 +378,17 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     analysis_b = analysis_b or _analysis_from_design(design.analysis_b) or analyse_rendered_audio(dry, b, pair.sample_rate, config)
     levels = np.array([x.input_gain_db for x in analysis_a.levels])
     drive_b = _smooth(_drive_curve(design, envelope, levels), pair.sample_rate, design.envelope_smoothing_ms)
-    if design.teacher_semantics_version not in (1, CHARACTER_TEACHER_SEMANTICS_VERSION):
+    if design.teacher_semantics_version not in (1, 2, CHARACTER_TEACHER_SEMANTICS_VERSION):
         raise ValueError(
             f"unsupported Character Blend teacher semantics version {design.teacher_semantics_version}; "
-            f"supported versions are 1 and {CHARACTER_TEACHER_SEMANTICS_VERSION}"
+            f"supported versions are 1, 2 and {CHARACTER_TEACHER_SEMANTICS_VERSION}"
         )
-    donor_weight_b = _causal_donor_weight(drive_b, pair.sample_rate) if design.teacher_semantics_version == CHARACTER_TEACHER_SEMANTICS_VERSION else (drive_b >= 0.5).astype(np.float64)
+    if design.teacher_semantics_version == 3:
+        donor_weight_b = _soft_donor_weight(drive_b)
+    elif design.teacher_semantics_version == 2:
+        donor_weight_b = _causal_donor_weight(drive_b, pair.sample_rate)
+    else:
+        donor_weight_b = (drive_b >= 0.5).astype(np.float64)
     donor = _select_donor(a, b, drive_b, pair.sample_rate, semantics_version=design.teacher_semantics_version)
     gain_a = np.array([x.compression_gain_db for x in analysis_a.levels]); gain_b = np.array([x.compression_gain_db for x in analysis_b.levels])
     target_gain = gain_a * (1 - _clamp(design.feel_mix_b)) + gain_b * _clamp(design.feel_mix_b)
@@ -345,12 +404,17 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     for i, level in enumerate(levels):
         eq_a = np.array(analysis_a.levels[i].spectrum_db); eq_b = np.array(analysis_b.levels[i].spectrum_db)
         target = eq_a * (1 - _clamp(design.tone_mix_b)) + eq_b * _clamp(design.tone_mix_b)
-        donor_eq = eq_b if _drive_curve(design, np.array([level]), levels)[0] >= .5 else eq_a
+        level_drive = _drive_curve(design, np.array([level]), levels)[0]
+        if design.teacher_semantics_version == 3:
+            level_weight_b = _soft_donor_weight(np.array([level_drive]))[0]
+            donor_eq = eq_a * (1.0 - level_weight_b) + eq_b * level_weight_b
+        else:
+            donor_eq = eq_b if level_drive >= .5 else eq_a
         correction = np.clip(target - donor_eq, -abs(design.eq_correction_limit_db), abs(design.eq_correction_limit_db))
         filtered.append(fftconvolve(corrected, _minimum_phase_correction(freqs, correction, pair.sample_rate), mode="full")[:n])
     weights = _adjacent_level_weights(levels, envelope)
     output = np.sum(np.vstack(filtered) * weights, axis=0).astype(np.float32)
-    return CharacterBlendResult(output, envelope, drive_b, analysis_a, analysis_b)
+    return CharacterBlendResult(output, envelope, donor_weight_b, analysis_a, analysis_b)
 
 
 def freeze_character_design(pair, result: CharacterBlendResult, amp_a_path: str, amp_b_path: str, **kwargs) -> CharacterBlendDesign:

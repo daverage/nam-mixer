@@ -299,11 +299,11 @@ mode. Two further modes are available from the same mode selector:
   ACTIVE playing material (silence excluded) rather than a crossover band,
   since there's no crossover region to match around (see
   `hybrid.fixed_blend.compute_active_trim`).
-- **Character Blend** (`hybrid/character_blend.py`): uses a level-selected
-  nonlinear donor plus measured EQ and compression corrections to produce a
-  deterministic teacher design. Tone, Feel, and Drive are not a simple
-  parallel waveform mix; Drive selects one donor at a time and can optionally
-  vary by input level.
+- **Character Blend** (`hybrid/character_blend.py`): uses a continuous,
+  residual-bounded nonlinear carrier plus measured EQ and compression
+  corrections to produce a deterministic teacher design. Tone, Feel, and
+  Drive are not a simple parallel waveform mix. Drive preserves exact Amp A/B
+  carriers outside a 35-65% soft region and can optionally vary by input level.
 
 All modes share Amp A/Amp B, the preview DI, input profile/calibration,
 render, test gain, the Listen controls, the Cabinet IR stage, the official
