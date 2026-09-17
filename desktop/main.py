@@ -93,6 +93,22 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def run_flask_app(flask_app, port: int) -> None:
+    """Run `flask_app` on 127.0.0.1:`port` -- pulled out of main() so this
+    exact call (and its load_dotenv=False) is independently testable; see
+    tests/test_desktop_main.py's regression test for why that flag matters.
+    """
+    # load_dotenv=False: Flask's app.run() defaults to auto-loading a .env
+    # from the current working directory (see flask.cli.load_dotenv), which
+    # would silently bypass the NAM_MIXER_ENV_FILE isolation
+    # _configure_env_file() just set up -- e.g. a real secret from a
+    # developer's repo-root .env leaking into the packaged app if it's ever
+    # launched with that directory as its CWD. This app's own env
+    # resolution (hybrid/env_file.py) is deliberate and sufficient on its
+    # own; Flask's independent auto-load must stay off here.
+    flask_app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, load_dotenv=False)
+
+
 def main() -> int:
     _configure_env_file()
 
@@ -116,10 +132,7 @@ def main() -> int:
     flask_app = flask_app_module.app
     port = _free_port()
 
-    server_thread = threading.Thread(
-        target=lambda: flask_app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False),
-        daemon=True,
-    )
+    server_thread = threading.Thread(target=lambda: run_flask_app(flask_app, port), daemon=True)
     server_thread.start()
 
     import webview  # deferred: only needed for the desktop launcher, not the plain Flask app
