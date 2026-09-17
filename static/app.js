@@ -3306,10 +3306,25 @@ async function setToolNam(data, label) {
   originalToolMetadata = inspection.metadata || {};
   toolLoudnessDb = Number.isFinite(inspection.loudness_db) ? inspection.loudness_db : null;
   const fieldMap = {
-    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by", gear_type: "tool-meta-gear-type",
+    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by",
     gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
   };
   Object.entries(fieldMap).forEach(([key, id]) => { document.getElementById(id).value = originalToolMetadata[key] ?? ""; });
+
+  const readOnly = inspection.read_only_metadata || {};
+  const exportInfo = document.getElementById("tool-export-info");
+  exportInfo.replaceChildren();
+  const rows = [
+    ["Architecture", inspection.architecture || "Unknown"],
+    ["Gear type", readOnly.gear_type || "Not specified"],
+    ["Recognised output scales", String(inspection.head_scales.length)],
+  ];
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    exportInfo.append(dt, dd);
+  }
+
   const calibration = inspection.calibration || {};
   toolCalibrationStatus.textContent = calibration.status === "Calibrated NAM"
     ? `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`
@@ -3399,9 +3414,25 @@ function renderSettings() {
       if (field.name === "NAM_MIXER_LOCAL_LLM_MODEL") {
         section.append(renderLocalLlmStatusRow());
       }
+      if (field.name === "TONE3000_API_KEY") {
+        section.append(renderTone3000ApiKeyLinkRow());
+      }
     }
     settingsGroups.append(section);
   }
+}
+
+function renderTone3000ApiKeyLinkRow() {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row";
+  const link = document.createElement("a");
+  link.href = "https://www.tone3000.com";
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.className = "btn btn-secondary btn-small";
+  link.textContent = "Get a TONE3000 API key";
+  row.append(link);
+  return row;
 }
 
 function renderNamRenderDownloadRow() {
@@ -3444,7 +3475,7 @@ function renderLocalLlmStatusRow() {
   const pullButton = document.createElement("button");
   pullButton.type = "button";
   pullButton.className = "btn btn-secondary btn-small";
-  pullButton.textContent = "Pull gemma3:4b via Ollama";
+  pullButton.textContent = "Pull gemma4:e4b via Ollama";
   pullButton.hidden = true;
 
   async function refreshStatus() {
@@ -3453,7 +3484,7 @@ function renderLocalLlmStatusRow() {
       const data = await response.json();
       if (!data.enabled) {
         status.textContent = "Not configured -- set a model name above to enable the AI Assistant tab. "
-          + "Any OpenAI-compatible local host works (Ollama, LM Studio, etc.); we recommend Ollama + gemma3:4b "
+          + "Any OpenAI-compatible local host works (Ollama, LM Studio, etc.); we recommend Ollama + gemma4:e4b "
           + "if you don't already have one running.";
         pullButton.hidden = false;
       } else if (data.reachable) {
@@ -3687,7 +3718,7 @@ document.getElementById("btn-tool-metadata").addEventListener("click", async () 
   if (!toolNamPath) return;
   const metadata = {};
   const fieldMap = {
-    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by", gear_type: "tool-meta-gear-type",
+    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by",
     gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
   };
   Object.entries(fieldMap).forEach(([key, id]) => {

@@ -43,15 +43,22 @@
           <button type="button" id="btn-tool-volume" class="btn btn-primary">Create volume-adjusted NAM</button>
         </section>
         <section>
-          <h3>Metadata editor</h3><p class="info">Edits descriptive NAM metadata only. Input/output calibration is shown below but cannot be changed here; it must come from a real calibration measurement.</p>
+          <h3>Metadata editor</h3><p class="info">Edits descriptive NAM metadata only. Facts about what was actually built -- architecture, gear type, calibration -- are shown read-only below and can't be changed here; they must come from the actual export/measurement.</p>
           <label class="field-label" for="tool-meta-name">Name</label><input id="tool-meta-name" class="select-input" placeholder="Optional model name">
           <label class="field-label" for="tool-meta-modeled-by">Modeled by</label><input id="tool-meta-modeled-by" class="select-input">
-          <label class="field-label" for="tool-meta-gear-type">Gear type</label><select id="tool-meta-gear-type" class="select-input"><option value="">Not specified</option><option value="amp">Amp</option><option value="pedal">Pedal</option><option value="pedal_amp">Pedal + amp</option><option value="amp_cab">Amp + cab</option><option value="amp_pedal_cab">Amp + pedal + cab</option><option value="preamp">Preamp</option><option value="studio">Studio</option></select>
-          <label class="field-label" for="tool-meta-gear-make">Gear make</label><input id="tool-meta-gear-make" class="select-input">
-          <label class="field-label" for="tool-meta-gear-model">Gear model</label><input id="tool-meta-gear-model" class="select-input">
           <label class="field-label" for="tool-meta-tone-type">Tone type</label><select id="tool-meta-tone-type" class="select-input"><option value="">Not specified</option><option value="clean">Clean</option><option value="overdrive">Overdrive</option><option value="crunch">Crunch</option><option value="hi_gain">High gain</option><option value="fuzz">Fuzz</option></select>
-          <div id="tool-calibration-status" class="info" aria-live="polite"></div>
+
+          <details class="tool-advanced">
+            <summary>Advanced metadata</summary>
+            <label class="field-label" for="tool-meta-gear-make">Gear make</label><input id="tool-meta-gear-make" class="select-input">
+            <label class="field-label" for="tool-meta-gear-model">Gear model</label><input id="tool-meta-gear-model" class="select-input">
+          </details>
+
           <button type="button" id="btn-tool-metadata" class="btn btn-primary">Create metadata-edited NAM</button>
+
+          <h4 class="tool-readonly-heading">Export information <span class="hint">(read-only)</span></h4>
+          <dl id="tool-export-info" class="tool-readonly-list"></dl>
+          <div id="tool-calibration-status" class="info" aria-live="polite"></div>
         </section>
       </div>
       <div id="tool-result" class="tool-result" hidden aria-live="polite"></div>

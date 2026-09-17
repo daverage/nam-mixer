@@ -37,8 +37,8 @@ def test_unknown_model_is_refused():
 
 def test_metadata_editor_cannot_change_model_content():
     source = slimmable(1)
-    edited, paths = apply_metadata_changes(source, {"name": "Battery", "modeled_by": "NAM user", "gear_type": "amp", "gear_make": "Mesa"})
-    assert paths == ["metadata.name", "metadata.modeled_by", "metadata.gear_type", "metadata.gear_make"]
+    edited, paths = apply_metadata_changes(source, {"name": "Battery", "modeled_by": "NAM user", "gear_make": "Mesa"})
+    assert paths == ["metadata.name", "metadata.modeled_by", "metadata.gear_make"]
     assert compare_changes(source, edited) == paths
 
 
@@ -47,11 +47,21 @@ def test_metadata_editor_refuses_calibration_fields():
         apply_metadata_changes(slimmable(1), {"input_level_dbu": 12.0})
 
 
+def test_metadata_editor_refuses_gear_type():
+    # gear_type is a fact about what was actually built (amp vs. amp+cab),
+    # determined by the export/cabinet mode at generation time -- not a
+    # free-text label a user can retroactively relabel here. See the
+    # metadata-categories design review / hybrid/nam_provenance.py.
+    with pytest.raises(NamToolError, match="only permits"):
+        apply_metadata_changes(slimmable(1), {"gear_type": "amp_cab"})
+
+
 def test_editor_reports_current_loudness_and_standard_metadata():
     source = slimmable(1)
     source["metadata"].update({"name": "Battery", "gear_type": "amp"})
     source.update({"input_level_dbu": 12.0, "output_level_dbu": -3.0})
     details = describe_nam_tools(source)
     assert details["loudness_db"] == -22.7
-    assert details["metadata"] == {"name": "Battery", "gear_type": "amp"}
+    assert details["metadata"] == {"name": "Battery"}
+    assert details["read_only_metadata"] == {"gear_type": "amp"}
     assert details["calibration"] == {"input_level_dbu": 12.0, "output_level_dbu": -3.0, "status": "Calibrated NAM"}

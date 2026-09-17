@@ -41,15 +41,14 @@ SETTINGS: tuple[SettingField, ...] = (
         kind="path",
         placeholder="/path/to/nam_render",
     ),
-    SettingField(
-        name="NAM_RENDER_SEQUENTIAL_EXE",
-        label="NAM render executable (Sequential compatibility gate)",
-        description="Optional second nam_render build pinned to the experimental "
-                     "Sequential/Linear NAMCore commit -- see native/nam_render/README.md. "
-                     "Leave blank unless you are testing that gate.",
-        group="Rendering",
-        kind="path",
-    ),
+    # NAM_RENDER_SEQUENTIAL_EXE (hybrid/render.py's find_sequential_nam_render_exe)
+    # is deliberately NOT exposed here. Since the switch to a single render
+    # engine, it already falls back to the same NAM_RENDER_EXE binary by
+    # default -- it exists only as a developer/CI override for the
+    # experimental NAMCore compatibility gate (tests/test_namcore_sequential_gate.py,
+    # native/nam_render/README.md's "Experimental Sequential compatibility
+    # gate"), comparing two separately-built renderers against a pinned
+    # commit. No web or desktop end user needs to set this.
     SettingField(
         name="PORT",
         label="Server port",
@@ -74,11 +73,11 @@ SETTINGS: tuple[SettingField, ...] = (
         name="NAM_MIXER_LOCAL_LLM_MODEL",
         label="Local AI assistant: model name",
         description="Model name as known to your local server. We recommend Google's Gemma "
-                     "(gemma3:4b) as a good balance of speed and quality for this app's recipe "
+                     "(gemma4:e4b) as a good balance of speed and quality for this app's recipe "
                      "suggestions, but any chat-capable model your host serves will work. Leave "
                      "blank to disable the AI Assistant tab entirely.",
         group="AI Assistant",
-        placeholder="gemma3:4b",
+        placeholder="gemma4:e4b",
     ),
     SettingField(
         name="NAM_MIXER_LOCAL_LLM_TEMPERATURE",
@@ -101,7 +100,7 @@ SETTINGS: tuple[SettingField, ...] = (
         label="TONE3000 API key",
         description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
                      "capture search. Leave blank to disable that tab. Never logged or returned "
-                     "by the API once saved -- see hybrid/research.py's _require_tone3000_api_key.",
+                     "by the API once saved.",
         group="TONE3000",
         kind="secret",
         placeholder="t3k_cs_...",
