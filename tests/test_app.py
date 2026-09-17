@@ -137,13 +137,13 @@ def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch
     assert calls[0]["request_tone3000_queries"] is True
     assert calls[1]["request_tone3000_queries"] is False
     assert "Vox AC30 capture" in calls[1]["research_notes"]
-    assert "Mesa Dual Rectifier capture" in calls[1]["research_notes"]
+    assert "Marshall JCM800 capture" in calls[1]["research_notes"]
     data = response.get_json()
     assert data["reply"] == "Try the Vox AC30 capture -- it fits the clean side."
-    assert [result["query"] for result in data["tone3000_results"]] == ["Vox AC30", "Mesa Dual Rectifier"]
+    assert [result["query"] for result in data["tone3000_results"]] == ["Vox AC30", "Marshall JCM800"]
 
 
-def test_local_llm_uses_concrete_fallback_queries_for_a_grohl_brief(client, monkeypatch):
+def test_local_llm_uses_the_players_description_when_no_catalogue_term_is_proposed(client, monkeypatch):
     monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
     searched = []
 
@@ -162,7 +162,29 @@ def test_local_llm_uses_concrete_fallback_queries_for_a_grohl_brief(client, monk
     })
 
     assert response.status_code == 200
-    assert searched == ["Vox AC30", "Mesa Dual Rectifier"]
+    assert searched == ["I want Dave Grohl clean to distorted tones"]
+
+
+def test_local_llm_uses_model_queries_without_hard_coded_amp_overrides(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    searched = []
+
+    def fake_converse(*_args, **_kwargs):
+        return SimpleNamespace(tone3000_queries=["Marshall JCM800"], recipe=None, to_dict=lambda: {"reply": "Starting point."})
+
+    def fake_search(query, *, rig_scope, author, rank_query=""):
+        searched.append(query)
+        return []
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    monkeypatch.setattr(app_module, "tone3000_search", fake_search)
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Start with a clean Vox AC30, then move to a JCM800.",
+        "research": {"tone3000": True, "web": False, "rig_scope": "anything", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert searched == ["Marshall JCM800"]
 
 
 def test_local_llm_accepts_a_selected_tone3000_pack_outside_the_user_prompt_limit(client, monkeypatch):
@@ -1197,3 +1219,29 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
         manifest = jsonlib.load(f)
     assert manifest["cab"]["baked"] is True
     assert manifest["cab"]["selected"] is True
+
+
+def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / ".env"))
+    monkeypatch.delenv("NAM_RENDER_EXE", raising=False)
+
+    resp = client.get("/api/settings")
+    assert resp.status_code == 200
+    names = {field["name"] for field in resp.get_json()["settings"]}
+    assert "NAM_RENDER_EXE" in names
+
+    resp = client.post("/api/settings", json={"values": {"NAM_RENDER_EXE": "/opt/nam_render"}})
+    assert resp.status_code == 200
+    assert resp.get_json()["saved"] == ["NAM_RENDER_EXE"]
+
+    resp = client.get("/api/settings")
+    saved = {field["name"]: field["value"] for field in resp.get_json()["settings"]}
+    assert saved["NAM_RENDER_EXE"] == "/opt/nam_render"
+
+    # save_settings() sets os.environ directly (by design, for immediate
+    # in-process effect). Clean up with a plain os.environ.pop, not
+    # monkeypatch.delenv: monkeypatch would instead restore this value at
+    # teardown (it saves "current value" to undo its own delenv), leaking it
+    # into later tests.
+    import os as _os
+    _os.environ.pop("NAM_RENDER_EXE", None)

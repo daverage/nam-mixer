@@ -44,6 +44,7 @@ from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
 from hybrid.design import freeze_design
 from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
+from hybrid.settings import get_settings as get_app_settings, save_settings as save_app_settings
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
@@ -266,6 +267,27 @@ def api_input_profiles():
     })
 
 
+@app.route("/api/settings", methods=["GET"])
+def api_settings_get():
+    """Current values + UI metadata for every user-configurable setting.
+
+    See hybrid/settings.py -- exists mainly for the standalone desktop app,
+    which has no shell to `export` env vars into, but works the same in the
+    normal `python app.py` workflow too.
+    """
+    return jsonify({"settings": get_app_settings()})
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_settings_save():
+    payload = request.get_json(silent=True) or {}
+    values = payload.get("values")
+    if not isinstance(values, dict):
+        return jsonify({"error": "expected {\"values\": {name: value}}"}), 400
+    result = save_app_settings({str(k): v for k, v in values.items()})
+    return jsonify(result)
+
+
 @app.get("/api/local_llm/status")
 def api_local_llm_status():
     """Expose configuration only; browser input can never choose the URL."""
@@ -289,6 +311,7 @@ def api_local_llm_recipe():
             or not isinstance(tone3000_context.get("models"), list)
             or len(tone3000_context["models"]) > 30
             or any(not isinstance(name, str) or len(name) > 200 for name in tone3000_context["models"])
+            or (tone3000_context.get("source_role") is not None and tone3000_context.get("source_role") not in ("a", "b"))
         ):
             return jsonify({"error": "selected TONE3000 pack context is invalid"}), 400
     source_plan = data.get("source_plan")
@@ -324,14 +347,10 @@ def api_local_llm_recipe():
         return jsonify({"error": "local LLM is not configured"}), 503
     try:
         notes, warnings = [], []
-        full_request_context = " ".join(
-            [prompt] + [message["content"] for message in history if message.get("role") == "user"]
-        ).lower()
         web_research_notes = None
         if use_web:
             try:
-                research_query = "Dave Grohl Foo Fighters live guitar amp rig" if any(name in full_request_context for name in ("dave grohl", "foo fighter")) else prompt.strip()
-                web_research_notes = web_notes(research_query)
+                web_research_notes = web_notes(prompt.strip())
                 notes.append("Web research:\n" + web_research_notes[:1_200])
             except RuntimeError as exc:
                 warnings.append(str(exc))
@@ -366,16 +385,14 @@ def api_local_llm_recipe():
         # instead of a generic "tell me your amps" reply.
         matches, seen = [], set()
         if use_tone3000 and not tone3000_context:
-            lower_prompt = full_request_context
-            # Artist names are poor catalog terms. The web-research path and
-            # user request point this specific brief at the Vox/Mesa families.
-            queries = ["Vox AC30", "Mesa Dual Rectifier"] if ("dave grohl" in lower_prompt or "foo fighter" in lower_prompt) else (conversation.tone3000_queries or [])
+            queries = list(dict.fromkeys(conversation.tone3000_queries or []))[:3]
             if not queries:
-                # Small local models sometimes skip this field. Never search an
-                # entire artist/tone sentence: catalog metadata is amp-centric.
-                # Use narrowly targeted family terms that can actually match.
-                queries = ["Marshall JCM800", "Fender Deluxe Reverb"]
-                warnings.append("The AI did not provide TONE3000 search terms, so the app used concrete amp-family searches instead.")
+                # Preserve the player's actual request as the neutral fallback
+                # instead of smuggling a fixed list of amp families into the
+                # product. With web research enabled, the model has its
+                # evidence notes before it proposes catalogue terms.
+                queries = [prompt.strip()]
+                warnings.append("The AI did not provide TONE3000 search terms, so the app searched your exact description.")
             for query in queries:
                 per_family = 0
                 try:
@@ -434,49 +451,56 @@ def api_local_llm_recipe():
             driven = next((name for name in names if "crunch" in name.lower()), None)
             driven = driven or next((name for name in names if "edge" in name.lower()), None)
             driven = driven or next((name for name in names if any(word in name.lower() for word in ("hot", "lead", "drive"))), names[-1])
-            selected_source_role = None
-            if source_plan:
+            # The browser already knows which slot this pack fills whenever
+            # it can score the pack against the durable source plan (see
+            # inferSourceRoleForResult in app.js) -- trust that instead of
+            # re-deriving it here and instead of asking the player to repeat
+            # "Amp A or Amp B" for a pack they (or the AI) already assigned.
+            explicit_source_role = tone3000_context.get("source_role")
+            pack_role = explicit_source_role
+            if pack_role is None and source_plan:
                 selected_text = f"{tone3000_context['title']} {tone3000_context['description']}".lower()
                 def _plan_score(value: str) -> int:
                     terms = {term for term in re.findall(r"[a-z0-9]+", value.lower()) if len(term) >= 3}
                     return sum(len(term) for term in terms if term in selected_text)
                 a_score, b_score = _plan_score(source_plan["ampA"]), _plan_score(source_plan["ampB"])
-                selected_source_role = "a" if a_score > b_score else "b" if b_score > a_score else None
-            prior_text = "\n".join(message["content"] for message in history).lower()
-            title = tone3000_context["title"].lower()
-            title_terms = [term for term in re.findall(r"[a-z0-9]+", title) if len(term) >= 3]
-            role_a_hits = role_b_hits = 0
-            for sentence in re.split(r"[\n.!?]+", prior_text):
-                if title in sentence or sum(term in sentence for term in title_terms) >= min(2, len(title_terms)):
-                    # The assistant's source-role section uses labels such as
-                    # "Amp B (Driven)" as well as "driven source". Treat all
-                    # of those equivalent labels as durable conversation
-                    # context when the user opens a pack to discuss its files.
-                    # A related capture can differ in its model/version suffix
-                    # (2203 vs 1959), so compare the position of the matching
-                    # family words to each role label rather than pretending a
-                    # non-exact title starts at character zero.
-                    family_positions = [match.start() for term in title_terms for match in re.finditer(rf"\b{re.escape(term)}\b", sentence)]
-                    if title in sentence:
-                        family_positions.append(sentence.find(title))
+                pack_role = "a" if a_score > b_score else "b" if b_score > a_score else None
+            if pack_role is None:
+                prior_text = "\n".join(message["content"] for message in history).lower()
+                title = tone3000_context["title"].lower()
+                title_terms = [term for term in re.findall(r"[a-z0-9]+", title) if len(term) >= 3]
+                role_a_hits = role_b_hits = 0
+                for sentence in re.split(r"[\n.!?]+", prior_text):
+                    if title in sentence or sum(term in sentence for term in title_terms) >= min(2, len(title_terms)):
+                        # The assistant's source-role section uses labels such as
+                        # "Amp B (Driven)" as well as "driven source". Treat all
+                        # of those equivalent labels as durable conversation
+                        # context when the user opens a pack to discuss its files.
+                        # A related capture can differ in its model/version suffix
+                        # (2203 vs 1959), so compare the position of the matching
+                        # family words to each role label rather than pretending a
+                        # non-exact title starts at character zero.
+                        family_positions = [match.start() for term in title_terms for match in re.finditer(rf"\b{re.escape(term)}\b", sentence)]
+                        if title in sentence:
+                            family_positions.append(sentence.find(title))
 
-                    def _nearest_role_distance(markers: tuple[str, ...]) -> float:
-                        marker_positions = [
-                            match.start()
-                            for marker in markers
-                            for match in re.finditer(re.escape(marker), sentence)
-                        ]
-                        if not marker_positions or not family_positions:
-                            return float("inf")
-                        return min(abs(marker_at - family_at) for marker_at in marker_positions for family_at in family_positions)
+                        def _nearest_role_distance(markers: tuple[str, ...]) -> float:
+                            marker_positions = [
+                                match.start()
+                                for marker in markers
+                                for match in re.finditer(re.escape(marker), sentence)
+                            ]
+                            if not marker_positions or not family_positions:
+                                return float("inf")
+                            return min(abs(marker_at - family_at) for marker_at in marker_positions for family_at in family_positions)
 
-                    a_distance = _nearest_role_distance(("amp a", "clean source", "clean voice"))
-                    b_distance = _nearest_role_distance(("amp b", "driven source", "dirty source", "driven voice"))
-                    if a_distance < b_distance:
-                        role_a_hits += 1
-                    elif b_distance < a_distance:
-                        role_b_hits += 1
-            pack_role = selected_source_role or ("a" if role_a_hits > role_b_hits else "b" if role_b_hits > role_a_hits else None)
+                        a_distance = _nearest_role_distance(("amp a", "clean source", "clean voice"))
+                        b_distance = _nearest_role_distance(("amp b", "driven source", "dirty source", "driven voice"))
+                        if a_distance < b_distance:
+                            role_a_hits += 1
+                        elif b_distance < a_distance:
+                            role_b_hits += 1
+                pack_role = "a" if role_a_hits > role_b_hits else "b" if role_b_hits > role_a_hits else None
             if pack_role == "a":
                 reply = (
                     f"This is the already-chosen **Amp A** pack. Use **`{clean}`** as Amp A: it is the clean foundation. "
@@ -2174,10 +2198,13 @@ def api_generate():
         return jsonify({"error": "model_name must contain letters or numbers"}), 400
     bundle_dir = A2_OUTPUT_DIR / design_id
     if (bundle_dir / "training_manifest.json").is_file():
-        return jsonify({
-            "error": f"a training bundle named {requested_name!r} already exists; choose a distinct model name",
-            "model_name": requested_name,
-        }), 409
+        base_design_id = design_id
+        suffix = 2
+        while (A2_OUTPUT_DIR / f"{base_design_id}-{suffix}" / "training_manifest.json").is_file():
+            suffix += 1
+        requested_name = f"{requested_name} ({suffix})"
+        design_id = f"{base_design_id}-{suffix}"
+        bundle_dir = A2_OUTPUT_DIR / design_id
 
     if mode == "character":
         try:
