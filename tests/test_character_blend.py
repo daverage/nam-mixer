@@ -8,7 +8,9 @@ from hybrid.character_blend import (
     CharacterBlendDesign,
     LowLevelResponseCheck,
     _adjacent_level_weights,
+    _continuous_drive_donor,
     _causal_donor_weight,
+    _soft_donor_weight,
     character_temporal_history_samples,
     _select_donor,
     build_character_blend,
@@ -208,21 +210,54 @@ def test_evaluate_low_level_response_flags_a_hard_gate(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Phase 8 -- Drive donor selection is a threshold, not a continuous morph.
-# Documented rather than changed by this fix.
+# Character teacher v3 -- Drive is continuous through a soft donor region.
 # ---------------------------------------------------------------------------
 
-def test_drive_donor_threshold_favours_amp_b_at_exactly_half():
+def test_drive_donor_v3_is_continuous_and_preserves_exact_endpoints():
     sample_rate = 48000
-    a = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float64)
-    b = np.array([2.0, 2.0, 2.0, 2.0], dtype=np.float64)
-    below_half = _select_donor(a, b, np.full(4, 0.499999), sample_rate)
-    at_half = _select_donor(a, b, np.full(4, 0.5), sample_rate)
-    above_half = _select_donor(a, b, np.full(4, 0.500001), sample_rate)
-    assert np.allclose(below_half, a)  # below 50% B: Amp A is the donor
-    assert np.allclose(at_half, b)     # AT exactly 50% B: Amp B is already the donor
-    assert np.allclose(above_half, b)  # above 50% B: still Amp A -> Amp B is unaffected
-    assert not np.allclose(at_half, 0.5 * (a + b))  # not a literal 50/50 waveform blend
+    a = np.full(1001, 1.0, dtype=np.float64)
+    b = np.full(1001, 4.0, dtype=np.float64)
+    drive = np.linspace(0.0, 1.0, len(a))
+    output = _select_donor(a, b, drive, sample_rate)
+    assert output[0] == pytest.approx(1.0)
+    assert output[-1] == pytest.approx(4.0)
+    assert np.max(np.abs(np.diff(output))) < 0.02
+    assert output[500] != pytest.approx(0.5 * (a[500] + b[500]))
+
+
+def test_soft_donor_weight_has_flat_exact_regions_and_smooth_midpoint():
+    weights = _soft_donor_weight(np.array([0.0, 0.35, 0.5, 0.65, 1.0]))
+    np.testing.assert_allclose(weights, [0.0, 0.0, 0.5, 1.0, 1.0])
+
+
+def test_continuous_drive_residual_is_bounded_for_dissimilar_amps():
+    a = np.ones(4096)
+    b = np.full(4096, 10.0)
+    midpoint = _continuous_drive_donor(a, b, np.full(4096, 0.5), 48000)
+    assert np.isfinite(midpoint).all()
+    assert not np.allclose(midpoint, 0.5 * (a + b))
+
+
+def test_continuous_drive_residual_is_prefix_invariant():
+    rng = np.random.default_rng(42)
+    a = rng.normal(0.0, 0.1, 4096)
+    b = np.tanh(a * 8.0)
+    changed_a, changed_b = a.copy(), b.copy()
+    changed_a[2048:] = 0.8
+    changed_b[2048:] = -0.8
+    weight = np.full(4096, 0.5)
+    short = _continuous_drive_donor(a[:2048], b[:2048], weight[:2048], 48000)
+    long = _continuous_drive_donor(changed_a, changed_b, weight, 48000)
+    np.testing.assert_allclose(short, long[:2048], rtol=0.0, atol=0.0)
+
+
+def test_v2_threshold_donor_remains_reproducible():
+    a = np.ones(4)
+    b = np.full(4, 2.0)
+    below = _select_donor(a, b, np.full(4, 0.499999), 48000, semantics_version=2)
+    at = _select_donor(a, b, np.full(4, 0.5), 48000, semantics_version=2)
+    assert np.allclose(below, a)
+    assert np.allclose(at, b)
 
 
 def test_drive_donor_transition_is_prefix_invariant_and_causal():
@@ -234,12 +269,12 @@ def test_drive_donor_transition_is_prefix_invariant_and_causal():
     switches_at_50 = before_switch.copy()
     switches_at_50[50:] = 1.0
     assert np.array_equal(
-        _select_donor(a, b, before_switch, sample_rate)[:50],
-        _select_donor(a, b, switches_at_50, sample_rate)[:50],
+        _select_donor(a, b, before_switch, sample_rate, semantics_version=2)[:50],
+        _select_donor(a, b, switches_at_50, sample_rate, semantics_version=2)[:50],
     )
     # The first affected sample is the switch itself, never a centred pre-fade.
-    assert _select_donor(a, b, switches_at_50, sample_rate)[49] == 0.0
-    assert _select_donor(a, b, switches_at_50, sample_rate)[50] > 0.0
+    assert _select_donor(a, b, switches_at_50, sample_rate, semantics_version=2)[49] == 0.0
+    assert _select_donor(a, b, switches_at_50, sample_rate, semantics_version=2)[50] > 0.0
 
 
 def test_drive_donor_causal_ramp_handles_reversal_without_a_jump():

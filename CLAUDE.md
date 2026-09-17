@@ -21,10 +21,10 @@ reused by all):
   material (via `hybrid.coverage.active_signal_mask`), not a crossover band.
 - **Character Blend**: `hybrid/character_blend.py` +
   `hybrid/character_training_target.py` -- creates a deterministic teacher
-  from one level-selected drive donor plus measured tone/feel corrections;
-  it is not a parallel waveform mix. Its low-level response sweep is a hard
-  preflight gate for bundle generation, preventing a hard gate from being
-  baked into a training target.
+  from a continuous, residual-bounded drive carrier plus measured tone/feel
+  corrections; it is not a parallel waveform mix. Its low-level response
+  sweep is a hard preflight gate for bundle generation, preventing a hard
+  gate from being baked into a training target.
 
 A mode-independent **Cabinet IR** stage (`hybrid/cab_ir.py`) sits AFTER the
 amp combination in every mode: ordinary causal FIR convolution,
@@ -255,8 +255,8 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     combination step (fixed mix vs. level-driven crossfade) and the
     manifest's `design`/`mode` section differ.
 17. **`character_blend.py`** is the Character Blend design mode: it derives
-    a deterministic teacher from a single level-selected drive donor and
-    measured tone/feel corrections. `CharacterBlendDesign` freezes the
+    a deterministic teacher from a continuous, residual-bounded drive carrier
+    and measured tone/feel corrections. `CharacterBlendDesign` freezes the
     analysis and controls; `evaluate_low_level_response` guards against a
     low-level dead zone before a target is generated.
 18. **`character_training_target.py`** generates Character Blend A2 targets
