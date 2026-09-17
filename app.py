@@ -2032,7 +2032,17 @@ def api_local_training_download():
     except (OSError, json.JSONDecodeError):
         return jsonify({"error": f"no training manifest found for design {design_id!r}"}), 404
 
-    nam_path_str = (manifest.get("training") or {}).get("output_nam_path")
+    training = manifest.get("training") or {}
+    requested_artifact = request.args.get("artifact", "head")
+    if requested_artifact == "embedded":
+        embedded = training.get("embedded_artifact") or {}
+        if embedded.get("state") != "validated":
+            return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
+        nam_path_str = ((embedded.get("artifacts") or {}).get("sequential_nam_path"))
+    elif requested_artifact == "head":
+        nam_path_str = training.get("output_nam_path")
+    else:
+        return jsonify({"error": "artifact must be 'head' or 'embedded'"}), 400
     if not nam_path_str:
         return jsonify({"error": "local training for this design hasn't produced a model yet"}), 400
 
@@ -2040,7 +2050,8 @@ def api_local_training_download():
     if not nam_path.is_file():
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
-    download_name = _suggested_nam_filename(design_id)
+    download_name = (_suggested_nam_filename(design_id) if requested_artifact == "head"
+                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-embedded-experimental-full.nam")
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 
