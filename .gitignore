@@ -31,3 +31,5 @@ venv/
 # native/nam_render/README.md).
 native/nam_render/build/
 native/nam_render/build-sequential/
+
+.env
