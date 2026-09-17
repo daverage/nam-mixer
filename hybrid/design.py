@@ -113,7 +113,7 @@ class HybridDesign:
             data = json.load(f)
         cab = data.get("cab")
         if isinstance(cab, dict):
-            data = {**data, "cab": CabDesign(**cab)}
+            data = {**data, "cab": CabDesign.from_dict(cab)}
         return HybridDesign(**data)
 
 

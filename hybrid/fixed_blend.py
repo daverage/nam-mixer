@@ -209,7 +209,7 @@ class BlendDesign:
         data.pop("mix_a", None)  # derived property, not a constructor field
         cab = data.get("cab")
         if isinstance(cab, dict):
-            data = {**data, "cab": CabDesign(**cab)}
+            data = {**data, "cab": CabDesign.from_dict(cab)}
         return BlendDesign(**data)
 
 

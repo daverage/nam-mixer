@@ -348,7 +348,8 @@ def build_training_manifest(
 
 
 def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int) -> np.ndarray:
-    """Apply the shared cabinet IR to `audio` if-and-only-if `cab.baked` --
+    """Apply the shared cabinet IR only for the learned-cab compatibility
+    export mode --
     used by both Hybrid and Blend target generation (see
     hybrid.blend_training_target). Must run BEFORE safety/peak-ceiling
     processing (docs/blend-mode.md "CAB PREVIEW SEMANTICS" / "SHARED
@@ -356,12 +357,13 @@ def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int
     baked -- this keeps existing no-cab Hybrid generation byte-for-byte
     unchanged.
     """
-    if cab is None or not cab.baked:
+    if cab is None or not cab.requires_training_convolution:
         return audio
     if not cab.ir_working_path:
         raise TrainingInputError("cab is marked baked but has no ir_working_path recorded in the design")
     try:
-        prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+        from .cab_ir import get_frozen_prepared_cab_ir
+        prepared = get_frozen_prepared_cab_ir(cab, sample_rate)
         return apply_cab_ir(audio, prepared)
     except CabIrError as exc:
         raise TrainingInputError(f"failed to bake cabinet IR into training target: {exc}") from exc
@@ -414,7 +416,7 @@ def compute_receptive_field_record(
             raise ValueError(f"envelope_max_history_ms is required for mode={mode!r}")
         envelope_samples = int(round(envelope_max_history_ms / 1000.0 * sample_rate))
 
-    cab_baked = bool(cab is not None and cab.baked)
+    cab_baked = bool(cab is not None and cab.requires_training_convolution)
     cab_fir_length = None
     cab_fir_samples = 0
     if cab_baked and cab.ir_working_path:
@@ -425,7 +427,8 @@ def compute_receptive_field_record(
         # changes the tap count. Cached, so this doesn't re-read/resample
         # the IR file if generation already prepared it via maybe_bake_cab.
         try:
-            prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+            from .cab_ir import get_frozen_prepared_cab_ir
+            prepared = get_frozen_prepared_cab_ir(cab, sample_rate)
             cab_fir_length = prepared.prepared_frame_count
             cab_fir_samples = max(0, prepared.prepared_frame_count - 1)
         except CabIrError:
@@ -447,9 +450,13 @@ def compute_receptive_field_record(
             a2_rf_at_generation_time = None
 
     cab_record = {
+        "export_mode": cab.export_mode if cab is not None else "none",
         "baked": cab_baked,
         "fir_length_samples": cab_fir_length,
         "fir_history_samples": cab_fir_samples,
+        "preparation_mode": cab.preparation_mode if cab is not None else None,
+        "leading_silence_threshold_db": cab.leading_silence_threshold_db if cab is not None else None,
+        "sha256": cab.sha256 if cab is not None else None,
     }
 
     if amp_a_samples is None or amp_b_samples is None:

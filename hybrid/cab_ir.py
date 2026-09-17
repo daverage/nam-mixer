@@ -57,6 +57,13 @@ from scipy.signal import fftconvolve, resample_poly
 # active-signal convention used elsewhere (hybrid/coverage.py), but RELATIVE
 # here because an IR's absolute level is arbitrary (unlike a calibrated DI).
 LEADING_SILENCE_THRESHOLD_RELATIVE_DB = -40.0
+PREPARATION_TRIM_INITIAL_SILENCE = "trim_initial_silence"
+PREPARATION_PRESERVE_ORIGINAL_TIMING = "preserve_original_timing"
+PREPARATION_MODES = {PREPARATION_TRIM_INITIAL_SILENCE, PREPARATION_PRESERVE_ORIGINAL_TIMING}
+EXPORT_MODE_NONE = "none"
+EXPORT_MODE_LEARNED = "learned"
+EXPORT_MODE_EMBEDDED = "embedded"
+EXPORT_MODES = {EXPORT_MODE_NONE, EXPORT_MODE_LEARNED, EXPORT_MODE_EMBEDDED}
 
 _MAX_CACHE_ENTRIES = 8
 
@@ -188,6 +195,7 @@ def load_and_prepare_cab_ir(
     path: str | Path,
     target_sample_rate: int,
     leading_silence_threshold_db: float = LEADING_SILENCE_THRESHOLD_RELATIVE_DB,
+    preparation_mode: str = PREPARATION_TRIM_INITIAL_SILENCE,
 ) -> PreparedCabIr:
     """Load a cabinet IR WAV and prepare it for convolution against audio at
     `target_sample_rate`. Raises `CabIrError` for anything that can't be
@@ -216,7 +224,12 @@ def load_and_prepare_cab_ir(
     if peak <= 1e-9:
         raise CabIrError(f"cabinet IR is silent/near-silent: {path}")
 
-    trimmed, leading_trimmed = _trim_leading_silence(mono, leading_silence_threshold_db)
+    if preparation_mode not in PREPARATION_MODES:
+        raise CabIrError(f"unsupported cabinet preparation mode: {preparation_mode}")
+    if preparation_mode == PREPARATION_TRIM_INITIAL_SILENCE:
+        trimmed, leading_trimmed = _trim_leading_silence(mono, leading_silence_threshold_db)
+    else:
+        trimmed, leading_trimmed = mono, 0
 
     if int(original_sample_rate) != int(target_sample_rate):
         # resample_poly needs an integer up/down ratio -- reduce via GCD so
@@ -254,28 +267,48 @@ def load_and_prepare_cab_ir(
 # resample the IR file on every slider movement (see doc "CAB CACHE /
 # PERFORMANCE"), but this is a single-process local tool (see CLAUDE.md), so
 # a simple dict with an eviction cap is enough; no need for real LRU bookkeeping.
-_prepared_cache: dict[tuple[str, int, float], PreparedCabIr] = {}
+_prepared_cache: dict[tuple[str, int, float, str], PreparedCabIr] = {}
 
 
 def get_prepared_cab_ir(
     path: str | Path,
     target_sample_rate: int,
     leading_silence_threshold_db: float = LEADING_SILENCE_THRESHOLD_RELATIVE_DB,
+    preparation_mode: str = PREPARATION_TRIM_INITIAL_SILENCE,
 ) -> PreparedCabIr:
     """Cached wrapper around `load_and_prepare_cab_ir`, keyed by the file's
     own content hash (not just its path) so a re-uploaded/replaced IR at the
     same path never serves a stale prepared IR."""
     path = Path(path)
     sha256 = _sha256_file(path)
-    key = (sha256, int(target_sample_rate), float(leading_silence_threshold_db))
+    key = (sha256, int(target_sample_rate), float(leading_silence_threshold_db), preparation_mode)
     cached = _prepared_cache.get(key)
     if cached is not None:
         return cached
 
-    prepared = load_and_prepare_cab_ir(path, target_sample_rate, leading_silence_threshold_db)
+    prepared = load_and_prepare_cab_ir(path, target_sample_rate, leading_silence_threshold_db, preparation_mode)
     if len(_prepared_cache) >= _MAX_CACHE_ENTRIES:
         _prepared_cache.pop(next(iter(_prepared_cache)))
     _prepared_cache[key] = prepared
+    return prepared
+
+
+def get_frozen_prepared_cab_ir(cab: "CabDesign", target_sample_rate: int) -> PreparedCabIr:
+    """Load exactly the cabinet frozen into a design and reject substituted
+    uploads before target generation, packaging, or validation."""
+    if not cab.selected or not cab.ir_working_path or not cab.sha256:
+        raise CabIrError("selected cabinet has incomplete frozen provenance")
+    actual = _sha256_file(cab.ir_working_path)
+    if actual != cab.sha256:
+        raise CabIrError("frozen cabinet IR hash does not match the file being consumed")
+    prepared = get_prepared_cab_ir(
+        cab.ir_working_path,
+        target_sample_rate,
+        cab.leading_silence_threshold_db,
+        cab.preparation_mode,
+    )
+    if prepared.sha256 != cab.sha256:
+        raise CabIrError("prepared cabinet IR hash does not match frozen provenance")
     return prepared
 
 
@@ -310,7 +343,14 @@ class CabDesign:
     original_filename: Optional[str] = None
     sha256: Optional[str] = None
     preview_enabled: bool = False
+    # `export_mode` supersedes the old binary `baked` flag.  Keep `baked` as
+    # a reporting/constructor alias so old designs and integrations remain
+    # readable; it is normalised in __post_init__ and is never interpreted as
+    # embedded.
+    export_mode: str = EXPORT_MODE_NONE
     baked: bool = False
+    preparation_mode: str = PREPARATION_TRIM_INITIAL_SILENCE
+    leading_silence_threshold_db: float = LEADING_SILENCE_THRESHOLD_RELATIVE_DB
     original_sample_rate: Optional[int] = None
     prepared_sample_rate: Optional[int] = None
     original_channels: Optional[int] = None
@@ -329,6 +369,34 @@ class CabDesign:
     energy_9999_samples: Optional[int] = None
     energy_9999_ms: Optional[float] = None
 
+    def __post_init__(self) -> None:
+        mode = self.export_mode
+        if mode not in EXPORT_MODES:
+            raise CabIrError(f"unsupported cabinet export mode: {mode}")
+        if self.baked and mode == EXPORT_MODE_NONE:
+            mode = EXPORT_MODE_LEARNED
+        if self.preparation_mode not in PREPARATION_MODES:
+            raise CabIrError(f"unsupported cabinet preparation mode: {self.preparation_mode}")
+        if mode != EXPORT_MODE_NONE and not self.selected:
+            raise CabIrError(f"cabinet export mode {mode} requires a selected cabinet")
+        object.__setattr__(self, "export_mode", mode)
+        object.__setattr__(self, "baked", mode == EXPORT_MODE_LEARNED)
+
+    @property
+    def requires_training_convolution(self) -> bool:
+        return self.export_mode == EXPORT_MODE_LEARNED
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CabDesign":
+        """Migrate unversioned baked-cab records without ever treating one
+        as an embedded Sequential export."""
+        data = dict(data)
+        if "export_mode" not in data:
+            data["export_mode"] = EXPORT_MODE_LEARNED if data.get("baked", False) else EXPORT_MODE_NONE
+        data.setdefault("preparation_mode", PREPARATION_TRIM_INITIAL_SILENCE)
+        data.setdefault("leading_silence_threshold_db", LEADING_SILENCE_THRESHOLD_RELATIVE_DB)
+        return cls(**data)
+
     def to_dict(self) -> dict:
         from dataclasses import asdict
 
@@ -339,7 +407,10 @@ def cab_design_from_prepared(
     prepared: PreparedCabIr,
     original_filename: str,
     preview_enabled: bool,
-    baked: bool,
+    baked: bool = False,
+    export_mode: Optional[str] = None,
+    preparation_mode: str = PREPARATION_TRIM_INITIAL_SILENCE,
+    leading_silence_threshold_db: float = LEADING_SILENCE_THRESHOLD_RELATIVE_DB,
 ) -> CabDesign:
     fir_history_samples = max(0, prepared.prepared_frame_count - 1)
     return CabDesign(
@@ -348,7 +419,10 @@ def cab_design_from_prepared(
         original_filename=original_filename,
         sha256=prepared.sha256,
         preview_enabled=preview_enabled,
+        export_mode=export_mode or (EXPORT_MODE_LEARNED if baked else EXPORT_MODE_NONE),
         baked=baked,
+        preparation_mode=preparation_mode,
+        leading_silence_threshold_db=leading_silence_threshold_db,
         original_sample_rate=prepared.original_sample_rate,
         prepared_sample_rate=prepared.sample_rate,
         original_channels=prepared.original_channels,

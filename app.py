@@ -980,8 +980,17 @@ def api_cab_upload():
     if not filename.lower().endswith(".wav"):
         return jsonify({"error": "expected a .wav file"}), 400
 
-    dest = CAB_UPLOAD_DIR / filename
-    upload.save(dest)
+    # The display name remains user-friendly, but the working object is
+    # content-addressed so a later upload with the same name cannot silently
+    # replace the IR frozen into an existing design.
+    temporary = CAB_UPLOAD_DIR / f".upload-{uuid.uuid4().hex}.wav"
+    upload.save(temporary)
+    digest = _sha256_path(temporary)
+    dest = CAB_UPLOAD_DIR / f"{digest[:16]}-{filename}"
+    if dest.exists():
+        temporary.unlink()
+    else:
+        temporary.replace(dest)
 
     pair: RenderedPair | None = _rendered_pair_cache["pair"]
     preview_sample_rate = pair.sample_rate if pair is not None else None
@@ -1045,16 +1054,23 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     if not cab_path:
         return None
     preview_enabled = bool(data.get("cab_preview_enabled", False))
-    baked = bool(data.get("cab_baked", False))
-    if baked:
+    legacy_baked = bool(data.get("cab_baked", False))
+    export_mode = data.get("cab_export_mode") or ("learned" if legacy_baked else "none")
+    if export_mode not in ("none", "learned", "embedded"):
+        raise ValueError("cab_export_mode must be 'none', 'learned', or 'embedded'")
+    if export_mode in ("learned", "embedded"):
         # Baking without preview is never allowed (docs/history/blend-mode.md "CAB
         # UI": "If Bake cab into A2 is enabled, automatically ensure Use cab
         # in preview is also enabled") -- enforced server-side too, not just
         # in the UI, so provenance can never record a baked-but-unaudited cab.
         preview_enabled = True
-    prepared = get_prepared_cab_ir(cab_path, pair_sample_rate)
+    preparation_mode = data.get("cab_preparation_mode", "trim_initial_silence")
+    threshold = float(data.get("cab_leading_silence_threshold_db", -40.0))
+    prepared = get_prepared_cab_ir(cab_path, pair_sample_rate, threshold, preparation_mode)
     return cab_design_from_prepared(
-        prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled, baked=baked,
+        prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled,
+        baked=legacy_baked, export_mode=export_mode, preparation_mode=preparation_mode,
+        leading_silence_threshold_db=threshold,
     )
 
 
