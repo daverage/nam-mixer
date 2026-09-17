@@ -173,3 +173,45 @@ def test_desktop_api_save_file_returns_none_when_dialog_cancelled(monkeypatch):
 
     api = desktop_main.DesktopApi()
     assert api.save_file("model.nam", "aGVsbG8=") is None
+
+
+def test_run_kaggle_cli_dispatches_to_kaggle_module_main_and_returns_exit_code(monkeypatch):
+    """Regression test for KaggleCli's frozen-build fallback
+    ([sys.executable, "--run-kaggle-cli", *args]): this is the receiving end
+    -- it must call the real kaggle.cli.main() (bundled via
+    desktop/build.spec's collect_all("kaggle")), not relaunch the GUI app."""
+    import sys
+    import types
+
+    desktop_main = _load_desktop_main()
+
+    captured = {}
+
+    def fake_kaggle_main():
+        captured["argv"] = list(sys.argv)
+        raise SystemExit(0)
+
+    fake_cli_module = types.SimpleNamespace(main=fake_kaggle_main)
+    monkeypatch.setitem(sys.modules, "kaggle", types.SimpleNamespace(cli=fake_cli_module))
+    monkeypatch.setitem(sys.modules, "kaggle.cli", fake_cli_module)
+
+    result = desktop_main._run_kaggle_cli_and_exit(["auth", "login"])
+
+    assert result == 0
+    assert captured["argv"] == ["kaggle", "auth", "login"]
+
+
+def test_run_kaggle_cli_returns_nonzero_exit_code(monkeypatch):
+    import sys
+    import types
+
+    desktop_main = _load_desktop_main()
+
+    def fake_kaggle_main():
+        raise SystemExit(2)
+
+    fake_cli_module = types.SimpleNamespace(main=fake_kaggle_main)
+    monkeypatch.setitem(sys.modules, "kaggle", types.SimpleNamespace(cli=fake_cli_module))
+    monkeypatch.setitem(sys.modules, "kaggle.cli", fake_cli_module)
+
+    assert desktop_main._run_kaggle_cli_and_exit(["invalid"]) == 2

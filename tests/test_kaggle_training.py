@@ -4,6 +4,7 @@ no Kaggle quota consumed -- see docs/kaggle_training.md.
 """
 import json
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -167,6 +168,29 @@ def test_launch_auth_login_falls_back_to_python_module_when_no_console_script(mo
     assert cli.launch_auth_login() is True
     assert None not in captured["argv"]
     assert captured["argv"][-2:] == ["auth", "login"]
+
+
+def test_build_argv_uses_run_kaggle_cli_dispatch_when_frozen(monkeypatch):
+    """A frozen desktop build's sys.executable is the packaged app's own
+    executable, not a real Python -- `-m kaggle` against it would just
+    relaunch the whole app instead of running the CLI. The frozen fallback
+    must use desktop/main.py's `--run-kaggle-cli` self-dispatch instead."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    cli = KaggleCli()
+    assert cli.executable is None
+
+    argv = cli._build_argv(["auth", "login"])
+    assert argv == [sys.executable, "--run-kaggle-cli", "auth", "login"]
+
+
+def test_build_argv_uses_python_module_when_not_frozen(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    cli = KaggleCli()
+
+    argv = cli._build_argv(["auth", "login"])
+    assert argv == [sys.executable, "-m", "kaggle", "auth", "login"]
 
 
 def test_launch_auth_login_returns_false_on_oserror(monkeypatch):

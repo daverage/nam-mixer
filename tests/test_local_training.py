@@ -40,6 +40,7 @@ def test_frozen_setup_uses_system_python_not_the_app_executable(tmp_path, monkey
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr("hybrid.local_training.shutil.which", lambda name: "/usr/local/bin/python3" if name == "python3" else None)
+    monkeypatch.setattr("hybrid.local_training._training_python_version", lambda argv: (3, 11))
     started = {}
     monkeypatch.setattr(manager, "_start", lambda command, state: started.update(command=command, state=state))
 
@@ -55,7 +56,66 @@ def test_frozen_setup_explains_when_no_system_python_is_available(tmp_path, monk
     monkeypatch.delenv("NAM_MIXER_TRAINING_PYTHON", raising=False)
     monkeypatch.setattr("hybrid.local_training.shutil.which", lambda _name: None)
 
-    with pytest.raises(RuntimeError, match="Python 3 installed outside the packaged app"):
+    with pytest.raises(RuntimeError, match=r"Python 3\.10\+ installed outside the packaged app"):
+        manager.setup()
+
+
+def test_frozen_setup_skips_a_too_old_python_and_uses_a_valid_one(tmp_path, monkeypatch):
+    """Regression test for a real failure: shutil.which("python3") picked up
+    macOS's ancient Xcode-bundled Python 3.9 (earlier on PATH than any real
+    installed Python), and pip then failed opaquely on
+    neural-amp-modeler==0.13.0 (which needs Python 3.10+) instead of a clear
+    "wrong Python version" message. The bootstrap must now actually check
+    each candidate's reported version, not just that it exists."""
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.delenv("NAM_MIXER_TRAINING_PYTHON", raising=False)
+
+    def fake_which(name):
+        return {"python3.12": None, "python3.11": None, "python3.10": None,
+                "python3.13": None, "python3.14": None,
+                "python3": "/usr/bin/python3", "python": None}.get(name)
+    monkeypatch.setattr("hybrid.local_training.shutil.which", fake_which)
+
+    def fake_version(argv):
+        # Simulate the exact bug: the only thing on PATH is the ancient
+        # Xcode-bundled Python 3.9.
+        return (3, 9) if argv == ["/usr/bin/python3"] else None
+    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+
+    with pytest.raises(RuntimeError, match=r"only found: 3\.9 \(/usr/bin/python3\)"):
+        manager.setup()
+
+
+def test_frozen_setup_prefers_a_versioned_python_over_the_bare_name(tmp_path, monkeypatch):
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.delenv("NAM_MIXER_TRAINING_PYTHON", raising=False)
+
+    def fake_which(name):
+        return {"python3.12": "/opt/homebrew/bin/python3.12", "python3": "/usr/bin/python3"}.get(name)
+    monkeypatch.setattr("hybrid.local_training.shutil.which", fake_which)
+
+    def fake_version(argv):
+        return {"/opt/homebrew/bin/python3.12": (3, 12), "/usr/bin/python3": (3, 9)}.get(argv[0])
+    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+
+    started = {}
+    monkeypatch.setattr(manager, "_start", lambda command, state: started.update(command=command, state=state))
+    manager.setup()
+
+    assert started["command"][0] == "/opt/homebrew/bin/python3.12"
+
+
+def test_configured_training_python_below_minimum_version_is_rejected(tmp_path, monkeypatch):
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    old_python = tmp_path / "old_python"
+    old_python.touch()
+    monkeypatch.setenv("NAM_MIXER_TRAINING_PYTHON", str(old_python))
+    monkeypatch.setattr("hybrid.local_training._training_python_version", lambda argv: (3, 9))
+
+    with pytest.raises(RuntimeError, match=r"reports Python 3\.9.*needs Python 3\.10\+"):
         manager.setup()
 
 

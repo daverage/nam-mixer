@@ -14,6 +14,58 @@ from collections import deque
 from pathlib import Path
 
 
+# neural-amp-modeler==0.13.0 (requirements-training.txt) itself requires
+# Python 3.10+ -- verified against a real failure: shutil.which("python3")
+# picked up macOS's ancient Xcode-bundled Python 3.9 (earlier on this
+# machine's PATH than any real installed Python), and pip then failed with
+# "No matching distribution found for neural-amp-modeler==0.13.0" instead of
+# a clear "wrong Python version" message.
+MIN_TRAINING_PYTHON = (3, 10)
+
+
+def _candidate_training_pythons() -> list[list[str]]:
+    """Every plausible system Python, most-preferred first.
+
+    Versioned names (python3.12, etc.) are checked before the bare `python3`/
+    `python` a distro's `update-alternatives`-style symlink might point at
+    literally anything -- preferring 3.12/3.11/3.10 specifically because
+    Torch wheels lag behind the newest CPython release (see
+    requirements-training.txt's own comment about avoiding a too-new
+    interpreter), while still accepting a newer one if that's all that
+    exists.
+    """
+    candidates = []
+    for name in ("python3.12", "python3.11", "python3.10", "python3.13", "python3.14", "python3", "python"):
+        found = shutil.which(name)
+        if found:
+            candidates.append([found])
+    if os.name == "nt":
+        py_launcher = shutil.which("py")
+        if py_launcher:
+            candidates.append([py_launcher, "-3"])
+    return candidates
+
+
+def _training_python_version(argv: list[str]) -> "tuple[int, int] | None":
+    """The (major, minor) an interpreter actually reports, or None if it
+    can't be run at all -- never guessed from a filename/version-manager
+    symlink, which can point anywhere."""
+    try:
+        result = subprocess.run(
+            [*argv, "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        major, minor = result.stdout.strip().split(".")
+        return (int(major), int(minor))
+    except ValueError:
+        return None
+
+
 class LocalTrainingManager:
     def __init__(self, repo_root: Path, output_root: Path, *, venv_dir: Path | None = None):
         self.repo_root, self.output_root = Path(repo_root), Path(output_root)
@@ -49,20 +101,40 @@ class LocalTrainingManager:
         """
         if not getattr(sys, "frozen", False):
             return [sys.executable]
+
         configured = os.environ.get("NAM_MIXER_TRAINING_PYTHON", "").strip()
         if configured:
             executable = Path(configured).expanduser()
-            if executable.is_file():
-                return [str(executable)]
-            raise RuntimeError("NAM_MIXER_TRAINING_PYTHON does not point to a Python executable.")
-        for name in ("python3", "python"):
-            executable = shutil.which(name)
-            if executable:
-                return [executable]
-        if os.name == "nt" and shutil.which("py"):
-            return ["py", "-3"]
+            if not executable.is_file():
+                raise RuntimeError("NAM_MIXER_TRAINING_PYTHON does not point to a Python executable.")
+            version = _training_python_version([str(executable)])
+            if version is None or version < MIN_TRAINING_PYTHON:
+                found = ".".join(map(str, version)) if version else "an unrecognized version"
+                raise RuntimeError(
+                    f"NAM_MIXER_TRAINING_PYTHON ({executable}) reports Python {found}, but "
+                    f"neural-amp-modeler needs Python {'.'.join(map(str, MIN_TRAINING_PYTHON))}+."
+                )
+            return [str(executable)]
+
+        checked: list[tuple[tuple[int, int], list[str]]] = []
+        for argv in _candidate_training_pythons():
+            version = _training_python_version(argv)
+            if version is None:
+                continue
+            if version >= MIN_TRAINING_PYTHON:
+                return argv
+            checked.append((version, argv))
+
+        min_str = ".".join(map(str, MIN_TRAINING_PYTHON))
+        if checked:
+            found_desc = ", ".join(f"{'.'.join(map(str, v))} ({' '.join(a)})" for v, a in checked)
+            raise RuntimeError(
+                f"Local training needs Python {min_str}+ (neural-amp-modeler's own requirement), "
+                f"but only found: {found_desc}. Install a newer Python 3, restart the app, then "
+                "click Set up local training again."
+            )
         raise RuntimeError(
-            "Local training needs Python 3 installed outside the packaged app. "
+            f"Local training needs Python {min_str}+ installed outside the packaged app. "
             "Install Python 3, restart the app, then click Set up local training again."
         )
 

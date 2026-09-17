@@ -2484,6 +2484,11 @@ async function refreshLocalTraining() {
       localTrainingMeta.textContent = "";
     }
     localTrainingActive = ["setting_up", "training", "cancelling"].includes(data.state);
+    // Once the dedicated environment is ready, there's nothing left to set
+    // up -- showing "Set up" next to a working environment invites
+    // re-running pip install for no reason and looks like the previous
+    // setup didn't take.
+    localSetupBtn.hidden = Boolean(data.ready);
     localSetupBtn.disabled = localTrainingActive;
     localTrainBtn.disabled = !data.ready || !lastDesignId || localTrainingActive;
     localCancelBtn.hidden = !localTrainingActive;

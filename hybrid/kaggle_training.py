@@ -210,6 +210,16 @@ class KaggleCli:
 
     def _build_argv(self, args: list[str]) -> list[str]:
         if self.executable is None:
+            if getattr(sys, "frozen", False):
+                # `sys.executable` is the packaged desktop app's OWN
+                # executable here, not a real Python interpreter -- it has
+                # no `-m` support, so `-m kaggle` would just relaunch the
+                # whole app. desktop/main.py's `--run-kaggle-cli` dispatch
+                # is the frozen-build equivalent: it re-execs the app's own
+                # bundled interpreter directly into kaggle's CLI (which
+                # desktop/build.spec bundles via collect_all("kaggle"))
+                # instead of the normal GUI startup path.
+                return [sys.executable, "--run-kaggle-cli", *args]
             # Fall back to `python -m kaggle` in case the console script
             # isn't on PATH but the package is importable in this interpreter.
             return [sys.executable, "-m", "kaggle", *args]

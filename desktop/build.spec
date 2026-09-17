@@ -14,8 +14,22 @@
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_all
+
 block_cipher = None
 REPO_ROOT = Path(SPECPATH).resolve().parent
+
+# The `kaggle` package is never `import`ed directly by the main app (see
+# hybrid/kaggle_training.py's module docstring) -- it's only ever invoked as
+# a subprocess, which means PyInstaller's static import analysis can't see
+# it and won't bundle it on its own. Kaggle GPU training would otherwise be
+# unusable from the packaged app unless the player separately installed the
+# `kaggle` CLI system-wide. collect_all() pulls in its full package data
+# (submodules PyInstaller's analyzer can't trace, plus its own data files)
+# so desktop/main.py's `--run-kaggle-cli` dispatch (see
+# hybrid/kaggle_training.py's KaggleCli._build_argv frozen-build branch) can
+# actually `from kaggle.cli import main`.
+_kaggle_datas, _kaggle_binaries, _kaggle_hidden = collect_all("kaggle")
 
 nam_render_exe = "nam_render.exe" if sys.platform.startswith("win") else "nam_render"
 nam_render_src = REPO_ROOT / "native" / "nam_render" / "build" / nam_render_exe
@@ -43,9 +57,11 @@ datas = [
     (str(REPO_ROOT / "scripts" / "train_a2.py"), "training_runtime/scripts"),
     (str(REPO_ROOT / "requirements-training.txt"), "training_runtime"),
     (str(REPO_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py"), "training_runtime/cloud/kaggle"),
+    *_kaggle_datas,
 ]
 binaries = [
     (str(nam_render_src), "nam_render"),
+    *_kaggle_binaries,
 ]
 
 # Icons rendered from static/nam-mixer-logo.png -- see desktop/icons/README.md
@@ -63,7 +79,7 @@ a = Analysis(
     pathex=[str(REPO_ROOT)],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["hybrid", "app"],
+    hiddenimports=["hybrid", "app", *_kaggle_hidden],
     hookspath=[],
     runtime_hooks=[],
     excludes=["torch", "torchaudio"],  # never bundle the training-only env, see CLAUDE.md

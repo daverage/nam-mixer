@@ -30,6 +30,26 @@ def _is_frozen() -> bool:
     return getattr(sys, "frozen", False)
 
 
+def _run_kaggle_cli_and_exit(args: list[str]) -> "int":
+    """Re-exec target for hybrid.kaggle_training.KaggleCli's frozen-build
+    fallback: `[sys.executable, "--run-kaggle-cli", *args]` instead of the
+    normal-interpreter `[sys.executable, "-m", "kaggle", *args]`, since a
+    frozen app's own executable has no `-m` support. Dispatched here,
+    before any Flask/webview import, so this process becomes a plain
+    one-shot `kaggle` CLI call and exits -- never opens a second app window.
+    desktop/build.spec bundles the `kaggle` package via collect_all("kaggle")
+    specifically so this import succeeds in the frozen build.
+    """
+    from kaggle.cli import main as kaggle_main
+
+    sys.argv = ["kaggle", *args]
+    try:
+        kaggle_main()
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    return 0
+
+
 def _bundle_dir() -> Path:
     """Directory containing bundled resources (nam_render binary, etc.).
 
@@ -220,4 +240,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-kaggle-cli":
+        raise SystemExit(_run_kaggle_cli_and_exit(sys.argv[2:]))
     raise SystemExit(main())
