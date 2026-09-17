@@ -25,7 +25,7 @@ file(GLOB NAM_SOURCES_TOP "${NAM_SRC_DIR}/NAM/*.cpp")
 file(GLOB NAM_SOURCES_SUB "${NAM_SRC_DIR}/NAM/*/*.cpp")
 
 add_executable(nam_render
-  "${NAM_SRC_DIR}/tools/render.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/nam_render.cpp"
   ${NAM_SOURCES_TOP}
   ${NAM_SOURCES_SUB}
   "${AUDIO_DSP_TOOLS_DIR}/dsp/wav.cpp"

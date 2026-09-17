@@ -32,10 +32,10 @@ def _nam(path: Path, architecture: str, config: dict, weights: list[float], *, s
     return path
 
 
-def _render(exe: Path, model: Path, audio: np.ndarray, tmp_path: Path, *, slim: float | None = None) -> np.ndarray:
+def _render(exe: Path, model: Path, audio: np.ndarray, tmp_path: Path, *, slim: float | None = None, block_size: int = 64) -> np.ndarray:
     source, destination = tmp_path / f"in-{exe.parent.name}.wav", tmp_path / f"out-{exe.parent.name}.wav"
     sf.write(source, audio.astype(np.float32), 48000, subtype="FLOAT")
-    command = [str(exe)] + ([] if slim is None else ["--slim", str(slim)]) + [str(model), str(source), str(destination)]
+    command = [str(exe)] + ([] if slim is None else ["--slim", str(slim)]) + ["--block-size", str(block_size), str(model), str(source), str(destination)]
     result = subprocess.run(command, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr or result.stdout
     rendered, sample_rate = sf.read(destination, dtype="float32")
@@ -69,13 +69,26 @@ def test_linear_and_sequential_fir_are_exact(tmp_path: Path):
     np.testing.assert_allclose(_render(sequential, sequential_model, audio, tmp_path), expected, rtol=0, atol=2e-7)
 
 
-def test_sequential_a2_followed_by_linear_matches_head_then_fir(tmp_path: Path):
+def test_sequential_a2_followed_by_linear_matches_head_then_fir_after_stream_warmup(tmp_path: Path):
     _, sequential = _require_renderers()
     a2 = Path("native/nam_render/build-sequential/_deps/namcore-src/example_models/A2.nam")
     child = json.loads(a2.read_text())
-    linear = _linear(tmp_path / "cab.nam", [0.75, 0.125, -0.0625])
-    composite = _nam(tmp_path / "a2-plus-cab.nam", "Sequential", {"models": [child, json.loads(linear.read_text())]}, [])
-    audio = np.random.default_rng(7).standard_normal(512).astype(np.float32) * 0.05
-    head = _render(sequential, a2, audio, tmp_path)
-    expected = np.convolve(head, [0.75, 0.125, -0.0625])[:len(head)]
-    np.testing.assert_allclose(_render(sequential, composite, audio, tmp_path), expected, rtol=0, atol=3e-6)
+    warmup = 4096
+    payload = np.zeros(1024, dtype=np.float32)
+    payload[73:] = np.random.default_rng(7).standard_normal(len(payload) - 73).astype(np.float32) * 0.05
+    # The standalone head and a child inside Sequential prewarm differently at
+    # stream startup. Compare a continuous, silence-prefixed stream and only
+    # assess the audible payload after the documented warm-up prefix.
+    audio = np.concatenate([np.zeros(warmup, dtype=np.float32), payload])
+    for index, taps in enumerate(([1.0], [0.75, 0.125, -0.0625], [0.4, -0.2, 0.1, 0.05, -0.025, 0.0125])):
+        linear = _linear(tmp_path / f"cab-{index}.nam", list(taps))
+        composite = _nam(tmp_path / f"a2-plus-cab-{index}.nam", "Sequential", {"models": [child, json.loads(linear.read_text())]}, [])
+        for block_size in (1, 7, 64, 257):
+            head = _render(sequential, a2, audio, tmp_path, block_size=block_size)
+            expected = np.convolve(head, taps)[:len(head)]
+            actual = _render(sequential, composite, audio, tmp_path, block_size=block_size)
+            # Each CLI invocation is a fresh Reset; confirm that reset is
+            # deterministic as well as comparing steady-state streams.
+            repeated = _render(sequential, composite, audio, tmp_path, block_size=block_size)
+            np.testing.assert_array_equal(repeated, actual)
+            np.testing.assert_allclose(actual[warmup:], expected[warmup:], rtol=0, atol=3e-6)
