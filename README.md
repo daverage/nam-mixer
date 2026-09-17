@@ -313,12 +313,26 @@ inference; the already-rendered `RenderedPair` (`hybrid/pipeline.py`) is
 reused by whichever mode you're auditioning.
 
 A third, mode-independent stage — **Cabinet IR** (`hybrid/cab_ir.py`) — sits
-AFTER the amp combination in any mode: an ordinary causal FIR convolution,
-optionally auditioned in preview only, or "baked" into the generated A2
-training target. Preview-only and baked processing always go through the
-exact same `apply_cab_ir` function on the COMPLETE prepared IR (never a
-shortened one), so what you hear in preview with "Use cab in preview"
-checked is exactly what gets trained if you also check "Bake cab into A2".
+AFTER the amp combination in any mode. Preview is independent of final export:
+you can audition an exact prepared causal FIR while selecting one of these
+final-model modes:
+
+- **No cabinet**: train/export the conventional head-only A2. A selected IR
+  remains a reusable preview/bundle artifact, not part of the target.
+- **Train cabinet into A2** (`learned`): preserve the legacy baked-cab path.
+  The exact FIR is applied to the teacher and the conventional A2 learns an
+  approximation; it is not an exact stored cabinet.
+- **Embed exact cabinet** (`embedded`, experimental): train the head without
+  cabinet convolution, retain its normal Full/Lite A2 artifact, and package
+  an explicitly extracted Full WaveNet followed by canonical Linear FIR taps
+  in a Sequential NAM. The unscaled prepared IR WAV is also retained.
+
+Embedded output folds the recorded post-cab safety scalar into the Linear
+weights and is downloadable only after validation using the explicitly
+configured Sequential-capable renderer. It remains experimental because
+Sequential/Linear support currently relies on the pinned upstream NAMCore
+commit described in `native/nam_render/README.md`; hosts that only support
+ordinary NAM A2 should use the learned compatibility option instead.
 
 **Receptive-field policy: one hard check, two advisory ones.** Amp A/Amp B
 (+, for Hybrid and Character, the bounded crossover envelope) are the CORE
