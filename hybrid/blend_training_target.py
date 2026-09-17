@@ -47,6 +47,7 @@ from .training_target import (
     _git_commit,
     _sha256_file,
     compute_receptive_field_record,
+    embedded_final_scalar,
     maybe_bake_cab,
     validate_training_input,
 )
@@ -258,6 +259,9 @@ def generate_blend_training_bundle(
         "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
         "applied_gain_db": output_gain_db,
     }
+    if design.cab is not None and design.cab.export_mode == "embedded":
+        _, output_gain_record["embedded_final"] = embedded_final_scalar(
+            blend_final, design.cab, input_info.sample_rate, target_peak_dbfs)
 
     manifest = build_blend_training_manifest(
         design=design, amp_a=amp_a, amp_b=amp_b,
