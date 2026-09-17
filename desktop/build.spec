@@ -36,6 +36,7 @@ datas = [
     (str(REPO_ROOT / "templates"), "templates"),
     (str(REPO_ROOT / "static"), "static"),
     (str(REPO_ROOT / "assets" / "di"), "assets/di"),
+    (str(REPO_ROOT / "assets" / "training"), "assets/training"),
     # These are source resources for the optional external-Python training
     # process, not imports for the render-only frozen interpreter.
     (str(REPO_ROOT / "hybrid"), "training_runtime/hybrid"),

@@ -182,8 +182,9 @@ genre/style DI (assets/di/*.wav)
 preview, auditioning, crossover analysis,
 automatic level-match testing, regression testing
 
-official NAM training input (a proper calibrated reamp/DI signal, e.g. the
-kind of stimulus NAMtoClo itself uses as nam_input_wav.wav — NOT included here)
+official NAM v3.0.0 training input (a proper calibrated reamp/DI signal, e.g.
+the kind of stimulus NAMtoClo itself uses as nam_input_wav.wav — bundled at
+assets/training/, seeded automatically on first run; see that folder's README)
     ↓
 Amp A render
 Amp B render
@@ -226,8 +227,9 @@ tools remain shared across all three design modes.
    happen to cover. Test gain automatically re-renders the pair after you stop
    dragging. Cabinet and output-gain controls are optional finishing tools;
    Dynamic Hybrid analysis is available on demand.
-4. **Create & train** — upload the official NAM training excitation, then "Generate
-   Training Bundle" — this freezes the current design into an immutable
+4. **Create & train** — the official NAM training excitation is bundled and
+   ready by default (upload a different one only if you want to); click
+   "Generate Training Bundle" — this freezes the current design into an immutable
    `HybridDesign` (`hybrid/design.py`) and blends the *official*
    training input (not the preview DI, and not with the input-profile gain
    applied — the profile only shaped *design/preview*, never the actual

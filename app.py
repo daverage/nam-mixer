@@ -99,6 +99,16 @@ CAB_UPLOAD_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_DIR = WORK_DIR / "training_input"
 TRAINING_INPUT_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
+# The official NAM v3.0.0 training/reamp input (see
+# hybrid/training_target.py's OFFICIAL_V3_INPUT_MD5) ships with the app --
+# assets/training/README.md documents its provenance/MD5 -- so training
+# works immediately without a manual upload first. This is a one-time local
+# file copy, never a network fetch: seeded once into the (gitignored,
+# per-install) work directory if nothing has been uploaded there yet, and
+# a manual upload always overwrites it, same as before.
+_BUNDLED_TRAINING_INPUT_PATH = BASE_DIR / "assets" / "training" / "official_nam_v3_input.wav"
+if not TRAINING_INPUT_PATH.is_file() and _BUNDLED_TRAINING_INPUT_PATH.is_file():
+    shutil.copyfile(_BUNDLED_TRAINING_INPUT_PATH, TRAINING_INPUT_PATH)
 A2_OUTPUT_DIR = WORK_DIR / "a2"
 A2_OUTPUT_DIR.mkdir(exist_ok=True)
 NAM_TOOL_OUTPUT_DIR = WORK_DIR / "nam_tools"
@@ -2219,7 +2229,11 @@ def api_training_input_upload():
     upload.save(TRAINING_INPUT_PATH)
     try:
         _, info = validate_training_input(TRAINING_INPUT_PATH)
-    except TrainingInputError as exc:
+    except (TrainingInputError, RuntimeError, OSError, ValueError) as exc:
+        # RuntimeError/OSError/ValueError: soundfile raises these (not
+        # TrainingInputError) for a file it can't even parse as audio at all
+        # (wrong format, truncated, not audio) -- still just an invalid
+        # upload, never a 500.
         TRAINING_INPUT_PATH.unlink(missing_ok=True)
         return jsonify({"error": str(exc)}), 400
     return jsonify({
