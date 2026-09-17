@@ -753,6 +753,8 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
 .settings-group h3 { margin: 0 0 0.5rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
 .settings-row { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.85rem; }
 .settings-row-label { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+.settings-download-row { flex-direction: row; align-items: center; gap: 0.75rem; margin: -0.4rem 0 1rem; }
+.settings-download-row .btn { flex: none; }
 .session-manager-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
 .session-manager-heading h2 { margin: 0; font-size: 1.05rem; text-transform: none; letter-spacing: normal; color: var(--text); }
 .session-manager-heading .info { margin: 0.35rem 0 0; }

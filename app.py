@@ -66,6 +66,7 @@ from hybrid.nam_loader import load_nam
 from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError, find_nam_render_exe, render
+from hybrid.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
 from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
 from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
 from hybrid.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
@@ -592,6 +593,21 @@ def api_renderer_readiness():
     except (OSError, subprocess.TimeoutExpired) as exc:
         return jsonify({"found": True, "verified": False, "path": str(exe), "error": str(exc)})
     return jsonify({"found": True, "verified": True, "path": str(exe)})
+
+
+@app.route("/api/renderer/download", methods=["POST"])
+def api_renderer_download():
+    """Fetch a prebuilt nam_render binary for this OS -- see hybrid/render_bootstrap.py.
+
+    Makes nam_render part of the app's own setup flow rather than a separate
+    manual install/path the user has to go find; not used by the standalone
+    desktop app, whose nam_render is already bundled at build time.
+    """
+    try:
+        dest = download_prebuilt_nam_render()
+    except NamRenderDownloadError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 200
+    return jsonify({"ok": True, "path": str(dest)})
 
 
 @app.route("/api/nam/upload", methods=["POST"])

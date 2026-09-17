@@ -1245,3 +1245,17 @@ def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
     # into later tests.
     import os as _os
     _os.environ.pop("NAM_RENDER_EXE", None)
+
+
+def test_renderer_download_route_reports_backend_error_as_json(client, monkeypatch):
+    from hybrid.render_bootstrap import NamRenderDownloadError
+
+    def fake_download():
+        raise NamRenderDownloadError("no prebuilt binary for this platform")
+
+    monkeypatch.setattr(app_module, "download_prebuilt_nam_render", fake_download)
+    resp = client.post("/api/renderer/download")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert "no prebuilt binary" in data["error"]

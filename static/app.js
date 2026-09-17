@@ -3391,9 +3391,42 @@ function renderSettings() {
       }
       row.append(labelText, input, desc);
       section.append(row);
+      if (field.name === "NAM_RENDER_EXE") {
+        section.append(renderNamRenderDownloadRow());
+      }
     }
     settingsGroups.append(section);
   }
+}
+
+function renderNamRenderDownloadRow() {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-secondary btn-small";
+  button.textContent = "Download nam_render automatically";
+  const status = document.createElement("span");
+  status.className = "info";
+  status.textContent = "Fetches the prebuilt renderer for this OS from GitHub releases -- no separate install or manual path needed.";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "Downloading…";
+    try {
+      const response = await fetch("/api/renderer/download", { method: "POST" });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "download failed");
+      status.textContent = `Installed at ${data.path}. Reloading settings…`;
+      await loadSettings();
+      refreshRendererReadiness();
+    } catch (err) {
+      status.textContent = "Download failed: " + err;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  row.append(button, status);
+  return row;
 }
 
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
