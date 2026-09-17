@@ -682,13 +682,20 @@ async function loadLocalRecipeAiStatus() {
   try {
     const response = await fetch("/api/local_llm/status");
     const data = await response.json();
-    localRecipeAiAvailable = Boolean(response.ok && data.enabled);
+    const configured = Boolean(response.ok && data.enabled);
+    localRecipeAiAvailable = configured && data.reachable !== false;
     recipeUseLocalAi.disabled = !localRecipeAiAvailable;
     recipeUseLocalAi.checked = localRecipeAiAvailable;
-    recipeAiStatus.textContent = localRecipeAiAvailable ? `(ready: ${data.model})` : "(not configured)";
+    if (!configured) {
+      recipeAiStatus.textContent = "(not set up — add a model name in Settings > AI Assistant)";
+    } else if (data.reachable === false) {
+      recipeAiStatus.textContent = `(configured for ${data.base_url}, but nothing responded — start your local LLM host, or check Settings)`;
+    } else {
+      recipeAiStatus.textContent = `(ready: ${data.model})`;
+    }
   } catch (_error) {
     localRecipeAiAvailable = false;
-    recipeAiStatus.textContent = "(unavailable)";
+    recipeAiStatus.textContent = "(could not check status — see Settings > AI Assistant to set it up)";
   }
 }
 loadLocalRecipeAiStatus();
@@ -1029,7 +1036,7 @@ async function applyRecipeFromPrompt() {
       return;
     } catch (error) {
       const reason = error && error.message ? error.message : "an unknown error";
-      prefix = `Local AI was unavailable (${reason}), so the built-in suggestion was used. `;
+      prefix = `Local AI's response could not be used (${reason}), so the built-in suggestion was used. `;
     } finally {
       recipePromptApplyButton.disabled = false;
     }
@@ -1054,6 +1061,53 @@ recipeConversationResetButton.addEventListener("click", () => {
   recipeSaveMarkdownButton.hidden = true;
   recipePromptInput.focus();
 });
+// The standalone desktop app (desktop/main.py) runs inside pywebview's
+// native OS webview, not a real browser -- and pywebview does not honor
+// <a download>: clicking it just navigates/opens the content inline
+// instead of triggering an OS save dialog. window.pywebview.api.save_file
+// (exposed via js_api= on the desktop window) opens a real native save
+// dialog and writes the bytes there; a plain browser keeps the standard
+// blob+<a download> trick, which already works correctly.
+function isDesktopApp() {
+  return typeof window.pywebview !== "undefined" && Boolean(window.pywebview.api);
+}
+
+async function saveBlobAsFile(filename, blob) {
+  if (isDesktopApp()) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return window.pywebview.api.save_file(filename, btoa(binary));
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
+
+async function triggerFileDownload(url, filename) {
+  if (isDesktopApp()) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`download failed (${response.status})`);
+    return saveBlobAsFile(filename, await response.blob());
+  }
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  return filename;
+}
+
 recipeSaveMarkdownButton.addEventListener("click", () => {
   const messages = [...recipeResult.querySelectorAll(".recipe-message")].reverse();
   const markdown = [
@@ -1066,12 +1120,7 @@ recipeSaveMarkdownButton.addEventListener("click", () => {
       "",
     ]),
   ].join("\n");
-  const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "nam-mixer-ai-conversation.md";
-  link.click();
-  URL.revokeObjectURL(url);
+  saveBlobAsFile("nam-mixer-ai-conversation.md", new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
 });
 
 wizardAnalyseButton.addEventListener("click", async () => {
@@ -2941,21 +2990,12 @@ function sessionSummary(session) {
 }
 
 function downloadSessionNam(artifact) {
-  const link = document.createElement("a");
-  link.href = artifact.downloadUrl;
-  link.download = artifact.filename || "model.nam";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  triggerFileDownload(artifact.downloadUrl, artifact.filename || "model.nam");
 }
 
 function downloadSessionJson(session) {
-  const link = document.createElement("a");
-  link.href = `/api/sessions/${encodeURIComponent(session.id)}/download`;
-  link.download = `${(session.name || "nam-mixer-session").replace(/[^a-z0-9_-]+/gi, "-")}.nam-mixer-session.json`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  const filename = `${(session.name || "nam-mixer-session").replace(/[^a-z0-9_-]+/gi, "-")}.nam-mixer-session.json`;
+  triggerFileDownload(`/api/sessions/${encodeURIComponent(session.id)}/download`, filename);
 }
 
 function importedSession(raw, filename) {
@@ -3286,7 +3326,8 @@ function showToolResult(data) {
   toolResult.replaceChildren();
   const changed = document.createElement("div");
   changed.textContent = `Validated changes: ${data.changed_paths.join(", ")}`;
-  const link = document.createElement("a"); link.href = data.download_url; link.download = data.filename; link.className = "btn btn-primary"; link.textContent = `Download ${data.filename}`;
+  const link = document.createElement("button"); link.type = "button"; link.className = "btn btn-primary"; link.textContent = `Download ${data.filename}`;
+  link.addEventListener("click", () => triggerFileDownload(data.download_url, data.filename));
   toolResult.append(changed, link);
   if (data.validation_report_invalidated) {
     const validation = document.createElement("div");
@@ -3557,6 +3598,10 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
     if (!response.ok) throw new Error(data.error || "save failed");
     settingsStatus.textContent = `Saved (${data.saved.length} setting${data.saved.length === 1 ? "" : "s"}).`;
     await loadSettings();
+    // Re-check anything the just-saved values could have changed the
+    // availability of, so the AI Assistant/TONE3000 tabs reflect reality
+    // immediately rather than only after a page reload.
+    await Promise.all([loadLocalRecipeAiStatus(), refreshTone3000Status()]);
   } catch (err) {
     settingsStatus.textContent = "Save failed: " + err;
   }
@@ -3569,6 +3614,23 @@ const tone3000RigScope = document.getElementById("tone3000-rig-scope");
 const tone3000Author = document.getElementById("tone3000-author");
 const tone3000Status = document.getElementById("tone3000-status");
 const tone3000Results = document.getElementById("tone3000-results");
+
+let tone3000ApiKeyConfigured = false;
+async function refreshTone3000Status() {
+  try {
+    const response = await fetch("/api/settings");
+    const data = await response.json();
+    const field = (data.settings || []).find((f) => f.name === "TONE3000_API_KEY");
+    tone3000ApiKeyConfigured = Boolean(field && field.has_value);
+    tone3000Status.textContent = tone3000ApiKeyConfigured
+      ? ""
+      : "Not set up — add a TONE3000 API key in Settings to search captures.";
+  } catch (_error) {
+    tone3000ApiKeyConfigured = false;
+    tone3000Status.textContent = "Could not check TONE3000 setup — see Settings.";
+  }
+}
+refreshTone3000Status();
 
 function scorePlanTermAgainst(value, text) {
   const terms = new Set((value.toLowerCase().match(/[a-z0-9]+/g) || []).filter((term) => term.length >= 3));
@@ -3640,11 +3702,12 @@ function showSelectedTone3000Capture(capture) {
   const models = document.createElement("div");
   models.className = "ai-tone3000-models";
   capture.models.forEach((model) => {
-    const download = document.createElement("a");
+    const download = document.createElement("button");
+    download.type = "button";
     download.className = "btn btn-secondary btn-small";
-    download.href = `/api/tone3000/tones/${encodeURIComponent(capture.id)}/models/${encodeURIComponent(model.id)}/download`;
-    download.download = model.name;
     download.textContent = "Download " + model.name;
+    const url = `/api/tone3000/tones/${encodeURIComponent(capture.id)}/models/${encodeURIComponent(model.id)}/download`;
+    download.addEventListener("click", () => triggerFileDownload(url, model.name));
     models.append(download);
   });
   fileDetails.append(summary, models);

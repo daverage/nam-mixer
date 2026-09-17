@@ -62,3 +62,47 @@ def test_configure_env_file_is_noop_when_not_frozen(monkeypatch):
 
     import os
     assert "NAM_MIXER_ENV_FILE" not in os.environ
+
+
+def test_desktop_api_save_file_writes_chosen_path(tmp_path, monkeypatch):
+    """Regression test: pywebview's native webview ignores <a download> --
+    static/app.js routes desktop downloads through this instead, so a
+    native Save dialog (not an inline open) is what actually happens."""
+    import base64
+    import sys
+    import types
+
+    desktop_main = _load_desktop_main()
+    dest = tmp_path / "chosen.nam"
+
+    class FakeWindow:
+        def create_file_dialog(self, dialog_type, save_filename=None):
+            assert save_filename == "model.nam"
+            return [str(dest)]
+
+    fake_webview = types.SimpleNamespace(windows=[FakeWindow()], SAVE_DIALOG="save")
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+    api = desktop_main.DesktopApi()
+    payload = base64.b64encode(b"hello nam").decode()
+    result = api.save_file("model.nam", payload)
+
+    assert result == str(dest)
+    assert dest.read_bytes() == b"hello nam"
+
+
+def test_desktop_api_save_file_returns_none_when_dialog_cancelled(monkeypatch):
+    import sys
+    import types
+
+    desktop_main = _load_desktop_main()
+
+    class FakeWindow:
+        def create_file_dialog(self, dialog_type, save_filename=None):
+            return None
+
+    fake_webview = types.SimpleNamespace(windows=[FakeWindow()], SAVE_DIALOG="save")
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+    api = desktop_main.DesktopApi()
+    assert api.save_file("model.nam", "aGVsbG8=") is None

@@ -109,6 +109,33 @@ def run_flask_app(flask_app, port: int) -> None:
     flask_app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, load_dotenv=False)
 
 
+class DesktopApi:
+    """Exposed to the page as `window.pywebview.api` (via `js_api=` below).
+
+    pywebview's native OS webview does not honor `<a download>` the way a
+    real browser does -- clicking one just navigates/opens the content
+    inline instead of prompting to save. static/app.js detects
+    `window.pywebview` and routes every download (NAM Tools exports,
+    session files, TONE3000 downloads, the AI Assistant's Markdown export)
+    through `save_file` instead, so "download" in the desktop app always
+    means an actual native Save dialog, matching the plain-browser behavior.
+    """
+
+    def save_file(self, filename: str, data_base64: str) -> "str | None":
+        import base64
+
+        import webview
+
+        window = webview.windows[0]
+        result = window.create_file_dialog(webview.SAVE_DIALOG, save_filename=filename)
+        if not result:
+            return None
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(data_base64))
+        return str(path)
+
+
 def main() -> int:
     _configure_env_file()
 
@@ -143,6 +170,7 @@ def main() -> int:
         width=1400,
         height=900,
         min_size=(900, 600),
+        js_api=DesktopApi(),
     )
     webview.start()
     return 0
