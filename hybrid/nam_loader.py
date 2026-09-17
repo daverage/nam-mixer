@@ -81,6 +81,30 @@ class NamModel:
         return _first_present(self.raw, _OUTPUT_CALIBRATION_KEY_CANDIDATES)
 
     @property
+    def name(self) -> Optional[str]:
+        return _dig(self.raw, ("metadata", "name"))
+
+    @property
+    def modeled_by(self) -> Optional[str]:
+        return _dig(self.raw, ("metadata", "modeled_by"))
+
+    @property
+    def gear_type(self) -> Optional[str]:
+        return _dig(self.raw, ("metadata", "gear_type"))
+
+    @property
+    def gear_make(self) -> Optional[str]:
+        return _dig(self.raw, ("metadata", "gear_make"))
+
+    @property
+    def gear_model(self) -> Optional[str]:
+        return _dig(self.raw, ("metadata", "gear_model"))
+
+    @property
+    def tone_type(self) -> Optional[str]:
+        return _dig(self.raw, ("metadata", "tone_type"))
+
+    @property
     def is_calibrated(self) -> bool:
         """True only when BOTH input and output calibration levels are present.
 

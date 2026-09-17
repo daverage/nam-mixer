@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NAM Mixer</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -20,6 +21,7 @@
     <button type="button" class="mode-tab" id="tab-tone3000" aria-pressed="false" aria-controls="tone3000-panel">TONE3000</button>
     <button type="button" class="mode-tab" id="tab-tools" aria-pressed="false" aria-controls="nam-tools-panel">Tools</button>
     <button type="button" class="mode-tab" id="tab-sessions" aria-pressed="false" aria-controls="sessions-panel">Sessions</button>
+    <button type="button" class="mode-tab" id="tab-settings" aria-pressed="false" aria-controls="settings-panel">Settings</button>
 
 
 
@@ -41,15 +43,22 @@
           <button type="button" id="btn-tool-volume" class="btn btn-primary">Create volume-adjusted NAM</button>
         </section>
         <section>
-          <h3>Metadata editor</h3><p class="info">Edits descriptive NAM metadata only. Input/output calibration is shown below but cannot be changed here; it must come from a real calibration measurement.</p>
+          <h3>Metadata editor</h3><p class="info">Edits descriptive NAM metadata only. Facts about what was actually built -- architecture, gear type, calibration -- are shown read-only below and can't be changed here; they must come from the actual export/measurement.</p>
           <label class="field-label" for="tool-meta-name">Name</label><input id="tool-meta-name" class="select-input" placeholder="Optional model name">
           <label class="field-label" for="tool-meta-modeled-by">Modeled by</label><input id="tool-meta-modeled-by" class="select-input">
-          <label class="field-label" for="tool-meta-gear-type">Gear type</label><select id="tool-meta-gear-type" class="select-input"><option value="">Not specified</option><option value="amp">Amp</option><option value="pedal">Pedal</option><option value="pedal_amp">Pedal + amp</option><option value="amp_cab">Amp + cab</option><option value="amp_pedal_cab">Amp + pedal + cab</option><option value="preamp">Preamp</option><option value="studio">Studio</option></select>
-          <label class="field-label" for="tool-meta-gear-make">Gear make</label><input id="tool-meta-gear-make" class="select-input">
-          <label class="field-label" for="tool-meta-gear-model">Gear model</label><input id="tool-meta-gear-model" class="select-input">
           <label class="field-label" for="tool-meta-tone-type">Tone type</label><select id="tool-meta-tone-type" class="select-input"><option value="">Not specified</option><option value="clean">Clean</option><option value="overdrive">Overdrive</option><option value="crunch">Crunch</option><option value="hi_gain">High gain</option><option value="fuzz">Fuzz</option></select>
-          <div id="tool-calibration-status" class="info" aria-live="polite"></div>
+
+          <details class="tool-advanced">
+            <summary>Advanced metadata</summary>
+            <label class="field-label" for="tool-meta-gear-make">Gear make</label><input id="tool-meta-gear-make" class="select-input">
+            <label class="field-label" for="tool-meta-gear-model">Gear model</label><input id="tool-meta-gear-model" class="select-input">
+          </details>
+
           <button type="button" id="btn-tool-metadata" class="btn btn-primary">Create metadata-edited NAM</button>
+
+          <h4 class="tool-readonly-heading">Export information <span class="hint">(read-only)</span></h4>
+          <dl id="tool-export-info" class="tool-readonly-list"></dl>
+          <div id="tool-calibration-status" class="info" aria-live="polite"></div>
         </section>
       </div>
       <div id="tool-result" class="tool-result" hidden aria-live="polite"></div>
@@ -134,8 +143,9 @@
     <button type="button" class="workflow-tab active" data-workflow-stage="configure"><span>1</span> Choose amps</button>
     <button type="button" class="workflow-tab" data-workflow-stage="compare"><span>2</span> Compare amps</button>
     <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>3</span> Shape the sound</button>
-    <button type="button" class="workflow-tab" data-workflow-stage="create"><span>4</span> Make a model</button>
-    <p id="workflow-hint" class="workflow-hint">Add two amps and a test performance to begin.</p>
+    <button type="button" class="workflow-tab" data-workflow-stage="finish"><span>4</span> Finish &amp; polish</button>
+    <button type="button" class="workflow-tab" data-workflow-stage="create"><span>5</span> Make a model</button>
+    <p id="workflow-hint" class="workflow-hint"></p>
   </nav>
   <section id="render-stale-callout" class="render-stale-callout" hidden aria-live="assertive">
     <div><strong>Preview needs rebuilding.</strong> <span id="render-stale-message">A source setting changed.</span></div>
@@ -355,11 +365,12 @@
           <button id="btn-preview-mix" class="btn btn-amp btn-hybrid shape-only" disabled>Hybrid</button>
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
-        <button id="btn-continue-shape" type="button" class="btn btn-primary compare-only">Shape this sound</button>
+
         <div class="audition-live-row shape-only"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition" checked> Update the result while it plays</label></div>
+
         <div id="live-blend-status" class="info shape-only" aria-live="polite">Always-on mix can change immediately while audio plays. Other modes update the result after you adjust a control.</div>
         <audio id="player" controls></audio>
-
+        <button id="btn-continue-shape" type="button" class="btn btn-primary btn-block compare-only">Shape this sound</button>
         <div class="slider-row shape-only">
           <label for="test-gain-slider">Play harder or softer <span class="cost-badge cost-badge-auto" title="Changes the input to both amps, then prepares them again">↻ prepares again</span></label>
           <span id="test-gain-value" class="value-chip">+0.0 dB</span>
@@ -371,7 +382,7 @@
 
       </section>
 
-      <details class="optional-tools workflow-stage workflow-shape" open>
+      <details class="optional-tools workflow-stage workflow-finish" open>
         <summary>Finish the sound <span>Add a cabinet IR (optional), and set output level</span></summary>
         <div class="finish-tools">
       <section class="card" id="cab-panel">
@@ -393,6 +404,9 @@
           <option value="learned">Train cabinet into A2 (compatible approximation)</option>
         </select>
         <div class="info">Preview is independent. Embedded export keeps a head-only A2 and prepared IR alongside the experimental Sequential NAM.</div>
+
+        <label class="field-label" for="cab-display-name">Cabinet display name <span class="hint">(shown in the exported model's name)</span></label>
+        <input type="text" id="cab-display-name" class="file-input" maxlength="80" placeholder="e.g. Modern Boutique 4x12" autocomplete="off">
 
         <div id="cab-status" class="info" aria-live="polite">Cab: off</div>
       </section>
@@ -420,7 +434,7 @@
         </div>
       </details>
 
-      <details id="hybrid-only-diagnostics" class="analysis-panel workflow-stage workflow-shape" data-mode-panel="hybrid">
+      <details id="hybrid-only-diagnostics" class="analysis-panel workflow-stage workflow-finish" data-mode-panel="hybrid">
         <summary>See how the changeover behaves <span>Dynamic Hybrid only</span></summary>
         <div class="analysis-tools">
         <section class="card">
@@ -557,6 +571,16 @@
     <div class="session-import-row"><button type="button" id="btn-export-current-session" class="btn btn-secondary btn-small">Save & export current session</button><button type="button" id="btn-import-session" class="btn btn-secondary btn-small">Import session JSON</button><input type="file" id="import-session-file" accept="application/json,.json" hidden></div>
     <div id="session-manager-status" class="info" aria-live="polite"></div>
     <div id="session-list" class="session-list" aria-live="polite"></div>
+  </section>
+
+  <section id="settings-panel" class="sessions-panel" hidden aria-labelledby="settings-panel-title">
+    <div class="session-manager-heading"><div><div class="eyebrow">App configuration</div><h2 id="settings-panel-title">Settings</h2><span id="settings-status" class="info" aria-live="polite"></span></div><button type="button" id="btn-close-settings" class="btn btn-secondary btn-small">Back to builder</button></div>
+    <p class="info">These settings are the same environment variables the app has always read (e.g. <code>NAM_RENDER_EXE</code>); this page just gives the standalone desktop app -- which has no shell to set them in -- a place to change them. Values are stored locally, never uploaded anywhere. Settings marked "restart required" only take effect the next time the app starts.</p>
+    <div id="settings-groups" class="settings-groups"></div>
+    <div class="session-import-row">
+      <button type="button" id="btn-save-settings" class="btn btn-primary btn-small">Save settings</button>
+      <button type="button" id="btn-reload-settings" class="btn btn-secondary btn-small">Reload</button>
+    </div>
   </section>
 
   <footer class="site-footer">

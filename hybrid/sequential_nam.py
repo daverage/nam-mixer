@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +45,8 @@ def extract_full_a2_child(head_model: dict[str, Any]) -> dict[str, Any]:
 
     This is deliberately strict: accepting arbitrary NAM JSON would make an
     embedded export look verified even though its Full/Lite semantics were
-    not. NAMCore's normal A2/SlimmableContainer fixture selects the lowest
-    `max_value` child for `--slim 0.0`; the native gate proves that equivalence.
+    not. A2 exports identify their highest-capacity (Full) child with the
+    highest `max_value`; the lower value is the Lite child.
     """
     if head_model.get("architecture") != "SlimmableContainer":
         raise SequentialNamError("embedded export requires a SlimmableContainer A2 head")
@@ -53,7 +54,7 @@ def extract_full_a2_child(head_model: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(submodels, list) or not submodels:
         raise SequentialNamError("A2 head has no usable SlimmableContainer submodels")
     try:
-        selected = min(submodels, key=lambda item: float(item["max_value"]))
+        selected = max(submodels, key=lambda item: float(item["max_value"]))
         child = selected["model"]
     except (KeyError, TypeError, ValueError) as exc:
         raise SequentialNamError("A2 head has malformed SlimmableContainer submodels") from exc
@@ -64,8 +65,52 @@ def extract_full_a2_child(head_model: dict[str, Any]) -> dict[str, Any]:
     return child
 
 
+def _packaging_date() -> dict[str, int]:
+    now = datetime.now(timezone.utc)
+    return {"year": now.year, "month": now.month, "day": now.day,
+            "hour": now.hour, "minute": now.minute, "second": now.second}
+
+
+def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
+                         loudness: float | None) -> dict[str, Any]:
+    """Build host-facing metadata for the complete amp-and-cab result.
+
+    The nested WaveNet remains byte-for-byte as exported.  Only calibration
+    facts that still describe the input side (and NAM's response ``gain``)
+    are inherited; the Linear scalar is deliberately not metadata gain.
+    """
+    head_metadata = full_head.get("metadata")
+    head_metadata = head_metadata if isinstance(head_metadata, dict) else {}
+    # The head's own name is left unsuffixed by hybrid/a2_training_settings.py
+    # for an "embedded" export_mode (it isn't the final deliverable in this
+    # mode -- this packaged Sequential file is), so it's safe to use
+    # directly here without stripping an "[Amp Only]"/"[Learned Cab]" suffix
+    # that would otherwise double up with the one appended below.
+    head_name = head_metadata.get("name") if isinstance(head_metadata.get("name"), str) else "NAM Head"
+    cab_name = cabinet_name.strip() if isinstance(cabinet_name, str) and cabinet_name.strip() else "Cabinet"
+    inherited_gain = head_metadata.get("gain")
+    gain = float(inherited_gain) if isinstance(inherited_gain, (int, float)) and np.isfinite(inherited_gain) else None
+    return {
+        "date": _packaging_date(),
+        "name": f"{head_name} + {cab_name} [Embedded Cab · Full]",
+        "modeled_by": "NAM Mixer",
+        "gear_type": "amp_cab",
+        "gear_make": None,
+        "gear_model": None,
+        "tone_type": None,
+        "input_level_dbu": head_metadata.get("input_level_dbu"),
+        # A cabinet stage invalidates any output calibration from the head.
+        "output_level_dbu": None,
+        # This must be supplied from a completed Sequential-model measurement;
+        # never substitute the head measurement or the Linear output scalar.
+        "loudness": loudness,
+        "gain": gain,
+    }
+
+
 def build_embedded_sequential(head_model: dict[str, Any], prepared_taps: np.ndarray, *, sample_rate: int,
-                              final_scalar: float = 1.0) -> tuple[dict[str, Any], dict[str, Any]]:
+                              final_scalar: float = 1.0, cabinet_name: str | None = None,
+                              loudness: float | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return canonical v0.7 Sequential JSON and auditable package metadata.
 
     `head_model` remains a separate conventional reusable head artifact. The
@@ -80,6 +125,8 @@ def build_embedded_sequential(head_model: dict[str, Any], prepared_taps: np.ndar
         raise SequentialNamError("prepared cabinet IR must be a non-empty finite mono tap sequence")
     if not np.isfinite(final_scalar) or final_scalar <= 0:
         raise SequentialNamError("final cabinet scalar must be finite and greater than zero")
+    if loudness is not None and (not isinstance(loudness, (int, float)) or not np.isfinite(loudness)):
+        raise SequentialNamError("Sequential loudness must be finite when supplied")
     with np.errstate(over="ignore", invalid="ignore"):
         scaled = (taps * np.float32(final_scalar)).astype(np.float32)
     if not np.all(np.isfinite(scaled)):
@@ -93,6 +140,7 @@ def build_embedded_sequential(head_model: dict[str, Any], prepared_taps: np.ndar
     }
     sequential = {
         "version": "0.7.0",
+        "metadata": _sequential_metadata(full_head, cabinet_name, loudness),
         "architecture": "Sequential",
         "config": {"models": [full_head, linear]},
         "weights": [],
@@ -148,8 +196,10 @@ def package_embedded_artifacts(head_nam_path: str | Path, output_dir: str | Path
             raise SequentialNamError("prepared IR WAV does not round-trip its frozen float32 taps")
         with open(head_nam_path, encoding="utf-8") as f:
             head = json.load(f)
-        sequential, record = build_embedded_sequential(head, prepared.samples, sample_rate=sample_rate,
-                                                        final_scalar=final_scalar)
+        sequential, record = build_embedded_sequential(
+            head, prepared.samples, sample_rate=sample_rate, final_scalar=final_scalar,
+            cabinet_name=cab.display_name or cab.original_filename,
+        )
         with open(nam_tmp, "w", encoding="utf-8") as f:
             json.dump(sequential, f, separators=(",", ":"), allow_nan=False)
             f.flush(); os.fsync(f.fileno())
@@ -163,7 +213,8 @@ def package_embedded_artifacts(head_nam_path: str | Path, output_dir: str | Path
         ir_tmp.unlink(missing_ok=True); nam_tmp.unlink(missing_ok=True)
         raise
     file_sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
-    return {**record, "prepared_ir_path": str(ir_path), "sequential_nam_path": str(sequential_path),
+    return {**record, "cabinet_filename": cab.original_filename,
+            "prepared_ir_path": str(ir_path), "sequential_nam_path": str(sequential_path),
             "source_ir_file_sha256": cab.sha256, "prepared_ir_taps_sha256": weights_sha256(prepared.samples),
             "prepared_ir_file_sha256": file_sha(ir_path), "linear_weights_sha256": record["linear_weights_sha256"],
             "sequential_nam_file_sha256": file_sha(sequential_path), "head_nam_file_sha256": file_sha(head_nam_path),

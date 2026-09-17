@@ -144,12 +144,64 @@ def test_cloud_worker_user_metadata_matches_shared_helper():
 
 
 def test_explicit_model_name_is_embedded_in_nam_metadata():
+    # No cab selected (no "cab" key) -> the automatic "[Amp Only]" export
+    # suffix applies, same as an explicit export_mode="none".
     manifest = {
         "model_name": "Mesa + JCM800 Studio Blend",
         "amp_a": {"filename": "Mesa.nam"},
         "amp_b": {"filename": "JCM800.nam"},
     }
-    assert user_metadata_kwargs(manifest)["name"] == "Mesa + JCM800 Studio Blend"
+    assert user_metadata_kwargs(manifest)["name"] == "Mesa + JCM800 Studio Blend [Amp Only]"
+
+
+def test_learned_cab_export_appends_cabinet_and_suffix():
+    manifest = {
+        "model_name": "British American High Gain",
+        "amp_a": {"filename": "Mesa.nam"},
+        "amp_b": {"filename": "JCM800.nam"},
+        "cab": {"export_mode": "learned", "display_name": "Modern Boutique 4x12"},
+    }
+    assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
+
+
+def test_embedded_cab_export_leaves_head_name_unsuffixed():
+    # The SlimmableContainer head isn't the final deliverable for an
+    # embedded export -- hybrid/sequential_nam.py's packaged Sequential
+    # file carries its own "[Embedded Cab · Full]" suffix instead.
+    manifest = {
+        "model_name": "British American High Gain",
+        "amp_a": {"filename": "Mesa.nam"},
+        "amp_b": {"filename": "JCM800.nam"},
+        "cab": {"export_mode": "embedded", "display_name": "Modern Boutique 4x12"},
+    }
+    assert user_metadata_kwargs(manifest)["name"] == "British American High Gain"
+
+
+def test_tone_type_copied_only_when_sources_agree():
+    manifest = {
+        "amp_a": {"filename": "A.nam", "tone_type": "hi_gain"},
+        "amp_b": {"filename": "B.nam", "tone_type": "hi_gain"},
+    }
+    assert user_metadata_kwargs(manifest)["tone_type"] == "hi_gain"
+
+    manifest["amp_b"]["tone_type"] = "clean"
+    assert user_metadata_kwargs(manifest)["tone_type"] is None
+
+    manifest["amp_b"]["tone_type"] = "hi_gain"
+    manifest["amp_a"]["tone_type"] = "bogus_value"
+    assert user_metadata_kwargs(manifest)["tone_type"] is None
+
+
+def test_cloud_worker_export_naming_matches_shared_helper():
+    cloud = _load_cloud_module()
+    for manifest in (
+        {"model_name": "X", "amp_a": {"filename": "A.nam"}, "amp_b": {"filename": "B.nam"}},
+        {"model_name": "X", "amp_a": {"filename": "A.nam"}, "amp_b": {"filename": "B.nam"},
+         "cab": {"export_mode": "learned", "display_name": "Cab"}},
+        {"model_name": "X", "amp_a": {"filename": "A.nam"}, "amp_b": {"filename": "B.nam"},
+         "cab": {"export_mode": "embedded", "display_name": "Cab"}},
+    ):
+        assert cloud.user_metadata_kwargs(manifest) == user_metadata_kwargs(manifest)
 
 
 @pytest.mark.parametrize("preset,expected_epochs", [("draft", 20), ("standard", 60), ("high_def", 120)])
@@ -197,6 +249,9 @@ def test_cloud_worker_run_training_uses_requested_epoch_preset(tmp_path, monkeyp
     class FakeGearType:
         AMP = "amp"
 
+    class FakeToneType:
+        pass
+
     class FakeUserMetadata:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -207,7 +262,7 @@ def test_cloud_worker_run_training_uses_requested_epoch_preset(tmp_path, monkeyp
     monkeypatch.setitem(sys.modules, "nam.train.metadata", types.SimpleNamespace(TRAINING_KEY="training"))
     monkeypatch.setitem(sys.modules, "nam.models", types.ModuleType("nam.models"))
     monkeypatch.setitem(sys.modules, "nam.models.metadata", types.SimpleNamespace(
-        GearType=FakeGearType, UserMetadata=FakeUserMetadata,
+        GearType=FakeGearType, ToneType=FakeToneType, UserMetadata=FakeUserMetadata,
     ))
 
     train_result = cloud.run_training(bundle_dir, tmp_path / "out", quick=False, epoch_preset=preset)

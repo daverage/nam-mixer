@@ -37,8 +37,8 @@ def test_unknown_model_is_refused():
 
 def test_metadata_editor_cannot_change_model_content():
     source = slimmable(1)
-    edited, paths = apply_metadata_changes(source, {"name": "Battery", "modeled_by": "NAM user", "gear_type": "amp", "gear_make": "Mesa"})
-    assert paths == ["metadata.name", "metadata.modeled_by", "metadata.gear_type", "metadata.gear_make"]
+    edited, paths = apply_metadata_changes(source, {"name": "Battery", "modeled_by": "NAM user", "gear_make": "Mesa"})
+    assert paths == ["metadata.name", "metadata.modeled_by", "metadata.gear_make"]
     assert compare_changes(source, edited) == paths
 
 
@@ -47,11 +47,43 @@ def test_metadata_editor_refuses_calibration_fields():
         apply_metadata_changes(slimmable(1), {"input_level_dbu": 12.0})
 
 
+def test_metadata_editor_refuses_gear_type():
+    # gear_type is a fact about what was actually built (amp vs. amp+cab),
+    # determined by the export/cabinet mode at generation time -- not a
+    # free-text label a user can retroactively relabel here. See the
+    # metadata-categories design review / hybrid/nam_provenance.py.
+    with pytest.raises(NamToolError, match="only permits"):
+        apply_metadata_changes(slimmable(1), {"gear_type": "amp_cab"})
+
+
 def test_editor_reports_current_loudness_and_standard_metadata():
     source = slimmable(1)
     source["metadata"].update({"name": "Battery", "gear_type": "amp"})
     source.update({"input_level_dbu": 12.0, "output_level_dbu": -3.0})
     details = describe_nam_tools(source)
     assert details["loudness_db"] == -22.7
-    assert details["metadata"] == {"name": "Battery", "gear_type": "amp"}
+    assert details["metadata"] == {"name": "Battery"}
+    assert details["read_only_metadata"] == {"gear_type": "amp"}
     assert details["calibration"] == {"input_level_dbu": 12.0, "output_level_dbu": -3.0, "status": "Calibrated NAM"}
+
+
+def test_describe_nam_tools_still_works_for_unsupported_volume_architecture():
+    # Regression test: an embedded-cab export's top-level architecture is
+    # "Sequential" (hybrid/sequential_nam.py) -- find_output_scalers()
+    # correctly can't identify a head_scale for that shape, but that must
+    # not block the metadata editor, which only touches the top-level
+    # `metadata` object regardless of architecture. Previously this raised
+    # NamToolError and broke the whole NAM Tools inspect for any embedded
+    # export.
+    source = {
+        "architecture": "Sequential",
+        "config": {"models": []},
+        "metadata": {"name": "My Amp + Cab", "gear_type": "amp_cab", "loudness": -16.3},
+    }
+    details = describe_nam_tools(source)
+    assert details["architecture"] == "Sequential"
+    assert details["metadata"] == {"name": "My Amp + Cab"}
+    assert details["read_only_metadata"] == {"gear_type": "amp_cab"}
+    assert details["head_scales"] == []
+    assert details["loudness_db"] == -16.3
+    assert "Sequential" in details["volume_unsupported_reason"]

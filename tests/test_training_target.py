@@ -151,6 +151,38 @@ def test_generate_training_bundle_output_files(tmp_path):
     assert len(target_audio) == len(input_audio)
 
 
+def test_manifest_amp_provenance_includes_descriptive_source_metadata(tmp_path):
+    amp_a = tmp_path / "a.nam"
+    amp_a.write_text(json.dumps({
+        "architecture": "WaveNet", "sample_rate": 48000.0,
+        "metadata": {"name": "Fender Clean", "modeled_by": "Someone",
+                     "gear_type": "amp", "gear_make": "Fender", "gear_model": "Deluxe",
+                     "tone_type": "clean"},
+    }), encoding="utf-8")
+    amp_b = tmp_path / "b.nam"
+    amp_b.write_text(json.dumps({
+        "architecture": "WaveNet", "sample_rate": 48000.0,
+        "metadata": {"name": "Mesa Lead", "tone_type": "hi_gain"},
+    }), encoding="utf-8")
+    training_input = _write_training_input(tmp_path / "input.wav")
+    design = _design(amp_a, amp_b)
+
+    bundle = generate_training_bundle(design, training_input, tmp_path / "bundle")
+    with open(bundle.training_manifest_path) as f:
+        manifest = json.load(f)
+
+    assert manifest["amp_a"]["name"] == "Fender Clean"
+    assert manifest["amp_a"]["gear_make"] == "Fender"
+    assert manifest["amp_a"]["tone_type"] == "clean"
+    assert manifest["amp_b"]["name"] == "Mesa Lead"
+    assert manifest["amp_b"]["tone_type"] == "hi_gain"
+    # No suffix baked into the manifest itself -- that's applied later by
+    # hybrid.a2_training_settings.user_metadata_kwargs at train time.
+    from hybrid.a2_training_settings import user_metadata_kwargs
+    assert user_metadata_kwargs(manifest)["tone_type"] is None  # clean != hi_gain, not copied
+    assert user_metadata_kwargs(manifest)["name"].endswith("[Amp Only]")
+
+
 def test_generate_training_bundle_target_is_float32_not_pcm16(tmp_path):
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")

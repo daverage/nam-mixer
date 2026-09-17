@@ -33,3 +33,8 @@ native/nam_render/build/
 native/nam_render/build-sequential/
 
 .env
+
+# PyInstaller output for the standalone desktop app (desktop/build.spec).
+/build/
+/dist/
+*.spec.bak

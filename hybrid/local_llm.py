@@ -136,6 +136,21 @@ def _config() -> tuple[str, str] | None:
     return base_url, model
 
 
+RECOMMENDED_LOCAL_MODEL = "gemma3:4b"
+
+
+def _reachable(base_url: str, timeout: float = 1.5) -> bool:
+    """Best-effort liveness check against the OpenAI-compatible /models
+    endpoint every mainstream local server implements (Ollama, LM Studio,
+    llama.cpp server, ...). A short timeout keeps a Settings-page load fast
+    even when nothing is listening; never raises."""
+    try:
+        with urlopen(Request(f"{base_url}/models"), timeout=timeout) as response:
+            return response.status < 500
+    except Exception:
+        return False
+
+
 def status() -> dict:
     try:
         config = _config()
@@ -144,7 +159,7 @@ def status() -> dict:
     if config is None:
         return {"enabled": False, "error": "not configured"}
     base_url, model = config
-    return {"enabled": True, "base_url": base_url, "model": model}
+    return {"enabled": True, "base_url": base_url, "model": model, "reachable": _reachable(base_url)}
 
 
 def _number(data: dict, key: str, low: float, high: float, *, integer: bool = False) -> int | float:
@@ -290,7 +305,9 @@ def converse(
         "say how to play or adjust it. Use short paragraphs separated with \\n. Keep explanation under 1,600 "
         "characters. Make reply a concise summary or question; place the detailed guidance in recipe.explanation. "
         "When research notes are present, use their specific facts and never claim a researched artist's rig from "
-        "memory alone."
+        "memory alone. When TONE3000 catalog matches are present, answer a request for sources by naming the best "
+        "matching capture's exact title and creator in `code`, and use that same exact title in source_plan; do not "
+        "ask for an amp choice that the catalog already provides."
         " When the user supplies a selected TONE3000 pack and its model names, help them choose a specific file "
         "by exact name where the available names/descriptions support it; explain why it fits the requested role "
         "(clean source, driven source, or alternative), and say explicitly when the names are too ambiguous to know. "
@@ -302,7 +319,8 @@ def converse(
         "family that could not have been anticipated by the existing source_plan."
         + (
             " TONE3000 research is enabled for this request. Add up to three concrete amp-family search terms in "
-            "tone3000_queries (for example, 'Vox AC30', 'Marshall JCM800'), never an artist's name or a long sentence. "
+            "tone3000_queries. Derive them from the player's stated gear and any web-research notes; preserve exact "
+            "amp names/models from that evidence, never substitute a familiar amp family or an artist name. "
             if request_tone3000_queries
             else ""
         )

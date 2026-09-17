@@ -37,6 +37,7 @@ from .calibration import resolve_calibration
 from .fixed_blend import BlendDesign
 from .input_profiles import db_to_amplitude
 from .nam_loader import load_nam
+from .nam_provenance import source_metadata_fields as _source_metadata_fields
 from .render import render
 from .safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
 from .training_target import (
@@ -82,6 +83,7 @@ def build_blend_training_manifest(
             "sample_rate": amp_a.sample_rate,
             "input_level_dbu": amp_a.input_level_dbu,
             "output_level_dbu": amp_a.output_level_dbu,
+            **_source_metadata_fields(amp_a),
         },
         "amp_b": {
             "filename": Path(design.amp_b_path).name,
@@ -91,6 +93,7 @@ def build_blend_training_manifest(
             "sample_rate": amp_b.sample_rate,
             "input_level_dbu": amp_b.input_level_dbu,
             "output_level_dbu": amp_b.output_level_dbu,
+            **_source_metadata_fields(amp_b),
         },
         "design": {
             "instrument_type": design.instrument_type,

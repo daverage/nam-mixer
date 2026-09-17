@@ -14,6 +14,7 @@ from .character_blend import CharacterBlendDesign, LowLevelResponseCheck, build_
 from .envelope import bounded_envelope_max_history_ms
 from .input_profiles import db_to_amplitude
 from .nam_loader import load_nam
+from .nam_provenance import source_metadata_fields as _source_metadata_fields
 from .render import render
 from .safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
 from .training_target import (
@@ -231,8 +232,8 @@ def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_r
 def build_character_training_manifest(design, amp_a, amp_b, amp_a_sha256, amp_b_sha256, calibration, training_input, safety, receptive_field, warnings, low_level_response: LowLevelResponseCheck, output_gain: "dict | None" = None):
     return {
         "hybrid_builder_version": HYBRID_BUILDER_VERSION, "git_commit": _git_commit(), "mode": "character",
-        "amp_a": {"filename": Path(design.amp_a_path).name, "path": design.amp_a_path, "sha256": amp_a_sha256, "architecture": amp_a.architecture, "sample_rate": amp_a.sample_rate, "input_level_dbu": amp_a.input_level_dbu},
-        "amp_b": {"filename": Path(design.amp_b_path).name, "path": design.amp_b_path, "sha256": amp_b_sha256, "architecture": amp_b.architecture, "sample_rate": amp_b.sample_rate, "input_level_dbu": amp_b.input_level_dbu},
+        "amp_a": {"filename": Path(design.amp_a_path).name, "path": design.amp_a_path, "sha256": amp_a_sha256, "architecture": amp_a.architecture, "sample_rate": amp_a.sample_rate, "input_level_dbu": amp_a.input_level_dbu, **_source_metadata_fields(amp_a)},
+        "amp_b": {"filename": Path(design.amp_b_path).name, "path": design.amp_b_path, "sha256": amp_b_sha256, "architecture": amp_b.architecture, "sample_rate": amp_b.sample_rate, "input_level_dbu": amp_b.input_level_dbu, **_source_metadata_fields(amp_b)},
         "design": design.to_dict(),
         "character_analysis": {"version": 2, "teacher_semantics_version": design.teacher_semantics_version, "amp_a_sha256": design.amp_a_sha256 or amp_a_sha256, "amp_b_sha256": design.amp_b_sha256 or amp_b_sha256, "analysis_a": design.analysis_a, "analysis_b": design.analysis_b, "tone_mix_b": design.tone_mix_b, "feel_mix_b": design.feel_mix_b, "drive_mix_b": design.drive_mix_b, "drive_curve": {"low": design.drive_low_mix_b, "mid": design.drive_mid_mix_b, "high": design.drive_high_mix_b}},
         "calibration": {"requested_mode": design.calibration_mode, "effective_mode": "auto" if calibration.applied else "raw", "reference_input_level_dbu": calibration.reference_input_level_dbu, "amp_a_compensation_db": calibration.amp_a_gain_db, "amp_b_compensation_db": calibration.amp_b_gain_db, "applied": calibration.applied, "warning": calibration.warning},

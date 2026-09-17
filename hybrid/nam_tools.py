@@ -22,12 +22,19 @@ class NamToolError(ValueError):
 # NAM 0.13's UserMetadata schema. ``date``, ``training`` and ``loudness`` are
 # exporter/trainer-owned values, so this editor deliberately does not forge
 # them; loudness is changed only by the output-volume operation.
+#
+# `gear_type` is deliberately NOT here (see the metadata-categories design
+# review): it's a fact about what was actually built -- amp-only vs.
+# amp+cab -- determined by the export/cabinet mode at generation time
+# (hybrid/nam_provenance.py, scripts/train_a2.py), not a free-text label a
+# user can retroactively relabel on an already-exported file. It's still
+# shown to the user via READ_ONLY_METADATA_FIELDS/inspect(), just not
+# editable.
 EDITABLE_METADATA_FIELDS = frozenset({
-    "name", "modeled_by", "gear_type", "gear_make", "gear_model",
-    "tone_type",
+    "name", "modeled_by", "gear_make", "gear_model", "tone_type",
 })
+READ_ONLY_METADATA_FIELDS = frozenset({"gear_type"})
 _STRING_METADATA_FIELDS = frozenset({"name", "modeled_by", "gear_make", "gear_model"})
-_GEAR_TYPES = frozenset({"amp", "pedal", "pedal_amp", "amp_cab", "amp_pedal_cab", "preamp", "studio"})
 _TONE_TYPES = frozenset({"clean", "overdrive", "crunch", "hi_gain", "fuzz"})
 
 
@@ -84,8 +91,22 @@ def find_output_scalers(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
 
 
 def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
-    """Return safe editor data and read-only calibration without model internals."""
-    scalers = find_output_scalers(data)
+    """Return safe editor data and read-only calibration without model internals.
+
+    Volume adjustment and metadata editing are independent features: an
+    architecture find_output_scalers() can't safely handle (e.g.
+    "Sequential", an embedded-cab export -- see hybrid/sequential_nam.py)
+    must not block the metadata editor, which only ever touches the
+    top-level `metadata` object regardless of architecture. Any such
+    failure is reported via `volume_unsupported_reason` instead of raised,
+    so the UI can disable just the volume control and keep the rest working.
+    """
+    try:
+        scalers = find_output_scalers(data)
+        volume_unsupported_reason = None
+    except NamToolError as exc:
+        scalers = []
+        volume_unsupported_reason = str(exc)
     model = NamModel(path=Path("<metadata>"), raw=data)
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     scales = [{"path": path, "value": config["head_scale"]} for path, config in scalers]
@@ -102,7 +123,9 @@ def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "architecture": data.get("architecture"),
         "metadata": {key: metadata.get(key) for key in EDITABLE_METADATA_FIELDS if key in metadata},
+        "read_only_metadata": {key: metadata.get(key) for key in READ_ONLY_METADATA_FIELDS if key in metadata},
         "head_scales": scales,
+        "volume_unsupported_reason": volume_unsupported_reason,
         "loudness_db": loudness,
         "calibration": {
             "input_level_dbu": model.input_level_dbu,
@@ -177,8 +200,6 @@ def apply_metadata_changes(data: dict[str, Any], updates: dict[str, Any]) -> tup
             continue
         if key in _STRING_METADATA_FIELDS and not isinstance(value, str):
             raise NamToolError(f"metadata.{key} must be text")
-        if key == "gear_type" and value not in _GEAR_TYPES:
-            raise NamToolError("metadata.gear_type is not a NAM gear type")
         if key == "tone_type" and value not in _TONE_TYPES:
             raise NamToolError("metadata.tone_type is not a NAM tone type")
     result = deepcopy(data)

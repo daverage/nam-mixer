@@ -638,6 +638,9 @@ def test_run_official_trainer_forwards_settings_epochs_to_core_train(tmp_path, m
     class FakeGearType:
         AMP = "amp"
 
+    class FakeToneType:
+        pass
+
     class FakeUserMetadata:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -648,7 +651,7 @@ def test_run_official_trainer_forwards_settings_epochs_to_core_train(tmp_path, m
     monkeypatch.setitem(sys.modules, "nam.train.metadata", types.SimpleNamespace(TRAINING_KEY="training"))
     monkeypatch.setitem(sys.modules, "nam.models", types.ModuleType("nam.models"))
     monkeypatch.setitem(sys.modules, "nam.models.metadata", types.SimpleNamespace(
-        GearType=FakeGearType, UserMetadata=FakeUserMetadata,
+        GearType=FakeGearType, ToneType=FakeToneType, UserMetadata=FakeUserMetadata,
     ))
 
     settings = train_a2.settings_for_preset("high_def")

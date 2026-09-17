@@ -137,13 +137,13 @@ def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch
     assert calls[0]["request_tone3000_queries"] is True
     assert calls[1]["request_tone3000_queries"] is False
     assert "Vox AC30 capture" in calls[1]["research_notes"]
-    assert "Mesa Dual Rectifier capture" in calls[1]["research_notes"]
+    assert "Marshall JCM800 capture" in calls[1]["research_notes"]
     data = response.get_json()
     assert data["reply"] == "Try the Vox AC30 capture -- it fits the clean side."
-    assert [result["query"] for result in data["tone3000_results"]] == ["Vox AC30", "Mesa Dual Rectifier"]
+    assert [result["query"] for result in data["tone3000_results"]] == ["Vox AC30", "Marshall JCM800"]
 
 
-def test_local_llm_uses_concrete_fallback_queries_for_a_grohl_brief(client, monkeypatch):
+def test_local_llm_uses_the_players_description_when_no_catalogue_term_is_proposed(client, monkeypatch):
     monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
     searched = []
 
@@ -162,7 +162,29 @@ def test_local_llm_uses_concrete_fallback_queries_for_a_grohl_brief(client, monk
     })
 
     assert response.status_code == 200
-    assert searched == ["Vox AC30", "Mesa Dual Rectifier"]
+    assert searched == ["I want Dave Grohl clean to distorted tones"]
+
+
+def test_local_llm_uses_model_queries_without_hard_coded_amp_overrides(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    searched = []
+
+    def fake_converse(*_args, **_kwargs):
+        return SimpleNamespace(tone3000_queries=["Marshall JCM800"], recipe=None, to_dict=lambda: {"reply": "Starting point."})
+
+    def fake_search(query, *, rig_scope, author, rank_query=""):
+        searched.append(query)
+        return []
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    monkeypatch.setattr(app_module, "tone3000_search", fake_search)
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Start with a clean Vox AC30, then move to a JCM800.",
+        "research": {"tone3000": True, "web": False, "rig_scope": "anything", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert searched == ["Marshall JCM800"]
 
 
 def test_local_llm_accepts_a_selected_tone3000_pack_outside_the_user_prompt_limit(client, monkeypatch):
@@ -583,6 +605,28 @@ def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
     assert edited["metadata"]["modeled_by"] == "Test"
     assert edited["metadata"]["gear_model"] == "Mark IIC+"
     assert edited["metadata"]["gain"] == 3.0
+
+
+def test_nam_tools_inspect_works_for_embedded_cab_sequential_export(client, tmp_path):
+    # Regression test: an embedded-cab export's architecture is "Sequential"
+    # (hybrid/sequential_nam.py), which find_output_scalers() can't find a
+    # head_scale for -- that must not block the metadata editor from
+    # loading at all (it previously raised a hard error, see the NAM Tools
+    # UI bug report this test guards against).
+    source = tmp_path / "model-embedded-experimental.nam"
+    source.write_text(jsonlib.dumps({
+        "architecture": "Sequential",
+        "config": {"models": []},
+        "metadata": {"name": "British American High Gain + Cab", "gear_type": "amp_cab", "loudness": -16.3},
+    }), encoding="utf-8")
+    uploaded = client.post("/api/nam/upload", data={"file": (io.BytesIO(source.read_bytes()), source.name)}).get_json()
+    response = client.post("/api/nam/tools/inspect", json={"path": uploaded["path"]})
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["architecture"] == "Sequential"
+    assert data["head_scales"] == []
+    assert "Sequential" in data["volume_unsupported_reason"]
+    assert data["metadata"]["name"] == "British American High Gain + Cab"
 
 
 def test_wizard_insight_requires_a_rendered_pair(client):
@@ -1187,13 +1231,80 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     resp = client.post("/api/generate", json={
         "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_baked": True,
+        "cab_display_name": "Modern Boutique 4x12", "model_name": "British American High Gain",
     })
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["cab_summary"]["baked"] is True
     assert data["cab_summary"]["sha256"]
+    assert data["cab_summary"]["display_name"] == "Modern Boutique 4x12"
 
     with open(data["manifest_path"]) as f:
         manifest = jsonlib.load(f)
     assert manifest["cab"]["baked"] is True
     assert manifest["cab"]["selected"] is True
+    assert manifest["cab"]["display_name"] == "Modern Boutique 4x12"
+
+    from hybrid.a2_training_settings import user_metadata_kwargs
+    assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
+
+
+def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / ".env"))
+    monkeypatch.delenv("NAM_RENDER_EXE", raising=False)
+
+    resp = client.get("/api/settings")
+    assert resp.status_code == 200
+    names = {field["name"] for field in resp.get_json()["settings"]}
+    assert "NAM_RENDER_EXE" in names
+
+    resp = client.post("/api/settings", json={"values": {"NAM_RENDER_EXE": "/opt/nam_render"}})
+    assert resp.status_code == 200
+    assert resp.get_json()["saved"] == ["NAM_RENDER_EXE"]
+
+    resp = client.get("/api/settings")
+    saved = {field["name"]: field["value"] for field in resp.get_json()["settings"]}
+    assert saved["NAM_RENDER_EXE"] == "/opt/nam_render"
+
+    # save_settings() sets os.environ directly (by design, for immediate
+    # in-process effect). Clean up with a plain os.environ.pop, not
+    # monkeypatch.delenv: monkeypatch would instead restore this value at
+    # teardown (it saves "current value" to undo its own delenv), leaking it
+    # into later tests.
+    import os as _os
+    _os.environ.pop("NAM_RENDER_EXE", None)
+
+
+def test_local_llm_pull_route_reports_backend_error_as_json(client, monkeypatch):
+    from hybrid.ollama_pull import OllamaPullError
+
+    def fake_start_pull(model=None):
+        raise OllamaPullError("ollama not found")
+
+    monkeypatch.setattr(app_module, "start_ollama_pull", fake_start_pull)
+    resp = client.post("/api/local_llm/pull")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert "ollama not found" in data["error"]
+
+
+def test_local_llm_pull_status_route_returns_current_state(client, monkeypatch):
+    monkeypatch.setattr(app_module, "get_ollama_pull_status", lambda: {"status": "idle", "model": None})
+    resp = client.get("/api/local_llm/pull_status")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "idle"
+
+
+def test_renderer_download_route_reports_backend_error_as_json(client, monkeypatch):
+    from hybrid.render_bootstrap import NamRenderDownloadError
+
+    def fake_download():
+        raise NamRenderDownloadError("no prebuilt binary for this platform")
+
+    monkeypatch.setattr(app_module, "download_prebuilt_nam_render", fake_download)
+    resp = client.post("/api/renderer/download")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert "no prebuilt binary" in data["error"]

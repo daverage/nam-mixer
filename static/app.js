@@ -25,13 +25,12 @@ const rebuildPreviewButton = document.getElementById("btn-rebuild-preview");
 let workflowStage = "configure";
 let statusClearTimer = null;
 
-const WORKFLOW_HINTS = {
-  configure: "Add two amps and choose a test performance to begin.",
-  compare: "Listen to Amp A and Amp B on the same performance before you shape the result.",
-  shape: "Choose how the amps combine, then listen as you refine the result.",
-  create: "Turn the sound you chose into one NAM model, then choose where to train it.",
-};
-
+// Each stage already explains itself via its own section headers, so the
+// nav no longer repeats a per-stage description here -- that text only
+// existed to be overwritten by the "prepare your amps first" warning below,
+// and its varying length could force the tab buttons to wrap. The hint
+// element is kept only for that warning; it stays empty (and collapsed via
+// CSS) the rest of the time.
 function setWorkflowStage(stage) {
   workflowStage = stage;
   document.body.dataset.workflowStage = stage;
@@ -40,12 +39,12 @@ function setWorkflowStage(stage) {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-current", active ? "step" : "false");
   });
-  workflowHint.textContent = WORKFLOW_HINTS[stage];
+  workflowHint.textContent = "";
 }
 
 workflowTabs.forEach((tab) => tab.addEventListener("click", () => {
   const stage = tab.dataset.workflowStage;
-  if ((stage === "compare" || stage === "shape" || stage === "create") && !havePair) {
+  if ((stage === "compare" || stage === "shape" || stage === "finish" || stage === "create") && !havePair) {
     workflowHint.textContent = "Prepare your amps first (step 1) before moving on.";
     return;
   }
@@ -97,7 +96,7 @@ modeTabs.forEach((tab) => {
       t.setAttribute("aria-pressed", t === tab ? "true" : "false");
     });
     applyModeVisibility();
-    if (workflowStage === "create") setWorkflowStage("shape");
+    if (workflowStage === "create" || workflowStage === "finish") setWorkflowStage("shape");
     // Switching modes never re-renders NAM inference -- just recompute the
     // (already-rendered) mix/journey/coverage panels for the new mode.
     scheduleUpdate();
@@ -999,6 +998,7 @@ async function applyRecipeFromPrompt() {
           creator: selectedTone3000Capture.creator,
           description: selectedTone3000Capture.description || "No description",
           models: selectedTone3000Capture.models.map((model) => model.name),
+          ...(selectedTone3000Capture.sourceRole ? { source_role: selectedTone3000Capture.sourceRole } : {}),
         }
         : null;
       const response = await fetch("/api/local_llm/recipe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tone3000_context: tone3000Context, source_plan: recipeSourcePlan, history: recipeConversationHistory, research }) });
@@ -2078,6 +2078,7 @@ characterLowLevelBtn.addEventListener("click", async () => {
 
 const generateBtn = document.getElementById("btn-generate");
 const modelNameInput = document.getElementById("model-name");
+const cabDisplayNameInput = document.getElementById("cab-display-name");
 let generationPending = false;
 generateBtn.addEventListener("click", async () => {
   if (generationPending) return;
@@ -2110,6 +2111,7 @@ generateBtn.addEventListener("click", async () => {
         cab_preview_enabled: cabPreviewEnabled.checked,
         cab_export_mode: cabExportMode.value,
         cab_baked: cabExportMode.value === "learned",
+        cab_display_name: cabDisplayNameInput?.value?.trim() || "",
         ...outputGainParamsBody(),
       }),
     });
@@ -2391,7 +2393,16 @@ function renderLocalDownloadResult(designId, validationReport = null) {
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block">Download trained .nam</a>${validationSummaryHtml(validationReport)}`;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block" style="
+      width: 100%;
+      flex-grow: 1;
+      display: flex;
+      text-align: center;
+      flex-wrap: nowrap;
+      align-content: center;
+      justify-content: center;
+      align-items: center;
+  ">Download trained .nam</a>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -3120,6 +3131,8 @@ const aiAssistantTab = document.getElementById("tab-ai-assistant");
 const aiAssistantPanel = document.getElementById("ai-assistant-panel");
 const wizardTab = document.getElementById("tab-wizard");
 const wizardPanel = document.getElementById("wizard-panel");
+const settingsTab = document.getElementById("tab-settings");
+const settingsPanel = document.getElementById("settings-panel");
 const toolEditors = document.getElementById("tool-editors");
 const toolInfo = document.getElementById("tool-nam-info");
 const toolResult = document.getElementById("tool-result");
@@ -3151,6 +3164,9 @@ function setToolsOpen(open) {
     tone3000Panel.hidden = true;
     tone3000Tab.classList.remove("active");
     tone3000Tab.setAttribute("aria-pressed", "false");
+    settingsPanel.hidden = true;
+    settingsTab.classList.remove("active");
+    settingsTab.setAttribute("aria-pressed", "false");
   }
   document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
@@ -3173,6 +3189,9 @@ function setSessionsOpen(open) {
     tone3000Panel.hidden = true;
     tone3000Tab.classList.remove("active");
     tone3000Tab.setAttribute("aria-pressed", "false");
+    settingsPanel.hidden = true;
+    settingsTab.classList.remove("active");
+    settingsTab.setAttribute("aria-pressed", "false");
   }
   document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
@@ -3187,10 +3206,12 @@ function setAiAssistantOpen(open) {
     sessionsPanel.hidden = true;
     wizardPanel.hidden = true;
     tone3000Panel.hidden = true;
+    settingsPanel.hidden = true;
     toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
     sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
     wizardTab.classList.remove("active"); wizardTab.setAttribute("aria-pressed", "false");
     tone3000Tab.classList.remove("active"); tone3000Tab.setAttribute("aria-pressed", "false");
+    settingsTab.classList.remove("active"); settingsTab.setAttribute("aria-pressed", "false");
   }
   document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
@@ -3207,10 +3228,12 @@ function setWizardOpen(open) {
     sessionsPanel.hidden = true;
     aiAssistantPanel.hidden = true;
     tone3000Panel.hidden = true;
+    settingsPanel.hidden = true;
     toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
     sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
     aiAssistantTab.classList.remove("active"); aiAssistantTab.setAttribute("aria-pressed", "false");
     tone3000Tab.classList.remove("active"); tone3000Tab.setAttribute("aria-pressed", "false");
+    settingsTab.classList.remove("active"); settingsTab.setAttribute("aria-pressed", "false");
   }
   document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
@@ -3221,16 +3244,34 @@ function setWizardOpen(open) {
 function setTone3000Open(open) {
   tone3000Panel.hidden = !open;
   if (open) {
-    toolsPanel.hidden = true; sessionsPanel.hidden = true; aiAssistantPanel.hidden = true; wizardPanel.hidden = true;
+    toolsPanel.hidden = true; sessionsPanel.hidden = true; aiAssistantPanel.hidden = true; wizardPanel.hidden = true; settingsPanel.hidden = true;
     toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
     sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
     aiAssistantTab.classList.remove("active"); aiAssistantTab.setAttribute("aria-pressed", "false");
     wizardTab.classList.remove("active"); wizardTab.setAttribute("aria-pressed", "false");
+    settingsTab.classList.remove("active"); settingsTab.setAttribute("aria-pressed", "false");
   }
   document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
   tone3000Tab.classList.toggle("active", open);
   tone3000Tab.setAttribute("aria-pressed", open ? "true" : "false");
+  setBuilderTabActive(!open);
+}
+function setSettingsOpen(open) {
+  settingsPanel.hidden = !open;
+  if (open) {
+    toolsPanel.hidden = true; sessionsPanel.hidden = true; aiAssistantPanel.hidden = true; wizardPanel.hidden = true; tone3000Panel.hidden = true;
+    toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
+    sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
+    aiAssistantTab.classList.remove("active"); aiAssistantTab.setAttribute("aria-pressed", "false");
+    wizardTab.classList.remove("active"); wizardTab.setAttribute("aria-pressed", "false");
+    tone3000Tab.classList.remove("active"); tone3000Tab.setAttribute("aria-pressed", "false");
+    loadSettings();
+  }
+  document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
+  document.getElementById("mode-description").hidden = open;
+  settingsTab.classList.toggle("active", open);
+  settingsTab.setAttribute("aria-pressed", open ? "true" : "false");
   setBuilderTabActive(!open);
 }
 function setBuilderOpen() {
@@ -3239,6 +3280,7 @@ function setBuilderOpen() {
   setAiAssistantOpen(false);
   setWizardOpen(false);
   setTone3000Open(false);
+  setSettingsOpen(false);
 }
 function showToolResult(data) {
   toolResult.hidden = false;
@@ -3264,15 +3306,38 @@ async function setToolNam(data, label) {
   originalToolMetadata = inspection.metadata || {};
   toolLoudnessDb = Number.isFinite(inspection.loudness_db) ? inspection.loudness_db : null;
   const fieldMap = {
-    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by", gear_type: "tool-meta-gear-type",
+    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by",
     gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
   };
   Object.entries(fieldMap).forEach(([key, id]) => { document.getElementById(id).value = originalToolMetadata[key] ?? ""; });
+
+  const readOnly = inspection.read_only_metadata || {};
+  const exportInfo = document.getElementById("tool-export-info");
+  exportInfo.replaceChildren();
+  const rows = [
+    ["Architecture", inspection.architecture || "Unknown"],
+    ["Gear type", readOnly.gear_type || "Not specified"],
+    ["Recognised output scales", String(inspection.head_scales.length)],
+  ];
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    exportInfo.append(dt, dd);
+  }
+
   const calibration = inspection.calibration || {};
   toolCalibrationStatus.textContent = calibration.status === "Calibrated NAM"
     ? `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`
     : "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
-  if (toolLoudnessDb !== null) {
+  if (inspection.volume_unsupported_reason) {
+    // e.g. an embedded-cab export's "Sequential" architecture -- see
+    // hybrid/sequential_nam.py. Metadata editing below still works fine;
+    // only the volume slider (which needs a recognised head_scale) is
+    // unavailable for this file.
+    toolVolumeSlider.disabled = true;
+    toolVolumeBaseline.textContent = "Volume adjustment isn't supported for this NAM's architecture "
+      + `(${inspection.architecture || "unknown"}). The metadata editor below still works normally.`;
+  } else if (toolLoudnessDb !== null) {
     toolVolumeSlider.value = Math.max(Number(toolVolumeSlider.min), Math.min(Number(toolVolumeSlider.max), toolLoudnessDb));
     toolVolumeSlider.disabled = false;
     toolVolumeBaseline.textContent = `Current measured loudness: ${toolLoudnessDb.toFixed(1)} dB. Drag to choose the final level.`;
@@ -3290,11 +3355,242 @@ document.getElementById("btn-close-tools").addEventListener("click", () => setTo
 builderTab.addEventListener("click", () => setBuilderOpen());
 tone3000Tab.addEventListener("click", () => setTone3000Open(true));
 document.getElementById("btn-close-tone3000").addEventListener("click", () => setTone3000Open(false));
+
+// ---- Settings: exposes the same env vars the app has always read (see
+// hybrid/settings.py) so the standalone desktop app -- with no shell to
+// `export` them in -- has a place to change them. ----
+const settingsGroups = document.getElementById("settings-groups");
+const settingsStatus = document.getElementById("settings-status");
+let settingsFields = [];
+
+async function loadSettings() {
+  settingsStatus.textContent = "Loading…";
+  try {
+    const response = await fetch("/api/settings");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "failed to load settings");
+    settingsFields = data.settings || [];
+    renderSettings();
+    settingsStatus.textContent = "";
+  } catch (err) {
+    settingsStatus.textContent = "Load failed: " + err;
+  }
+}
+
+function renderSettings() {
+  settingsGroups.replaceChildren();
+  const groups = new Map();
+  for (const field of settingsFields) {
+    if (!groups.has(field.group)) groups.set(field.group, []);
+    groups.get(field.group).push(field);
+  }
+  for (const [groupName, fields] of groups) {
+    const section = document.createElement("div");
+    section.className = "settings-group";
+    const heading = document.createElement("h3");
+    heading.textContent = groupName;
+    section.append(heading);
+    for (const field of fields) {
+      const row = document.createElement("label");
+      row.className = "settings-row";
+      const labelText = document.createElement("span");
+      labelText.className = "settings-row-label";
+      labelText.textContent = field.label + (field.restart_required ? " (restart required)" : "");
+      const input = document.createElement("input");
+      input.className = "select-input";
+      input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
+      input.dataset.settingName = field.name;
+      const desc = document.createElement("span");
+      desc.className = "info";
+      if (field.kind === "secret") {
+        // The real value never comes back from the server (see
+        // hybrid/settings.py's get_settings); leaving this blank on save
+        // means "unchanged", not "clear it".
+        input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
+        input.value = "";
+        desc.textContent = field.description + (field.has_value ? " (a key is currently saved)" : "");
+      } else {
+        input.placeholder = field.placeholder || "";
+        input.value = field.value || "";
+        desc.textContent = field.description;
+      }
+      row.append(labelText, input, desc);
+      section.append(row);
+      if (field.name === "NAM_RENDER_EXE") {
+        section.append(renderNamRenderDownloadRow());
+      }
+      if (field.name === "NAM_MIXER_LOCAL_LLM_MODEL") {
+        section.append(renderLocalLlmStatusRow());
+      }
+      if (field.name === "TONE3000_API_KEY") {
+        section.append(renderTone3000ApiKeyLinkRow());
+      }
+    }
+    settingsGroups.append(section);
+  }
+}
+
+function renderTone3000ApiKeyLinkRow() {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row";
+  const link = document.createElement("a");
+  link.href = "https://www.tone3000.com";
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.className = "btn btn-secondary btn-small";
+  link.textContent = "Get a TONE3000 API key";
+  row.append(link);
+  return row;
+}
+
+function renderNamRenderDownloadRow() {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-secondary btn-small";
+  button.textContent = "Download nam_render automatically";
+  const status = document.createElement("span");
+  status.className = "info";
+  status.textContent = "Fetches the prebuilt renderer for this OS from GitHub releases -- no separate install or manual path needed.";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "Downloading…";
+    try {
+      const response = await fetch("/api/renderer/download", { method: "POST" });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "download failed");
+      status.textContent = `Installed at ${data.path}. Reloading settings…`;
+      await loadSettings();
+      refreshRendererReadiness();
+    } catch (err) {
+      status.textContent = "Download failed: " + err;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  row.append(button, status);
+  return row;
+}
+
+function renderLocalLlmStatusRow() {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row";
+  const status = document.createElement("span");
+  status.className = "info";
+  status.textContent = "Checking whether a local LLM host is reachable…";
+
+  const pullButton = document.createElement("button");
+  pullButton.type = "button";
+  pullButton.className = "btn btn-secondary btn-small";
+  pullButton.textContent = "Pull gemma4:e4b via Ollama";
+  pullButton.hidden = true;
+
+  async function refreshStatus() {
+    try {
+      const response = await fetch("/api/local_llm/status");
+      const data = await response.json();
+      if (!data.enabled) {
+        status.textContent = "Not configured -- set a model name above to enable the AI Assistant tab. "
+          + "Any OpenAI-compatible local host works (Ollama, LM Studio, etc.); we recommend Ollama + gemma4:e4b "
+          + "if you don't already have one running.";
+        pullButton.hidden = false;
+      } else if (data.reachable) {
+        status.textContent = `Reachable at ${data.base_url} (model: ${data.model}).`;
+        pullButton.hidden = true;
+      } else {
+        status.textContent = `Configured for ${data.base_url}, but nothing responded there. `
+          + "Make sure your local LLM host (Ollama, LM Studio, etc.) is running.";
+        pullButton.hidden = false;
+      }
+    } catch (err) {
+      status.textContent = "Could not check local AI assistant status: " + err;
+    }
+  }
+
+  async function pollPullStatus() {
+    const response = await fetch("/api/local_llm/pull_status");
+    const data = await response.json();
+    if (data.status === "running") {
+      status.textContent = `Pulling ${data.model}… ${(data.log_tail || "").split("\n").slice(-1)[0] || ""}`;
+      setTimeout(pollPullStatus, 1500);
+    } else if (data.status === "done") {
+      status.textContent = `Pulled ${data.model}. Set "Local AI assistant: model name" above to ${data.model} and save.`;
+      pullButton.disabled = false;
+    } else if (data.status === "error") {
+      status.textContent = "Pull failed: " + data.error;
+      pullButton.disabled = false;
+    }
+  }
+
+  pullButton.addEventListener("click", async () => {
+    pullButton.disabled = true;
+    status.textContent = "Starting download…";
+    try {
+      const response = await fetch("/api/local_llm/pull", { method: "POST" });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "pull failed");
+      pollPullStatus();
+    } catch (err) {
+      status.textContent = "Could not start pull: " + err;
+      pullButton.disabled = false;
+    }
+  });
+
+  refreshStatus();
+  row.append(pullButton, status);
+  return row;
+}
+
+document.getElementById("btn-save-settings").addEventListener("click", async () => {
+  const values = {};
+  settingsGroups.querySelectorAll("input[data-setting-name]").forEach((input) => {
+    values[input.dataset.settingName] = input.value;
+  });
+  settingsStatus.textContent = "Saving…";
+  try {
+    const response = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "save failed");
+    settingsStatus.textContent = `Saved (${data.saved.length} setting${data.saved.length === 1 ? "" : "s"}).`;
+    await loadSettings();
+  } catch (err) {
+    settingsStatus.textContent = "Save failed: " + err;
+  }
+});
+document.getElementById("btn-reload-settings").addEventListener("click", () => loadSettings());
+settingsTab.addEventListener("click", () => setSettingsOpen(true));
+document.getElementById("btn-close-settings").addEventListener("click", () => setSettingsOpen(false));
 const tone3000Query = document.getElementById("tone3000-query");
 const tone3000RigScope = document.getElementById("tone3000-rig-scope");
 const tone3000Author = document.getElementById("tone3000-author");
 const tone3000Status = document.getElementById("tone3000-status");
 const tone3000Results = document.getElementById("tone3000-results");
+
+function scorePlanTermAgainst(value, text) {
+  const terms = new Set((value.toLowerCase().match(/[a-z0-9]+/g) || []).filter((term) => term.length >= 3));
+  let score = 0;
+  terms.forEach((term) => { if (text.includes(term)) score += term.length; });
+  return score;
+}
+
+// Mirrors the server's _plan_score fallback in app.py -- if the durable
+// source plan (set once the AI has proposed Amp A/Amp B families) already
+// distinguishes this candidate, we know its role before ever asking the AI
+// again, so the "discuss this pack" flow does not need to re-ask "should it
+// be Amp A or Amp B" for a pack that was already searched for one of them.
+function inferSourceRoleForResult(result) {
+  if (!recipeSourcePlan || !recipeSourcePlan.ampA || !recipeSourcePlan.ampB) return null;
+  const text = `${result.title || ""} ${result.creator || ""} ${result.description || ""} ${result.query || ""}`.toLowerCase();
+  const aScore = scorePlanTermAgainst(recipeSourcePlan.ampA, text);
+  const bScore = scorePlanTermAgainst(recipeSourcePlan.ampB, text);
+  if (aScore === bScore) return null;
+  return aScore > bScore ? "a" : "b";
+}
 
 function createTone3000DiscussButton(result, onError) {
   const discuss = document.createElement("button");
@@ -3306,11 +3602,14 @@ function createTone3000DiscussButton(result, onError) {
       const packResponse = await fetch(`/api/tone3000/tones/${encodeURIComponent(result.id)}/models`);
       const pack = await packResponse.json();
       if (!packResponse.ok) throw new Error(pack.error || "Could not load this TONE3000 pack");
-      showSelectedTone3000Capture({ ...result, models: pack.models });
+      const inferredRole = inferSourceRoleForResult(result);
+      showSelectedTone3000Capture({ ...result, models: pack.models, sourceRole: inferredRole || undefined });
       setAiAssistantOpen(true);
-      recipePromptInput.value = pack.models.length > 1
-        ? "This TONE3000 pack has several NAM files. Which specific one should I use for my tone, and should it be Amp A or Amp B?"
-        : "Should this TONE3000 file be Amp A or Amp B for my tone?";
+      recipePromptInput.value = inferredRole
+        ? `Which specific file in this pack should I use for Amp ${inferredRole.toUpperCase()}, and why?`
+        : pack.models.length > 1
+          ? "This TONE3000 pack has several NAM files. Which specific one should I use for my tone, and should it be Amp A or Amp B?"
+          : "Should this TONE3000 file be Amp A or Amp B for my tone?";
       recipePromptInput.focus();
     } catch (error) {
       if (onError) onError(error.message);
@@ -3427,7 +3726,7 @@ document.getElementById("btn-tool-metadata").addEventListener("click", async () 
   if (!toolNamPath) return;
   const metadata = {};
   const fieldMap = {
-    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by", gear_type: "tool-meta-gear-type",
+    name: "tool-meta-name", modeled_by: "tool-meta-modeled-by",
     gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
   };
   Object.entries(fieldMap).forEach(([key, id]) => {

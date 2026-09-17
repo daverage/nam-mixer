@@ -399,7 +399,7 @@ def _build_user_metadata(manifest: dict):
     has already been imported successfully, so `nam.models.metadata` is
     guaranteed importable too.
     """
-    from nam.models.metadata import GearType, UserMetadata
+    from nam.models.metadata import GearType, ToneType, UserMetadata
 
     # docs/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
     # gear type when baking a cab, IF the installed package actually has one
@@ -419,18 +419,26 @@ def _build_user_metadata(manifest: dict):
 
     # Shared with cloud/kaggle/train_a2_cloud.py -- see
     # hybrid/a2_training_settings.py's user_metadata_kwargs docstring. Only
-    # the nam-specific enum (gear_type) and tone_type/output_level_dbu
+    # the nam-specific enum (gear_type/tone_type) and output_level_dbu
     # omissions live here; everything else is the shared plain-dict logic.
+    kwargs = user_metadata_kwargs(manifest)
+
+    # tone_type comes back as a plain string (or None) from the shared
+    # helper -- only set it when the installed package's ToneType enum
+    # actually has a matching member, exactly like gear_type above; a
+    # source pair rarely agrees on tone_type at all (see
+    # hybrid/nam_provenance.py's agreed_tone_type), so this is usually None.
+    tone_type_name = kwargs.pop("tone_type", None)
+    tone_type = getattr(ToneType, tone_type_name.upper(), None) if tone_type_name else None
+
     return UserMetadata(
         gear_type=gear_type,
-        # tone_type deliberately left unset: this model's whole point is
-        # that its tone changes with input level, so no single ToneType
-        # value would be non-misleading.
+        tone_type=tone_type,
         # output_level_dbu deliberately left unset: the hybrid's output
         # level is a combination of both source models' outputs plus the
         # frozen B trim -- there's no single inherited physical value to
         # report here.
-        **user_metadata_kwargs(manifest),
+        **kwargs,
     )
 
 
