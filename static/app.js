@@ -3374,12 +3374,21 @@ function renderSettings() {
       const input = document.createElement("input");
       input.className = "select-input";
       input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
-      input.placeholder = field.placeholder || "";
-      input.value = field.value || "";
       input.dataset.settingName = field.name;
       const desc = document.createElement("span");
       desc.className = "info";
-      desc.textContent = field.description;
+      if (field.kind === "secret") {
+        // The real value never comes back from the server (see
+        // hybrid/settings.py's get_settings); leaving this blank on save
+        // means "unchanged", not "clear it".
+        input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
+        input.value = "";
+        desc.textContent = field.description + (field.has_value ? " (a key is currently saved)" : "");
+      } else {
+        input.placeholder = field.placeholder || "";
+        input.value = field.value || "";
+        desc.textContent = field.description;
+      }
       row.append(labelText, input, desc);
       section.append(row);
     }

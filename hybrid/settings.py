@@ -92,16 +92,34 @@ SETTINGS: tuple[SettingField, ...] = (
         kind="number",
         placeholder="60",
     ),
+    SettingField(
+        name="TONE3000_API_KEY",
+        label="TONE3000 API key",
+        description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
+                     "capture search. Leave blank to disable that tab. Never logged or returned "
+                     "by the API once saved -- see hybrid/research.py's _require_tone3000_api_key.",
+        group="TONE3000",
+        kind="secret",
+        placeholder="t3k_cs_...",
+    ),
 )
 
 _KNOWN_NAMES = {field.name for field in SETTINGS}
+_FIELDS_BY_NAME = {field.name: field for field in SETTINGS}
 
 
 def get_settings() -> list[dict]:
-    """Return every registered setting's current value plus its UI metadata."""
+    """Return every registered setting's current value plus its UI metadata.
+
+    A `kind="secret"` field's real value is never returned -- only whether
+    one is currently set (`has_value`) -- so an already-saved API key never
+    round-trips back out over the API or onto a screen someone might share.
+    """
     values = read_env_values(_KNOWN_NAMES)
-    return [
-        {
+    result = []
+    for field in SETTINGS:
+        raw_value = values.get(field.name, "")
+        entry = {
             "name": field.name,
             "label": field.label,
             "description": field.description,
@@ -109,14 +127,31 @@ def get_settings() -> list[dict]:
             "kind": field.kind,
             "placeholder": field.placeholder,
             "restart_required": field.restart_required,
-            "value": values.get(field.name, ""),
         }
-        for field in SETTINGS
-    ]
+        if field.kind == "secret":
+            entry["value"] = ""
+            entry["has_value"] = bool(raw_value)
+        else:
+            entry["value"] = raw_value
+        result.append(entry)
+    return result
 
 
 def save_settings(values: dict) -> dict:
-    """Persist `{name: value}` for known setting names only; silently ignores the rest."""
-    filtered = {name: str(value) for name, value in values.items() if name in _KNOWN_NAMES}
+    """Persist `{name: value}` for known setting names only; silently ignores the rest.
+
+    A blank submitted value for a `kind="secret"` field means "leave it
+    unchanged" (the UI never shows the real value to re-submit) rather than
+    "clear it" -- clearing a secret requires editing the .env file directly.
+    """
+    filtered = {}
+    for name, value in values.items():
+        field = _FIELDS_BY_NAME.get(name)
+        if field is None:
+            continue
+        value = str(value)
+        if field.kind == "secret" and not value.strip():
+            continue
+        filtered[name] = value
     env_file = write_env_values(filtered)
     return {"saved": sorted(filtered), "env_file": str(env_file)}

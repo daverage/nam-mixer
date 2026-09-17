@@ -74,3 +74,24 @@ def test_save_settings_ignores_unknown_names(isolated_env_file):
     assert result["saved"] == ["NAM_RENDER_EXE"]
     assert env_file.read_env_value("NOT_A_REAL_SETTING") == ""
     assert env_file.read_env_value("NAM_RENDER_EXE") == "/opt/nam_render"
+
+
+def test_secret_field_value_never_returned_by_get_settings(isolated_env_file):
+    settings.save_settings({"TONE3000_API_KEY": "t3k_cs_realsecret"})
+    result = {field["name"]: field for field in settings.get_settings()}
+    assert result["TONE3000_API_KEY"]["value"] == ""
+    assert result["TONE3000_API_KEY"]["has_value"] is True
+    assert env_file.read_env_value("TONE3000_API_KEY") == "t3k_cs_realsecret"
+
+
+def test_blank_secret_on_save_means_unchanged_not_cleared(isolated_env_file):
+    settings.save_settings({"TONE3000_API_KEY": "t3k_cs_realsecret"})
+    result = settings.save_settings({"TONE3000_API_KEY": ""})
+    assert result["saved"] == []
+    assert env_file.read_env_value("TONE3000_API_KEY") == "t3k_cs_realsecret"
+
+
+def test_secret_field_not_set_reports_no_value(isolated_env_file):
+    result = {field["name"]: field for field in settings.get_settings()}
+    assert result["TONE3000_API_KEY"]["has_value"] is False
+    assert result["TONE3000_API_KEY"]["value"] == ""
