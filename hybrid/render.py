@@ -85,10 +85,22 @@ def find_sequential_nam_render_exe() -> Path:
         raise NamRenderError(
             "embedded Sequential validation requires NAM_RENDER_SEQUENTIAL_EXE pinned to the proven NAMCore commit"
         )
-    candidate = Path(configured).expanduser()
+    # resolve() makes relative configuration deterministic against the
+    # application's current working directory and works for POSIX binaries as
+    # well as a Windows .exe name; no suffix is assumed.
+    candidate = Path(configured).expanduser().resolve()
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
         raise NamRenderError(f"NAM_RENDER_SEQUENTIAL_EXE is not an executable file: {candidate}")
     return candidate
+
+
+def sequential_renderer_record() -> dict:
+    """Auditable identity for embedded-validation metadata. No fallback is
+    attempted: callers must surface this error as experimental-artifact
+    failure while preserving the conventional A2 head."""
+    executable = find_sequential_nam_render_exe()
+    return {"path": str(executable), "configured_path": os.environ.get("NAM_RENDER_SEQUENTIAL_EXE"),
+            "required_namcore_commit": "2563c0fd4cb1f9ce457d89a761738ea15097e1f3"}
 
 
 _SUBPROCESS_TIMEOUT_S = 120.0

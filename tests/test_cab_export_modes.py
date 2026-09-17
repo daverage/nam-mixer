@@ -104,6 +104,33 @@ def test_embedded_validator_requires_explicit_sequential_renderer(monkeypatch):
         find_sequential_nam_render_exe()
 
 
+def test_sequential_renderer_path_resolution_is_suffix_agnostic(monkeypatch, tmp_path):
+    executable = tmp_path / "renderer with spaces"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NAM_RENDER_SEQUENTIAL_EXE", "renderer with spaces")
+    assert find_sequential_nam_render_exe() == executable.resolve()
+
+
+def test_sequential_renderer_rejects_non_executable_and_accepts_windows_name(monkeypatch, tmp_path):
+    executable = tmp_path / "nam_render.exe"
+    executable.write_text("placeholder")
+    monkeypatch.setenv("NAM_RENDER_SEQUENTIAL_EXE", str(executable))
+    with pytest.raises(NamRenderError, match="not an executable"):
+        find_sequential_nam_render_exe()
+    executable.chmod(0o755)
+    assert find_sequential_nam_render_exe().name == "nam_render.exe"
+
+
+def test_sequential_renderer_expands_home(monkeypatch, tmp_path):
+    home = tmp_path / "home"; home.mkdir()
+    executable = home / "nam_render"; executable.write_text("x"); executable.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("NAM_RENDER_SEQUENTIAL_EXE", "~/nam_render")
+    assert find_sequential_nam_render_exe() == executable.resolve()
+
+
 def test_local_and_kaggle_completion_share_canonical_embedded_package(tmp_path):
     import soundfile as sf
     head = _a2_head(); head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(head))
