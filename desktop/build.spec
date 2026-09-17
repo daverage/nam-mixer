@@ -42,6 +42,16 @@ binaries = [
     (str(nam_render_src), "nam_render"),
 ]
 
+# Icons rendered from static/nam-mixer-logo.png -- see desktop/icons/README.md
+# for how to regenerate them if that source logo ever changes.
+if sys.platform == "darwin":
+    icon_path = REPO_ROOT / "desktop" / "icons" / "icon.icns"
+elif sys.platform.startswith("win"):
+    icon_path = REPO_ROOT / "desktop" / "icons" / "icon.ico"
+else:
+    icon_path = REPO_ROOT / "desktop" / "icons" / "icon.png"
+icon_arg = str(icon_path) if icon_path.is_file() else None
+
 a = Analysis(
     [str(REPO_ROOT / "desktop" / "main.py")],
     pathex=[str(REPO_ROOT)],
@@ -66,6 +76,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=icon_arg,
 )
 
 coll = COLLECT(
@@ -82,7 +93,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="HybridNAMBuilder.app",
-        icon=None,
+        icon=icon_arg,
         bundle_identifier="com.hybridnambuilder.app",
         info_plist={
             "NSHighResolutionCapable": True,
