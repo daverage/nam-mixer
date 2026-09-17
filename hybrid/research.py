@@ -1,11 +1,13 @@
 """Optional, bounded research helpers for the local recipe assistant."""
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 from html.parser import HTMLParser
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from hybrid.env_file import read_env_value as _env
 
@@ -61,13 +63,54 @@ class _PageText(HTMLParser):
             self.parts.append(data)
 
 
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Refuse redirects instead of silently re-fetching an unvalidated host.
+
+    A search-engine result is third-party, untrusted data; if we validated
+    the original hostname but then transparently followed a redirect, a
+    malicious or compromised page could point us at an internal address
+    (SSRF) after the safety check already passed.
+    """
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _is_safe_public_host(hostname: str) -> bool:
+    """Reject loopback/private/link-local/reserved targets to guard against SSRF.
+
+    `href` values come from third-party search results, not from a trusted
+    catalogue API -- unlike the TONE3000 calls in this module, which only
+    ever hit a fixed, known-safe base URL.
+    """
+    if not hostname:
+        return False
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(hostname, None)}
+    except OSError:
+        return False
+    for raw_address in addresses:
+        try:
+            address = ipaddress.ip_address(raw_address)
+        except ValueError:
+            return False
+        if (
+            address.is_private or address.is_loopback or address.is_link_local
+            or address.is_reserved or address.is_multicast or address.is_unspecified
+        ):
+            return False
+    return True
+
+
 def _page_evidence(href: str, query: str) -> str:
     """Fetch a short, relevant text extract from a search result page."""
-    if not href.startswith(("https://", "http://")):
+    parsed = urlparse(href)
+    if parsed.scheme not in ("https", "http") or not _is_safe_public_host(parsed.hostname or ""):
         return ""
     try:
         request = Request(href, headers={"User-Agent": "NAM-Mixer research/1.0"})
-        with urlopen(request, timeout=8) as response:
+        opener = build_opener(_NoRedirectHandler)
+        with opener.open(request, timeout=8) as response:
             if "html" not in response.headers.get("Content-Type", ""):
                 return ""
             parser = _PageText()
@@ -154,6 +197,11 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
     author = author.strip().lower()
     results = []
     for tone in tones:
+        # An id-less entry can never be turned into a working discuss/download
+        # link downstream (both key off this id), so surfacing it would just
+        # be a dead result the player can click and get nothing from.
+        if not isinstance(tone.get("id"), int):
+            continue
         user = tone.get("user") or {}
         creator = str(user.get("display_name") or user.get("username") or "")
         if author and author not in creator.lower():
@@ -168,8 +216,6 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
         }
         result["match_score"], result["match_reason"] = _rank_tone3000_metadata(rank_query or query, result)
         results.append(result)
-        if len(results) == 8:
-            break
     if not results:
         scope = "heads only" if rig_scope == "heads" else "any rig"
         if rig_scope == "heads":
@@ -178,7 +224,15 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
                 "(for example, 'Vox AC30' or 'Marshall JCM800'), or switch the search to Anything."
             )
         raise RuntimeError(f"TONE3000 returned no {scope} matches for that search.")
-    return sorted(results, key=lambda result: result["match_score"], reverse=True)
+    # The catalogue order is useful, but it is not the user's request-specific
+    # ranking.  Rank the complete API page before shortening it: taking the
+    # first eight first could discard the best AC30/JCM result simply because
+    # it appeared later in TONE3000's broad best-match response.
+    return sorted(
+        results,
+        key=lambda result: (result["match_score"], result["title"].lower()),
+        reverse=True,
+    )[:8]
 
 
 def _tone3000_models_payload(tone_id: int, *, opener=urlopen) -> list[dict]:
