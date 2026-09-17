@@ -10,6 +10,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load machine-local settings (such as the optional Ollama recipe assistant)
+# without committing them. Values already exported by the shell take priority.
+if [ -f ".env" ]; then
+    while IFS='=' read -r name value; do
+        case "$name" in
+            ""|\#*) continue ;;
+        esac
+        if [ -z "${!name+x}" ]; then
+            export "$name=$value"
+        fi
+    done < ".env"
+fi
+
 if [ ! -d ".venv" ]; then
     echo "Creating .venv..."
     python3 -m venv .venv
@@ -23,25 +36,10 @@ if [ ! -f ".venv/.requirements_installed" ] || [ "requirements.txt" -nt ".venv/.
     touch ".venv/.requirements_installed"
 fi
 
-if [ -z "${PORT:-}" ]; then
-    PORT="$(
-        python3 - <<'PY'
-import socket
-
-for port in range(5000, 5011):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind(("127.0.0.1", port))
-        except OSError:
-            continue
-        print(port)
-        break
-else:
-    raise SystemExit("no free port found from 5000 to 5010")
-PY
-    )"
-    export PORT
-fi
+# Default to 5001, not 5000 -- macOS's AirPlay Receiver squats on 5000 and
+# silently 403s every request instead of refusing the connection.
+PORT="${PORT:-5001}"
+export PORT
 
 url="http://127.0.0.1:${PORT}/"
 echo "Opening ${url}"

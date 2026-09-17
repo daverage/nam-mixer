@@ -14,8 +14,15 @@
   </header>
 
   <nav class="mode-tabs utility-tabs" aria-label="Utilities">
+    <button type="button" class="mode-tab active" id="tab-builder" aria-pressed="true">Builder</button>
+    <button type="button" class="mode-tab" id="tab-wizard" aria-pressed="false" aria-controls="wizard-panel">Wizard</button>
+<button type="button" class="mode-tab" id="tab-ai-assistant" aria-pressed="false" aria-controls="ai-assistant-panel">AI Assistant</button>
+    <button type="button" class="mode-tab" id="tab-tone3000" aria-pressed="false" aria-controls="tone3000-panel">TONE3000</button>
     <button type="button" class="mode-tab" id="tab-tools" aria-pressed="false" aria-controls="nam-tools-panel">Tools</button>
     <button type="button" class="mode-tab" id="tab-sessions" aria-pressed="false" aria-controls="sessions-panel">Sessions</button>
+
+
+
   </nav>
 
   <section id="nam-tools-panel" class="nam-tools" hidden aria-labelledby="nam-tools-title">
@@ -46,6 +53,80 @@
         </section>
       </div>
       <div id="tool-result" class="tool-result" hidden aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="tone3000-panel" class="tone-wizard utility-panel" hidden aria-labelledby="tone3000-title">
+    <div class="tone-wizard-heading">
+      <div><div class="eyebrow">NAM capture discovery</div><h2 id="tone3000-title">TONE3000</h2></div>
+      <button type="button" id="btn-close-tone3000" class="btn btn-secondary btn-small">Back to builder</button>
+    </div>
+    <p class="wizard-intro">Search TONE3000 captures before building a blend. “Heads only” is for captures you plan to pair with your own cab later.</p>
+    <div class="recipe-prompt">
+      <label for="tone3000-query">Search captures</label>
+      <input id="tone3000-query" class="select-input" maxlength="240" placeholder="e.g. Vox AC30 clean, Marshall JCM800 crunch">
+      <div class="recipe-prompt-footer">
+        <label class="recipe-search-option">Rigs <select id="tone3000-rig-scope" class="select-input"><option value="anything">Anything</option><option value="heads">Heads only (add your own cab)</option></select></label>
+        <label class="recipe-search-option">Creator / author <input id="tone3000-author" class="select-input" maxlength="100" placeholder="Optional"></label>
+        <button type="button" id="btn-tone3000-search" class="btn btn-primary btn-small">Search TONE3000</button>
+      </div>
+      <div id="tone3000-status" class="info" aria-live="polite"></div>
+      <div id="tone3000-results" class="tone3000-results" hidden aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="ai-assistant-panel" class="tone-wizard utility-panel" hidden aria-labelledby="ai-assistant-title">
+    <div class="tone-wizard-heading">
+      <div><div class="eyebrow">Local conversation</div><h2 id="ai-assistant-title">AI Assistant</h2></div>
+      <button type="button" id="btn-close-ai-assistant" class="btn btn-secondary btn-small">Back to builder</button>
+    </div>
+    <p class="wizard-intro">Describe the sound you want, ask how a setting works, or refine the previous recipe.</p>
+    <div class="recipe-prompt">
+      <aside id="ai-tone3000-context" class="ai-tone3000-context" hidden aria-live="polite"></aside>
+      <label for="recipe-prompt-input">What would you like to create or change?</label>
+      <textarea id="recipe-prompt-input" rows="3" maxlength="600" placeholder="Keep the Vox EQ and feel, then move from Vox gain to Marshall crunch as I play harder."></textarea>
+      <div class="recipe-prompt-footer">
+        <span class="info">This suggests editable settings; it never changes either source amp.</span>
+        <div class="recipe-research-controls" aria-label="Assistant research options">
+          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-local-ai" disabled> Use local AI <span id="recipe-ai-status">(not configured)</span></label>
+          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-web-research" checked> Web research</label>
+          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-tone3000"> Search TONE3000</label>
+          <label class="recipe-search-option">Rigs <select id="recipe-tone3000-rig-scope" class="select-input"><option value="anything">Anything</option><option value="heads">Heads only</option></select></label>
+          <label class="recipe-search-option">Author <input id="recipe-tone3000-author" class="select-input" maxlength="100" placeholder="Optional"></label>
+        </div>
+        <button type="button" id="btn-recipe-prompt-apply" class="btn btn-primary btn-small recipe-prompt-submit">Ask AI / create recipe</button>
+      </div>
+      <div id="recipe-result" class="recipe-result" hidden aria-live="polite"></div>
+      <div class="recipe-conversation-actions">
+        <button type="button" id="btn-recipe-save-markdown" class="btn btn-secondary btn-small" hidden>Save conversation as Markdown</button>
+        <button type="button" id="btn-recipe-conversation-reset" class="btn btn-secondary btn-small" hidden>Start new conversation</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="wizard-panel" class="tone-wizard utility-panel" hidden aria-labelledby="wizard-title">
+    <div class="tone-wizard-heading">
+      <div><div class="eyebrow">Guided settings</div><h2 id="wizard-title">Wizard</h2></div>
+      <button type="button" id="btn-close-wizard" class="btn btn-secondary btn-small">Back to builder</button>
+    </div>
+    <div id="wizard-body">
+      <p class="wizard-intro">Answer a few musical questions to set a starting point. You can refine everything later.</p>
+      <div class="wizard-grid">
+        <fieldset><legend>What is driving the amps?</legend>
+          <label for="wizard-instrument">Instrument</label>
+          <select id="wizard-instrument" class="select-input"><option value="guitar">Guitar</option><option value="bass">Bass</option></select>
+          <label for="wizard-profile">Pickup / input type</label><select id="wizard-profile" class="select-input"></select><div id="wizard-profile-description" class="info"></div>
+        </fieldset>
+        <fieldset><legend>How should the two amps behave?</legend>
+          <label><input type="radio" name="wizard-behaviour" value="dynamic" checked> Clean-to-driven as I turn up</label><label><input type="radio" name="wizard-behaviour" value="smooth"> A broad, smooth dynamic blend</label><label><input type="radio" name="wizard-behaviour" value="fixed"> A constant A/B mix</label><label><input type="radio" name="wizard-behaviour" value="character"> Take tone from one amp and feel/drive from the other</label>
+        </fieldset>
+        <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend><label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label><input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover"><div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div></fieldset>
+        <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend><label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label><input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix"></fieldset>
+        <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
+        <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend><label for="wizard-tone-source">Broad tone / EQ comes from</label><select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select><label for="wizard-drive-source">Feel and drive response comes from</label><select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select><div class="info">For an AC30 in Amp A and a JCM800 in Amp B, choose Amp A for tone and Amp B for feel/drive.</div></fieldset>
+      </div>
+      <div class="wizard-actions"><button type="button" id="btn-wizard-apply" class="btn btn-primary">Apply this starting point</button><button type="button" id="btn-wizard-analyse" class="btn btn-secondary" disabled>Explain my rendered amps</button></div>
+      <div id="wizard-result" class="wizard-result" hidden aria-live="polite"></div>
     </div>
   </section>
 
@@ -153,32 +234,6 @@
           <div id="renderer-path" class="hint"></div>
         </details>
         <div id="render-warnings" class="warning-box" hidden aria-live="assertive"></div>
-      </section>
-
-      <section class="tone-wizard workflow-stage workflow-configure" aria-labelledby="wizard-title">
-        <div class="tone-wizard-heading">
-          <div><div class="eyebrow">Optional help</div><h2 id="wizard-title">Help me choose settings</h2></div>
-          <button type="button" id="btn-wizard-toggle" class="btn btn-secondary btn-small" aria-expanded="false" aria-controls="wizard-body">Choose settings</button>
-        </div>
-        <div id="wizard-body" hidden>
-          <p class="wizard-intro">Answer a few musical questions to set a starting point. You can refine everything later.</p>
-          <div class="wizard-grid">
-            <fieldset><legend>What is driving the amps?</legend>
-              <label for="wizard-instrument">Instrument</label>
-              <select id="wizard-instrument" class="select-input"><option value="guitar">Guitar</option><option value="bass">Bass</option></select>
-              <label for="wizard-profile">Pickup / input type</label><select id="wizard-profile" class="select-input"></select><div id="wizard-profile-description" class="info"></div>
-            </fieldset>
-            <fieldset><legend>How should the two amps behave?</legend>
-              <label><input type="radio" name="wizard-behaviour" value="dynamic" checked> Clean-to-driven as I turn up</label><label><input type="radio" name="wizard-behaviour" value="smooth"> A broad, smooth dynamic blend</label><label><input type="radio" name="wizard-behaviour" value="fixed"> A constant A/B mix</label><label><input type="radio" name="wizard-behaviour" value="character"> Take tone from one amp and feel/drive from the other</label>
-            </fieldset>
-            <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend><label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label><input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover"><div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div></fieldset>
-            <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend><label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label><input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix"></fieldset>
-            <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
-            <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend><label for="wizard-tone-source">Broad tone / EQ comes from</label><select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select><label for="wizard-drive-source">Feel and drive response comes from</label><select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select><div class="info">For an AC30 in Amp A and a JCM800 in Amp B, choose Amp A for tone and Amp B for feel/drive.</div></fieldset>
-          </div>
-          <div class="wizard-actions"><button type="button" id="btn-wizard-apply" class="btn btn-primary">Apply this starting point</button><button type="button" id="btn-wizard-analyse" class="btn btn-secondary" disabled>Explain my rendered amps</button></div>
-          <div id="wizard-result" class="wizard-result" hidden aria-live="polite"></div>
-        </div>
       </section>
 
       <script id="input-profiles-data" type="application/json">

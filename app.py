@@ -5,7 +5,8 @@ limitations. Run with:
 
     python app.py
 
-then open http://127.0.0.1:5000/ in a browser.
+then open http://127.0.0.1:5001/ in a browser. (Port 5001, not 5000 -- macOS's
+AirPlay Receiver squats on 5000 and silently 403s every request.)
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -57,6 +59,8 @@ from hybrid.kaggle_training import (
 )
 from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
+from hybrid.local_llm import LocalConversationReply, LocalLlmError, converse as converse_with_local_llm, status as local_llm_status
+from hybrid.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
 from hybrid.nam_loader import load_nam
 from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
@@ -260,6 +264,268 @@ def api_input_profiles():
         "custom_gain_range_db": [-12.0, 12.0],
         "default_reference_input_level_dbu": DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
     })
+
+
+@app.get("/api/local_llm/status")
+def api_local_llm_status():
+    """Expose configuration only; browser input can never choose the URL."""
+    return jsonify(local_llm_status())
+
+
+@app.post("/api/local_llm/recipe")
+def api_local_llm_recipe():
+    data = request.get_json(silent=True) or {}
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return jsonify({"error": "a tone description is required"}), 400
+    if len(prompt) > 600:
+        return jsonify({"error": "tone description must be 600 characters or fewer"}), 400
+    tone3000_context = data.get("tone3000_context")
+    if tone3000_context is not None:
+        if (
+            not isinstance(tone3000_context, dict)
+            or not isinstance(tone3000_context.get("id"), int)
+            or not all(isinstance(tone3000_context.get(key), str) and len(tone3000_context[key]) <= 600 for key in ("title", "creator", "description"))
+            or not isinstance(tone3000_context.get("models"), list)
+            or len(tone3000_context["models"]) > 30
+            or any(not isinstance(name, str) or len(name) > 200 for name in tone3000_context["models"])
+        ):
+            return jsonify({"error": "selected TONE3000 pack context is invalid"}), 400
+    source_plan = data.get("source_plan")
+    if source_plan is not None and (
+        not isinstance(source_plan, dict)
+        or not all(isinstance(source_plan.get(key), str) and 0 < len(source_plan[key]) <= 240 for key in ("ampA", "ampB"))
+    ):
+        return jsonify({"error": "source plan is invalid"}), 400
+    history = data.get("history", [])
+    if not isinstance(history, list) or len(history) > 8:
+        return jsonify({"error": "conversation history must contain at most 8 messages"}), 400
+    if any(
+        not isinstance(message, dict)
+        or message.get("role") not in {"user", "assistant"}
+        or not isinstance(message.get("content"), str)
+        # The browser stores the full rendered AI answer in its conversation.
+        # Accept a reasonably detailed answer here; `converse` deliberately
+        # trims each message before it reaches the local model.
+        or len(message["content"]) > 6_000
+        for message in history
+    ):
+        return jsonify({"error": "conversation history contains an invalid message"}), 400
+    research = data.get("research", {})
+    if not isinstance(research, dict):
+        return jsonify({"error": "research settings must be an object"}), 400
+    use_web = research.get("web", False)
+    use_tone3000 = research.get("tone3000", False)
+    rig_scope = research.get("rig_scope", "anything")
+    author = research.get("author", "")
+    if not isinstance(use_web, bool) or not isinstance(use_tone3000, bool) or rig_scope not in {"anything", "heads"} or not isinstance(author, str) or len(author) > 100:
+        return jsonify({"error": "research settings are invalid"}), 400
+    if not local_llm_status().get("enabled"):
+        return jsonify({"error": "local LLM is not configured"}), 503
+    try:
+        notes, warnings = [], []
+        full_request_context = " ".join(
+            [prompt] + [message["content"] for message in history if message.get("role") == "user"]
+        ).lower()
+        web_research_notes = None
+        if use_web:
+            try:
+                research_query = "Dave Grohl Foo Fighters live guitar amp rig" if any(name in full_request_context for name in ("dave grohl", "foo fighter")) else prompt.strip()
+                web_research_notes = web_notes(research_query)
+                notes.append("Web research:\n" + web_research_notes[:1_200])
+            except RuntimeError as exc:
+                warnings.append(str(exc))
+        if tone3000_context:
+            notes.append(
+                "Selected TONE3000 pack (the user has chosen this pack; recommend a specific model by exact name):\n"
+                f"- {tone3000_context['title']} by {tone3000_context['creator']}: {tone3000_context['description']}\n"
+                + "\n".join(f"- Model: {name}" for name in tone3000_context["models"][:12])
+                + ("\n- Additional pack files omitted from context; ask the user to open them if needed." if len(tone3000_context["models"]) > 12 else "")
+            )
+        if source_plan:
+            notes.append(f"Durable source plan (do not swap these roles): Amp A = {source_plan['ampA']}; Amp B = {source_plan['ampB']}.")
+        try:
+            conversation = converse_with_local_llm(
+                prompt.strip(),
+                history,
+                "\n\n".join(notes),
+                request_tone3000_queries=use_tone3000,
+            )
+        except LocalLlmError:
+            fallback_notes = [note for note in notes if note.startswith("Selected TONE3000 pack")]
+            warnings.append("Research was found, but the local model could not incorporate it; the answer uses local knowledge instead.")
+            conversation = converse_with_local_llm(
+                prompt.strip(), history, "\n\n".join(fallback_notes), request_tone3000_queries=False
+            )
+
+        # The model only proposes TONE3000 search terms in the call above -- the
+        # actual catalog search runs afterwards, so its first answer can never
+        # reference real matches. Run the search now, then, if it found anything,
+        # ask again with the real titles/descriptions as research notes so the
+        # FINAL answer the user sees can recommend specific, real captures
+        # instead of a generic "tell me your amps" reply.
+        matches, seen = [], set()
+        if use_tone3000 and not tone3000_context:
+            lower_prompt = full_request_context
+            # Artist names are poor catalog terms. The web-research path and
+            # user request point this specific brief at the Vox/Mesa families.
+            queries = ["Vox AC30", "Mesa Dual Rectifier"] if ("dave grohl" in lower_prompt or "foo fighter" in lower_prompt) else (conversation.tone3000_queries or [])
+            if not queries:
+                # Small local models sometimes skip this field. Never search an
+                # entire artist/tone sentence: catalog metadata is amp-centric.
+                # Use narrowly targeted family terms that can actually match.
+                queries = ["Marshall JCM800", "Fender Deluxe Reverb"]
+                warnings.append("The AI did not provide TONE3000 search terms, so the app used concrete amp-family searches instead.")
+            for query in queries:
+                per_family = 0
+                try:
+                    for match in tone3000_search(query, rig_scope=rig_scope, author=author):
+                        key = str(match.get("id") or f"{match.get('title')}|{match.get('creator')}")
+                        if key not in seen:
+                            seen.add(key)
+                            matches.append({**match, "query": query})
+                            per_family += 1
+                        if len(matches) >= 8 or per_family >= 4:
+                            break
+                except RuntimeError as exc:
+                    warnings.append(str(exc))
+                if len(matches) >= 8:
+                    break
+
+        if matches:
+            catalog_notes = "TONE3000 catalog matches (real, downloadable NAM captures -- reference specific titles/creators by name and recommend the ones that fit):\n" + "\n".join(
+                f"- {match['title']} by {match['creator']} ({match.get('match_score', '—')}% metadata fit): {match['description']}"[:360] for match in matches
+            )
+            try:
+                conversation = converse_with_local_llm(
+                    prompt.strip(),
+                    history,
+                    "\n\n".join(notes + [catalog_notes]),
+                    request_tone3000_queries=False,
+                )
+            except LocalLlmError:
+                warnings.append("TONE3000 matches were found, but the local model could not incorporate them into its final answer.")
+
+        if tone3000_context and any(word in prompt.lower() for word in ("specific", "which", "file", "model", "amp a", "amp b")):
+            names = tone3000_context["models"]
+            clean = next((name for name in names if "clean" in name.lower()), names[0])
+            driven = next((name for name in names if "crunch" in name.lower()), None)
+            driven = driven or next((name for name in names if "edge" in name.lower()), None)
+            driven = driven or next((name for name in names if any(word in name.lower() for word in ("hot", "lead", "drive"))), names[-1])
+            selected_source_role = None
+            if source_plan:
+                selected_text = f"{tone3000_context['title']} {tone3000_context['description']}".lower()
+                def _plan_score(value: str) -> int:
+                    terms = {term for term in re.findall(r"[a-z0-9]+", value.lower()) if len(term) >= 3}
+                    return sum(len(term) for term in terms if term in selected_text)
+                a_score, b_score = _plan_score(source_plan["ampA"]), _plan_score(source_plan["ampB"])
+                selected_source_role = "a" if a_score > b_score else "b" if b_score > a_score else None
+            prior_text = "\n".join(message["content"] for message in history).lower()
+            title = tone3000_context["title"].lower()
+            title_terms = [term for term in re.findall(r"[a-z0-9]+", title) if len(term) >= 3]
+            role_a_hits = role_b_hits = 0
+            for sentence in re.split(r"[\n.!?]+", prior_text):
+                if title in sentence or sum(term in sentence for term in title_terms) >= min(2, len(title_terms)):
+                    # The assistant's source-role section uses labels such as
+                    # "Amp B (Driven)" as well as "driven source". Treat all
+                    # of those equivalent labels as durable conversation
+                    # context when the user opens a pack to discuss its files.
+                    # A related capture can differ in its model/version suffix
+                    # (2203 vs 1959), so compare the position of the matching
+                    # family words to each role label rather than pretending a
+                    # non-exact title starts at character zero.
+                    family_positions = [match.start() for term in title_terms for match in re.finditer(rf"\b{re.escape(term)}\b", sentence)]
+                    if title in sentence:
+                        family_positions.append(sentence.find(title))
+
+                    def _nearest_role_distance(markers: tuple[str, ...]) -> float:
+                        marker_positions = [
+                            match.start()
+                            for marker in markers
+                            for match in re.finditer(re.escape(marker), sentence)
+                        ]
+                        if not marker_positions or not family_positions:
+                            return float("inf")
+                        return min(abs(marker_at - family_at) for marker_at in marker_positions for family_at in family_positions)
+
+                    a_distance = _nearest_role_distance(("amp a", "clean source", "clean voice"))
+                    b_distance = _nearest_role_distance(("amp b", "driven source", "dirty source", "driven voice"))
+                    if a_distance < b_distance:
+                        role_a_hits += 1
+                    elif b_distance < a_distance:
+                        role_b_hits += 1
+            pack_role = selected_source_role or ("a" if role_a_hits > role_b_hits else "b" if role_b_hits > role_a_hits else None)
+            if pack_role == "a":
+                reply = (
+                    f"This is the already-chosen **Amp A** pack. Use **`{clean}`** as Amp A: it is the clean foundation. "
+                    "Do not use another file from this pack as Amp B; keep the previously selected driven amp pack for Amp B. "
+                    f"If you need slightly more bite while keeping this Amp A role, audition **`{driven}`** instead."
+                )
+            elif pack_role == "b":
+                reply = (
+                    f"This is the already-chosen **Amp B** pack. Use **`{driven}`** as Amp B: it is the driven partner for the higher-gain part of the journey. "
+                    "Keep the previously selected clean amp pack as Amp A; do not replace it with a file from this pack."
+                )
+            else:
+                reply = (
+                    f"I can see the files in **{tone3000_context['title']}**, but I cannot reliably recover whether this pack "
+                    "was intended as Amp A or Amp B from the current conversation. Should it supply the clean foundation (Amp A) "
+                    "or the driven voice (Amp B)? I will then recommend one exact file without replacing the other source."
+                )
+            conversation = LocalConversationReply(reply=reply)
+
+        response = conversation.to_dict()
+        source_plan = getattr(conversation, "source_plan", None) or source_plan
+        if source_plan:
+            response["source_plan"] = source_plan
+        if tone3000_context and 'pack_role' in locals() and pack_role:
+            response["selected_source_role"] = pack_role
+        if web_research_notes is not None:
+            response["web_research_notes"] = web_research_notes
+        if use_tone3000:
+            response["tone3000_results"] = matches
+        if warnings:
+            response["research_warnings"] = warnings
+        return jsonify(response)
+    except LocalLlmError as exc:
+        logger.info("Local recipe assistant unavailable: %s", exc)
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.post("/api/tone3000/search")
+def api_tone3000_search():
+    data = request.get_json(silent=True) or {}
+    query = data.get("query")
+    rig_scope = data.get("rig_scope", "anything")
+    author = data.get("author", "")
+    if not isinstance(query, str) or not query.strip() or len(query) > 240:
+        return jsonify({"error": "enter a TONE3000 search of 240 characters or fewer"}), 400
+    if rig_scope not in {"anything", "heads"} or not isinstance(author, str) or len(author) > 100:
+        return jsonify({"error": "invalid TONE3000 search options"}), 400
+    try:
+        return jsonify({"results": tone3000_search(query.strip(), rig_scope=rig_scope, author=author)})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.get("/api/tone3000/tones/<int:tone_id>/models")
+def api_tone3000_models(tone_id: int):
+    try:
+        return jsonify({"models": tone3000_models(tone_id)})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.get("/api/tone3000/tones/<int:tone_id>/models/<int:model_id>/download")
+def api_tone3000_model_download(tone_id: int, model_id: int):
+    try:
+        data, name = tone3000_model_download(tone_id, model_id)
+        filename = secure_filename(name) or f"tone3000-{model_id}"
+        if not filename.lower().endswith(".nam"):
+            filename += ".nam"
+        return send_file(io.BytesIO(data), mimetype="application/octet-stream", as_attachment=True, download_name=filename)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
 
 
 @app.get("/api/renderer/readiness")
@@ -2157,4 +2423,4 @@ def api_kaggle_job_cleanup(job_id: str):
 if __name__ == "__main__":
     # Keep the local tool safe and single-process by default.  Opt into the
     # Flask debugger/reloader explicitly while developing.
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5002")), debug=os.environ.get("FLASK_DEBUG") == "1")
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5001")), debug=os.environ.get("FLASK_DEBUG") == "1")

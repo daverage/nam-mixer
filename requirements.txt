@@ -1,4 +1,5 @@
 flask
+ddgs
 numpy
 scipy
 soundfile
@@ -9,4 +10,3 @@ pytest
 # `kaggle` CLI/executable is actually invoked (via subprocess); this repo
 # never imports the `kaggle` Python package itself. See docs/kaggle_training.md.
 kaggle>=2.2.4
-

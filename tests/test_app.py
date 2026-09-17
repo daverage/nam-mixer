@@ -58,6 +58,282 @@ def _write_fake_nam(path, input_level_dbu=None):
     path.write_text(jsonlib.dumps(data))
 
 
+def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
+    assert client.get("/api/local_llm/status").get_json()["enabled"] is False
+    response = client.post("/api/local_llm/recipe", json={"prompt": "a clean crunch blend"})
+    assert response.status_code == 503
+
+
+def test_local_llm_recipe_rejects_oversized_conversation_history(client, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "test-model")
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "a clean crunch blend",
+        "history": [{"role": "user", "content": "x"}] * 9,
+    })
+    assert response.status_code == 400
+    assert "at most 8" in response.get_json()["error"]
+
+
+def test_local_llm_recipe_accepts_detailed_history_and_trims_it_for_the_model(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    seen = {}
+
+    def fake_converse(_prompt, history, _research_notes="", **_kwargs):
+        seen["history"] = history
+        return SimpleNamespace(recipe=None, tone3000_queries=[], to_dict=lambda: {"reply": "Understood."})
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which file should I use?",
+        "history": [{"role": "assistant", "content": "x" * 2_500}],
+        "research": {"web": False, "tone3000": False, "rig_scope": "anything", "author": ""},
+    })
+
+    assert response.status_code == 200
+    # The endpoint permits the browser's full answer; local_llm.converse caps
+    # it before sending to the model.
+    assert len(seen["history"][0]["content"]) == 2_500
+
+
+def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    calls = []
+
+    def fake_converse(prompt, history, research_notes="", **kwargs):
+        calls.append({"prompt": prompt, "research_notes": research_notes, **kwargs})
+        if len(calls) == 1:
+            return SimpleNamespace(
+                tone3000_queries=["Vox AC30", "Marshall JCM800"],
+                to_dict=lambda: {"reply": "Tell me your amps."},
+            )
+        return SimpleNamespace(
+            tone3000_queries=None,
+            to_dict=lambda: {"reply": "Try the Vox AC30 capture -- it fits the clean side."},
+        )
+
+    def fake_search(query, *, rig_scope, author):
+        return [{"id": query, "title": query + " capture", "creator": "tester", "description": "head"}]
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    monkeypatch.setattr(app_module, "tone3000_search", fake_search)
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Give me Foo Fighters live clean and dirt tones",
+        "research": {"tone3000": True, "web": False, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    # First call only proposes search terms; the real catalog matches are fed
+    # back in on a second call so the FINAL reply can reference them by name.
+    assert calls[0]["request_tone3000_queries"] is True
+    assert calls[1]["request_tone3000_queries"] is False
+    assert "Vox AC30 capture" in calls[1]["research_notes"]
+    assert "Mesa Dual Rectifier capture" in calls[1]["research_notes"]
+    data = response.get_json()
+    assert data["reply"] == "Try the Vox AC30 capture -- it fits the clean side."
+    assert [result["query"] for result in data["tone3000_results"]] == ["Vox AC30", "Mesa Dual Rectifier"]
+
+
+def test_local_llm_uses_concrete_fallback_queries_for_a_grohl_brief(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    searched = []
+
+    def fake_converse(*_args, **_kwargs):
+        return SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "A starting point."})
+
+    def fake_search(query, *, rig_scope, author):
+        searched.append(query)
+        return []
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    monkeypatch.setattr(app_module, "tone3000_search", fake_search)
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "I want Dave Grohl clean to distorted tones",
+        "research": {"tone3000": True, "web": False, "rig_scope": "anything", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert searched == ["Vox AC30", "Mesa Dual Rectifier"]
+
+
+def test_local_llm_accepts_a_selected_tone3000_pack_outside_the_user_prompt_limit(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    captured = {}
+
+    def fake_converse(prompt, _history, research_notes="", **_kwargs):
+        captured["prompt"] = prompt
+        captured["notes"] = research_notes
+        return SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "Try Clean.nam."})
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which model should I use?",
+        "tone3000_context": {
+            "id": 42, "title": "Example pack", "creator": "tester", "description": "A useful pack",
+            "models": ["Clean.nam"] * 30,
+        },
+        "research": {"web": False, "tone3000": False, "rig_scope": "anything", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert captured["prompt"] == "Which model should I use?"
+    assert "Selected TONE3000 pack" in captured["notes"]
+    assert "Model: Clean.nam" in captured["notes"]
+
+
+def test_selected_tone3000_pack_without_a_role_requests_one_before_recommending(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        app_module, "converse_with_local_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "generic"}),
+    )
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which specific model should be Amp A or Amp B?",
+        "tone3000_context": {
+            "id": 42, "title": "AC30", "creator": "tester", "description": "", 
+            "models": ["AC30_CLEAN", "AC30_EDGE", "AC30_CRUNCH", "AC30_HOT"],
+        },
+        "research": {"web": False, "tone3000": True, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert "clean foundation (Amp A)" in response.get_json()["reply"]
+    assert response.get_json()["tone3000_results"] == []
+
+
+def test_selected_amp_a_pack_does_not_replace_the_existing_amp_b(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        app_module, "converse_with_local_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "generic"}),
+    )
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which file should I use as Amp A or Amp B?",
+        "history": [{"role": "assistant", "content": "Use Vox AC30 CC2 as Amp A (clean source) and Mesa Dual Rectifier as Amp B (driven source)."}],
+        "tone3000_context": {
+            "id": 42, "title": "Vox AC30 CC2", "creator": "tester", "description": "",
+            "models": ["AC30_CLEAN", "AC30_EDGE", "AC30_CRUNCH", "AC30_HOT"],
+        },
+        "research": {"web": False, "tone3000": True, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    reply = response.get_json()["reply"]
+    assert "`AC30_CLEAN`" in reply
+    assert "Do not use another file from this pack as Amp B" in reply
+
+
+def test_selected_amp_b_pack_keeps_the_existing_amp_a(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        app_module, "converse_with_local_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "generic"}),
+    )
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which file should I use?",
+        "history": [{"role": "assistant", "content": (
+            "**Source Roles:**\n* **Amp A (Clean):** `1973 Fender Twin Reverb by mick8187`\n"
+            "* **Amp B (Driven):** `Marshall - JCM800 (Kerry King Signature) [18dBu] by kenazmusic`"
+        )}],
+        "tone3000_context": {
+            "id": 42, "title": "Marshall - JCM800 (Kerry King Signature) [18dBu]", "creator": "kenazmusic", "description": "",
+            "models": ["Marshall - JCM800 KKS EOB [18dBu]", "Marshall - JCM800 KKS (TS9) HG [18dBu]"],
+        },
+        "research": {"web": False, "tone3000": True, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    reply = response.get_json()["reply"]
+    assert "already-chosen **Amp B**" in reply
+    assert "Keep the previously selected clean amp pack as Amp A" in reply
+
+
+def test_related_amp_variant_in_the_source_plan_keeps_its_amp_b_role(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        app_module, "converse_with_local_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "generic"}),
+    )
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which specific file should I use?",
+        "history": [{"role": "assistant", "content": (
+            "The complete identity shifts from the Fender source (Amp A) to the Marshall source (Amp B) as guitar volume increases.\n"
+            "* **Amp A (Low Volume):** Fender Deluxe Reverb '65 Reissue (Clean Source)\n"
+            "* **Amp B (High Volume):** Marshall JCM 800 1959 100W Pack (Driven Source)"
+        )}],
+        "tone3000_context": {
+            "id": 1071, "title": "Marshall JCM 800 2203", "creator": "arthm", "description": "",
+            "models": ["JCM800 2203 - P5 B5 M5 T5 MV6 G5 - AZG - 700", "JCM800 2203 - P5 B5 M5 T5 MV5 G9 - AZG - 700"],
+        },
+        "research": {"web": False, "tone3000": True, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert "already-chosen **Amp B**" in response.get_json()["reply"]
+
+
+def test_durable_source_plan_tags_a_discussed_pack_without_using_history(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        app_module, "converse_with_local_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(recipe=None, tone3000_queries=[], to_dict=lambda: {"reply": "generic"}),
+    )
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which file should I use?",
+        "source_plan": {"ampA": "Fender Deluxe Reverb", "ampB": "Marshall JCM 800"},
+        "tone3000_context": {
+            "id": 1071, "title": "Marshall JCM 800 2203", "creator": "arthm", "description": "Flat Marshall capture",
+            "models": ["JCM800 2203 G1", "JCM800 2203 G9"],
+        },
+        "research": {"web": False, "tone3000": True, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["selected_source_role"] == "b"
+    assert data["source_plan"] == {"ampA": "Fender Deluxe Reverb", "ampB": "Marshall JCM 800"}
+
+
+def test_ambiguous_selected_pack_asks_for_its_role_instead_of_using_it_twice(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        app_module, "converse_with_local_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "generic"}),
+    )
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Which file should I use?",
+        "tone3000_context": {
+            "id": 42, "title": "Example pack", "creator": "tester", "description": "",
+            "models": ["Clean", "Crunch"],
+        },
+        "research": {"web": False, "tone3000": True, "rig_scope": "heads", "author": ""},
+    })
+
+    assert response.status_code == 200
+    assert "clean foundation (Amp A)" in response.get_json()["reply"]
+
+
+def test_tone3000_pack_models_are_exposed_as_direct_downloads(client, monkeypatch):
+    monkeypatch.setattr(app_module, "tone3000_models", lambda tone_id: [{
+        "id": 12, "name": "Crunch 6.nam", "architecture": 2,
+    }] if tone_id == 42 else [])
+
+    response = client.get("/api/tone3000/tones/42/models")
+
+    assert response.status_code == 200
+    assert response.get_json()["models"][0]["name"] == "Crunch 6.nam"
+
+
+def test_tone3000_model_download_proxies_the_selected_pack_member(client, monkeypatch):
+    monkeypatch.setattr(app_module, "tone3000_model_download", lambda tone_id, model_id: (b"nam-data", "Clean.nam"))
+
+    response = client.get("/api/tone3000/tones/42/models/12/download")
+
+    assert response.status_code == 200
+    assert response.data == b"nam-data"
+    assert "attachment" in response.headers["Content-Disposition"]
+
+
 def _write_tool_nam(path):
     path.write_text(jsonlib.dumps({
         "architecture": "SlimmableContainer",

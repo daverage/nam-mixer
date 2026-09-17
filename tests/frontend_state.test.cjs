@@ -79,6 +79,40 @@ test('wizard applies instrument, pickup, blend choice and protects them from DI 
   assert.equal(sandbox.instrumentSelect.value, 'bass');
   assert.equal(sandbox.profileSelect.value, 'active_bass');
 });
+
+test('plain-English Vox-to-Marshall request becomes a Vox tone/feel and dynamic Marshall drive recipe', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function recipeTextIncludes(', 'function setCharacterSlider('), sandbox);
+  const recipe = sandbox.recipeFromPrompt('Keep the Vox EQ and feel, then move from Vox gain to Marshall crunch as I play harder.');
+  assert.equal(recipe.mode, 'character');
+  assert.equal(recipe.tone, 0);
+  assert.equal(recipe.feel, 0);
+  assert.deepEqual([recipe.driveLow, recipe.driveMid, recipe.driveHigh], [0, 50, 100]);
+});
+
+test('plain-English request with explicit tone/gain percentages carries them into the recipe', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function recipeTextIncludes(', 'function setCharacterSlider('), sandbox);
+  const recipe = sandbox.recipeFromPrompt(
+    'I want to have a vox ac30 and blend it with a marshall. The eq and feel should be 70% vox, '
+    + 'the gain structure should start off with vox and at around 80 percent volume be 50/50 vox and marshall.'
+  );
+  assert.equal(recipe.mode, 'character');
+  assert.equal(recipe.tone, 30);
+  assert.equal(recipe.feel, 30);
+  assert.deepEqual([recipe.driveLow, recipe.driveMid, recipe.driveHigh], [0, 25, 50]);
+});
+
+test('plain-English parallel request creates a constant parallel blend', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function recipeTextIncludes(', 'function setCharacterSlider('), sandbox);
+  const recipe = sandbox.recipeFromPrompt('Make a parallel blend, mostly Amp B, with both amps on all the time.');
+  assert.equal(recipe.mode, 'blend');
+  assert.equal(recipe.mixB, 70);
+});
 function setup() {
   const revoked = [];
   const sandbox = {

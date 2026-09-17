@@ -38,6 +38,7 @@ becomes something you can load anywhere a NAM runs.
 | 🎧 **Real NAM inference** | Amps are rendered through the same [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore) C++ engine the official plugin uses — not a reimplementation, not an approximation. |
 | 🔊 **Live audition** | A/B the two source amps against the blended result over a bundled library of real guitar/bass performances, with input-profile simulation, test gain, coverage analysis, and an optional cabinet IR — all without re-running inference on every tweak. |
 | 🧠 **Train a real model** | Generate a proper training bundle from the official NAM training excitation and train a new A2 model on it — locally, or with one click on a private Kaggle GPU. |
+| ✍️ **Optional local AI recipes** | A configured local OpenAI-compatible model can turn a plain-English tone description into editable blend settings; built-in rules remain available with no AI service. |
 | ✅ **Built-in validation** | Every exported model is re-rendered and compared against its frozen teacher (ESR, RMS, peak, quiet-response) so you know exactly how close the trained model landed, not just that training finished. |
 | 💾 **Sessions library** | Save, reload, import/export, and revisit designs and completed models without losing your place. |
 | 🔒 **Local-first & private** | No cloud dependency, no telemetry, no account required. Kaggle training is fully opt-in and uses your own credentials and quota. |
@@ -355,6 +356,25 @@ purely informational, never used to shorten the actual convolution.
 
 ## Quick start
 
+### Optional: local AI tone recipes
+
+The Tone Wizard works without an AI service. The provided `.env` enables its
+optional local-AI suggestion with your local Ollama model (`gemma4:e4b` at
+`http://127.0.0.1:11434/v1`). Start Ollama, then launch NAM Mixer with:
+
+```bash
+scripts/run.sh
+```
+
+The launcher reads `.env` automatically. To change machines or models, edit
+your untracked `.env`; `.env.example` documents the available defaults.
+
+The base URL must be a loopback HTTP URL (`localhost`, `127.0.0.1`, or `::1`)
+and is deliberately read only from the process environment. The browser cannot
+choose an endpoint. Only the written tone request and a fixed recipe schema
+are sent to the local service—never NAM files or audio. If the model is down,
+slow, or returns invalid settings, NAM Mixer uses its built-in recipe rules.
+
 Every platform needs **Python 3.10+** plus a working `nam_render` — the
 native NAM inference executable. You don't need a C++ compiler to get one:
 CI builds `nam_render` for macOS, Linux, and Windows on every release (see
@@ -380,9 +400,10 @@ scripts/download_nam_render.sh
 scripts/run.sh
 ```
 
-If macOS has reserved port 5000 (for example, AirPlay Receiver), `scripts/run.sh`
-automatically chooses the next free local port. To force a specific port, run
-`PORT=5001 scripts/run.sh`.
+`scripts/run.sh` (and `app.py` directly) default to port 5001, not 5000 --
+macOS reserves 5000 for AirPlay Receiver, which silently returns 403 instead
+of refusing the connection. To use a different port, run
+`PORT=5003 scripts/run.sh`.
 
 <details>
 <summary>Build from source instead</summary>

@@ -616,7 +616,6 @@ updateMixValueLabel();
 // ---- Tone Wizard ---------------------------------------------------------
 // This is intentionally a thin, reversible guide over the existing controls.
 // It never invents a guitar model or bypasses the render/level-match path.
-const wizardToggle = document.getElementById("btn-wizard-toggle");
 const wizardBody = document.getElementById("wizard-body");
 const wizardInstrument = document.getElementById("wizard-instrument");
 const wizardProfile = document.getElementById("wizard-profile");
@@ -633,6 +632,67 @@ const wizardToneSource = document.getElementById("wizard-tone-source");
 const wizardDriveSource = document.getElementById("wizard-drive-source");
 const wizardResult = document.getElementById("wizard-result");
 const wizardAnalyseButton = document.getElementById("btn-wizard-analyse");
+const recipePromptInput = document.getElementById("recipe-prompt-input");
+const recipePromptApplyButton = document.getElementById("btn-recipe-prompt-apply");
+const recipeUseLocalAi = document.getElementById("recipe-use-local-ai");
+const recipeAiStatus = document.getElementById("recipe-ai-status");
+const recipeUseWebResearch = document.getElementById("recipe-use-web-research");
+const recipeUseTone3000 = document.getElementById("recipe-use-tone3000");
+const recipeTone3000RigScope = document.getElementById("recipe-tone3000-rig-scope");
+const recipeTone3000Author = document.getElementById("recipe-tone3000-author");
+const recipePromptContainer = recipePromptInput.closest(".recipe-prompt");
+// A live Flask process may serve a cached template while static assets have
+// refreshed. Create these optional conversation controls defensively so that
+// a mixed-version page still boots and the recipe button remains usable.
+const recipeResult = document.getElementById("recipe-result") || (() => {
+  const element = document.createElement("div");
+  element.id = "recipe-result";
+  element.className = "recipe-result";
+  element.hidden = true;
+  element.setAttribute("aria-live", "polite");
+  recipePromptContainer.append(element);
+  return element;
+})();
+const recipeConversationResetButton = document.getElementById("btn-recipe-conversation-reset") || (() => {
+  const element = document.createElement("button");
+  element.type = "button";
+  element.id = "btn-recipe-conversation-reset";
+  element.className = "btn btn-secondary btn-small recipe-conversation-reset";
+  element.textContent = "Start new conversation";
+  element.hidden = true;
+  recipePromptContainer.append(element);
+  return element;
+})();
+const recipeSaveMarkdownButton = document.getElementById("btn-recipe-save-markdown") || (() => {
+  const element = document.createElement("button");
+  element.type = "button";
+  element.id = "btn-recipe-save-markdown";
+  element.className = "btn btn-secondary btn-small";
+  element.textContent = "Save conversation as Markdown";
+  element.hidden = true;
+  recipePromptContainer.append(element);
+  return element;
+})();
+let localRecipeAiAvailable = false;
+let recipeConversationHistory = [];
+let recipeSourcePlan = null;
+let selectedTone3000Capture = null;
+const aiTone3000Context = document.getElementById("ai-tone3000-context");
+
+async function loadLocalRecipeAiStatus() {
+  try {
+    const response = await fetch("/api/local_llm/status");
+    const data = await response.json();
+    localRecipeAiAvailable = Boolean(response.ok && data.enabled);
+    recipeUseLocalAi.disabled = !localRecipeAiAvailable;
+    recipeUseLocalAi.checked = localRecipeAiAvailable;
+    recipeAiStatus.textContent = localRecipeAiAvailable ? `(ready: ${data.model})` : "(not configured)";
+  } catch (_error) {
+    localRecipeAiAvailable = false;
+    recipeAiStatus.textContent = "(unavailable)";
+  }
+}
+loadLocalRecipeAiStatus();
 
 function selectedWizardBehaviour() {
   return document.querySelector('input[name="wizard-behaviour"]:checked').value;
@@ -678,16 +738,6 @@ function setModeFromWizard(mode) {
   applyModeVisibility();
 }
 
-wizardToggle.addEventListener("click", () => {
-  const isOpen = wizardBody.hidden;
-  wizardBody.hidden = !isOpen;
-  wizardToggle.setAttribute("aria-expanded", String(isOpen));
-  wizardToggle.textContent = isOpen ? "Close wizard" : "Set up a sound";
-  if (isOpen) {
-    wizardInstrument.value = instrumentSelect.value;
-    populateWizardProfiles();
-  }
-});
 wizardSwitch.addEventListener("input", updateWizardLabels);
 wizardMoreB.addEventListener("input", updateWizardLabels);
 wizardInstrument.addEventListener("change", () => populateWizardProfiles({ preserveCurrent: false }));
@@ -746,6 +796,280 @@ function applyWizardSettings() {
   setWorkflowStage("configure");
 }
 document.getElementById("btn-wizard-apply").addEventListener("click", applyWizardSettings);
+
+// A deliberately local, explainable first pass at natural-language recipes.
+// It identifies the common "keep one amp's tone/feel, but let gain progress
+// from it to the other" request. The resulting controls stay visible and
+// editable, rather than hiding a black-box interpretation behind an AI call.
+function recipeTextIncludes(text, phrases) {
+  return phrases.some((phrase) => text.includes(phrase));
+}
+
+// Looks for a percentage figure mentioned near one of the given keywords,
+// e.g. "70% vox" or "eq at 70 percent" -> 70. Returns null if none found.
+function percentNear(text, keywords) {
+  for (const keyword of keywords) {
+    const before = text.match(new RegExp(`(\\d{1,3})\\s*(?:percent|%)[a-z0-9\\s]{0,15}\\b${keyword}`));
+    if (before) return Math.min(100, Number(before[1]));
+    const after = text.match(new RegExp(`\\b${keyword}[a-z0-9\\s]{0,40}?(\\d{1,3})\\s*(?:percent|%)`));
+    if (after) return Math.min(100, Number(after[1]));
+  }
+  return null;
+}
+
+function recipeFromPrompt(prompt) {
+  const text = prompt.toLowerCase().replace(/%/g, " percent ").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const hasVoxToMarshall = text.includes("vox") && recipeTextIncludes(text, ["marshall", "jcm", "plexi"]);
+  const wantsGainJourney = recipeTextIncludes(text, ["gain", "drive", "crunch", "overdrive", "play harder", "dig in", "starts", "ends"]);
+  const wantsCharacter = recipeTextIncludes(text, ["eq", "tone", "feel", "response", "touch"]);
+  const wantsParallel = recipeTextIncludes(text, ["parallel", "constant", "always mixed", "always blend", "both all the time", "permanent mix"]);
+
+  if (wantsParallel) {
+    const explicitAmpBPercent = text.match(/\b(\d{1,3})\s*(?:percent\s*)?(?:amp\s*)?b\b/);
+    const mixB = explicitAmpBPercent
+      ? Math.min(100, Number(explicitAmpBPercent[1]))
+      : recipeTextIncludes(text, ["mostly amp b", "more amp b", "mostly marshall", "more marshall"])
+        ? 70
+        : recipeTextIncludes(text, ["mostly amp a", "more amp a", "mostly vox", "more vox"])
+          ? 30
+          : 50;
+    return {
+      mode: "blend", mixB,
+      explanation: `Parallel Blend: both amps stay present at ${100 - mixB}% Amp A / ${mixB}% Amp B, independent of playing level.`,
+    };
+  }
+
+  if (hasVoxToMarshall || (wantsGainJourney && wantsCharacter)) {
+    // A stated tone/feel split (e.g. "70% vox") names the FIRST amp mentioned,
+    // which this heuristic treats as Amp A -- so it converts to a %-toward-B figure.
+    const tonePercentA = percentNear(text, ["eq", "feel", "tone", "response", "touch"]);
+    const toneB = tonePercentA != null ? Math.max(0, 100 - tonePercentA) : 0;
+    const fiftyFifty = /\b50\s*\/?\s*50\b/.test(text);
+    const drivePercentB = percentNear(text, ["gain", "drive", "volume", "level"]);
+    const driveHigh = fiftyFifty ? 50 : (drivePercentB != null ? drivePercentB : 100);
+    const driveMid = Math.round(driveHigh / 2);
+    return {
+      mode: "character", tone: toneB, feel: toneB, drive: 0,
+      driveLow: 0, driveMid, driveHigh,
+      explanation: `Character Blend: tone and feel stay ${100 - toneB}% Amp A / ${toneB}% Amp B; drive morphs from Amp A at low playing level to ${driveMid}% Amp B at medium level and ${driveHigh}% Amp B at high level.`,
+    };
+  }
+  if (wantsGainJourney) {
+    return {
+      mode: "hybrid", switchKnob: 7, width: 6,
+      explanation: "Dynamic Hybrid: Amp A stays dominant for quieter playing and Amp B takes over as you play harder.",
+    };
+  }
+  return null;
+}
+
+function setCharacterSlider(name, value) {
+  document.getElementById(`${name}-slider`).value = value;
+  document.getElementById(`${name}-value`).textContent = `${value}% B`;
+}
+
+function escapeMarkdownHtml(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+function renderMarkdownInline(value) {
+  let html = escapeMarkdownHtml(value);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+function renderSafeMarkdown(value) {
+  const lines = String(value).replaceAll("\r\n", "\n").split("\n");
+  const blocks = [];
+  let list = null;
+  const closeList = () => {
+    if (list) { blocks.push(`<${list.tag}>${list.items.join("")}</${list.tag}>`); list = null; }
+  };
+  for (const line of lines) {
+    const unordered = line.match(/^\s*[-*]\s+(.+)/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)/);
+    const heading = line.match(/^(#{1,3})\s+(.+)/);
+    if (unordered || ordered) {
+      const tag = unordered ? "ul" : "ol";
+      if (!list || list.tag !== tag) { closeList(); list = { tag, items: [] }; }
+      list.items.push(`<li>${renderMarkdownInline((unordered || ordered)[1])}</li>`);
+    } else {
+      closeList();
+      if (!line.trim()) continue;
+      if (heading) blocks.push(`<h${heading[1].length}>${renderMarkdownInline(heading[2])}</h${heading[1].length}>`);
+      else blocks.push(`<p>${renderMarkdownInline(line)}</p>`);
+    }
+  }
+  closeList();
+  return blocks.join("") || "<p></p>";
+}
+
+function addRecipeConversationMessage(role, text) {
+  recipeResult.hidden = false;
+  recipeConversationResetButton.hidden = false;
+  recipeSaveMarkdownButton.hidden = false;
+  const message = document.createElement("article");
+  message.className = `recipe-message recipe-message-${role}`;
+  message.dataset.markdown = text;
+  message.innerHTML = renderSafeMarkdown(text);
+  recipeResult.prepend(message);
+  recipeResult.scrollTop = 0;
+}
+
+function appendTone3000DiscussButtonsToLastMessage(results) {
+  const message = recipeResult.firstElementChild;
+  if (!message) return;
+  const container = document.createElement("div");
+  container.className = "ai-tone3000-candidate-list";
+  const seen = new Set();
+  results.forEach((result) => {
+    if (seen.has(result.id)) return;
+    seen.add(result.id);
+    const row = document.createElement("div");
+    row.className = "ai-tone3000-candidate-row";
+    const label = document.createElement("span");
+    label.className = "ai-tone3000-candidate-label";
+    label.textContent = `${result.title} — ${result.creator}${Number.isFinite(result.match_score) ? ` · ${result.match_score}% metadata fit` : ""}`;
+    row.append(label, createTone3000DiscussButton(result));
+    container.append(row);
+  });
+  if (container.children.length) message.append(container);
+}
+
+function applyRecipe(recipe, prefix = "", { showMessage = true } = {}) {
+  if (!recipe) {
+    if (showMessage) addRecipeConversationMessage("assistant", "I couldn't identify a blend direction yet. Try naming what should stay from Amp A and what should take over from Amp B—for example, ‘keep Amp A's EQ and feel; let its gain become Amp B crunch as I play harder.’");
+    return;
+  }
+  setModeFromWizard(recipe.mode);
+  if (recipe.mode === "character") {
+    setCharacterSlider("tone", recipe.tone);
+    setCharacterSlider("feel", recipe.feel);
+    setCharacterSlider("drive", recipe.drive);
+    setCharacterSlider("drive-low", recipe.driveLow);
+    setCharacterSlider("drive-mid", recipe.driveMid);
+    setCharacterSlider("drive-high", recipe.driveHigh);
+    document.getElementById("drive-morph-enabled").checked = true;
+  } else if (recipe.mode === "hybrid") {
+    crossoverKnobSlider.value = recipe.switchKnob;
+    const crossoverDb = dbFromKnob(recipe.switchKnob);
+    crossoverSlider.value = crossoverDb.toFixed(2);
+    crossoverBaseline = { value: crossoverSlider.value, label: "recipe" };
+    crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
+    transitionSlider.value = recipe.width;
+    transitionValue.textContent = `${recipe.width} dB`;
+    syncCrossoverKnobFromDb();
+    syncPresetButtonStates();
+    updateTransitionAroundSwitchNote();
+  } else {
+    mixSlider.value = recipe.mixB;
+    updateMixValueLabel();
+  }
+  scheduleUpdate();
+  scheduleAuditionRefresh();
+  if (showMessage) addRecipeConversationMessage("assistant", `${prefix}${recipe.explanation}\n\nThe settings above are a starting point: adjust them, then render and audition the result.`);
+}
+
+async function applyRecipeFromPrompt() {
+  const prompt = recipePromptInput.value.trim();
+  if (!prompt) {
+    addRecipeConversationMessage("assistant", "Tell me what you want to change, or describe the sound you are after.");
+    return;
+  }
+  let recipe = recipeFromPrompt(prompt);
+  let prefix = "";
+  let promptWasAdded = false;
+  if (localRecipeAiAvailable && recipeUseLocalAi.checked && prompt.trim()) {
+    addRecipeConversationMessage("user", prompt);
+    promptWasAdded = true;
+    recipePromptApplyButton.disabled = true;
+    try {
+      const research = {
+        web: recipeUseWebResearch.checked,
+        tone3000: recipeUseTone3000.checked,
+        rig_scope: recipeTone3000RigScope.value,
+        author: recipeTone3000Author.value.trim(),
+      };
+      const tone3000Context = selectedTone3000Capture
+        ? {
+          id: selectedTone3000Capture.id,
+          title: selectedTone3000Capture.title,
+          creator: selectedTone3000Capture.creator,
+          description: selectedTone3000Capture.description || "No description",
+          models: selectedTone3000Capture.models.map((model) => model.name),
+        }
+        : null;
+      const response = await fetch("/api/local_llm/recipe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tone3000_context: tone3000Context, source_plan: recipeSourcePlan, history: recipeConversationHistory, research }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "local AI is unavailable");
+      if (data.source_plan) recipeSourcePlan = data.source_plan;
+      if (selectedTone3000Capture && data.selected_source_role) {
+        selectedTone3000Capture.sourceRole = data.selected_source_role;
+        showSelectedTone3000Capture(selectedTone3000Capture);
+      }
+      const assistantContent = data.recipe
+        ? `${data.reply}\n\n${data.recipe.explanation}`
+        : data.reply;
+      const researchWarning = (data.research_warnings || []).length
+        ? `\n\nResearch note: ${data.research_warnings.join(" ")}`
+        : "";
+      const tone3000Candidates = (data.tone3000_results || []).length
+        ? `\n\nTONE3000 capture candidates:\n${data.tone3000_results.map((match) => (
+          `- ${match.title} — ${match.creator}${match.query ? ` (searched: ${match.query})` : ""}`
+        )).join("\n")}`
+        : "";
+      recipeConversationHistory.push({ role: "user", content: prompt }, { role: "assistant", content: assistantContent });
+      recipeConversationHistory = recipeConversationHistory.slice(-8);
+      addRecipeConversationMessage("assistant", assistantContent + tone3000Candidates + researchWarning);
+      if ((data.tone3000_results || []).length) appendTone3000DiscussButtonsToLastMessage(data.tone3000_results);
+      if (data.recipe) applyRecipe(data.recipe, "", { showMessage: false });
+      recipePromptInput.value = "";
+      return;
+    } catch (_error) {
+      prefix = "Local AI was unavailable, so the built-in suggestion was used. ";
+    } finally {
+      recipePromptApplyButton.disabled = false;
+    }
+  }
+  if (!promptWasAdded) addRecipeConversationMessage("user", prompt);
+  applyRecipe(recipe, prefix);
+  recipePromptInput.value = "";
+}
+
+recipePromptApplyButton.addEventListener("click", () => { applyRecipeFromPrompt(); });
+recipePromptInput.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); applyRecipeFromPrompt(); }
+});
+recipeConversationResetButton.addEventListener("click", () => {
+  recipeConversationHistory = [];
+  recipeSourcePlan = null;
+  recipeResult.replaceChildren();
+  recipeResult.hidden = true;
+  recipeConversationResetButton.hidden = true;
+  recipeSaveMarkdownButton.hidden = true;
+  recipePromptInput.focus();
+});
+recipeSaveMarkdownButton.addEventListener("click", () => {
+  const messages = [...recipeResult.querySelectorAll(".recipe-message")].reverse();
+  const markdown = [
+    "# NAM Mixer AI Assistant conversation",
+    "",
+    ...messages.flatMap((message) => [
+      `## ${message.classList.contains("recipe-message-user") ? "You" : "AI Assistant"}`,
+      "",
+      message.dataset.markdown.trim(),
+      "",
+    ]),
+  ].join("\n");
+  const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "nam-mixer-ai-conversation.md";
+  link.click();
+  URL.revokeObjectURL(url);
+});
 
 wizardAnalyseButton.addEventListener("click", async () => {
   wizardResult.hidden = false;
@@ -2782,9 +3106,16 @@ updateBackendPanels();
 
 // ---- NAM Tools: all file writes happen through the server's strict
 // approved-path validator; this UI only selects an app-managed source NAM. ----
+const builderTab = document.getElementById("tab-builder");
 const toolsTab = document.getElementById("tab-tools");
 const toolsPanel = document.getElementById("nam-tools-panel");
 const sessionsTab = document.getElementById("tab-sessions");
+const tone3000Tab = document.getElementById("tab-tone3000");
+const tone3000Panel = document.getElementById("tone3000-panel");
+const aiAssistantTab = document.getElementById("tab-ai-assistant");
+const aiAssistantPanel = document.getElementById("ai-assistant-panel");
+const wizardTab = document.getElementById("tab-wizard");
+const wizardPanel = document.getElementById("wizard-panel");
 const toolEditors = document.getElementById("tool-editors");
 const toolInfo = document.getElementById("tool-nam-info");
 const toolResult = document.getElementById("tool-result");
@@ -2796,17 +3127,32 @@ const toolVolumeValue = document.getElementById("tool-volume-value");
 const toolVolumeBaseline = document.getElementById("tool-volume-baseline");
 const toolCalibrationStatus = document.getElementById("tool-calibration-status");
 
+function setBuilderTabActive(active) {
+  builderTab.classList.toggle("active", active);
+  builderTab.setAttribute("aria-pressed", active ? "true" : "false");
+}
+
 function setToolsOpen(open) {
   toolsPanel.hidden = !open;
   if (open) {
     sessionsPanel.hidden = true;
     sessionsTab.classList.remove("active");
     sessionsTab.setAttribute("aria-pressed", "false");
+    aiAssistantPanel.hidden = true;
+    aiAssistantTab.classList.remove("active");
+    aiAssistantTab.setAttribute("aria-pressed", "false");
+    wizardPanel.hidden = true;
+    wizardTab.classList.remove("active");
+    wizardTab.setAttribute("aria-pressed", "false");
+    tone3000Panel.hidden = true;
+    tone3000Tab.classList.remove("active");
+    tone3000Tab.setAttribute("aria-pressed", "false");
   }
-  document.querySelectorAll(".workflow-nav, .tone-wizard, .layout").forEach((el) => { el.hidden = open; });
+  document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
   toolsTab.classList.toggle("active", open);
   toolsTab.setAttribute("aria-pressed", open ? "true" : "false");
+  setBuilderTabActive(!open);
 }
 function setSessionsOpen(open) {
   sessionsPanel.hidden = !open;
@@ -2814,11 +3160,81 @@ function setSessionsOpen(open) {
     toolsPanel.hidden = true;
     toolsTab.classList.remove("active");
     toolsTab.setAttribute("aria-pressed", "false");
+    aiAssistantPanel.hidden = true;
+    aiAssistantTab.classList.remove("active");
+    aiAssistantTab.setAttribute("aria-pressed", "false");
+    wizardPanel.hidden = true;
+    wizardTab.classList.remove("active");
+    wizardTab.setAttribute("aria-pressed", "false");
+    tone3000Panel.hidden = true;
+    tone3000Tab.classList.remove("active");
+    tone3000Tab.setAttribute("aria-pressed", "false");
   }
-  document.querySelectorAll(".workflow-nav, .tone-wizard, .layout").forEach((el) => { el.hidden = open; });
+  document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
   document.getElementById("mode-description").hidden = open;
   sessionsTab.classList.toggle("active", open);
   sessionsTab.setAttribute("aria-pressed", open ? "true" : "false");
+  setBuilderTabActive(!open);
+}
+function setAiAssistantOpen(open) {
+  aiAssistantPanel.hidden = !open;
+  if (open) {
+    toolsPanel.hidden = true;
+    sessionsPanel.hidden = true;
+    wizardPanel.hidden = true;
+    tone3000Panel.hidden = true;
+    toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
+    sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
+    wizardTab.classList.remove("active"); wizardTab.setAttribute("aria-pressed", "false");
+    tone3000Tab.classList.remove("active"); tone3000Tab.setAttribute("aria-pressed", "false");
+  }
+  document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
+  document.getElementById("mode-description").hidden = open;
+  aiAssistantTab.classList.toggle("active", open);
+  aiAssistantTab.setAttribute("aria-pressed", open ? "true" : "false");
+  setBuilderTabActive(!open);
+}
+function setWizardOpen(open) {
+  wizardPanel.hidden = !open;
+  if (open) {
+    wizardInstrument.value = instrumentSelect.value;
+    populateWizardProfiles();
+    toolsPanel.hidden = true;
+    sessionsPanel.hidden = true;
+    aiAssistantPanel.hidden = true;
+    tone3000Panel.hidden = true;
+    toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
+    sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
+    aiAssistantTab.classList.remove("active"); aiAssistantTab.setAttribute("aria-pressed", "false");
+    tone3000Tab.classList.remove("active"); tone3000Tab.setAttribute("aria-pressed", "false");
+  }
+  document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
+  document.getElementById("mode-description").hidden = open;
+  wizardTab.classList.toggle("active", open);
+  wizardTab.setAttribute("aria-pressed", open ? "true" : "false");
+  setBuilderTabActive(!open);
+}
+function setTone3000Open(open) {
+  tone3000Panel.hidden = !open;
+  if (open) {
+    toolsPanel.hidden = true; sessionsPanel.hidden = true; aiAssistantPanel.hidden = true; wizardPanel.hidden = true;
+    toolsTab.classList.remove("active"); toolsTab.setAttribute("aria-pressed", "false");
+    sessionsTab.classList.remove("active"); sessionsTab.setAttribute("aria-pressed", "false");
+    aiAssistantTab.classList.remove("active"); aiAssistantTab.setAttribute("aria-pressed", "false");
+    wizardTab.classList.remove("active"); wizardTab.setAttribute("aria-pressed", "false");
+  }
+  document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = open; });
+  document.getElementById("mode-description").hidden = open;
+  tone3000Tab.classList.toggle("active", open);
+  tone3000Tab.setAttribute("aria-pressed", open ? "true" : "false");
+  setBuilderTabActive(!open);
+}
+function setBuilderOpen() {
+  setToolsOpen(false);
+  setSessionsOpen(false);
+  setAiAssistantOpen(false);
+  setWizardOpen(false);
+  setTone3000Open(false);
 }
 function showToolResult(data) {
   toolResult.hidden = false;
@@ -2867,6 +3283,116 @@ async function setToolNam(data, label) {
 }
 toolsTab.addEventListener("click", () => setToolsOpen(true));
 document.getElementById("btn-close-tools").addEventListener("click", () => setToolsOpen(false));
+builderTab.addEventListener("click", () => setBuilderOpen());
+tone3000Tab.addEventListener("click", () => setTone3000Open(true));
+document.getElementById("btn-close-tone3000").addEventListener("click", () => setTone3000Open(false));
+const tone3000Query = document.getElementById("tone3000-query");
+const tone3000RigScope = document.getElementById("tone3000-rig-scope");
+const tone3000Author = document.getElementById("tone3000-author");
+const tone3000Status = document.getElementById("tone3000-status");
+const tone3000Results = document.getElementById("tone3000-results");
+
+function createTone3000DiscussButton(result, onError) {
+  const discuss = document.createElement("button");
+  discuss.type = "button"; discuss.className = "btn btn-secondary btn-small"; discuss.textContent = "See files / ask AI which to use";
+  discuss.addEventListener("click", async () => {
+    discuss.disabled = true;
+    discuss.textContent = "Loading pack…";
+    try {
+      const packResponse = await fetch(`/api/tone3000/tones/${encodeURIComponent(result.id)}/models`);
+      const pack = await packResponse.json();
+      if (!packResponse.ok) throw new Error(pack.error || "Could not load this TONE3000 pack");
+      showSelectedTone3000Capture({ ...result, models: pack.models });
+      setAiAssistantOpen(true);
+      recipePromptInput.value = pack.models.length > 1
+        ? "This TONE3000 pack has several NAM files. Which specific one should I use for my tone, and should it be Amp A or Amp B?"
+        : "Should this TONE3000 file be Amp A or Amp B for my tone?";
+      recipePromptInput.focus();
+    } catch (error) {
+      if (onError) onError(error.message);
+    } finally {
+      discuss.disabled = false;
+      discuss.textContent = "See files / ask AI which to use";
+    }
+  });
+  return discuss;
+}
+
+function showSelectedTone3000Capture(capture) {
+  selectedTone3000Capture = capture;
+  aiTone3000Context.hidden = false;
+  aiTone3000Context.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "Discussing: " + capture.title;
+  const note = document.createElement("p");
+  note.textContent = "The AI can recommend a specific NAM file below. Download any file directly when you are ready.";
+  if (capture.sourceRole) {
+    const role = document.createElement("p");
+    role.className = "info";
+    role.textContent = `Assigned role: Amp ${capture.sourceRole.toUpperCase()} (${capture.sourceRole === "a" ? "clean/foundation" : "driven"} source).`;
+    aiTone3000Context.append(heading, note, role);
+  }
+  const fileDetails = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = `${capture.models.length} NAM file${capture.models.length === 1 ? "" : "s"} ready to download`;
+  const models = document.createElement("div");
+  models.className = "ai-tone3000-models";
+  capture.models.forEach((model) => {
+    const download = document.createElement("a");
+    download.className = "btn btn-secondary btn-small";
+    download.href = `/api/tone3000/tones/${encodeURIComponent(capture.id)}/models/${encodeURIComponent(model.id)}/download`;
+    download.download = model.name;
+    download.textContent = "Download " + model.name;
+    models.append(download);
+  });
+  fileDetails.append(summary, models);
+  const clear = document.createElement("button");
+  clear.type = "button"; clear.className = "btn btn-secondary btn-small"; clear.textContent = "Stop discussing this pack";
+  clear.addEventListener("click", () => { selectedTone3000Capture = null; aiTone3000Context.hidden = true; });
+  if (!capture.sourceRole) aiTone3000Context.append(heading, note);
+  aiTone3000Context.append(fileDetails, clear);
+}
+
+document.getElementById("btn-tone3000-search").addEventListener("click", async () => {
+  const query = tone3000Query.value.trim();
+  if (!query) { tone3000Status.textContent = "Enter an amp or tone to search for."; return; }
+  tone3000Status.textContent = "Searching TONE3000…";
+  tone3000Results.hidden = true;
+  tone3000Results.replaceChildren();
+  try {
+    const response = await fetch("/api/tone3000/search", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, rig_scope: tone3000RigScope.value, author: tone3000Author.value.trim() }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "TONE3000 search failed");
+    data.results.forEach((result) => {
+      const card = document.createElement("article");
+      card.className = "tone3000-result";
+      const heading = document.createElement("h3");
+      heading.textContent = result.title;
+      const meta = document.createElement("p");
+      meta.textContent = "By " + result.creator + (Number.isFinite(result.match_score) ? ` · ${result.match_score}% metadata fit` : "");
+      const description = document.createElement("p");
+      description.textContent = result.description || "No description supplied.";
+      if (result.match_reason) description.title = result.match_reason;
+      const discuss = createTone3000DiscussButton(result, (message) => { tone3000Status.textContent = message; });
+      card.append(heading, meta, description, discuss);
+      tone3000Results.append(card);
+    });
+    tone3000Results.hidden = false;
+    tone3000Status.textContent = data.results.length + " capture" + (data.results.length === 1 ? "" : "s") + " found.";
+  } catch (error) {
+    tone3000Status.textContent = error.message;
+  }
+});
+aiAssistantTab.addEventListener("click", () => {
+  setAiAssistantOpen(true);
+  recipePromptInput.focus();
+});
+document.getElementById("btn-close-ai-assistant").addEventListener("click", () => setAiAssistantOpen(false));
+wizardTab.addEventListener("click", () => setWizardOpen(true));
+document.getElementById("btn-close-wizard").addEventListener("click", () => setWizardOpen(false));
 document.getElementById("btn-tool-upload").addEventListener("click", async () => {
   const file = document.getElementById("tool-nam-file").files[0];
   if (!file) { toolInfo.textContent = "Choose a .nam file first."; return; }

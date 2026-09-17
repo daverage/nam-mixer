@@ -127,7 +127,7 @@ never wire it to a user-facing control; use `input_profile_gain_db` on
 
 ```bash
 pip install -r requirements.txt   # flask, numpy, scipy, soundfile, pytest -- no torch here, see below
-python app.py                     # runs Flask dev server on http://127.0.0.1:5000/
+python app.py                     # runs Flask dev server on http://127.0.0.1:5001/ (not 5000 -- see AirPlay note in app.py)
 python -m pytest tests/           # full test suite
 python -m pytest tests/test_blend.py           # single test file
 python -m pytest tests/test_blend.py::test_name -v  # single test

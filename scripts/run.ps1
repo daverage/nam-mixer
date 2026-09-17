@@ -9,6 +9,20 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
+# Load machine-local settings (such as the optional Ollama recipe assistant).
+# Existing PowerShell environment variables take priority over .env values.
+if (Test-Path ".env") {
+    Get-Content ".env" | ForEach-Object {
+        if ($_ -match '^\s*([^#\s][^=\s]*)\s*=\s*(.*?)\s*$') {
+            $Name = $Matches[1]
+            $Value = $Matches[2].Trim('"').Trim("'")
+            if (-not (Test-Path "Env:$Name")) {
+                Set-Item -Path "Env:$Name" -Value $Value
+            }
+        }
+    }
+}
+
 if (-not (Test-Path ".venv")) {
     Write-Host "Creating .venv..."
     python -m venv .venv
