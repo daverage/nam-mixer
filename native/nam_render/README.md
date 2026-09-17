@@ -59,7 +59,7 @@ cmake -S . -B build
 cmake --build build --target nam_render
 cmake -S . -B build-sequential -DNAMCORE_GIT_TAG=2563c0fd4cb1f9ce457d89a761738ea15097e1f3
 cmake --build build-sequential --target nam_render
-NAM_RENDER_BASELINE=build/nam_render NAM_RENDER_SEQUENTIAL=build-sequential/nam_render \
+NAM_RENDER_BASELINE=build/nam_render NAM_RENDER_SEQUENTIAL_EXE=build-sequential/nam_render \
   python -m pytest tests/test_namcore_sequential_gate.py -q
 ```
 

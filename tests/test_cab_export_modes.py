@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,7 +10,7 @@ from hybrid.cab_ir import (
     PREPARATION_TRIM_INITIAL_SILENCE, get_frozen_prepared_cab_ir,
     load_and_prepare_cab_ir,
 )
-from hybrid.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential
+from hybrid.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential, package_embedded_artifacts
 from hybrid.render import NamRenderError, find_sequential_nam_render_exe
 
 
@@ -101,3 +102,15 @@ def test_embedded_validator_requires_explicit_sequential_renderer(monkeypatch):
     monkeypatch.delenv("NAM_RENDER_SEQUENTIAL_EXE", raising=False)
     with pytest.raises(NamRenderError, match="NAM_RENDER_SEQUENTIAL_EXE"):
         find_sequential_nam_render_exe()
+
+
+def test_local_and_kaggle_completion_share_canonical_embedded_package(tmp_path):
+    import soundfile as sf
+    head = _a2_head(); head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(head))
+    ir_path = tmp_path / "source.wav"; sf.write(ir_path, np.array([1., .25], dtype=np.float32), 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    cab = CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256)
+    local = package_embedded_artifacts(head_path, tmp_path / "local", cab, sample_rate=48000, final_scalar=.8)
+    kaggle = package_embedded_artifacts(head_path, tmp_path / "kaggle", cab, sample_rate=48000, final_scalar=.8)
+    assert json.loads(Path(local["sequential_nam_path"]).read_text()) == json.loads(Path(kaggle["sequential_nam_path"]).read_text())
+    assert local["linear_weights_sha256"] == kaggle["linear_weights_sha256"]

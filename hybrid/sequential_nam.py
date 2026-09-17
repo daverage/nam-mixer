@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import soundfile as sf
+
+from .cab_ir import CabDesign, get_frozen_prepared_cab_ir
 
 
 class SequentialNamError(ValueError):
@@ -117,3 +120,21 @@ def package_embedded_sequential(head_nam_path: str | Path, destination: str | Pa
     with open(destination, "w", encoding="utf-8") as f:
         json.dump(sequential, f, separators=(",", ":"))
     return {**record, "head_nam_path": str(head_nam_path), "sequential_nam_path": str(destination)}
+
+
+def package_embedded_artifacts(head_nam_path: str | Path, output_dir: str | Path, cab: CabDesign, *,
+                               sample_rate: int, final_scalar: float, stem: str = "model") -> dict[str, Any]:
+    """Backend-neutral local/Kaggle completion step. The unmodified head is
+    retained; the prepared, unscaled IR WAV is reusable; only the experimental
+    Sequential NAM receives the final scalar in its Linear taps."""
+    prepared = get_frozen_prepared_cab_ir(cab, sample_rate)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ir_path = output_dir / f"{stem}-prepared-cab.wav"
+    sf.write(ir_path, prepared.samples, sample_rate, subtype="FLOAT")
+    sequential_path = output_dir / f"{stem}-embedded-experimental.nam"
+    record = package_embedded_sequential(head_nam_path, sequential_path, prepared.samples,
+                                         sample_rate=sample_rate, final_scalar=final_scalar)
+    return {**record, "prepared_ir_path": str(ir_path), "prepared_ir_sha256": weights_sha256(prepared.samples),
+            "source_ir_sha256": cab.sha256, "prepared_ir_sample_rate": sample_rate,
+            "prepared_ir_tap_count": len(prepared.samples)}

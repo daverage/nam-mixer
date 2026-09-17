@@ -2,7 +2,7 @@
 
 Run explicitly with the two renderers built from CMake:
 NAM_RENDER_BASELINE=native/nam_render/build/nam_render \\
-NAM_RENDER_SEQUENTIAL=native/nam_render/build-sequential/nam_render \\
+NAM_RENDER_SEQUENTIAL_EXE=native/nam_render/build-sequential/nam_render \\
 python -m pytest tests/test_namcore_sequential_gate.py -q
 """
 from __future__ import annotations
@@ -20,12 +20,12 @@ from hybrid.sequential_nam import build_embedded_sequential
 
 
 BASELINE = os.environ.get("NAM_RENDER_BASELINE")
-SEQUENTIAL = os.environ.get("NAM_RENDER_SEQUENTIAL")
+SEQUENTIAL = os.environ.get("NAM_RENDER_SEQUENTIAL_EXE")
 
 
 def _require_renderers() -> tuple[Path, Path]:
     if not BASELINE or not SEQUENTIAL:
-        pytest.skip("set NAM_RENDER_BASELINE and NAM_RENDER_SEQUENTIAL to run the native Sequential gate")
+        pytest.skip("set NAM_RENDER_BASELINE and NAM_RENDER_SEQUENTIAL_EXE to run the native Sequential gate")
     return Path(BASELINE), Path(SEQUENTIAL)
 
 
