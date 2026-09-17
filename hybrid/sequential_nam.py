@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -131,10 +133,40 @@ def package_embedded_artifacts(head_nam_path: str | Path, output_dir: str | Path
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     ir_path = output_dir / f"{stem}-prepared-cab.wav"
-    sf.write(ir_path, prepared.samples, sample_rate, subtype="FLOAT")
     sequential_path = output_dir / f"{stem}-embedded-experimental.nam"
-    record = package_embedded_sequential(head_nam_path, sequential_path, prepared.samples,
-                                         sample_rate=sample_rate, final_scalar=final_scalar)
-    return {**record, "prepared_ir_path": str(ir_path), "prepared_ir_sha256": weights_sha256(prepared.samples),
-            "source_ir_sha256": cab.sha256, "prepared_ir_sample_rate": sample_rate,
-            "prepared_ir_tap_count": len(prepared.samples)}
+    token = uuid.uuid4().hex
+    ir_tmp = output_dir / f".{ir_path.name}.{token}.tmp"
+    nam_tmp = output_dir / f".{sequential_path.name}.{token}.tmp"
+    try:
+        # soundfile closes/flushed by its context internally; reopen below is
+        # deliberate validation before either visible filename is promoted.
+        sf.write(ir_tmp, prepared.samples, sample_rate, subtype="FLOAT", format="WAV")
+        decoded, decoded_rate = sf.read(ir_tmp, dtype="float32", always_2d=False)
+        if decoded_rate != sample_rate or decoded.ndim != 1 or not len(decoded) or not np.all(np.isfinite(decoded)):
+            raise SequentialNamError("prepared IR temporary WAV failed validation")
+        if not np.array_equal(decoded, prepared.samples):
+            raise SequentialNamError("prepared IR WAV does not round-trip its frozen float32 taps")
+        with open(head_nam_path, encoding="utf-8") as f:
+            head = json.load(f)
+        sequential, record = build_embedded_sequential(head, prepared.samples, sample_rate=sample_rate,
+                                                        final_scalar=final_scalar)
+        with open(nam_tmp, "w", encoding="utf-8") as f:
+            json.dump(sequential, f, separators=(",", ":"), allow_nan=False)
+            f.flush(); os.fsync(f.fileno())
+        reopened = json.loads(nam_tmp.read_text(encoding="utf-8"))
+        children = (reopened.get("config") or {}).get("models")
+        if reopened.get("architecture") != "Sequential" or not isinstance(children, list) or len(children) != 2 or children[0].get("architecture") != "WaveNet" or children[1].get("architecture") != "Linear":
+            raise SequentialNamError("temporary Sequential NAM failed structure validation")
+        os.replace(ir_tmp, ir_path)
+        os.replace(nam_tmp, sequential_path)
+    except Exception:
+        ir_tmp.unlink(missing_ok=True); nam_tmp.unlink(missing_ok=True)
+        raise
+    file_sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
+    return {**record, "prepared_ir_path": str(ir_path), "sequential_nam_path": str(sequential_path),
+            "source_ir_file_sha256": cab.sha256, "prepared_ir_taps_sha256": weights_sha256(prepared.samples),
+            "prepared_ir_file_sha256": file_sha(ir_path), "linear_weights_sha256": record["linear_weights_sha256"],
+            "sequential_nam_file_sha256": file_sha(sequential_path), "head_nam_file_sha256": file_sha(head_nam_path),
+            # Legacy aliases, explicitly retained for old sessions.
+            "prepared_ir_sha256": weights_sha256(prepared.samples), "source_ir_sha256": cab.sha256,
+            "prepared_ir_sample_rate": sample_rate, "prepared_ir_tap_count": len(prepared.samples)}
