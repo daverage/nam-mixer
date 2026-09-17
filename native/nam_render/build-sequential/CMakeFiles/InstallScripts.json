@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

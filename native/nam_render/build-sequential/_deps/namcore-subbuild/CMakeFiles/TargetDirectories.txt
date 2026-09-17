@@ -1,3 +1,0 @@
-/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/CMakeFiles/namcore-populate.dir
-/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/CMakeFiles/edit_cache.dir
-/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/CMakeFiles/rebuild_cache.dir
