@@ -47,6 +47,7 @@ import numpy as np
 
 from .a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from .character_training_target import check_export_low_level_response
+from .embedded_completion import complete_embedded_artifact
 from .nam_loader import load_nam
 from .render import NamRenderError, render
 from .validation import compute_esr_metrics
@@ -505,6 +506,7 @@ class KaggleJob:
     output_nam_sha256: Optional[str] = None
     training_result: Optional[dict] = None
     local_validation: Optional[dict] = None
+    embedded_artifact: Optional[dict] = None
     error: Optional[str] = None
     cleanup_state: Optional[str] = None
     cleanup_error: Optional[str] = None
@@ -1211,6 +1213,11 @@ class KaggleJobManager:
 
         job.local_validation = validation
         job.output_nam_sha256 = validation["sha256"]
+        embedded = ((bundle_manifest or {}).get("output_gain") or {}).get("embedded_final") or {}
+        job.embedded_artifact = complete_embedded_artifact(
+            bundle_manifest or {}, nam_path, nam_path.parent,
+            sample_rate=int(validation["sample_rate"]), final_scalar=float(embedded.get("final_linear_scalar", 1.0)),
+        )
         job.state = "complete"
         save_job(self.a2_output_dir, job)
 
