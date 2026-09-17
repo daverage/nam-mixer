@@ -130,6 +130,20 @@ def test_cab_design_from_prepared_records_fir_history_samples(tmp_path):
     assert design.sha256 == prepared.sha256
 
 
+def test_cab_design_display_name_defaults_to_none_and_round_trips(tmp_path):
+    ir_path = _write_wav(tmp_path / "ir.wav", np.random.default_rng(5).uniform(-1, 1, 250))
+    prepared = load_and_prepare_cab_ir(ir_path, target_sample_rate=48000)
+    design = cab_design_from_prepared(prepared, original_filename="ir.wav", preview_enabled=True, baked=True)
+    assert design.display_name is None
+
+    named = cab_design_from_prepared(
+        prepared, original_filename="ir.wav", preview_enabled=True, baked=True,
+        display_name="Modern Boutique 4x12",
+    )
+    assert named.display_name == "Modern Boutique 4x12"
+    assert named.to_dict()["display_name"] == "Modern Boutique 4x12"
+
+
 # -- Cabinet energy diagnostics -- docs/blend-mode.md "CABINET ENERGY ANALYSIS" ---
 # Purely informational: must never alter the actual FIR taps/convolution.
 

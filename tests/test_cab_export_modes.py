@@ -19,7 +19,7 @@ def _a2_head(sample_rate=48000):
     def wave(label):
         return {"version": "0.7.0", "architecture": "WaveNet", "config": {"label": label}, "weights": [1], "sample_rate": sample_rate}
     return {"version": "0.7.0", "architecture": "SlimmableContainer", "config": {"submodels": [
-        {"max_value": .5, "model": wave("full")}, {"max_value": 1.0, "model": wave("lite")}
+        {"max_value": .5, "model": wave("lite")}, {"max_value": 1.0, "model": wave("full")}
     ]}, "weights": [], "sample_rate": sample_rate}
 
 
@@ -64,9 +64,24 @@ def test_frozen_ir_hash_mismatch_is_rejected(tmp_path):
 
 def test_canonical_embedded_sequential_preserves_complete_head_and_tap_order(tmp_path):
     head = _a2_head()
+    full = head["config"]["submodels"][1]["model"]
+    full["metadata"] = {"name": "Modern Boutique", "input_level_dbu": -12.0, "gain": .3548}
     taps = np.array([1.0, -.25, .5], dtype=np.float32)
-    package, record = build_embedded_sequential(head, taps, sample_rate=48000, final_scalar=.5)
-    assert package["config"]["models"][0] is head["config"]["submodels"][0]["model"]
+    package, record = build_embedded_sequential(
+        head, taps, sample_rate=48000, final_scalar=.5,
+        cabinet_name="Modern Boutique 4x12", loudness=-12.3,
+    )
+    assert package["config"]["models"][0] is head["config"]["submodels"][1]["model"]
+    assert package["config"]["models"][0]["config"]["label"] == "full"
+    metadata = package["metadata"]
+    assert metadata["gear_type"] == "amp_cab"
+    assert metadata["modeled_by"] == "NAM Mixer"
+    assert metadata["name"] == "Modern Boutique + Modern Boutique 4x12 [Embedded Cab · Full]"
+    assert metadata["input_level_dbu"] == -12.0
+    assert metadata["output_level_dbu"] is None
+    assert metadata["loudness"] == -12.3
+    assert metadata["gain"] == .3548
+    assert set(metadata["date"]) == {"year", "month", "day", "hour", "minute", "second"}
     linear = package["config"]["models"][1]
     assert linear["config"]["receptive_field"] == 3
     assert linear["weights"] == pytest.approx([.5, -.125, .25])
@@ -140,7 +155,13 @@ def test_local_and_kaggle_completion_share_canonical_embedded_package(tmp_path):
     cab = CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256)
     local = package_embedded_artifacts(head_path, tmp_path / "local", cab, sample_rate=48000, final_scalar=.8)
     kaggle = package_embedded_artifacts(head_path, tmp_path / "kaggle", cab, sample_rate=48000, final_scalar=.8)
-    assert json.loads(Path(local["sequential_nam_path"]).read_text()) == json.loads(Path(kaggle["sequential_nam_path"]).read_text())
+    local_model = json.loads(Path(local["sequential_nam_path"]).read_text())
+    kaggle_model = json.loads(Path(kaggle["sequential_nam_path"]).read_text())
+    # Packaging timestamps legitimately differ while all audio/model content
+    # must remain identical between the local and Kaggle paths.
+    local_model["metadata"].pop("date")
+    kaggle_model["metadata"].pop("date")
+    assert local_model == kaggle_model
     assert local["linear_weights_sha256"] == kaggle["linear_weights_sha256"]
 
 

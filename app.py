@@ -61,6 +61,11 @@ from hybrid.kaggle_training import (
 from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
 from hybrid.local_llm import LocalConversationReply, LocalLlmError, converse as converse_with_local_llm, status as local_llm_status
+from hybrid.ollama_pull import (
+    OllamaPullError,
+    get_pull_status as get_ollama_pull_status,
+    start_pull as start_ollama_pull,
+)
 from hybrid.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
 from hybrid.nam_loader import load_nam
 from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
@@ -293,6 +298,26 @@ def api_settings_save():
 def api_local_llm_status():
     """Expose configuration only; browser input can never choose the URL."""
     return jsonify(local_llm_status())
+
+
+@app.post("/api/local_llm/pull")
+def api_local_llm_pull():
+    """Start a background `ollama pull` of the recommended local model (or a
+    caller-specified one) -- see hybrid/ollama_pull.py. Any OpenAI-compatible
+    local host works with the AI Assistant tab; this is just the one-click
+    path for someone who doesn't already have a model running."""
+    data = request.get_json(silent=True) or {}
+    model = str(data.get("model") or "").strip() or None
+    try:
+        state = start_ollama_pull(model)
+    except OllamaPullError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 200
+    return jsonify({"ok": True, **state})
+
+
+@app.get("/api/local_llm/pull_status")
+def api_local_llm_pull_status():
+    return jsonify(get_ollama_pull_status())
 
 
 @app.post("/api/local_llm/recipe")
@@ -1127,10 +1152,11 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     preparation_mode = data.get("cab_preparation_mode", "trim_initial_silence")
     threshold = float(data.get("cab_leading_silence_threshold_db", -40.0))
     prepared = get_prepared_cab_ir(cab_path, pair_sample_rate, threshold, preparation_mode)
+    display_name = str(data.get("cab_display_name") or "").strip() or None
     return cab_design_from_prepared(
         prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled,
         baked=legacy_baked, export_mode=export_mode, preparation_mode=preparation_mode,
-        leading_silence_threshold_db=threshold,
+        leading_silence_threshold_db=threshold, display_name=display_name,
     )
 
 

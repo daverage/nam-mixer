@@ -341,6 +341,11 @@ class CabDesign:
     selected: bool = False
     ir_working_path: Optional[str] = None
     original_filename: Optional[str] = None
+    # User-editable label shown in a learned/embedded export's name (e.g.
+    # "Modern Boutique 4x12") -- the only cabinet field a user may edit; see
+    # hybrid/nam_provenance.py's build_export_name. Falls back to
+    # `original_filename` when blank, never auto-derived from IR content.
+    display_name: Optional[str] = None
     sha256: Optional[str] = None
     preview_enabled: bool = False
     # `export_mode` supersedes the old binary `baked` flag.  Keep `baked` as
@@ -411,12 +416,14 @@ def cab_design_from_prepared(
     export_mode: Optional[str] = None,
     preparation_mode: str = PREPARATION_TRIM_INITIAL_SILENCE,
     leading_silence_threshold_db: float = LEADING_SILENCE_THRESHOLD_RELATIVE_DB,
+    display_name: Optional[str] = None,
 ) -> CabDesign:
     fir_history_samples = max(0, prepared.prepared_frame_count - 1)
     return CabDesign(
         selected=True,
         ir_working_path=prepared.source_path,
         original_filename=original_filename,
+        display_name=display_name,
         sha256=prepared.sha256,
         preview_enabled=preview_enabled,
         export_mode=export_mode or (EXPORT_MODE_LEARNED if baked else EXPORT_MODE_NONE),

@@ -107,9 +107,22 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     `UserMetadata(**user_metadata_kwargs(manifest))` themselves, after
     importing `nam.models.metadata` in their own environment.
 
-    Deliberately omits gear_type/tone_type/output_level_dbu semantics that
-    require the nam package's own enums -- callers that want GearType.AMP set
-    it themselves; this only supplies the plain string/number/None fields.
+    Deliberately omits output_level_dbu semantics that require the nam
+    package's own enums -- see scripts/train_a2.py's _build_user_metadata
+    docstring for why. `tone_type` IS included here as a plain string (or
+    omitted/None); callers using the real nam package must resolve it
+    against nam.models.metadata.ToneType themselves before constructing
+    UserMetadata, exactly like they already do for gear_type -- see
+    scripts/train_a2.py's _build_user_metadata.
+
+    Suffix/gear_type-adjacent naming logic here is intentionally duplicated
+    literally in cloud/kaggle/train_a2_cloud.py's copy of this function
+    (that module cannot import hybrid/nam_provenance.py -- it runs
+    self-contained inside a Kaggle kernel with no hybrid package installed)
+    rather than imported from hybrid/nam_provenance.py, so both copies stay
+    exactly the shape tests/test_a2_training_settings.py's parity test
+    checks. hybrid/nam_provenance.py's TONE_TYPES/SUFFIX_* constants are the
+    canonical reference for what "identical logic" means here.
     """
     from pathlib import Path
 
@@ -134,8 +147,35 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     # `model_name` is supplied by the builder UI/API and is persisted in the
     # manifest.  Prefer it for the name displayed by NAM tools; retain the
-    # source-model-derived fallback for legacy manifests.
-    model_name = str(manifest.get("model_name") or "").strip() or name
+    # source-model-derived fallback for legacy manifests. This is the
+    # user-editable BASE name -- the cabinet clause and technical suffix
+    # below are always appended automatically, never stored back into it.
+    base_name = str(manifest.get("model_name") or "").strip() or name
+
+    # Automatic export-identity suffix -- see the "Design modes" export
+    # table in CLAUDE.md / hybrid/nam_provenance.py. A no-cab and a
+    # learned-cab export are otherwise indistinguishable in a NAM player
+    # (both SlimmableContainer); an embedded export's own SlimmableContainer
+    # head is deliberately left unsuffixed since it isn't the final
+    # deliverable in that mode -- hybrid/sequential_nam.py's packaged
+    # Sequential file carries "[Embedded Cab · Full]" instead.
+    cab = manifest.get("cab") or {}
+    export_mode = cab.get("export_mode") or ("learned" if cab.get("baked") else "none")
+    if export_mode == "learned":
+        cabinet_name = str(cab.get("display_name") or cab.get("original_filename") or "Cabinet").strip()
+        model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
+    elif export_mode == "embedded":
+        model_name = base_name
+    else:
+        model_name = f"{base_name} [Amp Only]"
+
+    # tone_type: copy only when both sources report the IDENTICAL, officially
+    # recognised value -- a clean+hi_gain hybrid is not genuinely either, so
+    # an unset tone_type (left for the user) is the honest default.
+    _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
+    amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
+    amp_b_tone = manifest.get("amp_b", {}).get("tone_type")
+    tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
 
     return {
         "name": model_name,
@@ -143,7 +183,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         # a physical manufacturer/model for a synthetic hybrid; those remain
         # blank for the user to enter in the official metadata editor.
         "modeled_by": "NAM Mixer",
-        # tone_type/output_level_dbu deliberately absent -- see
+        "tone_type": tone_type,
+        # output_level_dbu deliberately absent -- see
         # scripts/train_a2.py's _build_user_metadata docstring for why.
         "input_level_dbu": input_level_dbu,
     }

@@ -2078,6 +2078,7 @@ characterLowLevelBtn.addEventListener("click", async () => {
 
 const generateBtn = document.getElementById("btn-generate");
 const modelNameInput = document.getElementById("model-name");
+const cabDisplayNameInput = document.getElementById("cab-display-name");
 let generationPending = false;
 generateBtn.addEventListener("click", async () => {
   if (generationPending) return;
@@ -2110,6 +2111,7 @@ generateBtn.addEventListener("click", async () => {
         cab_preview_enabled: cabPreviewEnabled.checked,
         cab_export_mode: cabExportMode.value,
         cab_baked: cabExportMode.value === "learned",
+        cab_display_name: cabDisplayNameInput?.value?.trim() || "",
         ...outputGainParamsBody(),
       }),
     });
@@ -3394,6 +3396,9 @@ function renderSettings() {
       if (field.name === "NAM_RENDER_EXE") {
         section.append(renderNamRenderDownloadRow());
       }
+      if (field.name === "NAM_MIXER_LOCAL_LLM_MODEL") {
+        section.append(renderLocalLlmStatusRow());
+      }
     }
     settingsGroups.append(section);
   }
@@ -3426,6 +3431,75 @@ function renderNamRenderDownloadRow() {
     }
   });
   row.append(button, status);
+  return row;
+}
+
+function renderLocalLlmStatusRow() {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row";
+  const status = document.createElement("span");
+  status.className = "info";
+  status.textContent = "Checking whether a local LLM host is reachable…";
+
+  const pullButton = document.createElement("button");
+  pullButton.type = "button";
+  pullButton.className = "btn btn-secondary btn-small";
+  pullButton.textContent = "Pull gemma3:4b via Ollama";
+  pullButton.hidden = true;
+
+  async function refreshStatus() {
+    try {
+      const response = await fetch("/api/local_llm/status");
+      const data = await response.json();
+      if (!data.enabled) {
+        status.textContent = "Not configured -- set a model name above to enable the AI Assistant tab. "
+          + "Any OpenAI-compatible local host works (Ollama, LM Studio, etc.); we recommend Ollama + gemma3:4b "
+          + "if you don't already have one running.";
+        pullButton.hidden = false;
+      } else if (data.reachable) {
+        status.textContent = `Reachable at ${data.base_url} (model: ${data.model}).`;
+        pullButton.hidden = true;
+      } else {
+        status.textContent = `Configured for ${data.base_url}, but nothing responded there. `
+          + "Make sure your local LLM host (Ollama, LM Studio, etc.) is running.";
+        pullButton.hidden = false;
+      }
+    } catch (err) {
+      status.textContent = "Could not check local AI assistant status: " + err;
+    }
+  }
+
+  async function pollPullStatus() {
+    const response = await fetch("/api/local_llm/pull_status");
+    const data = await response.json();
+    if (data.status === "running") {
+      status.textContent = `Pulling ${data.model}… ${(data.log_tail || "").split("\n").slice(-1)[0] || ""}`;
+      setTimeout(pollPullStatus, 1500);
+    } else if (data.status === "done") {
+      status.textContent = `Pulled ${data.model}. Set "Local AI assistant: model name" above to ${data.model} and save.`;
+      pullButton.disabled = false;
+    } else if (data.status === "error") {
+      status.textContent = "Pull failed: " + data.error;
+      pullButton.disabled = false;
+    }
+  }
+
+  pullButton.addEventListener("click", async () => {
+    pullButton.disabled = true;
+    status.textContent = "Starting download…";
+    try {
+      const response = await fetch("/api/local_llm/pull", { method: "POST" });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "pull failed");
+      pollPullStatus();
+    } catch (err) {
+      status.textContent = "Could not start pull: " + err;
+      pullButton.disabled = false;
+    }
+  });
+
+  refreshStatus();
+  row.append(pullButton, status);
   return row;
 }
 

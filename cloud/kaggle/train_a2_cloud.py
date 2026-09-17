@@ -406,10 +406,27 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     else:
         name = f"Hybrid {amp_a_name} -> {amp_b_name}"
 
-    model_name = str(manifest.get("model_name") or "").strip() or name
+    base_name = str(manifest.get("model_name") or "").strip() or name
+
+    cab = manifest.get("cab") or {}
+    export_mode = cab.get("export_mode") or ("learned" if cab.get("baked") else "none")
+    if export_mode == "learned":
+        cabinet_name = str(cab.get("display_name") or cab.get("original_filename") or "Cabinet").strip()
+        model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
+    elif export_mode == "embedded":
+        model_name = base_name
+    else:
+        model_name = f"{base_name} [Amp Only]"
+
+    _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
+    amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
+    amp_b_tone = manifest.get("amp_b", {}).get("tone_type")
+    tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
+
     return {
         "name": model_name,
         "modeled_by": "NAM Mixer",
+        "tone_type": tone_type,
         "input_level_dbu": input_level_dbu,
     }
 
@@ -420,7 +437,7 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
     settings = QUICK_SETTINGS if quick else settings_for_preset(epoch_preset)
 
     import nam.train.core as core
-    from nam.models.metadata import GearType, UserMetadata
+    from nam.models.metadata import GearType, ToneType, UserMetadata
     from nam.train.metadata import TRAINING_KEY
 
     with open(bundle_dir / "training_manifest.json", "r", encoding="utf-8") as f:
@@ -463,7 +480,10 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
             if candidate is not None:
                 gear_type = candidate
                 break
-    user_metadata = UserMetadata(gear_type=gear_type, **user_metadata_kwargs(manifest))
+    kwargs = user_metadata_kwargs(manifest)
+    tone_type_name = kwargs.pop("tone_type", None)
+    tone_type = getattr(ToneType, tone_type_name.upper(), None) if tone_type_name else None
+    user_metadata = UserMetadata(gear_type=gear_type, tone_type=tone_type, **kwargs)
     artifact_stem = str(manifest.get("artifact_stem") or "hybrid_a2")
     result.model.net.export(
         export_dir,

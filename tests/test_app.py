@@ -1209,16 +1209,22 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     resp = client.post("/api/generate", json={
         "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_baked": True,
+        "cab_display_name": "Modern Boutique 4x12", "model_name": "British American High Gain",
     })
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["cab_summary"]["baked"] is True
     assert data["cab_summary"]["sha256"]
+    assert data["cab_summary"]["display_name"] == "Modern Boutique 4x12"
 
     with open(data["manifest_path"]) as f:
         manifest = jsonlib.load(f)
     assert manifest["cab"]["baked"] is True
     assert manifest["cab"]["selected"] is True
+    assert manifest["cab"]["display_name"] == "Modern Boutique 4x12"
+
+    from hybrid.a2_training_settings import user_metadata_kwargs
+    assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
 def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
@@ -1245,6 +1251,27 @@ def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
     # into later tests.
     import os as _os
     _os.environ.pop("NAM_RENDER_EXE", None)
+
+
+def test_local_llm_pull_route_reports_backend_error_as_json(client, monkeypatch):
+    from hybrid.ollama_pull import OllamaPullError
+
+    def fake_start_pull(model=None):
+        raise OllamaPullError("ollama not found")
+
+    monkeypatch.setattr(app_module, "start_ollama_pull", fake_start_pull)
+    resp = client.post("/api/local_llm/pull")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is False
+    assert "ollama not found" in data["error"]
+
+
+def test_local_llm_pull_status_route_returns_current_state(client, monkeypatch):
+    monkeypatch.setattr(app_module, "get_ollama_pull_status", lambda: {"status": "idle", "model": None})
+    resp = client.get("/api/local_llm/pull_status")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "idle"
 
 
 def test_renderer_download_route_reports_backend_error_as_json(client, monkeypatch):

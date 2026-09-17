@@ -26,6 +26,32 @@ def test_local_llm_is_disabled_without_a_model(monkeypatch):
     assert local_llm.status()["enabled"] is False
 
 
+def test_status_reports_reachable_when_host_responds(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "gemma3:4b")
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
+
+    class _Ok(_Response):
+        status = 200
+
+    monkeypatch.setattr(local_llm, "urlopen", lambda *a, **k: _Ok({}))
+    status = local_llm.status()
+    assert status["enabled"] is True
+    assert status["reachable"] is True
+
+
+def test_status_reports_unreachable_when_host_does_not_respond(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "gemma3:4b")
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
+
+    def _raise(*_a, **_k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(local_llm, "urlopen", _raise)
+    status = local_llm.status()
+    assert status["enabled"] is True
+    assert status["reachable"] is False
+
+
 def test_local_llm_accepts_only_a_schema_valid_recipe(monkeypatch):
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "qwen2.5:3b")
     seen = {}

@@ -63,18 +63,22 @@ SETTINGS: tuple[SettingField, ...] = (
     SettingField(
         name="NAM_MIXER_LOCAL_LLM_BASE_URL",
         label="Local AI assistant: base URL",
-        description="OpenAI-compatible endpoint for the optional local recipe assistant "
-                     "(e.g. Ollama, LM Studio). Must be http:// and point at localhost -- "
-                     "never a remote host.",
+        description="Any local LLM host that exposes an OpenAI-compatible /v1 API will work here "
+                     "-- Ollama, LM Studio, llama.cpp server, etc. -- this app has no preference. "
+                     "Must be http:// and point at localhost -- never a remote host. Nothing needs "
+                     "to be running for the rest of the app to work; only the AI Assistant tab uses this.",
         group="AI Assistant",
         placeholder="http://127.0.0.1:11434/v1",
     ),
     SettingField(
         name="NAM_MIXER_LOCAL_LLM_MODEL",
         label="Local AI assistant: model name",
-        description="Model name as known to your local server. Leave blank to disable "
-                     "the AI Assistant tab entirely.",
+        description="Model name as known to your local server. We recommend Google's Gemma "
+                     "(gemma3:4b) as a good balance of speed and quality for this app's recipe "
+                     "suggestions, but any chat-capable model your host serves will work. Leave "
+                     "blank to disable the AI Assistant tab entirely.",
         group="AI Assistant",
+        placeholder="gemma3:4b",
     ),
     SettingField(
         name="NAM_MIXER_LOCAL_LLM_TEMPERATURE",
