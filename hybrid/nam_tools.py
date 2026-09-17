@@ -91,8 +91,22 @@ def find_output_scalers(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
 
 
 def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
-    """Return safe editor data and read-only calibration without model internals."""
-    scalers = find_output_scalers(data)
+    """Return safe editor data and read-only calibration without model internals.
+
+    Volume adjustment and metadata editing are independent features: an
+    architecture find_output_scalers() can't safely handle (e.g.
+    "Sequential", an embedded-cab export -- see hybrid/sequential_nam.py)
+    must not block the metadata editor, which only ever touches the
+    top-level `metadata` object regardless of architecture. Any such
+    failure is reported via `volume_unsupported_reason` instead of raised,
+    so the UI can disable just the volume control and keep the rest working.
+    """
+    try:
+        scalers = find_output_scalers(data)
+        volume_unsupported_reason = None
+    except NamToolError as exc:
+        scalers = []
+        volume_unsupported_reason = str(exc)
     model = NamModel(path=Path("<metadata>"), raw=data)
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     scales = [{"path": path, "value": config["head_scale"]} for path, config in scalers]
@@ -111,6 +125,7 @@ def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
         "metadata": {key: metadata.get(key) for key in EDITABLE_METADATA_FIELDS if key in metadata},
         "read_only_metadata": {key: metadata.get(key) for key in READ_ONLY_METADATA_FIELDS if key in metadata},
         "head_scales": scales,
+        "volume_unsupported_reason": volume_unsupported_reason,
         "loudness_db": loudness,
         "calibration": {
             "input_level_dbu": model.input_level_dbu,

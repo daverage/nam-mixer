@@ -3329,7 +3329,15 @@ async function setToolNam(data, label) {
   toolCalibrationStatus.textContent = calibration.status === "Calibrated NAM"
     ? `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`
     : "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
-  if (toolLoudnessDb !== null) {
+  if (inspection.volume_unsupported_reason) {
+    // e.g. an embedded-cab export's "Sequential" architecture -- see
+    // hybrid/sequential_nam.py. Metadata editing below still works fine;
+    // only the volume slider (which needs a recognised head_scale) is
+    // unavailable for this file.
+    toolVolumeSlider.disabled = true;
+    toolVolumeBaseline.textContent = "Volume adjustment isn't supported for this NAM's architecture "
+      + `(${inspection.architecture || "unknown"}). The metadata editor below still works normally.`;
+  } else if (toolLoudnessDb !== null) {
     toolVolumeSlider.value = Math.max(Number(toolVolumeSlider.min), Math.min(Number(toolVolumeSlider.max), toolLoudnessDb));
     toolVolumeSlider.disabled = false;
     toolVolumeBaseline.textContent = `Current measured loudness: ${toolLoudnessDb.toFixed(1)} dB. Drag to choose the final level.`;

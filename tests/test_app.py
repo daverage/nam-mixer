@@ -607,6 +607,28 @@ def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
     assert edited["metadata"]["gain"] == 3.0
 
 
+def test_nam_tools_inspect_works_for_embedded_cab_sequential_export(client, tmp_path):
+    # Regression test: an embedded-cab export's architecture is "Sequential"
+    # (hybrid/sequential_nam.py), which find_output_scalers() can't find a
+    # head_scale for -- that must not block the metadata editor from
+    # loading at all (it previously raised a hard error, see the NAM Tools
+    # UI bug report this test guards against).
+    source = tmp_path / "model-embedded-experimental.nam"
+    source.write_text(jsonlib.dumps({
+        "architecture": "Sequential",
+        "config": {"models": []},
+        "metadata": {"name": "British American High Gain + Cab", "gear_type": "amp_cab", "loudness": -16.3},
+    }), encoding="utf-8")
+    uploaded = client.post("/api/nam/upload", data={"file": (io.BytesIO(source.read_bytes()), source.name)}).get_json()
+    response = client.post("/api/nam/tools/inspect", json={"path": uploaded["path"]})
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["architecture"] == "Sequential"
+    assert data["head_scales"] == []
+    assert "Sequential" in data["volume_unsupported_reason"]
+    assert data["metadata"]["name"] == "British American High Gain + Cab"
+
+
 def test_wizard_insight_requires_a_rendered_pair(client):
     app_module._rendered_pair_cache["pair"] = None
     resp = client.post("/api/wizard/insight", json={})
