@@ -344,11 +344,10 @@ final-model modes:
   in a Sequential NAM. The unscaled prepared IR WAV is also retained.
 
 Embedded output folds the recorded post-cab safety scalar into the Linear
-weights and is downloadable only after validation using the explicitly
-configured Sequential-capable renderer. It remains experimental because
-Sequential/Linear support currently relies on the pinned upstream NAMCore
-commit described in `native/nam_render/README.md`; hosts that only support
-ordinary NAM A2 should use the learned compatibility option instead.
+weights and is downloadable only after validation using the bundled,
+Sequential-capable renderer. It remains experimental at the host-format level:
+hosts that only support ordinary NAM A2 should use the learned compatibility
+option instead.
 
 **Receptive-field policy: one hard check, two advisory ones.** Amp A/Amp B
 (+, for Hybrid and Character, the bounded crossover envelope) are the CORE
@@ -442,7 +441,12 @@ Requires Xcode's Command Line Tools (`xcode-select --install`) and
 CMake 3.18+. The first build downloads NeuralAmpModelerCore + its
 dependencies (a few hundred MB, one-time):
 
+The normal renderer supports both conventional NAM and canonical
+Sequential/Linear NAM. If you previously built the older renderer, remove
+`native/nam_render/build` first so CMake picks up the new pinned core.
+
 ```bash
+rm -rf native/nam_render/build  # only needed when replacing an older build
 cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
 cmake --build native/nam_render/build --config Release --target nam_render -j 4
 ```
@@ -473,6 +477,7 @@ sudo apt-get update && sudo apt-get install -y build-essential cmake
 Then:
 
 ```bash
+rm -rf native/nam_render/build  # only needed when replacing an older build
 cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
 cmake --build native/nam_render/build --config Release --target nam_render -j "$(nproc)"
 ```
@@ -510,11 +515,13 @@ with C++" workload from the
 (the MSVC toolchain `nam_render` needs), then:
 
 ```powershell
+Remove-Item -Recurse -Force native/nam_render/build  # only needed when replacing an older build
 cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
 cmake --build native/nam_render/build --config Release --target nam_render
 ```
 
-This produces `native/nam_render/build/Release/nam_render.exe`.
+This produces `native/nam_render/build/Release/nam_render.exe`, supporting
+both conventional NAM and Sequential/Linear NAM models.
 
 </details>
 </details>
