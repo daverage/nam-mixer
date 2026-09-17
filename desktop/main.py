@@ -1,4 +1,4 @@
-"""Standalone desktop entry point for Hybrid NAM Builder.
+"""Standalone desktop entry point for NAM Mixer.
 
 Wraps the existing Flask app (app.py) in a native OS window via `pywebview`,
 so the whole tool runs as a single double-clickable app on Windows/macOS/
@@ -40,9 +40,19 @@ def _bundle_dir() -> Path:
     """
     if _is_frozen():
         meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            return Path(meipass)
-        return Path(sys.executable).resolve().parent
+        executable_dir = Path(sys.executable).resolve().parent
+        # A macOS .app stores PyInstaller data resources in
+        # Contents/Resources, rather than alongside the executable in
+        # Contents/MacOS. Windows/Linux --onedir builds keep the latter.
+        mac_resources = executable_dir.parent / "Resources"
+        candidates = ([Path(meipass)] if meipass else []) + [executable_dir, mac_resources]
+        # `_MEIPASS` is not consistently the data-resource directory across
+        # PyInstaller's onedir/onefile/macOS bundle layouts. Prefer the first
+        # candidate that actually contains one of our bundled resources.
+        for candidate in candidates:
+            if (candidate / "nam_render").is_dir() or (candidate / "training_runtime").is_dir():
+                return candidate
+        return candidates[0]
     return Path(__file__).resolve().parent.parent
 
 
@@ -70,11 +80,13 @@ def _user_config_dir() -> Path:
     """
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-        return Path(base) / "HybridNAMBuilder"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "HybridNAMBuilder"
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "hybrid-nam-builder"
+        return Path(base) / "NAMMixer"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+        return base / "NAMMixer"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config"))
+        return base / "nam-mixer"
 
 
 def _configure_env_file() -> None:
@@ -85,6 +97,39 @@ def _configure_env_file() -> None:
     config_dir = _user_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     os.environ["NAM_MIXER_ENV_FILE"] = str(config_dir / ".env")
+
+
+def _configure_runtime_paths() -> None:
+    """Keep mutable desktop data outside the read-only application bundle."""
+    if not _is_frozen():
+        return
+    config_dir = _user_config_dir()
+    data_dir = config_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("NAM_MIXER_DATA_DIR", str(data_dir))
+
+    # The dedicated training sources are bundled as plain files because the
+    # external Python used for A2 training cannot import PyInstaller's PYZ.
+    training_root = _bundle_dir() / "training_runtime"
+    if training_root.is_dir():
+        os.environ.setdefault("NAM_MIXER_TRAINING_ROOT", str(training_root))
+
+
+def _load_saved_desktop_settings() -> None:
+    """Make saved frozen-app settings win over inherited launch variables.
+
+    A desktop app may be started from a terminal, Finder, an IDE, or a
+    launcher.  Its parent environment is therefore not a reliable source of
+    user preferences; in particular a stale TONE3000 key can otherwise mask
+    the key saved in the Settings page.  Only values actually present in the
+    per-user settings file replace inherited values.  Unconfigured settings
+    remain available as normal environment-variable overrides.
+    """
+    from hybrid.env_file import read_saved_env_values
+    from hybrid.settings import SETTINGS
+
+    saved = read_saved_env_values({field.name for field in SETTINGS})
+    os.environ.update(saved)
 
 
 def _free_port() -> int:
@@ -138,6 +183,7 @@ class DesktopApi:
 
 def main() -> int:
     _configure_env_file()
+    _configure_runtime_paths()
 
     # Import app.py lazily, after sys.path includes the repo root when
     # running unfrozen from desktop/, and before configuring NAM_RENDER_EXE
@@ -147,10 +193,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from hybrid.settings import get_settings as _get_settings
-    for field in _get_settings():
-        if field["value"]:
-            os.environ.setdefault(field["name"], field["value"])
+    _load_saved_desktop_settings()
 
     _configure_nam_render_exe()
 
@@ -165,7 +208,7 @@ def main() -> int:
     import webview  # deferred: only needed for the desktop launcher, not the plain Flask app
 
     window = webview.create_window(
-        "Hybrid NAM Builder",
+        "NAM Mixer",
         f"http://127.0.0.1:{port}/",
         width=1400,
         height=900,

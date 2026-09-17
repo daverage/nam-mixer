@@ -1,4 +1,4 @@
-# PyInstaller spec for the Hybrid NAM Builder standalone desktop app.
+# PyInstaller spec for the NAM Mixer standalone desktop app.
 #
 # Produces a --onedir bundle (not --onefile): the nam_render native binary
 # and assets/templates/static need to sit as plain files next to the
@@ -9,8 +9,7 @@
 # docs/standalone_packaging.md):
 #   pyinstaller desktop/build.spec --noconfirm
 #
-# Output: dist/HybridNAMBuilder/ (Windows/Linux) or
-#         dist/HybridNAMBuilder.app (macOS, via BUNDLE below).
+# Output: dist/NAMMixer/ (Windows/Linux) or dist/NAMMixer.app (macOS).
 
 import sys
 from pathlib import Path
@@ -37,6 +36,12 @@ datas = [
     (str(REPO_ROOT / "templates"), "templates"),
     (str(REPO_ROOT / "static"), "static"),
     (str(REPO_ROOT / "assets" / "di"), "assets/di"),
+    # These are source resources for the optional external-Python training
+    # process, not imports for the render-only frozen interpreter.
+    (str(REPO_ROOT / "hybrid"), "training_runtime/hybrid"),
+    (str(REPO_ROOT / "scripts" / "train_a2.py"), "training_runtime/scripts"),
+    (str(REPO_ROOT / "requirements-training.txt"), "training_runtime"),
+    (str(REPO_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py"), "training_runtime/cloud/kaggle"),
 ]
 binaries = [
     (str(nam_render_src), "nam_render"),
@@ -71,7 +76,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="HybridNAMBuilder",
+    name="NAMMixer",
     debug=False,
     strip=False,
     upx=False,
@@ -86,15 +91,15 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="HybridNAMBuilder",
+    name="NAMMixer",
 )
 
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="HybridNAMBuilder.app",
+        name="NAMMixer.app",
         icon=icon_arg,
-        bundle_identifier="com.hybridnambuilder.app",
+        bundle_identifier="com.nammixer.app",
         info_plist={
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",

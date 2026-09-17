@@ -549,6 +549,30 @@ def test_generated_session_is_stored_in_and_deletes_its_bundle(client, tmp_path,
     assert not bundle.exists()
 
 
+def test_renaming_loaded_generated_session_updates_untrained_manifest(client, tmp_path, monkeypatch):
+    a2_dir = tmp_path / "a2"
+    bundle = a2_dir / "demo"
+    bundle.mkdir(parents=True)
+    manifest_path = bundle / "training_manifest.json"
+    manifest_path.write_text(jsonlib.dumps({
+        "mode": "hybrid", "model_name": "Demo", "artifact_stem": "Demo",
+        "artifact_filename": "Demo.nam", "amp_a": {}, "amp_b": {}, "design": {},
+    }))
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    session = client.get("/api/sessions").get_json()[0]
+    session["settings"]["modelName"] = "Renamed Final Build"
+    session["name"] = "Renamed Final Build"
+
+    saved = client.post("/api/sessions", json=session)
+
+    assert saved.status_code == 201
+    manifest = jsonlib.loads(manifest_path.read_text())
+    assert manifest["model_name"] == "Renamed Final Build"
+    assert manifest["artifact_stem"] == "Renamed_Final_Build"
+    assert manifest["artifact_filename"] == "Renamed_Final_Build.nam"
+    assert saved.get_json()["name"] == "Renamed Final Build"
+
+
 def test_rejected_training_start_preserves_running_bundle_protection(client, tmp_path, monkeypatch):
     from hybrid.local_training import LocalTrainingManager
 

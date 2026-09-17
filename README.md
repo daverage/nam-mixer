@@ -28,9 +28,9 @@ Two ways to run it — pick whichever fits you:
 | | |
 | --- | --- |
 | 🖱️ **Standalone app (no Python)** | Download a double-clickable app for Windows, macOS, or Linux from the [**Releases page**](../../releases/latest) — no Python install, `pip`, or separately-built renderer required. Everything (including the native NAM inference engine) is bundled. See [Standalone desktop app](#standalone-desktop-app) below. |
-| 🐍 **Run from source** | Clone the repo and run it as a local Flask app with `python3`. Gives you the same features plus direct access to the code, and is the only path for local A2 training (a separate, dedicated environment either way — see [Workflow](#workflow)). See [Quick start](#quick-start) below. |
+| 🐍 **Run from source** | Clone the repo and run it as a local Flask app with `python3`. Gives you the same features plus direct access to the code. See [Quick start](#quick-start) below. |
 
-Both paths give you the full render/design/audition/generate experience described in this README. Local/Kaggle A2 training always needs the source checkout and a separate training environment regardless of which path you start from — see [Workflow](#workflow).
+Both paths give you the full render/design/audition/generate experience described in this README. Local A2 training uses a separate environment and needs Python 3 installed; the desktop app creates that environment from its bundled training sources. Kaggle training remains opt-in and uses your own Kaggle CLI/account — see [Workflow](#workflow).
 
 ## Why this exists
 
@@ -547,12 +547,12 @@ If you'd rather not install Python at all, grab a prebuilt app from the
 
 | Platform | Download |
 | --- | --- |
-| macOS (Apple Silicon) | `HybridNAMBuilder-macos-arm64.zip` |
-| Windows (x64) | `HybridNAMBuilder-windows-x64.zip` |
-| Linux (x64) | `HybridNAMBuilder-linux-x64.tar.gz` |
+| macOS (Apple Silicon) | `NAMMixer-macos-arm64.zip` |
+| Windows (x64) | `NAMMixer-windows-x64.zip` |
+| Linux (x64) | `NAMMixer-linux-x64.tar.gz` |
 
-Unzip it and run the app inside — `HybridNAMBuilder.app` on macOS,
-`HybridNAMBuilder.exe` on Windows, or `HybridNAMBuilder` on Linux. It opens
+Unzip it and run the app inside — `NAMMixer.app` on macOS,
+`NAMMixer.exe` on Windows, or `NAMMixer` on Linux. It opens
 in its own window (built on [pywebview](https://pywebview.flet.dev/), your
 OS's own native webview — not a bundled browser), with the native
 `nam_render` inference engine already inside it — nothing else to install or
@@ -566,10 +566,9 @@ in-app [Settings](#settings) tab.
 > right-click the app → *Open* (instead of double-clicking) the first time.
 > On Windows, click *More info* → *Run anyway* on the SmartScreen prompt.
 
-The one thing the standalone app **doesn't** include is A2 training itself
-(local or Kaggle) — that still needs the source checkout and a separate
-training environment, exactly as described in [Workflow](#workflow) above.
-Everything else — rendering, all three design modes, live audition,
+The standalone app bundles the A2 training scripts, but local A2 training
+still needs a system Python 3 interpreter so it can create its separate
+training environment. Everything else — rendering, all three design modes, live audition,
 Cabinet IR, generating a training bundle, Sessions, NAM Tools — works
 identically to running from source. See
 [docs/standalone_packaging.md](docs/standalone_packaging.md) for how it's
@@ -603,8 +602,8 @@ shell environment variable or an `.env` file:
 
 Settings are saved to a local `.env`-style file — the source checkout's own
 `.env` for `python app.py`, or a per-user config folder
-(`~/Library/Application Support/HybridNAMBuilder` on macOS, `%APPDATA%\HybridNAMBuilder`
-on Windows, `~/.config/hybrid-nam-builder` on Linux) for the standalone
+(`~/Library/Application Support/NAMMixer` on macOS, `%APPDATA%\NAMMixer`
+on Windows, `~/.config/nam-mixer` on Linux) for the standalone
 app — never uploaded anywhere.
 
 <!-- TODO: add a screenshot of the Settings tab here, e.g.

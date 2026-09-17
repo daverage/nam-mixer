@@ -62,6 +62,15 @@ def test_shell_env_var_takes_priority_over_env_file(isolated_env_file):
     assert env_file.read_env_value("NAM_RENDER_EXE") == "/from/shell"
 
 
+def test_read_saved_values_ignores_shell_environment(isolated_env_file, monkeypatch):
+    env_file.write_env_values({"TONE3000_API_KEY": "t3k_cs_saved"})
+    monkeypatch.setenv("TONE3000_API_KEY", "stale_shell_value")
+
+    assert env_file.read_saved_env_values({"TONE3000_API_KEY", "NOT_ALLOWED"}) == {
+        "TONE3000_API_KEY": "t3k_cs_saved",
+    }
+
+
 def test_get_settings_lists_all_registered_fields(isolated_env_file):
     result = settings.get_settings()
     names = {field["name"] for field in result}

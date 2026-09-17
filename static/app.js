@@ -2129,6 +2129,15 @@ const generateBtn = document.getElementById("btn-generate");
 const modelNameInput = document.getElementById("model-name");
 const cabDisplayNameInput = document.getElementById("cab-display-name");
 let generationPending = false;
+modelNameInput.addEventListener("change", () => {
+  const name = modelNameInput.value.trim();
+  if (!name || !activeSessionId) return;
+  activeSessionName = name;
+  persistActiveSession().catch((err) => {
+    console.warn("Could not save the updated model name:", err);
+    sessionSettingsStatus.textContent = "Could not save the model name: " + err.message;
+  });
+});
 generateBtn.addEventListener("click", async () => {
   if (generationPending) return;
   if (!havePair) {
@@ -2500,15 +2509,20 @@ async function refreshLocalTraining() {
 localSetupBtn.addEventListener("click", async () => {
   localSetupBtn.disabled = true;
   localTrainingStatus.textContent = "Creating the dedicated environment and installing training packages…";
+  let setupError = "";
   try {
     const resp = await fetch("/api/local_training/setup", { method: "POST" });
     const data = await resp.json();
-    if (!resp.ok) localTrainingStatus.textContent = data.error || "Local setup could not start.";
+    if (!resp.ok) setupError = data.error || "Local setup could not start.";
   } catch (err) {
-    localTrainingStatus.textContent = "Local setup could not start: " + err.message;
+    setupError = "Local setup could not start: " + err.message;
     localSetupBtn.disabled = false;
   } finally {
     await refreshLocalTraining();
+    // refreshLocalTraining reports the normal "not configured" state. Keep
+    // the startup failure visible instead, especially when a frozen build
+    // needs the user to install a real Python interpreter.
+    if (setupError) localTrainingStatus.textContent = setupError;
   }
 });
 
@@ -2978,7 +2992,8 @@ async function currentSession(name, generated = activeSessionGenerated) {
 
 async function persistActiveSession() {
   if (!activeSessionId) return;
-  const name = activeSessionName || document.getElementById("model-name").value.trim() || "Generated session";
+  const name = document.getElementById("model-name").value.trim() || activeSessionName || "Generated session";
+  activeSessionName = name;
   await writeSession(await currentSession(name));
 }
 

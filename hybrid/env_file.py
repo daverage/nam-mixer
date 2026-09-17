@@ -60,6 +60,31 @@ def read_env_values(names: "set[str]") -> "dict[str, str]":
     return result
 
 
+def read_saved_env_values(names: "set[str]") -> "dict[str, str]":
+    """Return allow-listed non-empty values stored in the selected `.env` file.
+
+    Unlike :func:`read_env_values`, this intentionally does not inspect the
+    inherited process environment.  The frozen desktop launcher uses it to
+    restore values the player explicitly saved in the app, before importing
+    the Flask application.  That prevents an unrelated value inherited from
+    the build shell from shadowing the desktop app's own configuration.
+    """
+    env_file = _env_file()
+    if not env_file.is_file():
+        return {}
+    result: dict[str, str] = {}
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, raw_value = stripped.partition("=")
+        key = key.strip()
+        value = raw_value.strip().strip('"').strip("'")
+        if key in names and value:
+            result[key] = value
+    return result
+
+
 def write_env_values(values: "dict[str, str]") -> Path:
     """Merge `values` into the `.env` file, updating existing keys in place.
 

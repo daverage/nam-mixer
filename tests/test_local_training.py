@@ -36,6 +36,38 @@ def test_setup_cannot_expose_previous_training_validation_report(tmp_path, monke
     assert manager.design_id is None
 
 
+def test_frozen_setup_uses_system_python_not_the_app_executable(tmp_path, monkeypatch):
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr("hybrid.local_training.shutil.which", lambda name: "/usr/local/bin/python3" if name == "python3" else None)
+    started = {}
+    monkeypatch.setattr(manager, "_start", lambda command, state: started.update(command=command, state=state))
+
+    manager.setup()
+
+    assert started["command"][:2] == ["/usr/local/bin/python3", "-c"]
+    assert started["state"] == "setting_up"
+
+
+def test_frozen_setup_explains_when_no_system_python_is_available(tmp_path, monkeypatch):
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.delenv("NAM_MIXER_TRAINING_PYTHON", raising=False)
+    monkeypatch.setattr("hybrid.local_training.shutil.which", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match="Python 3 installed outside the packaged app"):
+        manager.setup()
+
+
+def test_custom_venv_directory_is_separate_from_training_sources(tmp_path):
+    source_root = tmp_path / "bundled-training-sources"
+    data_venv = tmp_path / "user-data" / ".venv-a2"
+    manager = LocalTrainingManager(source_root, tmp_path / "user-data" / "a2", venv_dir=data_venv)
+
+    assert manager.venv_dir == data_venv
+    assert manager.python == data_venv / "bin" / "python"
+
+
 def test_training_ownership_follows_accepted_manifest_and_survives_launch_failure(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "a2")
     manager.python.parent.mkdir(parents=True)

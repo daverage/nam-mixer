@@ -1,6 +1,6 @@
 # Standalone desktop packaging
 
-Hybrid NAM Builder normally runs as `python app.py` + a browser tab. The
+NAM Mixer normally runs as `python app.py` + a browser tab. The
 `desktop/` directory adds an alternative: a double-clickable native app for
 Windows, macOS, and Linux, with no Python install, `pip install`, or
 manually-built `nam_render` step required by the end user.
@@ -17,9 +17,11 @@ manually-built `nam_render` step required by the end user.
   `--onefile`), because the bundled `nam_render` binary and the
   templates/static/assets need to sit as plain files next to the executable
   rather than unpacked to a temp dir on every launch. It explicitly excludes
-  `torch`/`torchaudio` -- this app is render/design/preview only; training a
-  bundle into a `.nam` still requires the separate environment described in
-  the top-level CLAUDE.md and `requirements-training.txt`.
+  `torch`/`torchaudio`, but bundles the small training scripts and
+  `requirements-training.txt` needed to create a separate local A2
+  environment. The player still needs an installed Python 3 interpreter for
+  that optional step; heavyweight training dependencies are never installed
+  into the app bundle.
 - **`hybrid/render.py`'s existing `NAM_RENDER_EXE` env var** is how the
   desktop launcher points the app at its bundled `nam_render` binary --
   no changes to `render.py` itself were needed.
@@ -41,8 +43,8 @@ cmake --build native/nam_render/build --config Release --target nam_render
 pyinstaller desktop/build.spec --noconfirm
 ```
 
-Output: `dist/HybridNAMBuilder/` (Windows/Linux) or
-`dist/HybridNAMBuilder.app` (macOS). PyInstaller does not cross-compile --
+Output: `dist/NAMMixer/` (Windows/Linux) or
+`dist/NAMMixer.app` (macOS). PyInstaller does not cross-compile --
 build on each target OS, or rely on the CI matrix.
 
 Running unfrozen for development (no packaging needed):
@@ -66,7 +68,10 @@ by the local-AI assistant settings) and applied to the running process's
 `os.environ` immediately, so most changes take effect without a restart --
 the registry in `hybrid/settings.py` flags the exceptions
 (`restart_required=True`, e.g. the server `PORT`, which is only read once at
-`app.run()`).
+`app.run()`). On a later packaged-app launch, values stored in this settings
+file take precedence over matching values inherited from the launcher. This
+avoids a stale terminal/IDE variable (especially `TONE3000_API_KEY`) masking
+the value saved in the Settings page.
 
 For the packaged desktop app specifically, `desktop/main.py` points
 `NAM_MIXER_ENV_FILE` at a per-user config directory instead of the repo
@@ -75,20 +80,26 @@ root (which is commonly read-only once installed, e.g. under
 
 | OS      | Settings file location                                      |
 |---------|--------------------------------------------------------------|
-| Windows | `%APPDATA%\HybridNAMBuilder\.env`                             |
-| macOS   | `~/Library/Application Support/HybridNAMBuilder/.env`         |
-| Linux   | `$XDG_CONFIG_HOME/hybrid-nam-builder/.env` (default `~/.config/...`) |
+| Windows | `%APPDATA%\NAMMixer\.env`                                     |
+| macOS   | `~/Library/Application Support/NAMMixer/.env`                 |
+| Linux   | `$XDG_CONFIG_HOME/nam-mixer/.env` (default `~/.config/...`)   |
 
 Running unfrozen (`python app.py` or `python desktop/main.py` from a git
 checkout) keeps using the repo-root `.env`, unchanged from before.
 
+The packaged app also stores uploads, sessions, generated bundles, local A2
+environments, and downloaded/generated outputs below that same per-user
+directory's `data/` folder. Nothing mutable is written into the installed app
+bundle. For optional local A2 training, it finds `python3`/`python` on the
+system (or honours an explicit `NAM_MIXER_TRAINING_PYTHON` executable path),
+then creates the dedicated environment inside that data folder.
+
 ## What's intentionally out of scope
 
-- **Training** (`scripts/train_a2.py`, the Kaggle GPU backend) is not
-  bundled and is not expected to run from the packaged app -- it needs a
-  separate torch environment per the existing project design (see
-  CLAUDE.md). The packaged app covers render/preview/design/generate
-  (everything Flask already serves), not local GPU training.
+- **A2 dependencies** (`torch`, `neural-amp-modeler`) are not bundled. Local
+  training remains opt-in and installs them into a separate per-user virtual
+  environment after the player requests setup; Kaggle training uses the
+  player's own Kaggle CLI/account.
 - **Code signing/notarization** is not set up. Unsigned builds will trigger
   Gatekeeper/SmartScreen warnings on macOS/Windows; users can still run them
   (right-click > Open on macOS, "More info > Run anyway" on Windows), but a

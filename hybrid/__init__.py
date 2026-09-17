@@ -1,4 +1,4 @@
-"""Hybrid NAM Builder core package.
+"""NAM Mixer core package.
 
 See the top-level README for the concept. Modules:
 - nam_loader: parse .nam files and their calibration metadata.

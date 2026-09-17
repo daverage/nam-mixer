@@ -64,6 +64,73 @@ def test_configure_env_file_is_noop_when_not_frozen(monkeypatch):
     assert "NAM_MIXER_ENV_FILE" not in os.environ
 
 
+def test_configure_runtime_paths_uses_user_data_and_bundled_training_sources(monkeypatch, tmp_path):
+    desktop_main = _load_desktop_main()
+    monkeypatch.setattr(desktop_main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(desktop_main, "_user_config_dir", lambda: tmp_path / "config")
+    training_root = tmp_path / "bundle" / "training_runtime"
+    training_root.mkdir(parents=True)
+    monkeypatch.setattr(desktop_main, "_bundle_dir", lambda: training_root.parent)
+    monkeypatch.delenv("NAM_MIXER_DATA_DIR", raising=False)
+    monkeypatch.delenv("NAM_MIXER_TRAINING_ROOT", raising=False)
+
+    desktop_main._configure_runtime_paths()
+
+    import os
+    assert os.environ["NAM_MIXER_DATA_DIR"] == str(tmp_path / "config" / "data")
+    assert os.environ["NAM_MIXER_TRAINING_ROOT"] == str(training_root)
+    assert (tmp_path / "config" / "data").is_dir()
+
+
+def test_bundle_dir_uses_resources_folder_in_a_macos_app(monkeypatch, tmp_path):
+    desktop_main = _load_desktop_main()
+    executable = tmp_path / "NAMMixer.app" / "Contents" / "MacOS" / "NAMMixer"
+    resources = executable.parent.parent / "Resources"
+    (resources / "training_runtime").mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setattr(desktop_main.sys, "frozen", True, raising=False)
+    monkeypatch.delattr(desktop_main.sys, "_MEIPASS", raising=False)
+    monkeypatch.setattr(desktop_main.sys, "executable", str(executable))
+
+    assert desktop_main._bundle_dir() == resources
+
+
+def test_bundle_dir_does_not_let_non_resource_meipass_hide_macos_resources(monkeypatch, tmp_path):
+    desktop_main = _load_desktop_main()
+    executable = tmp_path / "NAMMixer.app" / "Contents" / "MacOS" / "NAMMixer"
+    resources = executable.parent.parent / "Resources"
+    (resources / "training_runtime").mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    meipass = tmp_path / "NAMMixer.app" / "Contents" / "Frameworks"
+    meipass.mkdir()
+    monkeypatch.setattr(desktop_main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(desktop_main.sys, "_MEIPASS", str(meipass), raising=False)
+    monkeypatch.setattr(desktop_main.sys, "executable", str(executable))
+
+    assert desktop_main._bundle_dir() == resources
+
+
+def test_saved_desktop_settings_override_stale_inherited_values(monkeypatch, tmp_path):
+    desktop_main = _load_desktop_main()
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "NAM_MIXER_LOCAL_LLM_MODEL=gemma4:e4b\n"
+        "TONE3000_API_KEY=t3k_cs_saved\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env_path))
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "stale-model")
+    monkeypatch.setenv("TONE3000_API_KEY", "stale_shell_value")
+
+    desktop_main._load_saved_desktop_settings()
+
+    import os
+    assert os.environ["NAM_MIXER_LOCAL_LLM_MODEL"] == "gemma4:e4b"
+    assert os.environ["TONE3000_API_KEY"] == "t3k_cs_saved"
+
+
 def test_desktop_api_save_file_writes_chosen_path(tmp_path, monkeypatch):
     """Regression test: pywebview's native webview ignores <a download> --
     static/app.js routes desktop downloads through this instead, so a

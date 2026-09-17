@@ -290,6 +290,18 @@ def test_staging_allow_list(tmp_path, bundle_dir):
     assert job.state == "uploading"
 
 
+def test_staging_uses_an_explicit_packaged_cloud_worker(tmp_path, bundle_dir):
+    worker = tmp_path / "training_runtime" / "cloud" / "kaggle" / "train_a2_cloud.py"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("print('packaged worker')\n", encoding="utf-8")
+    manager = KaggleJobManager(tmp_path / "jobs", cloud_worker_path=worker)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+
+    _dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
+
+    assert (kernel_staging / "train_a2_cloud.py").read_text(encoding="utf-8") == "print('packaged worker')\n"
+
+
 def test_staging_writes_job_epoch_preset_into_cloud_job_json(tmp_path, bundle_dir):
     manager = KaggleJobManager(tmp_path)
     job = KaggleJob(job_id="abc123", design_id="mydesign", epoch_preset="high_def")

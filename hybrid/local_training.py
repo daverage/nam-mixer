@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import json
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -14,9 +15,9 @@ from pathlib import Path
 
 
 class LocalTrainingManager:
-    def __init__(self, repo_root: Path, output_root: Path):
+    def __init__(self, repo_root: Path, output_root: Path, *, venv_dir: Path | None = None):
         self.repo_root, self.output_root = Path(repo_root), Path(output_root)
-        self.venv_dir = self.repo_root / ".venv-a2"
+        self.venv_dir = Path(venv_dir) if venv_dir is not None else self.repo_root / ".venv-a2"
         self.process: subprocess.Popen | None = None
         self.state = "not_configured"
         self.log = deque(maxlen=300)
@@ -35,6 +36,35 @@ class LocalTrainingManager:
     @property
     def python(self) -> Path:
         return self.venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def _bootstrap_python(self) -> list[str]:
+        """Return a real CPython command for making the training venv.
+
+        ``sys.executable`` is the right interpreter while running from a
+        checkout.  In a PyInstaller build it is the desktop app's executable,
+        however, so using it with ``-c`` opens a second app instead of running
+        the setup script.  A packaged app must use an installed Python for
+        training because PyTorch and NAM's training dependencies are kept out
+        of the render-only bundle.
+        """
+        if not getattr(sys, "frozen", False):
+            return [sys.executable]
+        configured = os.environ.get("NAM_MIXER_TRAINING_PYTHON", "").strip()
+        if configured:
+            executable = Path(configured).expanduser()
+            if executable.is_file():
+                return [str(executable)]
+            raise RuntimeError("NAM_MIXER_TRAINING_PYTHON does not point to a Python executable.")
+        for name in ("python3", "python"):
+            executable = shutil.which(name)
+            if executable:
+                return [executable]
+        if os.name == "nt" and shutil.which("py"):
+            return ["py", "-3"]
+        raise RuntimeError(
+            "Local training needs Python 3 installed outside the packaged app. "
+            "Install Python 3, restart the app, then click Set up local training again."
+        )
 
     def _start(self, command: list[str], state: str) -> None:
         self.log.clear()
@@ -123,7 +153,7 @@ class LocalTrainingManager:
             "import_torch=\"import torch; print('MPS available: ' + str(torch.backends.mps.is_available())); print('MPS built: ' + str(torch.backends.mps.is_built()))\"; "
             "subprocess.check_call([str(py),'-c',import_torch])"
         )
-        self._start([sys.executable, "-c", bootstrap], "setting_up")
+        self._start([*self._bootstrap_python(), "-c", bootstrap], "setting_up")
 
     def train(self, manifest: Path, preset: str) -> None:
         manifest = Path(manifest).resolve()

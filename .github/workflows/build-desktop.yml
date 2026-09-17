@@ -49,11 +49,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset_name: HybridNAMBuilder-linux-x64.tar.gz
+            asset_name: NAMMixer-linux-x64.tar.gz
           - os: macos-latest
-            asset_name: HybridNAMBuilder-macos-arm64.zip
+            asset_name: NAMMixer-macos-arm64.zip
           - os: windows-latest
-            asset_name: HybridNAMBuilder-windows-x64.zip
+            asset_name: NAMMixer-windows-x64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -77,15 +77,15 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent HybridNAMBuilder.app "../${{ matrix.asset_name }}"
+          ditto -c -k --sequesterRsrc --keepParent NAMMixer.app "../${{ matrix.asset_name }}"
 
       - name: Archive (Linux)
         if: runner.os == 'Linux'
-        run: tar -C dist -czf "${{ matrix.asset_name }}" HybridNAMBuilder
+        run: tar -C dist -czf "${{ matrix.asset_name }}" NAMMixer
 
       - name: Archive (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path dist/HybridNAMBuilder/* -DestinationPath "${{ matrix.asset_name }}"
+        run: Compress-Archive -Path dist/NAMMixer/* -DestinationPath "${{ matrix.asset_name }}"
 
       - uses: actions/upload-artifact@v4
         with:

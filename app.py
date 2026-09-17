@@ -1,4 +1,4 @@
-"""Hybrid NAM Builder -- Flask app entry point.
+"""NAM Mixer -- Flask app entry point.
 
 Local beta application. See README.md for the overall concept and current
 limitations. Run with:
@@ -86,8 +86,12 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 DI_DIR = BASE_DIR / "assets" / "di"
-WORK_DIR = BASE_DIR / "work"
-WORK_DIR.mkdir(exist_ok=True)
+# Desktop/main.py sets this before importing us in a frozen build.  Keep the
+# checkout-relative default for `python app.py`, but never write uploads,
+# sessions, or generated models into a read-only app bundle.
+_data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
+WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
+WORK_DIR.mkdir(parents=True, exist_ok=True)
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
@@ -104,8 +108,16 @@ SESSION_DIR.mkdir(exist_ok=True)
 SESSION_MODEL_DIR = SESSION_DIR / "models"
 SESSION_MODEL_DIR.mkdir(exist_ok=True)
 
-_kaggle_manager = KaggleJobManager(A2_OUTPUT_DIR)
-_local_training_manager = LocalTrainingManager(BASE_DIR, A2_OUTPUT_DIR)
+TRAINING_ROOT = Path(os.environ.get("NAM_MIXER_TRAINING_ROOT", str(BASE_DIR))).expanduser()
+_kaggle_manager = KaggleJobManager(
+    A2_OUTPUT_DIR,
+    cloud_worker_path=TRAINING_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py",
+)
+_local_training_manager = LocalTrainingManager(
+    TRAINING_ROOT,
+    A2_OUTPUT_DIR,
+    venv_dir=WORK_DIR / ".venv-a2",
+)
 
 app = Flask(__name__)
 # This app accepts audio and model uploads, so leave enough room for a normal
@@ -711,6 +723,38 @@ def _generated_session_path(bundle_dir: Path) -> Path:
     return bundle_dir / "nam-mixer-session.json"
 
 
+def _sync_generated_session_name(session: dict, bundle_dir: Path) -> None:
+    """Keep a not-yet-trained bundle's manifest aligned with its session name."""
+    settings = session.get("settings")
+    if not isinstance(settings, dict):
+        raise ValueError("session must contain a settings object")
+    requested_name = str(settings.get("modelName") or "").strip()
+    if not requested_name:
+        return
+    if len(requested_name) > 100:
+        raise ValueError("model name must be 100 characters or fewer")
+    artifact_stem = secure_filename(requested_name)
+    if not artifact_stem:
+        raise ValueError("model name must contain letters or numbers")
+
+    manifest_path = bundle_dir / "training_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    training = manifest.get("training")
+    if isinstance(training, dict) and training.get("output_nam_path"):
+        # A completed NAM is immutable: changing its embedded name would also
+        # invalidate the validation report. The name remains editable for a
+        # new build, but this saved bundle cannot be silently rewritten.
+        if requested_name != manifest.get("model_name"):
+            raise ValueError("model name cannot be changed after training; create new training files to use the new name")
+        return
+
+    manifest["model_name"] = requested_name
+    manifest["artifact_stem"] = artifact_stem
+    manifest["artifact_filename"] = f"{artifact_stem}.nam"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    session["name"] = requested_name
+
+
 def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
     """Convert an existing A2 bundle into the canonical session record once."""
     design = manifest.get("design") or {}
@@ -875,6 +919,7 @@ def api_session_save():
             bundle_dir = A2_OUTPUT_DIR / design_id
             if not design_id or not (bundle_dir / "training_manifest.json").is_file():
                 raise ValueError("generated session bundle not found")
+            _sync_generated_session_name(session, bundle_dir)
             path = _generated_session_path(bundle_dir)
         else:
             path = _session_path(session_id)

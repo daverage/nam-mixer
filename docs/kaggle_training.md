@@ -13,7 +13,7 @@ pip install kaggle
 kaggle auth login
 ```
 
-That's it -- once `kaggle auth login` succeeds, Hybrid NAM Builder's "Create
+That's it -- once `kaggle auth login` succeeds, NAM Mixer's "Create
 A2" card shows "Connected ✓" and the "Train A2" button becomes usable. This
 app never reads, stores, or logs your Kaggle credentials; authentication is
 entirely the Kaggle CLI's own business (`~/.kaggle/kaggle.json` /
