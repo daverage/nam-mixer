@@ -369,6 +369,24 @@ def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int
         raise TrainingInputError(f"failed to bake cabinet IR into training target: {exc}") from exc
 
 
+def embedded_final_scalar(head_target: np.ndarray, cab: Optional[CabDesign], sample_rate: int,
+                          target_peak_dbfs: float) -> tuple[float, dict]:
+    """Derive the *post-head* scalar for embedded export from the exact
+    frozen FIR. The A2 training target remains cabless; this is the only
+    cabinet-bearing reference used to set Linear scaling."""
+    if cab is None or cab.export_mode != "embedded":
+        return 1.0, {"mode": "not_embedded"}
+    from .cab_ir import get_frozen_prepared_cab_ir
+    reference = apply_cab_ir(head_target, get_frozen_prepared_cab_ir(cab, sample_rate))
+    check = check_audio(reference)
+    if check.has_nan_or_inf or check.is_silent:
+        raise TrainingInputError("embedded post-cab reference is invalid")
+    _, reduction_db = apply_peak_ceiling(reference, target_peak_dbfs)
+    scalar = float(10.0 ** (-reduction_db / 20.0))
+    return scalar, {"head_training_target_gain": 1.0, "final_composite_reference_peak_dbfs": check.peak_dbfs,
+                    "safety_reduction_db": reduction_db, "final_linear_scalar": scalar}
+
+
 def compute_receptive_field_record(
     mode: str,
     amp_a: NamModel,
@@ -668,6 +686,10 @@ def generate_training_bundle(
         "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
         "applied_gain_db": output_gain_db,
     }
+    embedded_record = None
+    if design.cab is not None and design.cab.export_mode == "embedded":
+        scalar, embedded_record = embedded_final_scalar(hybrid_final, design.cab, input_info.sample_rate, target_peak_dbfs)
+        output_gain_record["embedded_final"] = embedded_record
 
     manifest = build_training_manifest(
         design=design, amp_a=amp_a, amp_b=amp_b,
