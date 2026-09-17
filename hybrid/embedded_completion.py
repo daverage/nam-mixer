@@ -47,7 +47,9 @@ def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Pa
         dry, actual_rate = sf.read(validation_input, dtype="float32", always_2d=False)
         if actual_rate != sample_rate or dry.ndim != 1:
             raise ValueError("embedded validation input is not compatible with the frozen sample rate")
-        head = render(load_nam(head_nam_path), dry, sample_rate, slim=0.0)
+        # The embedded package contains the explicit highest-capacity A2
+        # child (Full); compare it with that same renderer selection.
+        head = render(load_nam(head_nam_path), dry, sample_rate, slim=1.0)
         expected = apply_cab_ir(head, get_frozen_prepared_cab_ir(CabDesign.from_dict(cab_data), sample_rate)) * final_scalar
         actual = render(load_nam(artifacts["sequential_nam_path"]), dry, sample_rate,
                         executable=find_sequential_nam_render_exe())

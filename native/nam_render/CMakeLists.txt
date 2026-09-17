@@ -5,10 +5,9 @@ project(hybrid_nam_render)
 # which sets an invalid -Wno-error flag under MSVC) and builds the `render`
 # CLI tool directly. hybrid/render.py shells out to the resulting exe.
 include(FetchContent)
-# Keep the production baseline on the latest tagged release. The compatibility
-# gate can build a second renderer with -DNAMCORE_GIT_TAG=<full commit SHA>
-# without ever following a floating branch.
-set(NAMCORE_GIT_TAG "v0.5.4" CACHE STRING "Pinned NeuralAmpModelerCore tag or full commit SHA")
+# This pinned commit supports both conventional NAM models and canonical
+# v0.7 Sequential/Linear models.  Never follow a floating branch here.
+set(NAMCORE_GIT_TAG "2563c0fd4cb1f9ce457d89a761738ea15097e1f3" CACHE STRING "Pinned NeuralAmpModelerCore tag or full commit SHA")
 FetchContent_Declare(NAMCore
   GIT_REPOSITORY https://github.com/sdatkinson/NeuralAmpModelerCore.git
   GIT_TAG ${NAMCORE_GIT_TAG}

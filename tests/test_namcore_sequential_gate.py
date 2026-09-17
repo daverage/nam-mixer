@@ -110,7 +110,7 @@ def test_sequential_a2_followed_by_linear_matches_head_then_fir_after_stream_war
         warmup = _sequential_warmup_samples(full_child, len(taps))
         audio = np.concatenate([np.zeros(warmup, dtype=np.float32), payload])
         for block_size in (1, 7, 64, 257):
-            head = _render(sequential, a2, audio, tmp_path, slim=0.0, block_size=block_size)
+            head = _render(sequential, a2, audio, tmp_path, slim=1.0, block_size=block_size)
             expected = np.convolve(head, np.asarray(taps) * package_record["final_linear_scalar"])[:len(head)]
             actual = _render(sequential, composite, audio, tmp_path, block_size=block_size)
             # Each CLI invocation is a fresh Reset; confirm that reset is
@@ -139,14 +139,14 @@ def test_explicit_full_a2_child_matches_normal_container_full_selection(tmp_path
     _, sequential = _require_renderers()
     a2 = Path("native/nam_render/build-sequential/_deps/namcore-src/example_models/A2.nam")
     container = json.loads(a2.read_text())
-    full = min(container["config"]["submodels"], key=lambda item: float(item["max_value"]))["model"]
+    full = max(container["config"]["submodels"], key=lambda item: float(item["max_value"]))["model"]
     full_path = tmp_path / "explicit-full.nam"
     full_path.write_text(json.dumps(full))
     identity = _linear(tmp_path / "identity.nam", [1.0])
     composite = _nam(tmp_path / "explicit-full-plus-identity.nam", "Sequential",
                      {"models": [full, json.loads(identity.read_text())]}, [])
     audio = np.random.default_rng(9).standard_normal(1024).astype(np.float32) * .03
-    normal_full = _render(sequential, a2, audio, tmp_path, slim=0.0)
+    normal_full = _render(sequential, a2, audio, tmp_path, slim=1.0)
     extracted = _render(sequential, full_path, audio, tmp_path)
     embedded = _render(sequential, composite, audio, tmp_path)
     np.testing.assert_allclose(extracted, normal_full, rtol=0, atol=3e-6)

@@ -9,7 +9,8 @@ wrong at the on-disk schema (see git history for why that was deliberately
 not attempted directly in Python).
 
 To build the native tool: see native/nam_render/README.md. In short --
-CMake + FetchContent pulls NeuralAmpModelerCore v0.5.4 and its dependencies
+CMake + FetchContent pulls the pinned Sequential-capable NeuralAmpModelerCore
+commit and its dependencies
 (Eigen, AudioDSPTools) and compiles the `render` CLI it defines
 (`native/nam_render/build/Release/nam_render.exe` on Windows).
 
@@ -73,18 +74,15 @@ def find_nam_render_exe() -> Path:
 
 
 def find_sequential_nam_render_exe() -> Path:
-    """Return only the explicitly configured experimental renderer.
+    """Return the renderer used for Sequential validation.
 
-    Embedded exports must never be silently validated by the released v0.5.4
-    renderer, which cannot load canonical Sequential/Linear. This is kept
-    separate from NAM_RENDER_EXE so ordinary head-only validation remains on
-    the released runtime.
+    The bundled renderer is pinned to the Sequential-capable NAMCore commit.
+    ``NAM_RENDER_SEQUENTIAL_EXE`` remains an optional explicit override for
+    testing another renderer.
     """
     configured = os.environ.get("NAM_RENDER_SEQUENTIAL_EXE")
     if not configured:
-        raise NamRenderError(
-            "embedded Sequential validation requires NAM_RENDER_SEQUENTIAL_EXE pinned to the proven NAMCore commit"
-        )
+        return find_nam_render_exe()
     # resolve() makes relative configuration deterministic against the
     # application's current working directory and works for POSIX binaries as
     # well as a Windows .exe name; no suffix is assumed.
@@ -95,9 +93,7 @@ def find_sequential_nam_render_exe() -> Path:
 
 
 def sequential_renderer_record() -> dict:
-    """Auditable identity for embedded-validation metadata. No fallback is
-    attempted: callers must surface this error as experimental-artifact
-    failure while preserving the conventional A2 head."""
+    """Auditable identity for embedded-validation metadata."""
     executable = find_sequential_nam_render_exe()
     return {"path": str(executable), "configured_path": os.environ.get("NAM_RENDER_SEQUENTIAL_EXE"),
             "required_namcore_commit": "2563c0fd4cb1f9ce457d89a761738ea15097e1f3"}

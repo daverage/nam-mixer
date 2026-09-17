@@ -15,7 +15,7 @@ the repository's small `nam_render.cpp` wrapper (`nam::get_dsp` loads the
 adds a test-only `--block-size` option; normal application rendering keeps
 the established 64-frame block size.
 
-`CMakeLists.txt` here fetches NAMCore v0.5.4's *source* only (not its own
+`CMakeLists.txt` here fetches a pinned Sequential-capable NAMCore commit's *source* only (not its own
 `tools/CMakeLists.txt`, which sets an MSVC-invalid `-Wno-error` flag) and
 compiles the `render.cpp` tool plus the NAM sources and AudioDSPTools' WAV
 I/O directly, as target `nam_render`.
@@ -31,6 +31,11 @@ cmake -B build -S .
 cmake --build build --config Release --target nam_render
 ```
 
+If this directory was previously configured against an older NAMCore version,
+remove the old `build/` directory before configuring so CMake does not retain
+its cached pin. The top-level README has ready-to-copy macOS, Linux, and
+Windows commands.
+
 On Windows this produces `build/Release/nam_render.exe`; on other platforms,
 `build/nam_render`. `hybrid/render.py`'s `find_nam_render_exe()` looks in
 both locations (and on `PATH`) automatically.
@@ -45,52 +50,22 @@ Input WAV's sample rate must match the model's expected sample rate (if the
 `.nam` file declares one) -- `nam_render` errors out clearly if they don't
 match rather than silently resampling. Mono input only.
 
-## Experimental Sequential compatibility gate
+## Sequential compatibility
 
-The released runtime remains pinned to NAMCore `v0.5.4`. Canonical NAM 0.7
-`Sequential`/`Linear` support is evaluated only against the explicitly pinned
-upstream commit `2563c0fd4cb1f9ce457d89a761738ea15097e1f3`; it is not a
-floating-branch dependency and is not yet used by normal exports.
+The released renderer is pinned to NAMCore commit
+`2563c0fd4cb1f9ce457d89a761738ea15097e1f3`, which supports both conventional
+NAM models and canonical NAM 0.7 `Sequential`/`Linear` models. It is never a
+floating-branch dependency.
 
-Build the two renderers and run the gate with:
+Build the unified renderer with:
 
 ```bash
 cmake -S . -B build
 cmake --build build --target nam_render
-cmake -S . -B build-sequential -DNAMCORE_GIT_TAG=2563c0fd4cb1f9ce457d89a761738ea15097e1f3
-cmake --build build-sequential --target nam_render
-NAM_RENDER_BASELINE=build/nam_render NAM_RENDER_SEQUENTIAL_EXE=build-sequential/nam_render \
-  python -m pytest tests/test_namcore_sequential_gate.py -q
 ```
 
-The gate proves ordinary WaveNet/Slimmable parity plus exact Linear and
-Sequential FIR processing. A Sequential A2+Linear stream has a deterministic
-canonical startup difference from separately prewarmed head rendering. The
-gate derives the silence prefix from the complete Sequential child histories,
-compares only the post-warm-up stream,
-and fails for any later or block-boundary discrepancy. Embedded-cab export
-must remain experimental until this gate passes on every supported renderer
-build. The current Sequential wrapper does not forward the CLI's Full/Lite
-selection into a nested SlimmableContainer, so experimental embedded output
-must not claim a verified Full or Lite variant.
-
-## macOS experimental Sequential renderer
-
-On either Apple Silicon or Intel macOS, build for the current host
-architecture with standard CMake; no architecture flag is required:
-
-```bash
-cmake -S native/nam_render \
-  -B native/nam_render/build-sequential \
-  -DNAMCORE_GIT_TAG=2563c0fd4cb1f9ce457d89a761738ea15097e1f3
-cmake --build native/nam_render/build-sequential --target nam_render --config Release
-chmod +x native/nam_render/build-sequential/nam_render
-export NAM_RENDER_SEQUENTIAL_EXE="$PWD/native/nam_render/build-sequential/nam_render"
-```
-
-Embedded validation accepts only `NAM_RENDER_SEQUENTIAL_EXE`; it never guesses
-or falls back to the released renderer. Finder-launched apps do not normally
-inherit Terminal environment variables, so launch the app from a shell with
-that export or configure the same absolute path in the app's launch
-environment. A missing or non-executable setting leaves the conventional head
-available and marks only the experimental artifact failed.
+The native gate can be run during an upgrade by comparing a deliberately
+configured legacy baseline with this renderer. It proves ordinary
+WaveNet/Slimmable parity plus exact Linear and Sequential FIR processing.
+Sequential embedded exports use the normal renderer by default;
+`NAM_RENDER_SEQUENTIAL_EXE` is only an optional test override.

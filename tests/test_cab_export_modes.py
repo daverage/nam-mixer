@@ -114,10 +114,10 @@ def test_embedded_packager_rejects_overflowing_scaled_taps():
                                   final_scalar=2.0)
 
 
-def test_embedded_validator_requires_explicit_sequential_renderer(monkeypatch):
+def test_embedded_validator_uses_default_renderer_when_not_overridden(monkeypatch):
     monkeypatch.delenv("NAM_RENDER_SEQUENTIAL_EXE", raising=False)
-    with pytest.raises(NamRenderError, match="NAM_RENDER_SEQUENTIAL_EXE"):
-        find_sequential_nam_render_exe()
+    monkeypatch.setattr("hybrid.render.find_nam_render_exe", lambda: Path("/tmp/nam_render"))
+    assert find_sequential_nam_render_exe() == Path("/tmp/nam_render")
 
 
 def test_sequential_renderer_path_resolution_is_suffix_agnostic(monkeypatch, tmp_path):
