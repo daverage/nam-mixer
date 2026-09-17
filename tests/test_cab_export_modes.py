@@ -10,6 +10,15 @@ from hybrid.cab_ir import (
     load_and_prepare_cab_ir,
 )
 from hybrid.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential
+from hybrid.render import NamRenderError, find_sequential_nam_render_exe
+
+
+def _a2_head(sample_rate=48000):
+    def wave(label):
+        return {"version": "0.7.0", "architecture": "WaveNet", "config": {"label": label}, "weights": [1], "sample_rate": sample_rate}
+    return {"version": "0.7.0", "architecture": "SlimmableContainer", "config": {"submodels": [
+        {"max_value": .5, "model": wave("full")}, {"max_value": 1.0, "model": wave("lite")}
+    ]}, "weights": [], "sample_rate": sample_rate}
 
 
 def test_legacy_baked_design_migrates_to_learned_not_embedded():
@@ -52,10 +61,10 @@ def test_frozen_ir_hash_mismatch_is_rejected(tmp_path):
 
 
 def test_canonical_embedded_sequential_preserves_complete_head_and_tap_order(tmp_path):
-    head = {"version": "0.7.0", "architecture": "LSTM", "config": {"x": 1}, "weights": [1], "sample_rate": 48000}
+    head = _a2_head()
     taps = np.array([1.0, -.25, .5], dtype=np.float32)
     package, record = build_embedded_sequential(head, taps, sample_rate=48000, final_scalar=.5)
-    assert package["config"]["models"][0] is head
+    assert package["config"]["models"][0] is head["config"]["submodels"][0]["model"]
     linear = package["config"]["models"][1]
     assert linear["config"]["receptive_field"] == 3
     assert linear["weights"] == pytest.approx([.5, -.125, .25])
@@ -68,4 +77,27 @@ def test_canonical_embedded_sequential_preserves_complete_head_and_tap_order(tmp
 
 def test_embedded_packager_rejects_sample_rate_mismatch():
     with pytest.raises(SequentialNamError, match="sample_rate"):
-        build_embedded_sequential({"sample_rate": 44100}, np.ones(1), sample_rate=48000)
+        build_embedded_sequential(_a2_head(44100), np.ones(1), sample_rate=48000)
+
+
+@pytest.mark.parametrize("scalar", [0.0, float("nan"), float("inf")])
+def test_embedded_packager_rejects_invalid_final_scalar(scalar):
+    with pytest.raises(SequentialNamError, match="scalar"):
+        build_embedded_sequential(_a2_head(), np.ones(1), sample_rate=48000, final_scalar=scalar)
+
+
+def test_embedded_packager_rejects_non_a2_head():
+    with pytest.raises(SequentialNamError, match="SlimmableContainer"):
+        build_embedded_sequential({"architecture": "WaveNet", "sample_rate": 48000}, np.ones(1), sample_rate=48000)
+
+
+def test_embedded_packager_rejects_overflowing_scaled_taps():
+    with pytest.raises(SequentialNamError, match="non-finite"):
+        build_embedded_sequential(_a2_head(), np.array([np.finfo(np.float32).max]), sample_rate=48000,
+                                  final_scalar=2.0)
+
+
+def test_embedded_validator_requires_explicit_sequential_renderer(monkeypatch):
+    monkeypatch.delenv("NAM_RENDER_SEQUENTIAL_EXE", raising=False)
+    with pytest.raises(NamRenderError, match="NAM_RENDER_SEQUENTIAL_EXE"):
+        find_sequential_nam_render_exe()

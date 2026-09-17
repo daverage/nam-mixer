@@ -72,6 +72,25 @@ def find_nam_render_exe() -> Path:
     )
 
 
+def find_sequential_nam_render_exe() -> Path:
+    """Return only the explicitly configured experimental renderer.
+
+    Embedded exports must never be silently validated by the released v0.5.4
+    renderer, which cannot load canonical Sequential/Linear. This is kept
+    separate from NAM_RENDER_EXE so ordinary head-only validation remains on
+    the released runtime.
+    """
+    configured = os.environ.get("NAM_RENDER_SEQUENTIAL_EXE")
+    if not configured:
+        raise NamRenderError(
+            "embedded Sequential validation requires NAM_RENDER_SEQUENTIAL_EXE pinned to the proven NAMCore commit"
+        )
+    candidate = Path(configured).expanduser()
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise NamRenderError(f"NAM_RENDER_SEQUENTIAL_EXE is not an executable file: {candidate}")
+    return candidate
+
+
 _SUBPROCESS_TIMEOUT_S = 120.0
 
 
