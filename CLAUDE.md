@@ -39,8 +39,7 @@ has three tiers:**
   Hybrid and Character only) -- `hard_required_samples`. This MUST fit inside the
   destination A2's actual receptive field; failing it aborts
   generation/training exactly as before, via
-  `assert_required_history_fits` (renamed from `assert_envelope_history_fits`,
-  which remains as a back-compat alias).
+  `assert_required_history_fits`.
 - **Character processing (advisory only).** Character donor transitions,
   smoothing, and correction filters are reported as
   `formal_character_required_samples`. If they exceed A2's receptive field,
@@ -61,12 +60,6 @@ has three tiers:**
   for why these two independent implementations can never silently
   diverge). Only the CORE dependency exceeding the A2's receptive field
   still aborts.
-
-Legacy manifest keys (`base_required_samples`/`cab_fir_serial_samples`/
-`total_required_samples`, from before this two-tier policy existed) are
-preserved as numeric aliases of `hard_required_samples`/the cab FIR history/
-`formal_total_required_samples` respectively -- old manifests remain
-trainable, and `total_required_samples` is NEVER read as the hard gate.
 
 Cumulative-energy diagnostics on the prepared IR (`PreparedCabIr.energy_99_
 /_999_/_9999_samples`, `energy_fraction_within`) report how much of a long

@@ -44,14 +44,6 @@ class NamRenderError(RuntimeError):
     """Raised when the native nam_render tool can't be found or fails to run."""
 
 
-class RenderNotImplementedError(NamRenderError):
-    """Deprecated alias kept for backward compatibility with older callers.
-
-    render() no longer raises this unconditionally now that NAM inference is
-    wired in -- see the module docstring. Prefer catching NamRenderError.
-    """
-
-
 def find_nam_render_exe() -> Path:
     """Locate the built nam_render executable, or raise NamRenderError."""
     configured = os.environ.get("NAM_RENDER_EXE")

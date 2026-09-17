@@ -2110,7 +2110,6 @@ generateBtn.addEventListener("click", async () => {
         cab_path: cabServerPath || null,
         cab_preview_enabled: cabPreviewEnabled.checked,
         cab_export_mode: cabExportMode.value,
-        cab_baked: cabExportMode.value === "learned",
         cab_display_name: cabDisplayNameInput?.value?.trim() || "",
         ...outputGainParamsBody(),
       }),

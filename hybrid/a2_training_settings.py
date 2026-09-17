@@ -61,8 +61,7 @@ def settings_for_preset(preset: str) -> A2TrainingSettings:
     return _full_settings(A2_EPOCH_PRESETS[preset])
 
 
-# Normal, full-quality training run at the default preset -- kept for
-# backward compatibility with callers that don't need preset selection.
+# Normal, full-quality training run at the default preset.
 A2_TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
 
 # Fast development/smoke-test run only -- never the final model (docs/phase3.md

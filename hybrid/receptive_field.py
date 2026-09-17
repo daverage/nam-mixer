@@ -262,13 +262,6 @@ def combine_required_history(
     `hybrid.blend_training_target` build the "receptive_field" manifest
     section from this same function so local/Kaggle checks can never
     silently diverge in how they combine branches.
-
-    Legacy keys `base_required_samples`/`total_required_samples` are kept,
-    numerically identical to `hard_required_samples`/
-    `formal_total_required_samples`, for manifests/readers written before
-    this policy existed -- they must NEVER be read as the new hard gate
-    (some old code/tests did exactly that, which is the bug this policy
-    fixes; see docs/blend-mode.md).
     """
     if mode not in ("hybrid", "blend", "character"):
         raise ValueError(f"unknown mode: {mode!r} (expected 'hybrid', 'blend', or 'character')")
@@ -293,9 +286,6 @@ def combine_required_history(
         "hard_required_samples": hard_required_samples,
         "cab_fir_serial_samples": cab_fir_samples,
         "formal_total_required_samples": formal_total_required_samples,
-        # Legacy aliases -- see docstring. Do not use for the hard gate.
-        "base_required_samples": hard_required_samples,
-        "total_required_samples": formal_total_required_samples,
     }
 
 
@@ -347,16 +337,3 @@ def assert_required_history_fits(
             f"from {rf.config_path})."
         )
     return rf
-
-
-def assert_envelope_history_fits(
-    envelope_history_samples: int,
-    sample_rate: int,
-    margin_fraction: float = 0.0,
-) -> A2ReceptiveField:
-    """Deprecated alias for `assert_required_history_fits` -- kept for
-    backward compatibility with existing callers/tests written before this
-    function was renamed to reflect that it checks the CORE Hybrid/Blend
-    dependency (Amp A/B [+ envelope]), not merely "the envelope". Prefer
-    `assert_required_history_fits` in new code."""
-    return assert_required_history_fits(envelope_history_samples, sample_rate, margin_fraction)

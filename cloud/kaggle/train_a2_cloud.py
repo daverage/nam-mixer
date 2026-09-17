@@ -79,7 +79,7 @@ def settings_for_preset(preset: str) -> dict:
     return {**_BASE_SETTINGS, "epochs": EPOCH_PRESETS[preset]}
 
 
-# Kept for backward compatibility / parity checks against
+# Exercised by tests/test_a2_training_settings.py's parity check against
 # hybrid/a2_training_settings.py's A2_TRAINING_SETTINGS (both use the same
 # DEFAULT_EPOCH_PRESET).
 TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
@@ -201,10 +201,9 @@ def _resolve_baked_cab_fir_samples(manifest: dict) -> int:
     KAGGLE": source NAMs/cab IRs are not uploaded to Kaggle), so, unlike
     scripts/train_a2.py's local equivalent, it can only ever trust numbers
     already computed by hybrid.training_target.compute_receptive_field_record
-    at generation time. Prefers the NEW nested receptive_field.cab record
+    at generation time. Prefers the nested receptive_field.cab record
     (computed at the OFFICIAL TRAINING INPUT's sample rate, i.e. accurate for
-    what was actually baked into hybrid_target.wav) over the legacy flat
-    receptive_field.cab_fir_serial_samples key, over the CabDesign's own
+    what was actually baked into hybrid_target.wav) over the CabDesign's own
     audition-time (possibly different sample rate) fir_history_samples.
     """
     cab = manifest.get("cab") or {}
@@ -214,9 +213,6 @@ def _resolve_baked_cab_fir_samples(manifest: dict) -> int:
     rf_cab = rf_record.get("cab") or {}
     if rf_cab.get("fir_history_samples") is not None:
         return int(rf_cab["fir_history_samples"])
-    legacy = rf_record.get("cab_fir_serial_samples")
-    if legacy is not None:
-        return int(legacy)
     return int(cab.get("fir_history_samples") or 0)
 
 

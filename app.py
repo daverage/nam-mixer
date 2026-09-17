@@ -1136,13 +1136,12 @@ def _parse_cab_params(data: dict, pair_sample_rate: int):
 def _resolve_cab_design(data: dict, pair_sample_rate: int):
     """Build a `CabDesign` for provenance/freezing from generate-request
     params, or None if no cab is selected. Mirrors _parse_cab_params but
-    also records `baked` -- see hybrid/cab_ir.py's CabDesign."""
+    also records `export_mode` -- see hybrid/cab_ir.py's CabDesign."""
     cab_path = data.get("cab_path")
     if not cab_path:
         return None
     preview_enabled = bool(data.get("cab_preview_enabled", False))
-    legacy_baked = bool(data.get("cab_baked", False))
-    export_mode = data.get("cab_export_mode") or ("learned" if legacy_baked else "none")
+    export_mode = data.get("cab_export_mode") or "none"
     if export_mode not in ("none", "learned", "embedded"):
         raise ValueError("cab_export_mode must be 'none', 'learned', or 'embedded'")
     # Preview is intentionally independent of final export: a user may
@@ -1155,7 +1154,7 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     display_name = str(data.get("cab_display_name") or "").strip() or None
     return cab_design_from_prepared(
         prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled,
-        baked=legacy_baked, export_mode=export_mode, preparation_mode=preparation_mode,
+        export_mode=export_mode, preparation_mode=preparation_mode,
         leading_silence_threshold_db=threshold, display_name=display_name,
     )
 

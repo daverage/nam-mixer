@@ -191,8 +191,7 @@ def _resolve_baked_cab_fir_samples(manifest: dict, cab: dict, sample_rate: int) 
     unlike the self-contained Kaggle cloud worker, can import hybrid/ and
     normally runs on the same machine that generated the bundle, so the IR
     file is usually still reachable. Falls back to the manifest's own
-    recorded numbers (receptive_field.cab, then the legacy
-    receptive_field.cab_fir_serial_samples key, then the CabDesign's own
+    recorded numbers (receptive_field.cab, then the CabDesign's own
     audition-time fir_history_samples) if the file is no longer reachable.
     """
     ir_path = cab.get("ir_working_path")
@@ -207,9 +206,6 @@ def _resolve_baked_cab_fir_samples(manifest: dict, cab: dict, sample_rate: int) 
     rf_cab = rf_record.get("cab") or {}
     if rf_cab.get("fir_history_samples") is not None:
         return int(rf_cab["fir_history_samples"]), rf_cab.get("fir_length_samples")
-    legacy = rf_record.get("cab_fir_serial_samples")
-    if legacy is not None:
-        return int(legacy), None
     if cab.get("fir_history_samples"):
         return int(cab["fir_history_samples"]), cab.get("prepared_frame_count")
     return 0, None

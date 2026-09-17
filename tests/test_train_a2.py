@@ -380,44 +380,6 @@ def test_check_receptive_field_real_world_bug_report_scenario_trains(tmp_path, m
     assert result["cab_requires_approximation"] is True
 
 
-def test_check_receptive_field_legacy_manifest_base_is_hard_total_is_formal(tmp_path, monkeypatch):
-    """A manifest written by the PRE-policy code has
-    receptive_field.base_required_samples/cab_fir_serial_samples/
-    total_required_samples but no receptive_field.cab sub-record. The hard
-    gate must still only ever see the CORE (base) dependency, never the
-    (formerly-hard, now-formal-only) total -- see docs/blend-mode.md
-    "BACKWARDS COMPATIBILITY"."""
-    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # RF = 3
-    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])  # RF = 3
-
-    manifest = {
-        "mode": "blend",
-        "amp_a": {"path": str(amp_a)},
-        "amp_b": {"path": str(amp_b)},
-        "cab": {"baked": True},  # no fir_history_samples on the CabDesign itself
-        "receptive_field": {
-            "mode": "blend",
-            "branch_samples": {"amp_a": 3, "amp_b": 3},
-            "base_required_samples": 3,
-            "cab_fir_serial_samples": 500,
-            "total_required_samples": 503,
-        },
-    }
-
-    captured = {}
-
-    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
-        captured["samples"] = samples
-        return type("R", (), {"receptive_field_samples": samples + 1000, "submodel_names": ["fake"]})()
-
-    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
-    result = train_a2.check_receptive_field(manifest, 48000)
-
-    assert captured["samples"] == 3  # hard gate sees the CORE amp dependency only
-    assert result["cab_fir_history_samples"] == 500  # resolved from the legacy cab_fir_serial_samples key
-    assert result["formal_total_required_samples"] == 503
-
-
 def test_validate_exported_nam_runs_native_render(tmp_path, monkeypatch):
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"

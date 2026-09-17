@@ -1230,7 +1230,7 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
 
     resp = client.post("/api/generate", json={
         "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
-        "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_baked": True,
+        "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_export_mode": "learned",
         "cab_display_name": "Modern Boutique 4x12", "model_name": "British American High Gain",
     })
     assert resp.status_code == 200

@@ -23,14 +23,6 @@ def _env_file() -> Path:
     return Path(__file__).resolve().parent.parent / ".env"
 
 
-# Kept as a module-level name for backward compatibility with existing
-# callers/tests that reference `env_file.ENV_FILE` directly; always reflects
-# the current override, if any, at import time. Prefer `_env_file()` for any
-# new code so a later change to NAM_MIXER_ENV_FILE within the same process
-# (e.g. in tests) is honored.
-ENV_FILE = _env_file()
-
-
 def read_env_value(name: str) -> str:
     """Return `name` from the process environment, falling back to `.env`."""
     # An explicitly empty inherited variable must not mask a valid `.env`
