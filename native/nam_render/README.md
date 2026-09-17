@@ -59,7 +59,7 @@ cmake -S . -B build
 cmake --build build --target nam_render
 cmake -S . -B build-sequential -DNAMCORE_GIT_TAG=2563c0fd4cb1f9ce457d89a761738ea15097e1f3
 cmake --build build-sequential --target nam_render
-NAM_RENDER_BASELINE=build/nam_render NAM_RENDER_SEQUENTIAL=build-sequential/nam_render \
+NAM_RENDER_BASELINE=build/nam_render NAM_RENDER_SEQUENTIAL_EXE=build-sequential/nam_render \
   python -m pytest tests/test_namcore_sequential_gate.py -q
 ```
 
@@ -73,3 +73,24 @@ must remain experimental until this gate passes on every supported renderer
 build. The current Sequential wrapper does not forward the CLI's Full/Lite
 selection into a nested SlimmableContainer, so experimental embedded output
 must not claim a verified Full or Lite variant.
+
+## macOS experimental Sequential renderer
+
+On either Apple Silicon or Intel macOS, build for the current host
+architecture with standard CMake; no architecture flag is required:
+
+```bash
+cmake -S native/nam_render \
+  -B native/nam_render/build-sequential \
+  -DNAMCORE_GIT_TAG=2563c0fd4cb1f9ce457d89a761738ea15097e1f3
+cmake --build native/nam_render/build-sequential --target nam_render --config Release
+chmod +x native/nam_render/build-sequential/nam_render
+export NAM_RENDER_SEQUENTIAL_EXE="$PWD/native/nam_render/build-sequential/nam_render"
+```
+
+Embedded validation accepts only `NAM_RENDER_SEQUENTIAL_EXE`; it never guesses
+or falls back to the released renderer. Finder-launched apps do not normally
+inherit Terminal environment variables, so launch the app from a shell with
+that export or configure the same absolute path in the app's launch
+environment. A missing or non-executable setting leaves the conventional head
+available and marks only the experimental artifact failed.

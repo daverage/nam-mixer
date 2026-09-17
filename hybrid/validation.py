@@ -25,7 +25,7 @@ from .character_blend import CharacterBlendDesign, build_character_blend
 from .envelope import BoundedEnvelopeConfig, bounded_causal_envelope_db
 from .nam_loader import load_nam
 from .render import render
-from .cab_ir import apply_cab_ir, get_prepared_cab_ir
+from .cab_ir import apply_cab_ir, get_frozen_prepared_cab_ir, get_prepared_cab_ir
 from .safety import apply_output_gain
 
 
@@ -87,10 +87,12 @@ def render_processed_reference(design, manifest: dict, dry: np.ndarray, sample_r
     processed = np.asarray(result.hybrid, dtype=np.float32)
 
     cab = getattr(design, "cab", None)
-    if cab is not None and cab.baked:
-        if not cab.ir_working_path:
-            raise FileNotFoundError("baked cabinet has no saved working path")
-        processed = apply_cab_ir(processed, get_prepared_cab_ir(cab.ir_working_path, sample_rate))
+    if cab is not None and cab.requires_training_convolution:
+        # Legacy manifests created before frozen IR hashes remain readable;
+        # new/export-mode records always use the hash-checked path.
+        prepared = (get_frozen_prepared_cab_ir(cab, sample_rate) if cab.sha256
+                    else get_prepared_cab_ir(cab.ir_working_path, sample_rate))
+        processed = apply_cab_ir(processed, prepared)
 
     output_gain_db = float((manifest.get("output_gain") or {}).get("applied_gain_db") or 0.0)
     peak_reduction_db = float((manifest.get("target") or {}).get("global_safety_gain_reduction_db") or 0.0)

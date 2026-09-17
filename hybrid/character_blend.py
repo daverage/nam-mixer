@@ -111,7 +111,7 @@ class CharacterBlendDesign:
         # retain their original (v1) behaviour rather than silently changing a
         # previously generated target's meaning.
         data.setdefault("teacher_semantics_version", 1)
-        if isinstance(data.get("cab"), dict): data["cab"] = CabDesign(**data["cab"])
+        if isinstance(data.get("cab"), dict): data["cab"] = CabDesign.from_dict(data["cab"])
         return CharacterBlendDesign(**data)
 
 

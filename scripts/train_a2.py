@@ -74,6 +74,7 @@ from hybrid.metadata import suggested_nam_filename  # noqa: E402
 from hybrid.nam_loader import load_nam  # noqa: E402
 from hybrid.validation import compute_esr_metrics  # noqa: E402
 from hybrid.validation_report import build_validation_report  # noqa: E402
+from hybrid.embedded_completion import complete_embedded_artifact  # noqa: E402
 
 
 class TrainingAbort(RuntimeError):
@@ -689,6 +690,14 @@ def main(argv=None) -> int:
             "lite_metrics_vs_target": lite_metrics,
             "validation_report": validation_report,
         }
+        # Experimental packaging is deliberately post-head and non-fatal: a
+        # valid conventional A2 remains the completed training artifact even
+        # if the explicit Sequential runtime is unavailable.
+        embedded = ((manifest.get("output_gain") or {}).get("embedded_final") or {})
+        manifest["training"]["embedded_artifact"] = complete_embedded_artifact(
+            manifest, nam_path, output_dir, sample_rate=sample_rate,
+            final_scalar=float(embedded.get("final_linear_scalar", 1.0)), validation_input=input_path,
+        )
         if rf_check:
             manifest["receptive_field_check"] = rf_check
         if low_level_response_checks:
