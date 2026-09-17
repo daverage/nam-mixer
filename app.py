@@ -1072,6 +1072,27 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     )
 
 
+def _source_cabinet_warning(*paths: str, cab=None) -> str | None:
+    """Warn, never block, an intentional second cabinet stage when a source
+    NAM explicitly identifies itself as amp+cab or amp+pedal+cab."""
+    if cab is None or not cab.selected:
+        return None
+    tagged = []
+    for path in paths:
+        try:
+            raw = load_nam_json(path)
+            metadata = raw.get("metadata") or {}
+            gear_type = str(metadata.get("gear_type") or raw.get("gear_type") or "").lower()
+            if gear_type in {"amp_cab", "amp_pedal_cab"}:
+                tagged.append(Path(path).name)
+        except (OSError, ValueError, NamToolError):
+            continue
+    if not tagged:
+        return None
+    return ("A selected cabinet follows source capture(s) tagged amp+cab: " + ", ".join(tagged) +
+            ". This may intentionally create a double-cabinet sound.")
+
+
 def _parse_output_gain_params(data: dict):
     """Shared post-combination output-gain parsing for /api/preview
     (source=hybrid/blend/character) and /api/generate. Mode-independent and
@@ -2213,6 +2234,10 @@ def api_generate():
     bundle.manifest["model_name"] = requested_name
     bundle.manifest["artifact_stem"] = design_id
     bundle.manifest["artifact_filename"] = f"{design_id}.nam"
+    cab_warning = _source_cabinet_warning(design.amp_a_path, design.amp_b_path, cab=design.cab)
+    if cab_warning and cab_warning not in bundle.warnings:
+        bundle.warnings.append(cab_warning)
+        bundle.manifest.setdefault("warnings", []).append(cab_warning)
     # The opaque id is only a live-cache capability.  Persist the content
     # identities and frozen render inputs as durable provenance instead.
     bundle.manifest["preview_render_provenance"] = {
