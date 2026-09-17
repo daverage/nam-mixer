@@ -98,8 +98,12 @@ def test_sequential_a2_followed_by_linear_matches_head_then_fir_after_stream_war
     # The standalone head and a child inside Sequential prewarm differently at
     # stream startup. Compare a continuous, silence-prefixed stream and only
     # assess the audible payload after the documented warm-up prefix.
-    for index, taps in enumerate(([1.0], [0.75, 0.125, -0.0625], [0.4, -0.2, 0.1, 0.05, -0.025, 0.0125], [0.001] * 512, [0.001] * 2048, [0.001] * 8192)):
-        composite_json, package_record = build_embedded_sequential(child, np.asarray(taps), sample_rate=48000)
+    cases = (([1.0], .73), ([0.75, 0.125, -0.0625], 1.0),
+             ([0.4, -0.2, 0.1, 0.05, -0.025, 0.0125], .91),
+             ([0.001] * 512, .65), ([0.001] * 2048, 1.2), ([0.001] * 8192, .47))
+    for index, (taps, final_scalar) in enumerate(cases):
+        composite_json, package_record = build_embedded_sequential(
+            child, np.asarray(taps), sample_rate=48000, final_scalar=final_scalar)
         composite = tmp_path / f"a2-plus-cab-{index}.nam"
         composite.write_text(json.dumps(composite_json))
         full_child = composite_json["config"]["models"][0]
