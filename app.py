@@ -2424,14 +2424,25 @@ def api_kaggle_job_download(job_id: str):
     job = load_job(A2_OUTPUT_DIR, design_id, job_id)
     if job is None:
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
-    if not job.output_nam_path:
+    artifact = request.args.get("artifact", "head")
+    if artifact == "embedded":
+        embedded = job.embedded_artifact or {}
+        if embedded.get("state") != "validated":
+            return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
+        nam_path_str = (embedded.get("artifacts") or {}).get("sequential_nam_path")
+    elif artifact == "head":
+        nam_path_str = job.output_nam_path
+    else:
+        return jsonify({"error": "artifact must be 'head' or 'embedded'"}), 400
+    if not nam_path_str:
         return jsonify({"error": f"job {job_id!r} has no downloadable model yet (state={job.state})"}), 400
 
-    nam_path = Path(job.output_nam_path)
+    nam_path = Path(nam_path_str)
     if not nam_path.is_file():
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
-    download_name = _suggested_nam_filename(design_id)
+    download_name = (_suggested_nam_filename(design_id) if artifact == "head"
+                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-embedded-experimental-full.nam")
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 
