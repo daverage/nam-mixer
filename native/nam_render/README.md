@@ -66,7 +66,10 @@ NAM_RENDER_BASELINE=build/nam_render NAM_RENDER_SEQUENTIAL=build-sequential/nam_
 The gate proves ordinary WaveNet/Slimmable parity plus exact Linear and
 Sequential FIR processing. A Sequential A2+Linear stream has a deterministic
 canonical startup difference from separately prewarmed head rendering. The
-gate prepends 4,096 silent samples, compares only the post-warm-up stream,
+gate derives the silence prefix from the complete Sequential child histories,
+compares only the post-warm-up stream,
 and fails for any later or block-boundary discrepancy. Embedded-cab export
 must remain experimental until this gate passes on every supported renderer
-build.
+build. The current Sequential wrapper does not forward the CLI's Full/Lite
+selection into a nested SlimmableContainer, so experimental embedded output
+must not claim a verified Full or Lite variant.

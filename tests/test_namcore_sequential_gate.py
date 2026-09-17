@@ -47,6 +47,23 @@ def _linear(path: Path, taps: list[float]) -> Path:
     return _nam(path, "Linear", {"receptive_field": len(taps), "bias": False, "implementation": "auto"}, taps)
 
 
+def _wavenet_prewarm_samples(model: dict) -> int:
+    """Mirror NAMCore WaveNet's documented prewarm calculation."""
+    config = model["config"]
+    history = 1  # no condition DSP in the shipped A2 fixture
+    for layer in config["layers"]:
+        history += sum((kernel - 1) * dilation for kernel, dilation in zip(layer["kernel_sizes"], layer["dilations"]))
+        history += int(layer["head"]["kernel_size"]) - 1
+    return history
+
+
+def _sequential_warmup_samples(a2_child: dict, linear_taps: int) -> int:
+    # Container returns the active child history; Sequential sums child
+    # prewarm histories. Linear's buffer history is its receptive field.
+    active_child = a2_child["config"]["submodels"][0]["model"]
+    return _wavenet_prewarm_samples(active_child) + linear_taps
+
+
 def test_existing_wavenet_and_slimmable_models_are_numerically_stable(tmp_path: Path):
     baseline, sequential = _require_renderers()
     source = Path("native/nam_render/build-sequential/_deps/namcore-src/example_models")
@@ -73,16 +90,16 @@ def test_sequential_a2_followed_by_linear_matches_head_then_fir_after_stream_war
     _, sequential = _require_renderers()
     a2 = Path("native/nam_render/build-sequential/_deps/namcore-src/example_models/A2.nam")
     child = json.loads(a2.read_text())
-    warmup = 4096
     payload = np.zeros(1024, dtype=np.float32)
     payload[73:] = np.random.default_rng(7).standard_normal(len(payload) - 73).astype(np.float32) * 0.05
     # The standalone head and a child inside Sequential prewarm differently at
     # stream startup. Compare a continuous, silence-prefixed stream and only
     # assess the audible payload after the documented warm-up prefix.
-    audio = np.concatenate([np.zeros(warmup, dtype=np.float32), payload])
-    for index, taps in enumerate(([1.0], [0.75, 0.125, -0.0625], [0.4, -0.2, 0.1, 0.05, -0.025, 0.0125])):
+    for index, taps in enumerate(([1.0], [0.75, 0.125, -0.0625], [0.4, -0.2, 0.1, 0.05, -0.025, 0.0125], [0.001] * 512, [0.001] * 2048, [0.001] * 8192)):
         linear = _linear(tmp_path / f"cab-{index}.nam", list(taps))
         composite = _nam(tmp_path / f"a2-plus-cab-{index}.nam", "Sequential", {"models": [child, json.loads(linear.read_text())]}, [])
+        warmup = _sequential_warmup_samples(child, len(taps))
+        audio = np.concatenate([np.zeros(warmup, dtype=np.float32), payload])
         for block_size in (1, 7, 64, 257):
             head = _render(sequential, a2, audio, tmp_path, block_size=block_size)
             expected = np.convolve(head, taps)[:len(head)]
@@ -92,3 +109,16 @@ def test_sequential_a2_followed_by_linear_matches_head_then_fir_after_stream_war
             repeated = _render(sequential, composite, audio, tmp_path, block_size=block_size)
             np.testing.assert_array_equal(repeated, actual)
             np.testing.assert_allclose(actual[warmup:], expected[warmup:], rtol=0, atol=3e-6)
+
+
+def test_sequential_does_not_expose_nested_a2_slim_selection(tmp_path: Path):
+    """Do not label a Sequential A2 child as Full or Lite without runtime support."""
+    _, sequential = _require_renderers()
+    a2 = Path("native/nam_render/build-sequential/_deps/namcore-src/example_models/A2.nam")
+    linear = _linear(tmp_path / "cab.nam", [1.0])
+    composite = _nam(tmp_path / "a2-plus-cab.nam", "Sequential", {"models": [json.loads(a2.read_text()), json.loads(linear.read_text())]}, [])
+    source, destination = tmp_path / "in.wav", tmp_path / "out.wav"
+    sf.write(source, np.zeros(128, dtype=np.float32), 48000, subtype="FLOAT")
+    result = subprocess.run([str(sequential), "--slim", "1.0", str(composite), str(source), str(destination)], text=True, capture_output=True)
+    assert result.returncode != 0
+    assert "SlimmableModel" in (result.stderr + result.stdout)
