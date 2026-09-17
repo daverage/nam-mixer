@@ -2,7 +2,7 @@
 
 Run explicitly with the two renderers built from CMake:
 NAM_RENDER_BASELINE=native/nam_render/build/nam_render \\
-NAM_RENDER_SEQUENTIAL=native/nam_render/build-sequential/nam_render \\
+NAM_RENDER_SEQUENTIAL_EXE=native/nam_render/build-sequential/nam_render \\
 python -m pytest tests/test_namcore_sequential_gate.py -q
 """
 from __future__ import annotations
@@ -16,14 +16,16 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from hybrid.sequential_nam import build_embedded_sequential
+
 
 BASELINE = os.environ.get("NAM_RENDER_BASELINE")
-SEQUENTIAL = os.environ.get("NAM_RENDER_SEQUENTIAL")
+SEQUENTIAL = os.environ.get("NAM_RENDER_SEQUENTIAL_EXE")
 
 
 def _require_renderers() -> tuple[Path, Path]:
     if not BASELINE or not SEQUENTIAL:
-        pytest.skip("set NAM_RENDER_BASELINE and NAM_RENDER_SEQUENTIAL to run the native Sequential gate")
+        pytest.skip("set NAM_RENDER_BASELINE and NAM_RENDER_SEQUENTIAL_EXE to run the native Sequential gate")
     return Path(BASELINE), Path(SEQUENTIAL)
 
 
@@ -60,7 +62,8 @@ def _wavenet_prewarm_samples(model: dict) -> int:
 def _sequential_warmup_samples(a2_child: dict, linear_taps: int) -> int:
     # Container returns the active child history; Sequential sums child
     # prewarm histories. Linear's buffer history is its receptive field.
-    active_child = a2_child["config"]["submodels"][0]["model"]
+    active_child = (a2_child["config"]["submodels"][0]["model"]
+                    if a2_child.get("architecture") == "SlimmableContainer" else a2_child)
     return _wavenet_prewarm_samples(active_child) + linear_taps
 
 
@@ -95,14 +98,20 @@ def test_sequential_a2_followed_by_linear_matches_head_then_fir_after_stream_war
     # The standalone head and a child inside Sequential prewarm differently at
     # stream startup. Compare a continuous, silence-prefixed stream and only
     # assess the audible payload after the documented warm-up prefix.
-    for index, taps in enumerate(([1.0], [0.75, 0.125, -0.0625], [0.4, -0.2, 0.1, 0.05, -0.025, 0.0125], [0.001] * 512, [0.001] * 2048, [0.001] * 8192)):
-        linear = _linear(tmp_path / f"cab-{index}.nam", list(taps))
-        composite = _nam(tmp_path / f"a2-plus-cab-{index}.nam", "Sequential", {"models": [child, json.loads(linear.read_text())]}, [])
-        warmup = _sequential_warmup_samples(child, len(taps))
+    cases = (([1.0], .73), ([0.75, 0.125, -0.0625], 1.0),
+             ([0.4, -0.2, 0.1, 0.05, -0.025, 0.0125], .91),
+             ([0.001] * 512, .65), ([0.001] * 2048, 1.2), ([0.001] * 8192, .47))
+    for index, (taps, final_scalar) in enumerate(cases):
+        composite_json, package_record = build_embedded_sequential(
+            child, np.asarray(taps), sample_rate=48000, final_scalar=final_scalar)
+        composite = tmp_path / f"a2-plus-cab-{index}.nam"
+        composite.write_text(json.dumps(composite_json))
+        full_child = composite_json["config"]["models"][0]
+        warmup = _sequential_warmup_samples(full_child, len(taps))
         audio = np.concatenate([np.zeros(warmup, dtype=np.float32), payload])
         for block_size in (1, 7, 64, 257):
-            head = _render(sequential, a2, audio, tmp_path, block_size=block_size)
-            expected = np.convolve(head, taps)[:len(head)]
+            head = _render(sequential, a2, audio, tmp_path, slim=0.0, block_size=block_size)
+            expected = np.convolve(head, np.asarray(taps) * package_record["final_linear_scalar"])[:len(head)]
             actual = _render(sequential, composite, audio, tmp_path, block_size=block_size)
             # Each CLI invocation is a fresh Reset; confirm that reset is
             # deterministic as well as comparing steady-state streams.
@@ -122,3 +131,23 @@ def test_sequential_does_not_expose_nested_a2_slim_selection(tmp_path: Path):
     result = subprocess.run([str(sequential), "--slim", "1.0", str(composite), str(source), str(destination)], text=True, capture_output=True)
     assert result.returncode != 0
     assert "SlimmableModel" in (result.stderr + result.stdout)
+
+
+def test_explicit_full_a2_child_matches_normal_container_full_selection(tmp_path: Path):
+    """The embedded policy extracts Full rather than relying on a nested
+    container. Prove this exact mapping against NAMCore's normal interface."""
+    _, sequential = _require_renderers()
+    a2 = Path("native/nam_render/build-sequential/_deps/namcore-src/example_models/A2.nam")
+    container = json.loads(a2.read_text())
+    full = min(container["config"]["submodels"], key=lambda item: float(item["max_value"]))["model"]
+    full_path = tmp_path / "explicit-full.nam"
+    full_path.write_text(json.dumps(full))
+    identity = _linear(tmp_path / "identity.nam", [1.0])
+    composite = _nam(tmp_path / "explicit-full-plus-identity.nam", "Sequential",
+                     {"models": [full, json.loads(identity.read_text())]}, [])
+    audio = np.random.default_rng(9).standard_normal(1024).astype(np.float32) * .03
+    normal_full = _render(sequential, a2, audio, tmp_path, slim=0.0)
+    extracted = _render(sequential, full_path, audio, tmp_path)
+    embedded = _render(sequential, composite, audio, tmp_path)
+    np.testing.assert_allclose(extracted, normal_full, rtol=0, atol=3e-6)
+    np.testing.assert_allclose(embedded, extracted, rtol=0, atol=3e-6)

@@ -348,7 +348,8 @@ def build_training_manifest(
 
 
 def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int) -> np.ndarray:
-    """Apply the shared cabinet IR to `audio` if-and-only-if `cab.baked` --
+    """Apply the shared cabinet IR only for the learned-cab compatibility
+    export mode --
     used by both Hybrid and Blend target generation (see
     hybrid.blend_training_target). Must run BEFORE safety/peak-ceiling
     processing (docs/blend-mode.md "CAB PREVIEW SEMANTICS" / "SHARED
@@ -356,15 +357,34 @@ def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int
     baked -- this keeps existing no-cab Hybrid generation byte-for-byte
     unchanged.
     """
-    if cab is None or not cab.baked:
+    if cab is None or not cab.requires_training_convolution:
         return audio
     if not cab.ir_working_path:
         raise TrainingInputError("cab is marked baked but has no ir_working_path recorded in the design")
     try:
-        prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+        from .cab_ir import get_frozen_prepared_cab_ir
+        prepared = get_frozen_prepared_cab_ir(cab, sample_rate)
         return apply_cab_ir(audio, prepared)
     except CabIrError as exc:
         raise TrainingInputError(f"failed to bake cabinet IR into training target: {exc}") from exc
+
+
+def embedded_final_scalar(head_target: np.ndarray, cab: Optional[CabDesign], sample_rate: int,
+                          target_peak_dbfs: float) -> tuple[float, dict]:
+    """Derive the *post-head* scalar for embedded export from the exact
+    frozen FIR. The A2 training target remains cabless; this is the only
+    cabinet-bearing reference used to set Linear scaling."""
+    if cab is None or cab.export_mode != "embedded":
+        return 1.0, {"mode": "not_embedded"}
+    from .cab_ir import get_frozen_prepared_cab_ir
+    reference = apply_cab_ir(head_target, get_frozen_prepared_cab_ir(cab, sample_rate))
+    check = check_audio(reference)
+    if check.has_nan_or_inf or check.is_silent:
+        raise TrainingInputError("embedded post-cab reference is invalid")
+    _, reduction_db = apply_peak_ceiling(reference, target_peak_dbfs)
+    scalar = float(10.0 ** (-reduction_db / 20.0))
+    return scalar, {"head_training_target_gain": 1.0, "final_composite_reference_peak_dbfs": check.peak_dbfs,
+                    "safety_reduction_db": reduction_db, "final_linear_scalar": scalar}
 
 
 def compute_receptive_field_record(
@@ -414,7 +434,7 @@ def compute_receptive_field_record(
             raise ValueError(f"envelope_max_history_ms is required for mode={mode!r}")
         envelope_samples = int(round(envelope_max_history_ms / 1000.0 * sample_rate))
 
-    cab_baked = bool(cab is not None and cab.baked)
+    cab_baked = bool(cab is not None and cab.requires_training_convolution)
     cab_fir_length = None
     cab_fir_samples = 0
     if cab_baked and cab.ir_working_path:
@@ -425,7 +445,8 @@ def compute_receptive_field_record(
         # changes the tap count. Cached, so this doesn't re-read/resample
         # the IR file if generation already prepared it via maybe_bake_cab.
         try:
-            prepared = get_prepared_cab_ir(cab.ir_working_path, sample_rate)
+            from .cab_ir import get_frozen_prepared_cab_ir
+            prepared = get_frozen_prepared_cab_ir(cab, sample_rate)
             cab_fir_length = prepared.prepared_frame_count
             cab_fir_samples = max(0, prepared.prepared_frame_count - 1)
         except CabIrError:
@@ -447,9 +468,13 @@ def compute_receptive_field_record(
             a2_rf_at_generation_time = None
 
     cab_record = {
+        "export_mode": cab.export_mode if cab is not None else "none",
         "baked": cab_baked,
         "fir_length_samples": cab_fir_length,
         "fir_history_samples": cab_fir_samples,
+        "preparation_mode": cab.preparation_mode if cab is not None else None,
+        "leading_silence_threshold_db": cab.leading_silence_threshold_db if cab is not None else None,
+        "sha256": cab.sha256 if cab is not None else None,
     }
 
     if amp_a_samples is None or amp_b_samples is None:
@@ -661,6 +686,10 @@ def generate_training_bundle(
         "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
         "applied_gain_db": output_gain_db,
     }
+    embedded_record = None
+    if design.cab is not None and design.cab.export_mode == "embedded":
+        scalar, embedded_record = embedded_final_scalar(hybrid_final, design.cab, input_info.sample_rate, target_peak_dbfs)
+        output_gain_record["embedded_final"] = embedded_record
 
     manifest = build_training_manifest(
         design=design, amp_a=amp_a, amp_b=amp_b,

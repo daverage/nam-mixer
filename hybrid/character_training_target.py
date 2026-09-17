@@ -18,7 +18,7 @@ from .render import render
 from .safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
 from .training_target import (
     A2_TARGET_PEAK_CEILING_DBFS, TargetSafetyReport, TrainingBundle, TrainingInputError,
-    _git_commit, _sha256_file, compute_receptive_field_record, maybe_bake_cab, validate_training_input,
+    _git_commit, _sha256_file, compute_receptive_field_record, embedded_final_scalar, maybe_bake_cab, validate_training_input,
 )
 from .validation_report import DEFAULT_VALIDATION_POLICY
 
@@ -306,6 +306,9 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
         "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
         "applied_gain_db": output_gain_db,
     }
+    if design.cab is not None and design.cab.export_mode == "embedded":
+        _, output_gain_record["embedded_final"] = embedded_final_scalar(
+            target_final, design.cab, input_info.sample_rate, target_peak_dbfs)
     manifest = build_character_training_manifest(design, amp_a, amp_b, a_sha, b_sha, calibration, input_info, safety, receptive, warnings, low_level_response, output_gain=output_gain_record)
     validation_reference.update({
         "input_excerpt_path": reference_out.name,

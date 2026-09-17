@@ -980,8 +980,17 @@ def api_cab_upload():
     if not filename.lower().endswith(".wav"):
         return jsonify({"error": "expected a .wav file"}), 400
 
-    dest = CAB_UPLOAD_DIR / filename
-    upload.save(dest)
+    # The display name remains user-friendly, but the working object is
+    # content-addressed so a later upload with the same name cannot silently
+    # replace the IR frozen into an existing design.
+    temporary = CAB_UPLOAD_DIR / f".upload-{uuid.uuid4().hex}.wav"
+    upload.save(temporary)
+    digest = _sha256_path(temporary)
+    dest = CAB_UPLOAD_DIR / f"{digest[:16]}-{filename}"
+    if dest.exists():
+        temporary.unlink()
+    else:
+        temporary.replace(dest)
 
     pair: RenderedPair | None = _rendered_pair_cache["pair"]
     preview_sample_rate = pair.sample_rate if pair is not None else None
@@ -1045,17 +1054,43 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     if not cab_path:
         return None
     preview_enabled = bool(data.get("cab_preview_enabled", False))
-    baked = bool(data.get("cab_baked", False))
-    if baked:
-        # Baking without preview is never allowed (docs/history/blend-mode.md "CAB
-        # UI": "If Bake cab into A2 is enabled, automatically ensure Use cab
-        # in preview is also enabled") -- enforced server-side too, not just
-        # in the UI, so provenance can never record a baked-but-unaudited cab.
-        preview_enabled = True
-    prepared = get_prepared_cab_ir(cab_path, pair_sample_rate)
+    legacy_baked = bool(data.get("cab_baked", False))
+    export_mode = data.get("cab_export_mode") or ("learned" if legacy_baked else "none")
+    if export_mode not in ("none", "learned", "embedded"):
+        raise ValueError("cab_export_mode must be 'none', 'learned', or 'embedded'")
+    # Preview is intentionally independent of final export: a user may
+    # audition cabless while training a learned target or package an exact
+    # embedded FIR. A non-none mode still requires the selected cab path
+    # validated below; it simply does not rewrite preview provenance.
+    preparation_mode = data.get("cab_preparation_mode", "trim_initial_silence")
+    threshold = float(data.get("cab_leading_silence_threshold_db", -40.0))
+    prepared = get_prepared_cab_ir(cab_path, pair_sample_rate, threshold, preparation_mode)
     return cab_design_from_prepared(
-        prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled, baked=baked,
+        prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled,
+        baked=legacy_baked, export_mode=export_mode, preparation_mode=preparation_mode,
+        leading_silence_threshold_db=threshold,
     )
+
+
+def _source_cabinet_warning(*paths: str, cab=None) -> str | None:
+    """Warn, never block, an intentional second cabinet stage when a source
+    NAM explicitly identifies itself as amp+cab or amp+pedal+cab."""
+    if cab is None or not cab.selected:
+        return None
+    tagged = []
+    for path in paths:
+        try:
+            raw = load_nam_json(path)
+            metadata = raw.get("metadata") or {}
+            gear_type = str(metadata.get("gear_type") or raw.get("gear_type") or "").lower()
+            if gear_type in {"amp_cab", "amp_pedal_cab"}:
+                tagged.append(Path(path).name)
+        except (OSError, ValueError, NamToolError):
+            continue
+    if not tagged:
+        return None
+    return ("A selected cabinet follows source capture(s) tagged amp+cab: " + ", ".join(tagged) +
+            ". This may intentionally create a double-cabinet sound.")
 
 
 def _parse_output_gain_params(data: dict):
@@ -2016,7 +2051,17 @@ def api_local_training_download():
     except (OSError, json.JSONDecodeError):
         return jsonify({"error": f"no training manifest found for design {design_id!r}"}), 404
 
-    nam_path_str = (manifest.get("training") or {}).get("output_nam_path")
+    training = manifest.get("training") or {}
+    requested_artifact = request.args.get("artifact", "head")
+    if requested_artifact == "embedded":
+        embedded = training.get("embedded_artifact") or {}
+        if embedded.get("state") != "validated":
+            return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
+        nam_path_str = ((embedded.get("artifacts") or {}).get("sequential_nam_path"))
+    elif requested_artifact == "head":
+        nam_path_str = training.get("output_nam_path")
+    else:
+        return jsonify({"error": "artifact must be 'head' or 'embedded'"}), 400
     if not nam_path_str:
         return jsonify({"error": "local training for this design hasn't produced a model yet"}), 400
 
@@ -2024,7 +2069,8 @@ def api_local_training_download():
     if not nam_path.is_file():
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
-    download_name = _suggested_nam_filename(design_id)
+    download_name = (_suggested_nam_filename(design_id) if requested_artifact == "head"
+                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-embedded-experimental-full.nam")
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 
@@ -2188,6 +2234,10 @@ def api_generate():
     bundle.manifest["model_name"] = requested_name
     bundle.manifest["artifact_stem"] = design_id
     bundle.manifest["artifact_filename"] = f"{design_id}.nam"
+    cab_warning = _source_cabinet_warning(design.amp_a_path, design.amp_b_path, cab=design.cab)
+    if cab_warning and cab_warning not in bundle.warnings:
+        bundle.warnings.append(cab_warning)
+        bundle.manifest.setdefault("warnings", []).append(cab_warning)
     # The opaque id is only a live-cache capability.  Persist the content
     # identities and frozen render inputs as durable provenance instead.
     bundle.manifest["preview_render_provenance"] = {
@@ -2374,14 +2424,25 @@ def api_kaggle_job_download(job_id: str):
     job = load_job(A2_OUTPUT_DIR, design_id, job_id)
     if job is None:
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
-    if not job.output_nam_path:
+    artifact = request.args.get("artifact", "head")
+    if artifact == "embedded":
+        embedded = job.embedded_artifact or {}
+        if embedded.get("state") != "validated":
+            return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
+        nam_path_str = (embedded.get("artifacts") or {}).get("sequential_nam_path")
+    elif artifact == "head":
+        nam_path_str = job.output_nam_path
+    else:
+        return jsonify({"error": "artifact must be 'head' or 'embedded'"}), 400
+    if not nam_path_str:
         return jsonify({"error": f"job {job_id!r} has no downloadable model yet (state={job.state})"}), 400
 
-    nam_path = Path(job.output_nam_path)
+    nam_path = Path(nam_path_str)
     if not nam_path.is_file():
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
-    download_name = _suggested_nam_filename(design_id)
+    download_name = (_suggested_nam_filename(design_id) if artifact == "head"
+                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-embedded-experimental-full.nam")
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 

@@ -386,10 +386,13 @@
           <input type="checkbox" id="cab-preview-enabled" disabled>
           Hear the sound through this cabinet
         </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="cab-baked" disabled>
-          Include this cabinet in the final model
-        </label>
+        <label class="field-label" for="cab-export-mode">Final cabinet export</label>
+        <select id="cab-export-mode" disabled>
+          <option value="none">No cabinet — export the trained amp/blend only</option>
+          <option value="embedded">Embed exact cabinet (experimental Sequential NAM)</option>
+          <option value="learned">Train cabinet into A2 (compatible approximation)</option>
+        </select>
+        <div class="info">Preview is independent. Embedded export keeps a head-only A2 and prepared IR alongside the experimental Sequential NAM.</div>
 
         <div id="cab-status" class="info" aria-live="polite">Cab: off</div>
       </section>

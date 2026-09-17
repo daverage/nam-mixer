@@ -198,14 +198,16 @@ let cabServerPath = null;
 const cabFileInput = document.getElementById("cab-file");
 const cabInfoEl = document.getElementById("cab-info");
 const cabPreviewEnabled = document.getElementById("cab-preview-enabled");
-const cabBaked = document.getElementById("cab-baked");
+const cabExportMode = document.getElementById("cab-export-mode");
 const cabStatusEl = document.getElementById("cab-status");
 
 function updateCabStatus() {
   if (!cabServerPath) {
     cabStatusEl.textContent = "Cab: off";
-  } else if (cabBaked.checked) {
-    cabStatusEl.textContent = "Cab: baked -- exported A2 will include this cabinet";
+  } else if (cabExportMode.value === "embedded") {
+    cabStatusEl.textContent = "Cab: exact IR embedded in experimental Sequential NAM";
+  } else if (cabExportMode.value === "learned") {
+    cabStatusEl.textContent = "Cab: learned approximation in conventional A2";
   } else if (cabPreviewEnabled.checked) {
     cabStatusEl.textContent = "Cab: preview only -- exported A2 remains amp/head only";
   } else {
@@ -218,9 +220,9 @@ cabFileInput.addEventListener("change", async () => {
   const file = cabFileInput.files[0];
   cabServerPath = null;
   cabPreviewEnabled.checked = false;
-  cabBaked.checked = false;
+  cabExportMode.value = "none";
   cabPreviewEnabled.disabled = true;
-  cabBaked.disabled = true;
+  cabExportMode.disabled = true;
   if (!file) {
     cabInfoEl.textContent = "";
     updateCabStatus();
@@ -239,7 +241,7 @@ cabFileInput.addEventListener("change", async () => {
     }
     cabServerPath = data.path;
     cabPreviewEnabled.disabled = false;
-    cabBaked.disabled = false;
+    cabExportMode.disabled = false;
     const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
     const preparedMs = data.prepared_duration_ms !== undefined ? data.prepared_duration_ms.toFixed(1) : null;
     const energy999Ms = data.energy_999_ms !== undefined ? data.energy_999_ms.toFixed(1) : null;
@@ -258,7 +260,6 @@ cabFileInput.addEventListener("change", async () => {
 });
 
 cabPreviewEnabled.addEventListener("change", () => {
-  if (!cabPreviewEnabled.checked) cabBaked.checked = false; // bake requires preview
   updateCabStatus();
   // Does NOT require re-rendering the amps (cab runs after amp combination),
   // but it DOES change what the final exported model would contain, so any
@@ -269,10 +270,9 @@ cabPreviewEnabled.addEventListener("change", () => {
   invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
   if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
-cabBaked.addEventListener("change", () => {
+cabExportMode.addEventListener("change", () => {
   // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
   // is also enabled" -- docs/blend-mode.md "CAB UI".
-  if (cabBaked.checked) cabPreviewEnabled.checked = true;
   updateCabStatus();
   resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
   invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
@@ -2105,7 +2105,8 @@ generateBtn.addEventListener("click", async () => {
         model_name: modelNameInput?.value?.trim() || "",
         cab_path: cabServerPath || null,
         cab_preview_enabled: cabPreviewEnabled.checked,
-        cab_baked: cabBaked.checked,
+        cab_export_mode: cabExportMode.value,
+        cab_baked: cabExportMode.value === "learned",
         ...outputGainParamsBody(),
       }),
     });
@@ -2131,7 +2132,7 @@ generateBtn.addEventListener("click", async () => {
         }</div>`
       : "";
     const cabLine = data.cab_summary
-      ? `<div><strong>Cabinet:</strong> ${data.cab_summary.baked ? "included in this model" : "used for preview only"}</div>`
+      ? `<div><strong>Cabinet:</strong> ${data.cab_summary.export_mode === "embedded" ? "exact cabinet in experimental Sequential NAM" : data.cab_summary.baked ? "learned approximation in this A2" : "not included in this model"}</div>`
       : "";
     const lowLevelHtml = data.low_level_response ? renderLowLevelResponseHtml(data.low_level_response) : "";
     generateResult.innerHTML = `
@@ -2772,7 +2773,7 @@ function collectSessionSettings() {
       path: cabServerPath,
       label: cabInfoEl.textContent,
       previewEnabled: cabPreviewEnabled.checked,
-      baked: cabBaked.checked,
+      exportMode: cabExportMode.value,
     },
     outputGainAuto: outputGainAutoCheckbox.checked,
     outputGainManualDb: outputGainManualSlider.value,
@@ -2831,9 +2832,9 @@ function applySessionSettings(s) {
   cabServerPath = s.cab.path;
   cabInfoEl.textContent = s.cab.path ? `${s.cab.label} (restored)` : "";
   cabPreviewEnabled.disabled = !s.cab.path;
-  cabBaked.disabled = !s.cab.path;
+  cabExportMode.disabled = !s.cab.path;
   cabPreviewEnabled.checked = s.cab.previewEnabled;
-  cabBaked.checked = s.cab.baked;
+  cabExportMode.value = s.cab.exportMode || (s.cab.baked ? "learned" : "none");
   updateCabStatus();
 
   outputGainAutoCheckbox.checked = s.outputGainAuto;

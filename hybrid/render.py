@@ -72,10 +72,42 @@ def find_nam_render_exe() -> Path:
     )
 
 
+def find_sequential_nam_render_exe() -> Path:
+    """Return only the explicitly configured experimental renderer.
+
+    Embedded exports must never be silently validated by the released v0.5.4
+    renderer, which cannot load canonical Sequential/Linear. This is kept
+    separate from NAM_RENDER_EXE so ordinary head-only validation remains on
+    the released runtime.
+    """
+    configured = os.environ.get("NAM_RENDER_SEQUENTIAL_EXE")
+    if not configured:
+        raise NamRenderError(
+            "embedded Sequential validation requires NAM_RENDER_SEQUENTIAL_EXE pinned to the proven NAMCore commit"
+        )
+    # resolve() makes relative configuration deterministic against the
+    # application's current working directory and works for POSIX binaries as
+    # well as a Windows .exe name; no suffix is assumed.
+    candidate = Path(configured).expanduser().resolve()
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise NamRenderError(f"NAM_RENDER_SEQUENTIAL_EXE is not an executable file: {candidate}")
+    return candidate
+
+
+def sequential_renderer_record() -> dict:
+    """Auditable identity for embedded-validation metadata. No fallback is
+    attempted: callers must surface this error as experimental-artifact
+    failure while preserving the conventional A2 head."""
+    executable = find_sequential_nam_render_exe()
+    return {"path": str(executable), "configured_path": os.environ.get("NAM_RENDER_SEQUENTIAL_EXE"),
+            "required_namcore_commit": "2563c0fd4cb1f9ce457d89a761738ea15097e1f3"}
+
+
 _SUBPROCESS_TIMEOUT_S = 120.0
 
 
-def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | None = None) -> np.ndarray:
+def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | None = None,
+           executable: Path | None = None) -> np.ndarray:
     """Render `audio` (mono float32, at `sample_rate`) through `model`.
 
     - Input and output are both mono float32 numpy arrays of the same length.
@@ -98,7 +130,7 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | N
       boundary between native code and the rest of the app, so it verifies
       that contract rather than trusting the subprocess blindly.
     """
-    exe = find_nam_render_exe()
+    exe = executable or find_nam_render_exe()
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim != 1:
         raise NamRenderError(f"NAM render currently requires mono audio, got shape {audio.shape}")

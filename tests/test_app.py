@@ -58,6 +58,15 @@ def _write_fake_nam(path, input_level_dbu=None):
     path.write_text(jsonlib.dumps(data))
 
 
+def test_selected_cab_warns_for_explicit_amp_cab_source_metadata(tmp_path):
+    from hybrid.cab_ir import CabDesign
+    source = tmp_path / "source.nam"
+    source.write_text(jsonlib.dumps({"architecture": "Test", "config": {}, "sample_rate": 48000,
+                                     "metadata": {"gear_type": "amp_cab"}}))
+    warning = app_module._source_cabinet_warning(str(source), cab=CabDesign(selected=True))
+    assert warning and "double-cabinet" in warning and source.name in warning
+
+
 def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch):
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
     assert client.get("/api/local_llm/status").get_json()["enabled"] is False
