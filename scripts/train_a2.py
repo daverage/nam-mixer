@@ -696,7 +696,7 @@ def main(argv=None) -> int:
         embedded = ((manifest.get("output_gain") or {}).get("embedded_final") or {})
         manifest["training"]["embedded_artifact"] = complete_embedded_artifact(
             manifest, nam_path, output_dir, sample_rate=sample_rate,
-            final_scalar=float(embedded.get("final_linear_scalar", 1.0)),
+            final_scalar=float(embedded.get("final_linear_scalar", 1.0)), validation_input=input_path,
         )
         if rf_check:
             manifest["receptive_field_check"] = rf_check

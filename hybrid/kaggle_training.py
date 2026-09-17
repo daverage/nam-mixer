@@ -1217,6 +1217,7 @@ class KaggleJobManager:
         job.embedded_artifact = complete_embedded_artifact(
             bundle_manifest or {}, nam_path, nam_path.parent,
             sample_rate=int(validation["sample_rate"]), final_scalar=float(embedded.get("final_linear_scalar", 1.0)),
+            validation_input=bundle_dir / "input.wav",
         )
         job.state = "complete"
         save_job(self.a2_output_dir, job)

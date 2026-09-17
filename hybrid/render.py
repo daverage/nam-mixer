@@ -106,7 +106,8 @@ def sequential_renderer_record() -> dict:
 _SUBPROCESS_TIMEOUT_S = 120.0
 
 
-def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | None = None) -> np.ndarray:
+def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | None = None,
+           executable: Path | None = None) -> np.ndarray:
     """Render `audio` (mono float32, at `sample_rate`) through `model`.
 
     - Input and output are both mono float32 numpy arrays of the same length.
@@ -129,7 +130,7 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | N
       boundary between native code and the rest of the app, so it verifies
       that contract rather than trusting the subprocess blindly.
     """
-    exe = find_nam_render_exe()
+    exe = executable or find_nam_render_exe()
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim != 1:
         raise NamRenderError(f"NAM render currently requires mono audio, got shape {audio.shape}")

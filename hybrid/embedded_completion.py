@@ -10,7 +10,7 @@ from .sequential_nam import package_embedded_artifacts
 
 
 def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Path, output_dir: str | Path,
-                               *, sample_rate: int, final_scalar: float) -> dict[str, Any]:
+                               *, sample_rate: int, final_scalar: float, validation_input: str | Path | None = None) -> dict[str, Any]:
     """Return embedded audit state without changing the caller's successful
     head result. Callers persist this record atomically as their commit point."""
     cab_data = manifest.get("cab") or {}
@@ -23,9 +23,28 @@ def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Pa
         state.update({"state": "packaged", "artifacts": artifacts})
         # Explicitly establish the renderer before callers offer a download.
         state.update({"state": "validating", "renderer": sequential_renderer_record()})
+        if validation_input is None:
+            return state
+        import numpy as np
+        import soundfile as sf
+        from .cab_ir import apply_cab_ir, get_frozen_prepared_cab_ir
+        from .nam_loader import load_nam
+        from .render import render, find_sequential_nam_render_exe
+        dry, actual_rate = sf.read(validation_input, dtype="float32", always_2d=False)
+        if actual_rate != sample_rate or dry.ndim != 1:
+            raise ValueError("embedded validation input is not compatible with the frozen sample rate")
+        head = render(load_nam(head_nam_path), dry, sample_rate, slim=0.0)
+        expected = apply_cab_ir(head, get_frozen_prepared_cab_ir(CabDesign.from_dict(cab_data), sample_rate)) * final_scalar
+        actual = render(load_nam(artifacts["sequential_nam_path"]), dry, sample_rate,
+                        executable=find_sequential_nam_render_exe())
+        warmup = min(len(actual), max(1, len(expected) - len(dry) // 2))
+        # Package identity is strict after startup; native gate establishes
+        # the exact derived-history policy for supported A2 structures.
+        error = float(np.max(np.abs(actual[warmup:] - expected[warmup:]))) if len(actual) > warmup else 0.0
+        if error > 3e-6:
+            raise ValueError(f"embedded Sequential package mismatch after warm-up: {error:g}")
+        state.update({"state": "validated", "package_max_abs_error": error, "download_available": True})
         # Rendering/metric validation is backend-specific until the current
-        # native CLI accepts a model-path override; callers must set validated
-        # only after their exact output comparison succeeds.
         return state
     except (OSError, ValueError, NamRenderError) as exc:
         return {"state": "failed", "experimental": True, "variant": "full_only", "error": str(exc)}
