@@ -27,7 +27,7 @@ def test_local_llm_is_disabled_without_a_model(monkeypatch):
 
 
 def test_status_reports_reachable_when_host_responds(monkeypatch):
-    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "gemma3:4b")
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "gemma4:e4b")
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
 
     class _Ok(_Response):
@@ -40,7 +40,7 @@ def test_status_reports_reachable_when_host_responds(monkeypatch):
 
 
 def test_status_reports_unreachable_when_host_does_not_respond(monkeypatch):
-    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "gemma3:4b")
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "gemma4:e4b")
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
 
     def _raise(*_a, **_k):

@@ -1,5 +1,5 @@
 """Tests for hybrid/ollama_pull.py -- the Settings page's one-click "pull
-gemma3:4b via Ollama" button backend. Subprocess/PATH access is mocked so
+gemma4:e4b via Ollama" button backend. Subprocess/PATH access is mocked so
 these never actually invoke Ollama."""
 import time
 from unittest.mock import patch
@@ -65,10 +65,10 @@ def test_start_pull_reports_nonzero_exit_as_error():
 
 def test_start_pull_returns_existing_state_when_already_running():
     with ollama_pull._lock:
-        ollama_pull._state.update({"status": "running", "model": "gemma3:4b", "error": None, "log_tail": ""})
+        ollama_pull._state.update({"status": "running", "model": "gemma4:e4b", "error": None, "log_tail": ""})
     with patch.object(ollama_pull.shutil, "which", return_value="/usr/bin/ollama"), \
          patch.object(ollama_pull.subprocess, "Popen") as popen:
         state = ollama_pull.start_pull("other-model")
         popen.assert_not_called()
         assert state["status"] == "running"
-        assert state["model"] == "gemma3:4b"
+        assert state["model"] == "gemma4:e4b"

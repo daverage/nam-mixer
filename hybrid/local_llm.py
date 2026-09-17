@@ -136,7 +136,7 @@ def _config() -> tuple[str, str] | None:
     return base_url, model
 
 
-RECOMMENDED_LOCAL_MODEL = "gemma3:4b"
+RECOMMENDED_LOCAL_MODEL = "gemma4:e4b"
 
 
 def _reachable(base_url: str, timeout: float = 1.5) -> bool:

@@ -19,7 +19,7 @@ import subprocess
 import threading
 from typing import Optional
 
-RECOMMENDED_LOCAL_MODEL = "gemma3:4b"
+RECOMMENDED_LOCAL_MODEL = "gemma4:e4b"
 
 _lock = threading.Lock()
 _state: dict = {"status": "idle", "model": None, "error": None, "log_tail": ""}
