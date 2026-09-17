@@ -8,12 +8,35 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from hybrid.env_file import read_env_value as _read_env_value
+
+
+_BYTE_ESCAPE_RUN_RE = re.compile(r"(?:<0x[0-9A-Fa-f]{2}>){2,4}")
+_BYTE_ESCAPE_TOKEN_RE = re.compile(r"<0x([0-9A-Fa-f]{2})>")
+
+
+def _repair_byte_escaped_utf8(text: str) -> str:
+    """Undo a quantized-model quirk: literal '<0xF0><0x9F>...' instead of real UTF-8 bytes.
+
+    Some local models emit the byte-escape spelling of a multi-byte UTF-8
+    sequence (typically emoji with a variation selector) as literal text
+    rather than the actual bytes. Each run is byte-decoded and re-encoded as
+    UTF-8; a run that isn't valid UTF-8 is left untouched rather than guessed at.
+    """
+    def _decode_run(match: re.Match) -> str:
+        raw = bytes(int(byte, 16) for byte in _BYTE_ESCAPE_TOKEN_RE.findall(match.group(0)))
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return match.group(0)
+
+    return _BYTE_ESCAPE_RUN_RE.sub(_decode_run, text)
 
 
 LOCAL_LLM_REQUEST_TIMEOUT_SECONDS = 60
@@ -138,7 +161,7 @@ def _recipe_from_json(data: object) -> LocalRecipe:
     explanation = data.get("explanation", "")
     if not isinstance(explanation, str):
         raise LocalLlmError("local LLM returned an invalid explanation")
-    explanation = explanation.strip()[:_integer_setting("NAM_MIXER_LOCAL_LLM_MAX_EXPLANATION_CHARS", MAX_LOCAL_RECIPE_EXPLANATION_LENGTH)]
+    explanation = _repair_byte_escaped_utf8(explanation.strip())[:_integer_setting("NAM_MIXER_LOCAL_LLM_MAX_EXPLANATION_CHARS", MAX_LOCAL_RECIPE_EXPLANATION_LENGTH)]
     if mode == "blend":
         return LocalRecipe(mode=mode, mixB=_number(data, "mixB", 0, 100, integer=True), explanation=explanation)
     if mode == "hybrid":
@@ -168,6 +191,7 @@ def _conversation_reply_from_json(data: object) -> LocalConversationReply:
     reply = data.get("reply")
     if not isinstance(reply, str) or not reply.strip():
         raise LocalLlmError("local LLM returned an invalid conversation reply")
+    reply = _repair_byte_escaped_utf8(reply.strip())[:_integer_setting("NAM_MIXER_LOCAL_LLM_MAX_REPLY_CHARS", MAX_LOCAL_CONVERSATION_REPLY_LENGTH)]
     raw_queries = data.get("tone3000_queries", [])
     queries = [str(query).strip()[:120] for query in raw_queries if isinstance(query, str) and query.strip()][:3] if isinstance(raw_queries, list) else []
     raw_plan = data.get("source_plan")
@@ -178,9 +202,9 @@ def _conversation_reply_from_json(data: object) -> LocalConversationReply:
             source_plan = {"ampA": amp_a.strip()[:240], "ampB": amp_b.strip()[:240]}
     recipe_data = data.get("recipe")
     if recipe_data is None:
-        return LocalConversationReply(reply=reply.strip()[:_integer_setting("NAM_MIXER_LOCAL_LLM_MAX_REPLY_CHARS", MAX_LOCAL_CONVERSATION_REPLY_LENGTH)], tone3000_queries=queries, source_plan=source_plan)
+        return LocalConversationReply(reply=reply, tone3000_queries=queries, source_plan=source_plan)
     recipe = _recipe_from_json(recipe_data)
-    return LocalConversationReply(reply=reply.strip()[:_integer_setting("NAM_MIXER_LOCAL_LLM_MAX_REPLY_CHARS", MAX_LOCAL_CONVERSATION_REPLY_LENGTH)], recipe=recipe, tone3000_queries=queries, source_plan=source_plan)
+    return LocalConversationReply(reply=reply, recipe=recipe, tone3000_queries=queries, source_plan=source_plan)
 
 
 def converse(
@@ -227,38 +251,55 @@ def converse(
         "Choose exactly one mode by reasoning about what remains constant and what changes. Do not choose from "
         "artist names, genre labels, or isolated words such as 'clean', 'gain', or 'switch'. First identify the "
         "requested signal behaviour, then select the only mode whose controls can express it:\n"
-        "- 'blend' (Parallel Blend): both captures run together continuously at one fixed proportion. Nothing changes "
-        "with picking strength or guitar volume. Use it for a static layer, a permanent two-amp mix, or a request "
-        "for an exact always-on percentage. Recipe fields: mode,mixB (0-100, percent Amp B),explanation. Explain "
-        "that mixB is the sole mode control and that it does not create a level-dependent change.\n"
-        "- 'hybrid' (Dynamic Hybrid): the complete identity moves from Amp A to Amp B as input level rises: EQ, touch "
-        "response, compression, and drive all travel together. Use it for a genuine two-state/full-voice handoff, "
-        "including a request that associates one whole amp with a lower guitar-volume range and another whole amp "
-        "with a higher range. Recipe fields: mode,switchKnob (0-10, the centre of the detected level handoff) and "
-        "width (1-24 dB, transition range; small is decisive, large is gradual),explanation. Explain both controls. "
-        "A guitar-volume number is a musical target, not a calibrated physical measurement: state that switchKnob "
-        "may need a short audition adjustment.\n"
-        "- 'character' (Character Blend): one voice's broad EQ/feel/response remains the foundation while only the "
-        "drive character follows a separate level-dependent path toward the other. Use it only when the brief makes "
-        "that split of responsibilities clear. Recipe fields: mode,tone,feel (0-100 each, percent toward Amp B for "
-        "the retained colour and response), drive,driveLow,driveMid,driveHigh (0-100 each, percent toward Amp B at "
-        "the three dynamic ranges),explanation. Give a non-flat Low/Mid/High drive curve whenever the drive is meant "
-        "to evolve, and explain every value.\n"
+        "- 'blend' (Parallel Blend, labelled 'Always mixed' on the mode picker): both captures run together "
+        "continuously at one fixed proportion. Nothing changes with picking strength or guitar volume. Use it for a "
+        "static layer, a permanent two-amp mix, or a request for an exact always-on percentage. Recipe fields: "
+        "mode,mixB (0-100, percent Amp B),explanation. In prose, refer to this control by its on-screen label "
+        "'Amp A / Amp B mix' (never the internal field name 'mixB'), and explain that it is the sole mode control "
+        "and does not create a level-dependent change.\n"
+        "- 'hybrid' (Dynamic Hybrid, labelled 'Changes as you play harder' on the mode picker): the complete identity "
+        "moves from Amp A to Amp B as input level rises: EQ, touch response, compression, and drive all travel "
+        "together. Use it for a genuine two-state/full-voice handoff, including a request that associates one whole "
+        "amp with a lower guitar-volume range and another whole amp with a higher range. Recipe fields: "
+        "mode,switchKnob (0-10, the centre of the detected level handoff) and width (1-24 dB, transition range; "
+        "small is decisive, large is gradual),explanation. In prose, refer to switchKnob by its on-screen label "
+        "'Where does it start to change?' and width by its on-screen label 'How gradually should it change?' (never "
+        "the internal field names). Explain both controls. A guitar-volume number is a musical target, not a "
+        "calibrated physical measurement: state that this may need a short audition adjustment.\n"
+        "- 'character' (Character Blend, labelled 'Combine tone and feel' on the mode picker): one voice's broad "
+        "EQ/feel/response remains the foundation while only the drive character follows a separate level-dependent "
+        "path toward the other. Use it only when the brief makes that split of responsibilities clear. Recipe "
+        "fields: mode,tone,feel (0-100 each, percent toward Amp B for the retained colour and response), "
+        "drive,driveLow,driveMid,driveHigh (0-100 each, percent toward Amp B at the three dynamic ranges),"
+        "explanation. In prose, refer to tone by its on-screen label 'Broad tone: Amp A / Amp B', feel by 'Playing "
+        "feel: Amp A / Amp B', and drive/driveLow/driveMid/driveHigh collectively by 'Drive: Amp A / Amp B' (with "
+        "its 'Advanced: drive morph by input level' section for the Low/Mid/High split) -- never the internal field "
+        "names. Give a non-flat Low/Mid/High drive curve whenever the drive is meant to evolve, and explain every "
+        "value.\n"
         "Before returning a recipe, perform this check: if the user expects only a constant mixture, use Blend; if "
         "they expect the entire amp to become the other one across level, use Hybrid; if they expect a stable tonal "
         "foundation with a separately morphing drive voice, use Character. Name this reasoning in the explanation.\n"
-        "You are an expert tutor on every NAM Mixer control. Do not invent amp facts; use only the request. "
+        "You are an expert tutor on every NAM Mixer control. Do not invent amp facts; use only the request. Always "
+        "speak the same language as the Builder screen: use its on-screen control and mode-picker labels (given "
+        "above) in reply and explanation text, not internal field/code names like switchKnob, mixB, tone, feel, "
+        "drive, driveLow, driveMid, or driveHigh -- those are for the JSON recipe only, never for prose the user reads.\n"
         "Write reply and recipe.explanation as clear Markdown: use short headings, bullets or numbered steps where "
         "they make instructions easier to scan, **bold** control names, and `code` for literal setting values. "
         "In explanation, give concise but detailed, practical instructions: name the chosen mode and why; state "
-        "every literal control value; explain what each relevant control does (mixB, or switchKnob and width, or "
-        "tone, feel, drive, driveLow, driveMid and driveHigh); then say how to play or adjust it. Use short "
-        "paragraphs separated with \\n. Keep explanation under 1,600 characters. Make reply a concise summary or "
-        "question; place the detailed guidance in recipe.explanation. When research notes are present, use their "
-        "specific facts and never claim a researched artist's rig from memory alone."
+        "every literal control value next to its on-screen label; explain what each relevant control does; then "
+        "say how to play or adjust it. Use short paragraphs separated with \\n. Keep explanation under 1,600 "
+        "characters. Make reply a concise summary or question; place the detailed guidance in recipe.explanation. "
+        "When research notes are present, use their specific facts and never claim a researched artist's rig from "
+        "memory alone."
         " When the user supplies a selected TONE3000 pack and its model names, help them choose a specific file "
         "by exact name where the available names/descriptions support it; explain why it fits the requested role "
-        "(clean source, driven source, or alternative), and say explicitly when the names are too ambiguous to know."
+        "(clean source, driven source, or alternative), and say explicitly when the names are too ambiguous to know. "
+        "If a source_plan is already established (ampA/ampB are known) and this pack's family/description clearly "
+        "corresponds to one of those two roles -- for example it is the same amp family as the previously named "
+        "Amp A or Amp B, or the conversation already discussed it as one role -- DO NOT ask the user whether it "
+        "should be Amp A or Amp B. Decide the role yourself from that context and directly recommend one exact "
+        "file for that established role. Only ask which role it should fill when the pack is a genuinely new amp "
+        "family that could not have been anticipated by the existing source_plan."
         + (
             " TONE3000 research is enabled for this request. Add up to three concrete amp-family search terms in "
             "tone3000_queries (for example, 'Vox AC30', 'Marshall JCM800'), never an artist's name or a long sentence. "

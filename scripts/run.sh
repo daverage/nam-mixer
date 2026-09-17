@@ -17,6 +17,13 @@ if [ -f ".env" ]; then
         case "$name" in
             ""|\#*) continue ;;
         esac
+        # Match hybrid/env_file.py's parsing: strip one layer of surrounding
+        # quotes so a quoted .env value (e.g. KEY="secret") isn't exported
+        # with the literal quote characters still attached.
+        value="${value%\"}"
+        value="${value#\"}"
+        value="${value%\'}"
+        value="${value#\'}"
         if [ -z "${!name+x}" ]; then
             export "$name=$value"
         fi

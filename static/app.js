@@ -938,9 +938,9 @@ function appendTone3000DiscussButtonsToLastMessage(results) {
   if (container.children.length) message.append(container);
 }
 
-function applyRecipe(recipe, prefix = "", { showMessage = true } = {}) {
+function applyRecipe(recipe, prefix = "", { showMessage = true, noRecipeMessage = "I couldn't identify a blend direction yet. Try naming what should stay from Amp A and what should take over from Amp B—for example, ‘keep Amp A's EQ and feel; let its gain become Amp B crunch as I play harder.’" } = {}) {
   if (!recipe) {
-    if (showMessage) addRecipeConversationMessage("assistant", "I couldn't identify a blend direction yet. Try naming what should stay from Amp A and what should take over from Amp B—for example, ‘keep Amp A's EQ and feel; let its gain become Amp B crunch as I play harder.’");
+    if (showMessage) addRecipeConversationMessage("assistant", noRecipeMessage);
     return;
   }
   setModeFromWizard(recipe.mode);
@@ -1027,14 +1027,17 @@ async function applyRecipeFromPrompt() {
       if (data.recipe) applyRecipe(data.recipe, "", { showMessage: false });
       recipePromptInput.value = "";
       return;
-    } catch (_error) {
-      prefix = "Local AI was unavailable, so the built-in suggestion was used. ";
+    } catch (error) {
+      const reason = error && error.message ? error.message : "an unknown error";
+      prefix = `Local AI was unavailable (${reason}), so the built-in suggestion was used. `;
     } finally {
       recipePromptApplyButton.disabled = false;
     }
   }
   if (!promptWasAdded) addRecipeConversationMessage("user", prompt);
-  applyRecipe(recipe, prefix);
+  applyRecipe(recipe, prefix, {
+    noRecipeMessage: `${prefix}I couldn't turn that into settings with the built-in suggestion tool. Try naming what should stay from Amp A and what should take over from Amp B, or re-enable local AI for open-ended questions like file/pack choices.`,
+  });
   recipePromptInput.value = "";
 }
 

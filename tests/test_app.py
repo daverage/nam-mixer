@@ -112,7 +112,7 @@ def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch
             to_dict=lambda: {"reply": "Try the Vox AC30 capture -- it fits the clean side."},
         )
 
-    def fake_search(query, *, rig_scope, author):
+    def fake_search(query, *, rig_scope, author, rank_query=""):
         return [{"id": query, "title": query + " capture", "creator": "tester", "description": "head"}]
 
     monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
@@ -141,7 +141,7 @@ def test_local_llm_uses_concrete_fallback_queries_for_a_grohl_brief(client, monk
     def fake_converse(*_args, **_kwargs):
         return SimpleNamespace(tone3000_queries=[], recipe=None, to_dict=lambda: {"reply": "A starting point."})
 
-    def fake_search(query, *, rig_scope, author):
+    def fake_search(query, *, rig_scope, author, rank_query=""):
         searched.append(query)
         return []
 

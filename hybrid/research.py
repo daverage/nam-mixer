@@ -12,24 +12,32 @@ from hybrid.env_file import read_env_value as _env
 
 TONE3000_BASE = "https://www.tone3000.com/api/v1"
 
+_METADATA_STOPWORDS = frozenset({
+    "amp", "and", "are", "for", "from", "guitar", "have", "into", "its",
+    "model", "need", "over", "pack", "sound", "that", "the", "this", "tone",
+    "with", "your",
+})
+
 
 def _rank_tone3000_metadata(query: str, result: dict) -> tuple[int, str]:
     """Rank catalogue records from supplied metadata, never invented facts.
 
     This is the deterministic safety net used before the local model reads the
-    shortlist: a concrete family match in a pack description is more useful
-    than API ordering alone, while an undocumented pack stays conservative.
+    shortlist. Scores represent the portion of the meaningful query terms that
+    occur in the title or description; a title hit is weighted more heavily.
     """
-    terms = {term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) >= 3}
-    title = result["title"].lower()
-    description = result["description"].lower()
-    title_hits = sorted(term for term in terms if term in title)
-    description_hits = sorted(term for term in terms if term in description)
-    score = 30 + 12 * len(title_hits) + 7 * len(description_hits)
-    if description.strip():
-        score += 3
+    terms = {
+        term for term in re.findall(r"[a-z0-9]+", query.lower())
+        if len(term) >= 3 and term not in _METADATA_STOPWORDS
+    }
+    title_terms = set(re.findall(r"[a-z0-9]+", result["title"].lower()))
+    description_terms = set(re.findall(r"[a-z0-9]+", result["description"].lower()))
+    title_hits = sorted(terms & title_terms)
+    description_hits = sorted((terms & description_terms) - set(title_hits))
+    matched_weight = 2 * len(title_hits) + len(description_hits)
+    score = round(100 * matched_weight / (2 * len(terms))) if terms else 0
     reason = "Metadata matches " + ", ".join(title_hits + [term for term in description_hits if term not in title_hits]) if (title_hits or description_hits) else "Limited catalogue metadata; inspect the pack description"
-    return min(100, score), reason + "."
+    return score, reason + "."
 
 
 class _PageText(HTMLParser):
@@ -99,11 +107,37 @@ def web_notes(query: str) -> str:
     return "\n".join(notes)
 
 
-def tone3000_search(query: str, *, rig_scope: str, author: str = "", opener=urlopen) -> list[dict]:
-    """Search public TONE3000 metadata; captures themselves are never downloaded."""
+def _require_tone3000_api_key(*, for_action: str) -> str:
+    """Return a validated TONE3000_API_KEY, never logging its value.
+
+    Distinguishes "not set anywhere" from "set but wrong prefix" -- the
+    latter usually means a stale TONE3000_API_KEY exported in the shell that
+    started the server is shadowing a correctly edited .env, since an
+    already-set environment variable always wins over .env (see env_file.py).
+    """
     api_key = _env("TONE3000_API_KEY")
+    if not api_key:
+        raise RuntimeError(f"TONE3000 {for_action} needs a server-side TONE3000_API_KEY secret key (t3k_cs_…).")
     if not api_key.startswith("t3k_cs_"):
-        raise RuntimeError("TONE3000 search needs a server-side TONE3000_API_KEY secret key (t3k_cs_…).")
+        raise RuntimeError(
+            f"TONE3000 {for_action} found a TONE3000_API_KEY, but it does not start with the expected "
+            "'t3k_cs_' secret-key prefix. If .env has a correct key, check for a stale TONE3000_API_KEY "
+            "exported in the shell/environment that started the server -- that always overrides .env."
+        )
+    return api_key
+
+
+def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query: str = "", opener=urlopen) -> list[dict]:
+    """Search public TONE3000 metadata; captures themselves are never downloaded.
+
+    `query` is the narrow amp-family term sent to the catalogue API, which
+    already filters for relevance -- scoring every result against that same
+    short term is nearly always 100% and tells the user nothing. `rank_query`
+    (typically the user's full, richer request) is used for match scoring
+    instead so results are actually differentiated; it defaults to `query`
+    when the caller has nothing richer to offer.
+    """
+    api_key = _require_tone3000_api_key(for_action="search")
     params = {"query": query, "page": 1, "page_size": 20, "sort": "best-match", "format": "nam", "architecture": "2"}
     if rig_scope == "heads":
         params["gears"] = "amp"
@@ -132,7 +166,7 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", opener=urlo
             "creator": creator or "unknown creator",
             "description": description[:600],
         }
-        result["match_score"], result["match_reason"] = _rank_tone3000_metadata(query, result)
+        result["match_score"], result["match_reason"] = _rank_tone3000_metadata(rank_query or query, result)
         results.append(result)
         if len(results) == 8:
             break
@@ -148,9 +182,7 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", opener=urlo
 
 
 def _tone3000_models_payload(tone_id: int, *, opener=urlopen) -> list[dict]:
-    api_key = _env("TONE3000_API_KEY")
-    if not api_key.startswith("t3k_cs_"):
-        raise RuntimeError("TONE3000 downloads need a server-side TONE3000_API_KEY secret key (t3k_cs_…).")
+    api_key = _require_tone3000_api_key(for_action="downloads")
     request = Request(
         f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': 2})}",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -188,7 +220,7 @@ def tone3000_model_download(tone_id: int, model_id: int, *, opener=urlopen) -> t
     url = str((model or {}).get("model_url") or "")
     if not url.startswith(f"{TONE3000_BASE}/models/"):
         raise RuntimeError("TONE3000 could not provide a safe download link for that NAM file.")
-    api_key = _env("TONE3000_API_KEY")
+    api_key = _require_tone3000_api_key(for_action="downloads")
     try:
         with opener(Request(url, headers={"Authorization": f"Bearer {api_key}"}), timeout=30) as response:
             data = response.read()

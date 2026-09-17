@@ -379,7 +379,7 @@ def api_local_llm_recipe():
             for query in queries:
                 per_family = 0
                 try:
-                    for match in tone3000_search(query, rig_scope=rig_scope, author=author):
+                    for match in tone3000_search(query, rig_scope=rig_scope, author=author, rank_query=prompt.strip()):
                         key = str(match.get("id") or f"{match.get('title')}|{match.get('creator')}")
                         if key not in seen:
                             seen.add(key)
@@ -388,7 +388,13 @@ def api_local_llm_recipe():
                         if len(matches) >= 8 or per_family >= 4:
                             break
                 except RuntimeError as exc:
-                    warnings.append(str(exc))
+                    message = str(exc)
+                    if message in warnings:
+                        # Same failure already recorded (for example a missing/invalid
+                        # server-side API key) will recur identically for every
+                        # remaining query -- stop retrying instead of repeating it.
+                        break
+                    warnings.append(message)
                 if len(matches) >= 8:
                     break
 
@@ -405,6 +411,22 @@ def api_local_llm_recipe():
                 )
             except LocalLlmError:
                 warnings.append("TONE3000 matches were found, but the local model could not incorporate them into its final answer.")
+
+            # The prose above names specific captures in backtick code spans
+            # (e.g. `Vox AC30 Clean for Jazz - Super 58's`). Surface those
+            # same captures first in the candidate list shown to the user,
+            # instead of leaving the order to per-query search-score luck.
+            conversation_dict = conversation.to_dict()
+            final_text = " ".join(filter(None, [
+                conversation_dict.get("reply"),
+                (conversation_dict.get("recipe") or {}).get("explanation"),
+            ]))
+            # Quoted spans sometimes include a trailing "by <creator>" (e.g.
+            # `Marshall SV20H by thebedroomrocker`), so match by containment
+            # rather than requiring an exact string match against the title alone.
+            recommended_spans = [name.strip().lower() for name in re.findall(r"`([^`]+)`", final_text) if name.strip()]
+            if recommended_spans:
+                matches.sort(key=lambda match: 0 if any(match["title"].strip().lower() in span for span in recommended_spans) else 1)
 
         if tone3000_context and any(word in prompt.lower() for word in ("specific", "which", "file", "model", "amp a", "amp b")):
             names = tone3000_context["models"]
@@ -485,7 +507,7 @@ def api_local_llm_recipe():
         if use_tone3000:
             response["tone3000_results"] = matches
         if warnings:
-            response["research_warnings"] = warnings
+            response["research_warnings"] = list(dict.fromkeys(warnings))
         return jsonify(response)
     except LocalLlmError as exc:
         logger.info("Local recipe assistant unavailable: %s", exc)
