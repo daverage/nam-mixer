@@ -1,0 +1,14 @@
+# Target labels
+ namcore-populate
+# Source files and their labels
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/CMakeFiles/namcore-populate
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/CMakeFiles/namcore-populate.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/CMakeFiles/namcore-populate-complete.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-build.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-configure.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-download.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-install.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-mkdir.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-patch.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-test.rule
+/Users/andrzejmarczewski/Documents/GitHub/hybrid-nam-builder/native/nam_render/build-sequential/_deps/namcore-subbuild/namcore-populate-prefix/src/namcore-populate-stamp/namcore-populate-update.rule
