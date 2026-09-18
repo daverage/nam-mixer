@@ -51,8 +51,8 @@ DI_FILES = {
 }
 
 
-def _find_capture(amp_dir: Path, channel: str, gain: int) -> Path:
-    matches = [p for p in amp_dir.glob("*.nam") if channel in p.stem and f"G{gain}" == p.stem.split()[-1]]
+def _find_capture(amp_dir: Path, channel: str, gain: int, gain_prefix: str) -> Path:
+    matches = [p for p in amp_dir.glob("*.nam") if channel in p.stem and f"{gain_prefix}{gain}" == p.stem.split()[-1]]
     if not matches:
         raise FileNotFoundError(f"No capture found for channel={channel!r} gain={gain} in {amp_dir}")
     if len(matches) > 1:
@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("amp_dir", type=Path, help="Directory containing the gain-sweep .nam captures")
     parser.add_argument("--channels", default="Hi,Lo", help="Comma-separated channel name substrings (default: Hi,Lo)")
     parser.add_argument("--gains", default="2,4,6,8,10", help="Comma-separated gain positions (default: 2,4,6,8,10)")
+    parser.add_argument("--gain-prefix", default="G", help='Filename label preceding the gain number, e.g. "G" or "V" (default: G)')
     parser.add_argument("--seconds", type=int, default=6, help="Seconds of each DI clip to render (default: 6)")
     args = parser.parse_args()
 
@@ -83,14 +84,14 @@ def main() -> None:
     def load_cached(channel: str, gain: int):
         key = (channel, gain)
         if key not in model_cache:
-            model_cache[key] = load_nam(_find_capture(args.amp_dir, channel, gain))
+            model_cache[key] = load_nam(_find_capture(args.amp_dir, channel, gain, args.gain_prefix))
         return model_cache[key]
 
     def full_set(channel: str, hidden_gain: int) -> GainCaptureSet:
         captures = [
             GainCapture(
                 model=load_cached(channel, g), control_position=float(g),
-                label=f"{channel}_G{g}", hidden=(g == hidden_gain),
+                label=f"{channel}_{args.gain_prefix}{g}", hidden=(g == hidden_gain),
             )
             for g in gains
         ]
@@ -141,7 +142,7 @@ def main() -> None:
     capture_set = full_set(channels[0], mid_gain)
     dry, sr = _load_di("standard", args.seconds)
     harness = run_ground_truth_harness(capture_set, dry, sr, calibration_mode="auto", output_normalization_amount=0.5)
-    hidden_rendered = harness.by_label(f"{channels[0]}_G{mid_gain}")
+    hidden_rendered = harness.by_label(f"{channels[0]}_{args.gain_prefix}{mid_gain}")
     real = hidden_rendered.output
     linear = interpolate_output(harness, capture_set, hidden_rendered.normalized_position)
     oracle = interpolate_output_level_matched(harness, capture_set, hidden_rendered.normalized_position, hidden_rendered.active_rms_dbfs)
