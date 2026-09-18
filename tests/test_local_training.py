@@ -45,6 +45,23 @@ def test_carriage_return_progress_bar_is_visible_before_the_epoch_finishes(tmp_p
     manager.cancel()
 
 
+def test_lightning_epoch_colon_progress_is_parsed_with_preset_total(tmp_path):
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    manager._start(
+        [sys.executable, "-c",
+         "import sys,time; print('--epoch-preset=standard: 60 epochs.', flush=True); sys.stdout.write('Epoch 3: 40%|####\\r'); sys.stdout.flush(); time.sleep(30)"],
+        "training",
+    )
+    deadline = time.monotonic() + 2
+    status = manager.status()
+    while status["progress"] is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+        status = manager.status()
+    assert status["progress"] == {"epoch": 3, "total_epochs": 60}
+    assert status["latest_line"].startswith("Epoch 3: 40%")
+    manager.cancel()
+
+
 def test_setup_cannot_expose_previous_training_validation_report(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     old_manifest = tmp_path / "old-manifest.json"

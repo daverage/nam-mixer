@@ -195,6 +195,23 @@ class KaggleCli:
         found = shutil.which("kaggle")
         if found:
             return found
+        # GUI-launched macOS apps often receive a minimal PATH that omits the
+        # user-site console-script directory where `pip install --user kaggle`
+        # puts the executable. Probe the standard user locations as well as
+        # PATH so the bundled desktop app can use an already-installed CLI.
+        if not getattr(sys, "frozen", False):
+            return None
+        candidates = [
+            Path.home() / ".local" / "bin" / "kaggle",
+            Path.home() / "Library" / "Python" / f"{sys.version_info.major}.{sys.version_info.minor}" / "bin" / "kaggle",
+            Path("/opt/homebrew/bin/kaggle"),
+            Path("/usr/local/bin/kaggle"),
+            Path("/usr/bin/kaggle"),
+        ]
+        candidates.extend(Path.home().glob("Library/Python/*/bin/kaggle"))
+        for candidate in candidates:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
         return None
 
     @staticmethod
@@ -640,6 +657,7 @@ class KaggleJobManager:
         installed = self.cli.is_installed()
         info: dict = {
             "cli_installed": installed,
+            "cli_path": self.cli.executable if installed else None,
             "cli_version": self.cli.version() if installed else None,
             "authenticated": self.cli.is_authenticated() if installed else False,
             "accelerator": ACCELERATOR,

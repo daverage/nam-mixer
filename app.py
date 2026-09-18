@@ -62,7 +62,7 @@ from hybrid.kaggle_training import (
 )
 from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
-from hybrid.local_llm import LocalConversationReply, LocalLlmError, converse as converse_with_local_llm, status as local_llm_status
+from hybrid.local_llm import LocalConversationReply, LocalLlmError, converse as converse_with_local_llm, status as local_llm_status, test_connection as test_ai_connection
 from hybrid.ollama_pull import (
     OllamaPullError,
     get_pull_status as get_ollama_pull_status,
@@ -326,7 +326,10 @@ def api_settings_save():
     values = payload.get("values")
     if not isinstance(values, dict):
         return jsonify({"error": "expected {\"values\": {name: value}}"}), 400
-    result = save_app_settings({str(k): v for k, v in values.items()})
+    clear_secrets = payload.get("clear_secrets", [])
+    if not isinstance(clear_secrets, list) or not all(isinstance(name, str) for name in clear_secrets):
+        return jsonify({"error": "clear_secrets must be a list of setting names"}), 400
+    result = save_app_settings({str(k): v for k, v in values.items()}, clear_secrets=clear_secrets)
     return jsonify(result)
 
 
@@ -334,6 +337,13 @@ def api_settings_save():
 def api_local_llm_status():
     """Expose configuration only; browser input can never choose the URL."""
     return jsonify(local_llm_status())
+
+
+@app.post("/api/local_llm/test")
+def api_local_llm_test():
+    """A provider-aware, quota-consuming connection test with no user content."""
+    result = test_ai_connection()
+    return jsonify(result), (200 if result.get("ok") else 502)
 
 
 @app.post("/api/local_llm/pull")
@@ -431,12 +441,14 @@ def api_local_llm_recipe():
                 history,
                 "\n\n".join(notes),
                 request_tone3000_queries=use_tone3000,
+                known_source_plan=source_plan,
             )
         except LocalLlmError:
             fallback_notes = [note for note in notes if note.startswith("Selected TONE3000 pack")]
             warnings.append("Research was found, but the local model could not incorporate it; the answer uses local knowledge instead.")
             conversation = converse_with_local_llm(
-                prompt.strip(), history, "\n\n".join(fallback_notes), request_tone3000_queries=False
+                prompt.strip(), history, "\n\n".join(fallback_notes), request_tone3000_queries=False,
+                known_source_plan=source_plan,
             )
 
         # The model only proposes TONE3000 search terms in the call above -- the
@@ -487,9 +499,11 @@ def api_local_llm_recipe():
                     history,
                     "\n\n".join(notes + [catalog_notes]),
                     request_tone3000_queries=False,
+                    known_source_plan=getattr(conversation, "source_plan", None) or source_plan,
                 )
             except LocalLlmError:
-                warnings.append("TONE3000 matches were found, but the local model could not incorporate them into its final answer.")
+                provider_name = local_llm_status().get("provider", "AI provider")
+                warnings.append(f"TONE3000 matches were found, but {provider_name} could not incorporate them into its final answer.")
 
             # The prose above names specific captures in backtick code spans
             # (e.g. `Vox AC30 Clean for Jazz - Super 58's`). Surface those
@@ -2299,7 +2313,12 @@ def api_training_input_status():
 
 @app.get("/api/local_training/status")
 def api_local_training_status():
-    return jsonify(_local_training_manager.status())
+    status = _local_training_manager.status()
+    design_id = _local_training_manager.design_id
+    if design_id:
+        status["design_id"] = design_id
+        status["download_filename"] = _suggested_nam_filename(design_id)
+    return jsonify(status)
 
 
 @app.post("/api/local_training/setup")

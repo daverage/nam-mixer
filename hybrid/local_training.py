@@ -372,8 +372,18 @@ class LocalTrainingManager:
             # (Lightning's own progress bar text is what usually carries
             # "Epoch X/Y" in the first place).
             tail = "\n".join(self.log) + (f"\n{self._live_line}" if self._live_line else "")
+        # Lightning's rich progress output is commonly either ``Epoch 3/60``
+        # or ``Epoch 3: 100%|...``.  The latter has no total in the line, so
+        # pair it with the explicit ``--epoch-preset=...: N epochs`` message.
         matches = re.findall(r"[Ee]poch\s+(\d+)\s*/\s*(\d+)", tail)
-        progress = None if not matches else {"epoch": int(matches[-1][0]), "total_epochs": int(matches[-1][1])}
+        if matches:
+            progress = {"epoch": int(matches[-1][0]), "total_epochs": int(matches[-1][1])}
+        else:
+            current = re.findall(r"[Ee]poch\s+(\d+)\s*[:|]", tail)
+            totals = re.findall(r"(?:epoch(?:s)?|for)\D{0,20}(\d+)\s+epochs?", tail, flags=re.IGNORECASE)
+            progress = ({"epoch": int(current[-1]), "total_epochs": int(totals[-1])} if current and totals else None)
+        meaningful_lines = [line.strip() for line in tail.splitlines() if line.strip()]
+        latest_line = meaningful_lines[-1] if meaningful_lines else ""
         now = time.time()
         elapsed_s = None if self.started_at is None else int((self.finished_at or now) - self.started_at)
         validation_report = None
@@ -387,5 +397,6 @@ class LocalTrainingManager:
             "log_tail": tail, "started_at": self.started_at, "finished_at": self.finished_at,
             "elapsed_s": elapsed_s, "exit_code": self.exit_code,
             "progress": progress,
+            "latest_line": latest_line[-500:],
             "validation_report": validation_report,
         }

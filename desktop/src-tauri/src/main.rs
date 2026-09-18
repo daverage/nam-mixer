@@ -264,8 +264,10 @@ fn main() {
             let url = if ready {
                 format!("http://127.0.0.1:{port}/")
             } else {
-                // Surface failure in-window rather than a blank screen.
-                "about:blank".to_string()
+                // A blank about: page looks like a frozen launch and gives
+                // the user no recovery path. Keep the failure in the same
+                // window and make it explicit instead.
+                "data:text/html,%3Chtml%3E%3Cbody%20style=%22font-family:sans-serif;padding:2rem%22%3E%3Ch1%3ENAM%20Mixer%20could%20not%20start%3C%2Fh1%3E%3Cp%3EThe%20local%20backend%20did%20not%20become%20ready%20within%2030%20seconds.%20Quit%20and%20try%20again.%3C%2Fp%3E%3C%2Fbody%3E%3C%2Fhtml%3E".to_string()
             };
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
                 .title("NAM Mixer")

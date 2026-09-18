@@ -89,6 +89,43 @@ if (isTauriDesktop) {
 
 const statusEl = document.getElementById("status");
 const systemUsageEl = document.getElementById("system-usage");
+const activityIndicator = document.getElementById("activity-indicator");
+const activityMessage = document.getElementById("activity-message");
+let activitySequence = 0;
+const activities = new Map();
+
+// One shared, unmistakable activity indicator for operations that can take
+// long enough to look like a frozen page. Section-local messages remain useful
+// detail, while this stays visible at the bottom of the window regardless of
+// which panel is open.
+function beginActivity(message) {
+  const id = ++activitySequence;
+  let currentMessage = message;
+  const started = Date.now();
+  const render = () => {
+    activityMessage.textContent = `${currentMessage} · ${formatElapsed((Date.now() - started) / 1000)}`;
+  };
+  activities.set(id, render);
+  render();
+  activityIndicator.hidden = false;
+  const timer = setInterval(render, 1000);
+  const finish = (finishedMessage = "") => {
+    clearInterval(timer);
+    activities.delete(id);
+    if (activities.size) {
+      [...activities.values()].at(-1)();
+    } else {
+      activityIndicator.hidden = true;
+    }
+    if (finishedMessage) setStatus(finishedMessage);
+  };
+  finish.update = (nextMessage) => {
+    if (!activities.has(id)) return;
+    currentMessage = nextMessage;
+    render();
+  };
+  return finish;
+}
 async function refreshSystemUsage() {
   if (!systemUsageEl) return;
   try {
@@ -196,7 +233,7 @@ function applyModeVisibility() {
   createA2Title.textContent = currentMode === "blend" ? "Make a Blend A2" : currentMode === "character" ? "Make a Character A2" : "Make a Hybrid A2";
   createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : currentMode === "character" ? CHARACTER_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
   const auditionMode = document.getElementById("audition-mode");
-  auditionMode.textContent = currentMode === "blend" ? "Parallel Blend" : currentMode === "character" ? "Character Blend" : "Dynamic Hybrid";
+  auditionMode.textContent = currentMode === "blend" ? "Always mixed" : currentMode === "character" ? "Combine tone and feel" : "Changes as you play harder";
   modeDescription.textContent = currentMode === "blend"
     ? "Both amps are present all the time at one fixed ratio. Use this for a permanent mixed rig."
     : currentMode === "character"
@@ -228,7 +265,7 @@ applyModeVisibility();
 function setStatus(msg, isError) {
   clearTimeout(statusClearTimer);
   statusEl.textContent = msg;
-  statusEl.style.color = isError ? "#c0362c" : "";
+  statusEl.classList.toggle("is-error", Boolean(isError));
   if (msg && !isError) {
     statusClearTimer = setTimeout(() => {
       if (statusEl.textContent === msg) statusEl.textContent = "";
@@ -257,16 +294,6 @@ function formatElapsed(seconds) {
   return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, "0")}s`;
 }
 
-// Long operations should never look frozen. The caller owns the final status
-// message; stopping the timer deliberately leaves that message intact.
-function showElapsed(statusElement, message) {
-  const started = Date.now();
-  const update = () => { statusElement.textContent = `${message} · ${formatElapsed((Date.now() - started) / 1000)}`; };
-  update();
-  const timer = setInterval(update, 1000);
-  return () => clearInterval(timer);
-}
-
 // Resolved server-side paths for the uploaded .nam files, keyed by "a"/"b" --
 // filled in once each upload completes, read by the Render Amps handler.
 const ampServerPaths = { a: null, b: null };
@@ -280,7 +307,7 @@ async function uploadNam(slot, fileInputId, infoElId) {
     infoEl.textContent = "";
     return;
   }
-  const stopElapsed = showElapsed(infoEl, `Uploading ${file.name}`);
+  const stopActivity = beginActivity(`Uploading ${file.name}…`);
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -298,7 +325,7 @@ async function uploadNam(slot, fileInputId, infoElId) {
   } catch (err) {
     setStatus("Request failed: " + err, true);
   } finally {
-    stopElapsed();
+    stopActivity();
   }
 }
 
@@ -348,7 +375,7 @@ cabFileInput.addEventListener("change", async () => {
     updateCabStatus();
     return;
   }
-  const stopElapsed = showElapsed(cabInfoEl, `Uploading ${file.name}`);
+  const stopActivity = beginActivity(`Uploading cabinet ${file.name}…`);
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -374,7 +401,7 @@ cabFileInput.addEventListener("change", async () => {
   } catch (err) {
     cabInfoEl.textContent = "Upload failed: " + err;
   } finally {
-    stopElapsed();
+    stopActivity();
   }
   updateCabStatus();
 });
@@ -554,7 +581,7 @@ testGainSlider.addEventListener("input", () => {
     previewButtons.forEach((btn) => (btn.disabled = true));
     setRenderBusy(true);
     player.classList.add("player-busy");
-    const stopElapsed = showElapsed(testGainStatus, "Preparing both amps for the new input level");
+    const stopActivity = beginActivity("Re-rendering both amps for the new input level…");
     try {
       const data = await doRenderPair();
       if (requestGeneration !== renderGeneration) return;
@@ -569,7 +596,7 @@ testGainSlider.addEventListener("input", () => {
       testGainStatus.textContent = "Error: " + err.message;
       setStatus("Test-gain re-render failed.", true);
     } finally {
-      stopElapsed();
+      stopActivity();
       setRenderBusy(false);
       player.classList.remove("player-busy");
     }
@@ -755,6 +782,7 @@ const wizardAnalyseButton = document.getElementById("btn-wizard-analyse");
 const recipePromptInput = document.getElementById("recipe-prompt-input");
 const recipePromptApplyButton = document.getElementById("btn-recipe-prompt-apply");
 const recipeUseLocalAi = document.getElementById("recipe-use-local-ai");
+const recipeAiProviderLabel = document.getElementById("recipe-ai-provider-label");
 const recipeAiStatus = document.getElementById("recipe-ai-status");
 const recipeUseWebResearch = document.getElementById("recipe-use-web-research");
 const recipeUseTone3000 = document.getElementById("recipe-use-tone3000");
@@ -804,11 +832,15 @@ async function loadLocalRecipeAiStatus() {
     const response = await fetch("/api/local_llm/status");
     const data = await response.json();
     const configured = Boolean(response.ok && data.enabled);
+    const providerLabel = data.provider === "cloudflare"
+      ? "Use Cloudflare Workers AI"
+      : data.provider === "custom" ? "Use custom AI" : "Use local AI";
+    if (recipeAiProviderLabel) recipeAiProviderLabel.textContent = providerLabel;
     localRecipeAiAvailable = configured && data.reachable !== false;
     recipeUseLocalAi.disabled = !localRecipeAiAvailable;
     recipeUseLocalAi.checked = localRecipeAiAvailable;
     if (!configured) {
-      recipeAiStatus.textContent = "(not set up — add a model name in Settings > AI Assistant)";
+      recipeAiStatus.textContent = "(not configured — choose a provider and save it in Settings > AI Assistant)";
     } else if (data.reachable === false) {
       recipeAiStatus.textContent = `(configured for ${data.base_url}, but nothing responded — start your local LLM host, or check Settings)`;
     } else {
@@ -816,6 +848,7 @@ async function loadLocalRecipeAiStatus() {
     }
   } catch (_error) {
     localRecipeAiAvailable = false;
+    if (recipeAiProviderLabel) recipeAiProviderLabel.textContent = "Use AI";
     recipeAiStatus.textContent = "(could not check status — see Settings > AI Assistant to set it up)";
   }
 }
@@ -946,8 +979,10 @@ function percentNear(text, keywords) {
 
 function recipeFromPrompt(prompt) {
   const text = prompt.toLowerCase().replace(/%/g, " percent ").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-  const hasVoxToMarshall = text.includes("vox") && recipeTextIncludes(text, ["marshall", "jcm", "plexi"]);
-  const wantsGainJourney = recipeTextIncludes(text, ["gain", "drive", "crunch", "overdrive", "play harder", "dig in", "starts", "ends"]);
+  const namedAmpFamilies = ["fender", "vox", "marshall", "mesa", "boogie", "orange", "peavey", "soldano", "engl", "hiwatt", "bogner", "princeton", "deluxe", "tweed", "jcm", "ac30"];
+  const namedAmpCount = namedAmpFamilies.filter((name) => text.includes(name)).length;
+  const hasAmpTransition = namedAmpCount >= 2 && recipeTextIncludes(text, ["from", "to", "into", "toward", "towards", "transition", "goes", "change"]);
+  const wantsGainJourney = recipeTextIncludes(text, ["gain", "drive", "crunch", "overdrive", "dirty", "play harder", "dig in", "starts", "ends"]);
   const wantsCharacter = recipeTextIncludes(text, ["eq", "tone", "feel", "response", "touch"]);
   const wantsParallel = recipeTextIncludes(text, ["parallel", "constant", "always mixed", "always blend", "both all the time", "permanent mix"]);
 
@@ -955,9 +990,9 @@ function recipeFromPrompt(prompt) {
     const explicitAmpBPercent = text.match(/\b(\d{1,3})\s*(?:percent\s*)?(?:amp\s*)?b\b/);
     const mixB = explicitAmpBPercent
       ? Math.min(100, Number(explicitAmpBPercent[1]))
-      : recipeTextIncludes(text, ["mostly amp b", "more amp b", "mostly marshall", "more marshall"])
+      : recipeTextIncludes(text, ["mostly amp b", "more amp b"])
         ? 70
-        : recipeTextIncludes(text, ["mostly amp a", "more amp a", "mostly vox", "more vox"])
+        : recipeTextIncludes(text, ["mostly amp a", "more amp a"])
           ? 30
           : 50;
     return {
@@ -966,7 +1001,7 @@ function recipeFromPrompt(prompt) {
     };
   }
 
-  if (hasVoxToMarshall || (wantsGainJourney && wantsCharacter)) {
+  if (wantsCharacter && (hasAmpTransition || wantsGainJourney)) {
     // A stated tone/feel split (e.g. "70% vox") names the FIRST amp mentioned,
     // which this heuristic treats as Amp A -- so it converts to a %-toward-B figure.
     const tonePercentA = percentNear(text, ["eq", "feel", "tone", "response", "touch"]);
@@ -1112,7 +1147,15 @@ async function applyRecipeFromPrompt() {
     addRecipeConversationMessage("user", prompt);
     promptWasAdded = true;
     recipePromptApplyButton.disabled = true;
+    const stopActivity = beginActivity("AI is working — preparing your recipe and research…");
     try {
+      // An explicit amp-family change in the current brief is a deliberate
+      // source-plan revision, not a follow-up tweak to the old pair.
+      if (recipeSourcePlan) {
+        const ampTerms = [...new Set((prompt.toLowerCase().match(/\b(fender|vox|marshall|mesa|boogie|orange|peavey|soldano|engl|hiwatt|bogner|princeton|deluxe|tweed|jcm|ac30)\b/g) || []))];
+        const existingPlan = `${recipeSourcePlan.ampA} ${recipeSourcePlan.ampB}`.toLowerCase();
+        if (ampTerms.some((term) => !existingPlan.includes(term))) recipeSourcePlan = null;
+      }
       const research = {
         web: recipeUseWebResearch.checked,
         tone3000: recipeUseTone3000.checked,
@@ -1131,7 +1174,7 @@ async function applyRecipeFromPrompt() {
         : null;
       const response = await fetch("/api/local_llm/recipe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tone3000_context: tone3000Context, source_plan: recipeSourcePlan, history: recipeConversationHistory, research }) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "local AI is unavailable");
+      if (!response.ok) throw new Error(data.error || "AI provider is unavailable");
       if (data.source_plan) recipeSourcePlan = data.source_plan;
       if (selectedTone3000Capture && data.selected_source_role) {
         selectedTone3000Capture.sourceRole = data.selected_source_role;
@@ -1157,14 +1200,15 @@ async function applyRecipeFromPrompt() {
       return;
     } catch (error) {
       const reason = error && error.message ? error.message : "an unknown error";
-      prefix = `Local AI's response could not be used (${reason}), so the built-in suggestion was used. `;
+      prefix = `The AI provider's response could not be used (${reason}), so the built-in suggestion was used. `;
     } finally {
+      stopActivity();
       recipePromptApplyButton.disabled = false;
     }
   }
   if (!promptWasAdded) addRecipeConversationMessage("user", prompt);
   applyRecipe(recipe, prefix, {
-    noRecipeMessage: `${prefix}I couldn't turn that into settings with the built-in suggestion tool. Try naming what should stay from Amp A and what should take over from Amp B, or re-enable local AI for open-ended questions like file/pack choices.`,
+    noRecipeMessage: `${prefix}I couldn't turn that into settings with the built-in suggestion tool. Try naming what should stay from Amp A and what should take over from Amp B, or enable an AI provider for open-ended questions like file/pack choices.`,
   });
   recipePromptInput.value = "";
 }
@@ -1237,6 +1281,7 @@ wizardAnalyseButton.addEventListener("click", async () => {
   wizardResult.hidden = false;
   wizardResult.textContent = "Listening to the rendered pair…";
   wizardAnalyseButton.disabled = true;
+  const stopActivity = beginActivity("Analysing the rendered amps…");
   try {
     const resp = await fetch("/api/wizard/insight", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ render_id: activeRenderId }) });
     const data = await resp.json();
@@ -1245,6 +1290,7 @@ wizardAnalyseButton.addEventListener("click", async () => {
   } catch (err) {
     wizardResult.textContent = `Analysis unavailable: ${err.message}`;
   } finally {
+    stopActivity();
     wizardAnalyseButton.disabled = !havePair;
   }
 });
@@ -2068,7 +2114,7 @@ renderPairBtn.addEventListener("click", async () => {
   const requestGeneration = renderGeneration;
   renderPairBtn.disabled = true;
   setRenderBusy(true);
-  const stopElapsed = showElapsed(renderStatus, "Preparing both amps for comparison");
+  const stopActivity = beginActivity("Rendering both amps — this can take a moment…");
   renderWarnings.hidden = true;
   previewButtons.forEach((btn) => (btn.disabled = true));
   document.getElementById("btn-character-low-level-check").disabled = true;
@@ -2084,7 +2130,7 @@ renderPairBtn.addEventListener("click", async () => {
     renderStatus.textContent = "Error: " + err.message;
     setStatus("Render failed.", true);
   } finally {
-    stopElapsed();
+    stopActivity();
     setRenderBusy(false);
     renderPairBtn.disabled = false;
     rebuildPreviewButton.disabled = false;
@@ -2178,7 +2224,7 @@ trainingInputFile.addEventListener("change", async () => {
   if (!file) return;
   trainingInputReady = false;
   syncTrainingControls();
-  const stopElapsed = showElapsed(trainingInputStatus, `Uploading ${file.name}`);
+  const stopActivity = beginActivity(`Uploading training input ${file.name}…`);
   const formData = new FormData();
   formData.append("file", file);
   try {
@@ -2194,7 +2240,7 @@ trainingInputFile.addEventListener("change", async () => {
   } catch (err) {
     trainingInputStatus.textContent = "Upload failed: " + err;
   } finally {
-    stopElapsed();
+    stopActivity();
     syncTrainingControls();
   }
 });
@@ -2210,7 +2256,7 @@ characterLowLevelBtn.addEventListener("click", async () => {
   characterLowLevelBtn.disabled = true;
   const requestGeneration = renderGeneration;
   characterLowLevelResult.hidden = true;
-  const stopElapsed = showElapsed(characterLowLevelStatus, "Checking how the sound responds to quiet playing");
+  const stopActivity = beginActivity("Checking the quiet-playing response…");
   try {
     const resp = await fetch("/api/character/low_level_check", {
       method: "POST",
@@ -2230,7 +2276,7 @@ characterLowLevelBtn.addEventListener("click", async () => {
     if (requestGeneration !== renderGeneration) return;
     characterLowLevelStatus.textContent = "Request failed: " + err;
   } finally {
-    stopElapsed();
+    stopActivity();
     characterLowLevelBtn.disabled = !havePair;
   }
 });
@@ -2266,7 +2312,7 @@ async function runGenerate() {
   generationPending = true;
   syncTrainingControls();
   const requestGeneration = renderGeneration;
-  const stopElapsed = showElapsed(generateStatus, "Creating training files from the official NAM input");
+  const stopActivity = beginActivity("Creating training files — processing the official input…");
   generateResult.hidden = true;
   try {
     const resp = await fetch("/api/generate", {
@@ -2353,7 +2399,7 @@ async function runGenerate() {
     setStatus("Training bundle generation failed.", true);
     return false;
   } finally {
-    stopElapsed();
+    stopActivity();
     generationPending = false;
     syncTrainingControls();
   }
@@ -2382,6 +2428,7 @@ const kaggleProgressState = document.getElementById("kaggle-progress-state");
 const kaggleProgressMeta = document.getElementById("kaggle-progress-meta");
 const kaggleProgressBarTrack = document.getElementById("kaggle-progress-bar-track");
 const kaggleProgressBarFill = document.getElementById("kaggle-progress-bar-fill");
+const kaggleCurrentLine = document.getElementById("kaggle-current-line");
 const kaggleLogTail = document.getElementById("kaggle-log-tail");
 const kaggleResultEl = document.getElementById("kaggle-result");
 const kaggleRefreshBtn = document.getElementById("btn-kaggle-refresh");
@@ -2393,6 +2440,7 @@ let kaggleAuthPollTimer = null;
 let kaggleJobSubmittedAt = null;
 let localTrainingActive = false;
 let kaggleTrainingActive = false;
+let kaggleActivityStop = null;
 
 function trainingIsActive() {
   return localTrainingActive || kaggleTrainingActive;
@@ -2442,6 +2490,9 @@ function selectedEpochPreset() {
 
 const localTrainingStatus = document.getElementById("local-training-status");
 const localTrainingMeta = document.getElementById("local-training-meta");
+const localTrainingProgressTrack = document.getElementById("local-training-progress-track");
+const localTrainingProgressFill = document.getElementById("local-training-progress-fill");
+const localTrainingCurrentLine = document.getElementById("local-training-current-line");
 const localTrainingLog = document.getElementById("local-training-log");
 const localSetupBtn = document.getElementById("btn-local-setup");
 const localSetupSizeHint = document.getElementById("local-setup-size-hint");
@@ -2450,6 +2501,7 @@ const localTrainBlockedReasonEl = document.getElementById("local-train-blocked-r
 const localCancelBtn = document.getElementById("btn-local-cancel");
 const localResultEl = document.getElementById("local-result");
 let localTrainingPoll = null;
+let localTrainingActivityStop = null;
 // The design a completed "training" state actually belongs to -- captured
 // at the moment Train locally is clicked, since LocalTrainingManager is a
 // single global slot with no design_id of its own to poll back.
@@ -2582,36 +2634,29 @@ function validationSummaryHtml(report) {
   return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
 }
 
-function renderLocalDownloadResult(designId, validationReport = null) {
+function renderLocalDownloadResult(designId, validationReport = null, downloadFilename = "model.nam") {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
-  completedNamArtifact = { type: "local", designId, downloadUrl, filename: "trained-model.nam" };
+  const namFilename = downloadFilename || "model.nam";
+  completedNamArtifact = { type: "local", designId, downloadUrl, filename: namFilename };
   completedValidationReport = validationReport;
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download="trained-model.nam" class="btn btn-primary btn-block" style="
-      width: 100%;
-      flex-grow: 1;
-      display: flex;
-      text-align: center;
-      flex-wrap: nowrap;
-      align-content: center;
-      justify-content: center;
-      align-items: center;
-  ">${desktopSaveLabel("Download trained .nam")}</a>${validationSummaryHtml(validationReport)}`;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel(`Download ${namFilename}`)}</a><div class="hint">Saved as <code>${escapeHtml(namFilename)}</code></div>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
   try {
     const resp = await fetch("/api/local_training/status");
     const data = await resp.json();
-    localTrainingStatus.textContent = data.state === "ready"
+    const stateLabel = data.state === "ready"
       ? "Local training environment is ready."
       : data.state === "not_configured"
         ? "Set up the dedicated local training environment once."
         : data.state === "cancelled"
           ? "Local process stopped. You can set up or train again when ready."
         : `Local training: ${data.state.replace("_", " ")}.`;
+    localTrainingStatus.textContent = stateLabel;
     // The Train button can be blocked for a few independent reasons; always
     // say which one, rather than leaving a disabled button unexplained.
     // Note: a missing training bundle is NOT one of them -- Train generates
@@ -2638,12 +2683,37 @@ async function refreshLocalTraining() {
       const minutes = Math.floor(data.elapsed_s / 60);
       const seconds = data.elapsed_s % 60;
       const outcome = data.exit_code === null || data.exit_code === undefined ? "running" : `exit ${data.exit_code}`;
-      const progress = data.progress ? `Epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "Waiting for first epoch…";
+      const progress = data.progress ? `Epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "Preparing the first epoch…";
       localTrainingMeta.textContent = `Elapsed ${minutes}m ${seconds}s · ${progress} · ${outcome}`;
+      if (data.progress && data.progress.total_epochs > 0) {
+        localTrainingProgressTrack.hidden = false;
+        localTrainingProgressFill.style.width = `${Math.min(100, Math.max(0, (data.progress.epoch / data.progress.total_epochs) * 100))}%`;
+      } else {
+        localTrainingProgressTrack.hidden = true;
+        localTrainingProgressFill.style.width = "0%";
+      }
     } else {
       localTrainingMeta.textContent = "";
+      localTrainingProgressTrack.hidden = true;
+      localTrainingProgressFill.style.width = "0%";
+    }
+    if (data.latest_line && ["setting_up", "training", "cancelling"].includes(data.state)) {
+      localTrainingCurrentLine.hidden = false;
+      localTrainingCurrentLine.textContent = data.latest_line;
+    } else {
+      localTrainingCurrentLine.hidden = true;
+      localTrainingCurrentLine.textContent = "";
     }
     localTrainingActive = ["setting_up", "training", "cancelling"].includes(data.state);
+    if (localTrainingActive) {
+      const phase = data.state === "setting_up" ? "Setting up local training" : data.state === "cancelling" ? "Stopping local training" : "Training model";
+      const detail = data.progress ? ` — epoch ${data.progress.epoch}/${data.progress.total_epochs}` : " — preparing the trainer";
+      if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity(`${phase}${detail}…`);
+      else localTrainingActivityStop.update(`${phase}${detail}…`);
+    } else if (localTrainingActivityStop) {
+      localTrainingActivityStop();
+      localTrainingActivityStop = null;
+    }
     // Once the dedicated environment is ready, there's nothing left to set
     // up -- showing "Set up" next to a working environment invites
     // re-running pip install for no reason and looks like the previous
@@ -2661,7 +2731,7 @@ async function refreshLocalTraining() {
       clearInterval(localTrainingPoll); localTrainingPoll = null;
     }
     if (data.state === "complete" && data.exit_code === 0 && localTrainingDesignId) {
-      renderLocalDownloadResult(localTrainingDesignId, data.validation_report);
+      renderLocalDownloadResult(localTrainingDesignId, data.validation_report, data.download_filename);
     } else if (data.state !== "complete") {
       localResultEl.hidden = true;
     }
@@ -2675,6 +2745,7 @@ async function refreshLocalTraining() {
 localSetupBtn.addEventListener("click", async () => {
   localSetupBtn.disabled = true;
   localTrainingStatus.textContent = "Creating the dedicated environment and installing training packages…";
+  if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity("Setting up local training — installing the dedicated environment…");
   let setupError = "";
   try {
     const resp = await fetch("/api/local_training/setup", { method: "POST" });
@@ -2701,6 +2772,7 @@ localTrainBtn.addEventListener("click", async () => {
   localTrainBtn.disabled = true;
   localResultEl.hidden = true;
   localTrainingDesignId = lastDesignId;
+  if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity("Training model — preparing the first epoch…");
   try {
     const resp = await fetch("/api/local_training/start", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -2719,6 +2791,7 @@ localTrainBtn.addEventListener("click", async () => {
 localCancelBtn.addEventListener("click", async () => {
   localCancelBtn.disabled = true;
   localTrainingStatus.textContent = "Stopping the local process…";
+  if (localTrainingActivityStop) localTrainingActivityStop.update("Stopping local training…");
   try {
     const resp = await fetch("/api/local_training/cancel", { method: "POST" });
     const data = await resp.json();
@@ -2759,6 +2832,31 @@ function renderKaggleDownloadResult(designId, jobId, data) {
 // State label, elapsed-since-submit, and a progress bar/log tail when
 // available -- a bare repeating "running" string with no other signal made
 // it look stuck even while training was progressing normally.
+const KAGGLE_ACTIVE_STATES = new Set([
+  "preparing", "uploading", "uploading_dataset", "verifying_dataset",
+  "creating_kernel", "verifying_kernel", "queued", "running",
+  "downloading", "validating", "cancelling"
+]);
+
+const KAGGLE_STATE_LABELS = {
+  preparing: "Preparing cloud training…",
+  uploading: "Uploading training bundle…",
+  uploading_dataset: "Uploading training bundle…",
+  verifying_dataset: "Checking the cloud training bundle…",
+  creating_kernel: "Starting the cloud training job…",
+  verifying_kernel: "Checking the cloud training job…",
+  queued: "Waiting for a cloud GPU…",
+  running: "Training model on the cloud GPU…",
+  downloading: "Downloading the trained model…",
+  validating: "Validating the trained model…",
+  complete: "Cloud training complete.",
+  failed: "Cloud training failed."
+};
+
+function kaggleStateLabel(state) {
+  return KAGGLE_STATE_LABELS[state] || (state ? `Cloud training: ${String(state).replaceAll("_", " ")}…` : "Checking cloud training…");
+}
+
 function renderKaggleProgress(stateLabel, data) {
   kaggleProgressBox.hidden = false;
   kaggleProgressState.textContent = stateLabel;
@@ -2774,16 +2872,35 @@ function renderKaggleProgress(stateLabel, data) {
 
   if (data && data.progress) {
     const { epoch, total_epochs } = data.progress;
-    metaParts.unshift(`epoch ${epoch}/${total_epochs}`);
+    metaParts.unshift(`Epoch ${epoch}/${total_epochs}`);
     kaggleProgressBarTrack.hidden = false;
-    kaggleProgressBarFill.style.width = `${Math.min(100, (epoch / total_epochs) * 100)}%`;
+    kaggleProgressBarFill.style.width = `${total_epochs > 0 ? Math.min(100, (epoch / total_epochs) * 100) : 0}%`;
   } else {
     kaggleProgressBarTrack.hidden = true;
+    kaggleProgressBarFill.style.width = "0%";
   }
   kaggleProgressMeta.textContent = metaParts.join(" — ");
 
   if (data && typeof data.log_tail === "string") {
     kaggleLogTail.textContent = data.log_tail.trim() || "(no log output yet)";
+    const latestLine = data.log_tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1);
+    if (latestLine) {
+      kaggleCurrentLine.hidden = false;
+      kaggleCurrentLine.textContent = latestLine;
+    }
+  } else if (!data) {
+    kaggleCurrentLine.hidden = true;
+    kaggleCurrentLine.textContent = "";
+  }
+
+  const state = data?.state;
+  if (state && KAGGLE_ACTIVE_STATES.has(state)) {
+    const detail = data.progress ? ` — epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "";
+    if (!kaggleActivityStop) kaggleActivityStop = beginActivity(`${stateLabel}${detail}`);
+    else kaggleActivityStop.update(`${stateLabel}${detail}`);
+  } else if (state && kaggleActivityStop) {
+    kaggleActivityStop();
+    kaggleActivityStop = null;
   }
 }
 
@@ -2812,7 +2929,7 @@ async function refreshKaggleStatus() {
     const data = await resp.json();
     if (!data.cli_installed) {
       kaggleStatusEl.textContent = isTauriDesktop
-        ? "Kaggle CLI not available in this app build yet -- install the standalone Kaggle CLI and make sure it's on your PATH, then reopen this app."
+        ? "Kaggle CLI not found. Install the standalone Kaggle CLI, ensure its executable is on PATH, then refresh this check."
         : "Kaggle CLI not installed. Run: pip install kaggle";
       kaggleConnectBtn.hidden = true;
       kaggleInstallBtn.hidden = isTauriDesktop;
@@ -2825,7 +2942,7 @@ async function refreshKaggleStatus() {
     }
     kaggleInstallBtn.hidden = true;
     if (!data.authenticated) {
-      kaggleStatusEl.textContent = `Kaggle CLI ${data.cli_version || ""} installed, not connected.`;
+      kaggleStatusEl.textContent = `Kaggle CLI ${data.cli_version || ""} installed${data.cli_path ? ` at ${data.cli_path}` : ""}, not connected.`;
       kaggleConnectBtn.hidden = false;
       kaggleAuthenticated = false;
       trainA2Btn.disabled = true;
@@ -2836,7 +2953,7 @@ async function refreshKaggleStatus() {
     const quota = data.quota_available ? formatGpuQuota(data.quota_raw) : "unavailable";
     kaggleStatusEl.textContent = `Connected ✓  CLI ${data.cli_version || "?"}  GPU: NVIDIA T4  Quota: ${quota}`;
 
-    const activeJob = data.job && data.job.state && !["complete", "failed"].includes(data.job.state);
+    const activeJob = data.job && data.job.state && KAGGLE_ACTIVE_STATES.has(data.job.state);
     kaggleTrainingActive = !!activeJob;
     syncTrainingControls();
     trainA2Btn.disabled = !!activeJob;
@@ -2860,6 +2977,7 @@ kaggleRefreshBtn.addEventListener("click", () => refreshKaggleStatus());
 
 kaggleInstallBtn.addEventListener("click", async () => {
   kaggleInstallBtn.disabled = true;
+  const stopActivity = beginActivity("Installing the Kaggle CLI…");
   kaggleStatusEl.textContent = "Installing Kaggle CLI into this app environment…";
   try {
     const resp = await fetch("/api/kaggle/install", { method: "POST" });
@@ -2872,16 +2990,19 @@ kaggleInstallBtn.addEventListener("click", async () => {
       if (status.cli_installed || status.install_state?.state === "failed") {
         clearInterval(timer);
         kaggleInstallBtn.disabled = false;
+        stopActivity();
       }
     }, 2000);
   } catch (err) {
     kaggleStatusEl.textContent = "Could not install Kaggle CLI: " + err;
     kaggleInstallBtn.disabled = false;
+    stopActivity();
   }
 });
 
 kaggleConnectBtn.addEventListener("click", async () => {
   kaggleConnectBtn.disabled = true;
+  const stopActivity = beginActivity("Connecting to Kaggle…");
   kaggleStatusEl.textContent = "Starting Kaggle authentication...";
   try {
     const resp = await fetch("/api/kaggle/auth/start", { method: "POST" });
@@ -2889,6 +3010,7 @@ kaggleConnectBtn.addEventListener("click", async () => {
     if (!resp.ok) {
       kaggleStatusEl.textContent = "Error: " + (data.error || "could not start Kaggle auth");
       kaggleConnectBtn.disabled = false;
+      stopActivity();
       return;
     }
     kaggleStatusEl.textContent = data.started
@@ -2897,16 +3019,17 @@ kaggleConnectBtn.addEventListener("click", async () => {
   } catch (err) {
     kaggleStatusEl.textContent = "Could not start Kaggle auth: " + err;
     kaggleConnectBtn.disabled = false;
+    stopActivity();
     return;
   }
-  pollKaggleAuth();
+  pollKaggleAuth(stopActivity);
 });
 
 // After starting `kaggle auth login` we can't know when the user finishes the
 // browser OAuth flow, so poll status for a while rather than requiring a
 // manual page refresh -- this is exactly the flow the user found confusing
 // (Connect Kaggle appearing to do nothing until a full reload).
-function pollKaggleAuth() {
+function pollKaggleAuth(stopActivity) {
   if (kaggleAuthPollTimer) clearInterval(kaggleAuthPollTimer);
   let attempts = 0;
   const maxAttempts = 100; // ~5 minutes at 3s
@@ -2917,6 +3040,7 @@ function pollKaggleAuth() {
       clearInterval(kaggleAuthPollTimer);
       kaggleAuthPollTimer = null;
       kaggleConnectBtn.disabled = false;
+      stopActivity();
       if (!kaggleAuthenticated) {
         kaggleStatusEl.textContent += " Still not connected -- click Connect Kaggle again once you've finished logging in, or Refresh.";
       }
@@ -2934,7 +3058,7 @@ trainA2Btn.addEventListener("click", async () => {
   kaggleTrainingActive = true;
   syncTrainingControls();
   kaggleJobSubmittedAt = Date.now();
-  renderKaggleProgress("Uploading training pair...", null);
+  renderKaggleProgress("Uploading training bundle…", { state: "uploading" });
   kaggleResultEl.hidden = true;
   try {
     const resp = await fetch("/api/kaggle/train", {
@@ -2946,7 +3070,7 @@ trainA2Btn.addEventListener("click", async () => {
     if (!resp.ok) {
       kaggleTrainingActive = false;
       syncTrainingControls();
-      renderKaggleProgress("Error: " + (data.error || "training request failed"), null);
+      renderKaggleProgress("Cloud training could not start: " + (data.error || "training request failed"), { state: "failed" });
       trainA2Btn.disabled = false;
       return;
     }
@@ -2954,7 +3078,7 @@ trainA2Btn.addEventListener("click", async () => {
   } catch (err) {
     kaggleTrainingActive = false;
     syncTrainingControls();
-    renderKaggleProgress("Request failed: " + err, null);
+    renderKaggleProgress("Cloud training request failed: " + err, { state: "failed" });
     trainA2Btn.disabled = false;
   }
 });
@@ -2968,13 +3092,13 @@ function pollKaggleJob(designId, jobId) {
   if (kaggleTickTimer) clearInterval(kaggleTickTimer);
   trainA2Btn.disabled = true;
   if (!kaggleJobSubmittedAt) kaggleJobSubmittedAt = Date.now();
-  renderKaggleProgress("Checking job...", null);
+  renderKaggleProgress("Checking cloud training…", { state: "preparing" });
 
   // A 1s local ticker keeps "elapsed" visibly moving between the slower
   // network polls below -- reassurance that the page itself hasn't frozen,
   // independent of whether Kaggle actually has anything new to report.
   kaggleTickTimer = setInterval(() => {
-    if (kaggleLastJobData) renderKaggleProgress(kaggleLastJobData.state, kaggleLastJobData);
+    if (kaggleLastJobData) renderKaggleProgress(kaggleStateLabel(kaggleLastJobData.state), kaggleLastJobData);
   }, 1000);
 
   const poll = async () => {
@@ -2982,13 +3106,13 @@ function pollKaggleJob(designId, jobId) {
       const resp = await fetch(`/api/kaggle/jobs/${encodeURIComponent(jobId)}?design_id=${encodeURIComponent(designId)}`);
       const data = await resp.json();
       if (!resp.ok) {
-        renderKaggleProgress("Error checking job: " + (data.error || "unknown error"), null);
+        renderKaggleProgress("Could not check cloud training: " + (data.error || "unknown error"), { state: "failed" });
         return;
       }
       kaggleLastJobData = data;
       kaggleTrainingActive = !["complete", "failed"].includes(data.state);
       syncTrainingControls();
-      renderKaggleProgress(data.state, data);
+      renderKaggleProgress(kaggleStateLabel(data.state), data);
 
       if (data.state === "complete") {
         clearInterval(kaggleJobPollTimer);
@@ -3004,12 +3128,12 @@ function pollKaggleJob(designId, jobId) {
         trainA2Btn.disabled = false;
         kaggleTrainingActive = false;
         syncTrainingControls();
-        renderKaggleProgress("Failed: " + (data.error || "unknown error"), data);
+        renderKaggleProgress("Cloud training failed: " + (data.error || "unknown error"), data);
         if (data.output_available) renderKaggleDownloadResult(designId, jobId, data);
         setStatus("Kaggle A2 training failed.", true);
       }
     } catch (err) {
-      renderKaggleProgress("Polling error: " + err, kaggleLastJobData);
+      renderKaggleProgress("Could not refresh cloud training: " + err, kaggleLastJobData);
     }
   };
   poll();
@@ -3746,16 +3870,42 @@ function renderSettings() {
     const heading = document.createElement("h3");
     heading.textContent = groupName;
     section.append(heading);
+    const provider = (settingsFields.find((field) => field.name === "NAM_MIXER_AI_PROVIDER") || {}).value || "local";
     for (const field of fields) {
       const row = document.createElement("label");
       row.className = "settings-row";
+      if (field.providers?.length) {
+        row.hidden = !field.providers.includes(provider);
+        row.dataset.providerField = "true";
+      }
       const labelText = document.createElement("span");
       labelText.className = "settings-row-label";
       labelText.textContent = field.label + (field.restart_required ? " (restart required)" : "");
-      const input = document.createElement("input");
+      const input = field.kind === "select" ? document.createElement("select") : document.createElement("input");
       input.className = "select-input";
-      input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
+      if (field.kind !== "select") input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
       input.dataset.settingName = field.name;
+      let suggestionsList = null;
+      if (field.suggestions?.length) {
+        const listId = `setting-suggestions-${field.name}`;
+        const datalist = document.createElement("datalist");
+        datalist.id = listId;
+        for (const suggestion of field.suggestions) {
+          const option = document.createElement("option");
+          option.value = suggestion;
+          datalist.append(option);
+        }
+        input.setAttribute("list", listId);
+        suggestionsList = datalist;
+      }
+      if (field.kind === "select") {
+        for (const optionData of field.options || []) {
+          const option = document.createElement("option");
+          option.value = optionData.value;
+          option.textContent = optionData.label;
+          input.append(option);
+        }
+      }
       const desc = document.createElement("span");
       desc.className = "info";
       if (field.kind === "secret") {
@@ -3768,10 +3918,45 @@ function renderSettings() {
       } else {
         input.placeholder = field.placeholder || "";
         input.value = field.value || "";
+        if (field.name === "NAM_MIXER_AI_MODEL" && provider === "cloudflare" && input.value === "@cf/openai/gpt-oss-20b") {
+          input.value = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+        }
         desc.textContent = field.description;
       }
       row.append(labelText, input, desc);
       section.append(row);
+      if (suggestionsList) section.append(suggestionsList);
+      if (field.name === "NAM_MIXER_AI_PROVIDER") {
+        const setupRow = document.createElement("div");
+        setupRow.className = "settings-row settings-download-row";
+        setupRow.dataset.cloudflareSetup = "true";
+        setupRow.hidden = provider !== "cloudflare";
+        const setupLink = document.createElement("a");
+        setupLink.href = "https://developers.cloudflare.com/workers-ai/get-started/rest-api/";
+        setupLink.target = "_blank";
+        setupLink.rel = "noopener noreferrer";
+        setupLink.className = "btn btn-secondary btn-small";
+        setupLink.textContent = "Open Cloudflare setup";
+        const setupNote = document.createElement("span");
+        setupNote.className = "info";
+        setupNote.textContent = "Create the Workers AI token and copy your Account ID, then return here.";
+        setupRow.append(setupLink, setupNote);
+        section.append(setupRow);
+      }
+      if (field.kind === "secret" && field.name === "NAM_MIXER_AI_API_KEY") {
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "btn btn-secondary btn-small";
+        clear.textContent = "Clear API token";
+        clear.hidden = !field.has_value || row.hidden;
+        clear.addEventListener("click", async () => {
+          if (!confirm("Clear the stored API token?")) return;
+          const response = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({values: {}, clear_secrets: [field.name]})});
+          if (!response.ok) { settingsStatus.textContent = "Could not clear API token."; return; }
+          await loadSettings();
+        });
+        section.append(clear);
+      }
       if (field.name === "NAM_RENDER_EXE" && !isTauriDesktop) {
         // The desktop build always ships nam_render already bundled inside
         // the app itself (see packaging/backend/nam_mixer_backend.spec) --
@@ -3779,7 +3964,7 @@ function renderSettings() {
         // browser/web checkout that hasn't built/downloaded one yet.
         section.append(renderNamRenderDownloadRow());
       }
-      if (field.name === "NAM_MIXER_LOCAL_LLM_MODEL") {
+      if (field.name === "NAM_MIXER_AI_MODEL") {
         section.append(renderLocalLlmStatusRow());
       }
       if (field.name === "TONE3000_API_KEY") {
@@ -3836,27 +4021,57 @@ function renderNamRenderDownloadRow() {
 function renderLocalLlmStatusRow() {
   const row = document.createElement("div");
   row.className = "settings-row settings-download-row";
+  row.dataset.aiStatusRow = "true";
   const status = document.createElement("span");
   status.className = "info";
-  status.textContent = "Checking whether a local LLM host is reachable…";
+  status.textContent = "Checking AI provider configuration…";
+
+  const testButton = document.createElement("button");
+  testButton.type = "button";
+  testButton.className = "btn btn-secondary btn-small";
+  testButton.textContent = "Test connection";
 
   const pullButton = document.createElement("button");
   pullButton.type = "button";
   pullButton.className = "btn btn-secondary btn-small";
   pullButton.textContent = "Pull gemma4:e4b via Ollama";
   pullButton.hidden = true;
+  let pullActivityStop = null;
 
   async function refreshStatus() {
     try {
       const response = await fetch("/api/local_llm/status");
       const data = await response.json();
-      if (!data.enabled) {
+      const selectedProvider = settingsGroups.querySelector('[data-setting-name="NAM_MIXER_AI_PROVIDER"]')?.value || "local";
+      if (!data.enabled && selectedProvider === "cloudflare") {
+        status.textContent = data.error === "not configured"
+          ? "Cloudflare is selected. Enter your API token, then save Settings."
+          : `Cloudflare is not ready: ${data.error || "complete the Account ID, model, and API token fields above."}`;
+        pullButton.hidden = true;
+      } else if (!data.enabled && selectedProvider === "custom") {
+        status.textContent = data.error === "not configured"
+          ? "Custom AI is selected. Enter a model and HTTPS base URL, then save Settings."
+          : `Custom AI is not ready: ${data.error || "check the provider fields above."}`;
+        pullButton.hidden = true;
+      } else if (!data.enabled) {
         status.textContent = "Not configured -- set a model name above to enable the AI Assistant tab. "
           + "Any OpenAI-compatible local host works (Ollama, LM Studio, etc.); we recommend Ollama + gemma4:e4b "
           + "if you don't already have one running.";
         pullButton.hidden = false;
+      } else if (data.provider !== "local") {
+        status.textContent = `Configured for ${data.provider === "cloudflare" ? "Cloudflare Workers AI" : "a custom AI provider"} (model: ${data.model}). Testing sends a small real request that may count against quota or billing.`;
+        pullButton.hidden = true;
+        if (data.provider === "cloudflare") {
+          const usageLink = document.createElement("a");
+          usageLink.href = "https://dash.cloudflare.com/";
+          usageLink.target = "_blank";
+          usageLink.rel = "noopener noreferrer";
+          usageLink.textContent = " Open Cloudflare usage dashboard";
+          usageLink.className = "settings-inline-link";
+          status.append(usageLink);
+        }
       } else if (data.reachable) {
-        status.textContent = `Reachable at ${data.base_url} (model: ${data.model}).`;
+        status.textContent = `Local provider reachable (model: ${data.model}).`;
         pullButton.hidden = true;
       } else {
         status.textContent = `Configured for ${data.base_url}, but nothing responded there. `
@@ -3873,18 +4088,23 @@ function renderLocalLlmStatusRow() {
     const data = await response.json();
     if (data.status === "running") {
       status.textContent = `Pulling ${data.model}… ${(data.log_tail || "").split("\n").slice(-1)[0] || ""}`;
+      if (!pullActivityStop) pullActivityStop = beginActivity(`Pulling ${data.model} via Ollama…`);
+      else pullActivityStop.update(`Pulling ${data.model} via Ollama…`);
       setTimeout(pollPullStatus, 1500);
     } else if (data.status === "done") {
       status.textContent = `Pulled ${data.model}. Set "Local AI assistant: model name" above to ${data.model} and save.`;
       pullButton.disabled = false;
+      if (pullActivityStop) { pullActivityStop(); pullActivityStop = null; }
     } else if (data.status === "error") {
       status.textContent = "Pull failed: " + data.error;
       pullButton.disabled = false;
+      if (pullActivityStop) { pullActivityStop(); pullActivityStop = null; }
     }
   }
 
   pullButton.addEventListener("click", async () => {
     pullButton.disabled = true;
+    pullActivityStop = beginActivity("Starting the local AI model download…");
     status.textContent = "Starting download…";
     try {
       const response = await fetch("/api/local_llm/pull", { method: "POST" });
@@ -3894,17 +4114,39 @@ function renderLocalLlmStatusRow() {
     } catch (err) {
       status.textContent = "Could not start pull: " + err;
       pullButton.disabled = false;
+      if (pullActivityStop) { pullActivityStop(); pullActivityStop = null; }
     }
   });
 
+  testButton.addEventListener("click", async () => {
+    testButton.disabled = true;
+    const stopActivity = beginActivity("Testing the AI provider connection…");
+    status.textContent = "Testing connection (this may use provider quota)…";
+    try {
+      const response = await fetch("/api/local_llm/test", {method: "POST"});
+      const data = await response.json();
+      status.textContent = data.ok ? "Connected." : (data.error || "Connection test failed.");
+      if (!data.ok && data.diagnostics) {
+        const detail = document.createElement("span");
+        detail.className = "info";
+        const diagnostics = data.diagnostics;
+        const shape = diagnostics.shape || `content=${diagnostics.content_type || "unknown"}, length=${diagnostics.content_length ?? "unknown"}`;
+        detail.textContent = ` Diagnostic: ${shape}${diagnostics.response_keys ? `; response keys: ${diagnostics.response_keys.join(", ")}` : ""}`;
+        status.append(detail);
+      }
+    } catch (err) { status.textContent = "Connection test failed: " + err; }
+    finally { stopActivity(); testButton.disabled = false; }
+  });
+
   refreshStatus();
-  row.append(pullButton, status);
+  row.refreshAiStatus = refreshStatus;
+  row.append(pullButton, testButton, status);
   return row;
 }
 
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
   const values = {};
-  settingsGroups.querySelectorAll("input[data-setting-name]").forEach((input) => {
+  settingsGroups.querySelectorAll("[data-setting-name]").forEach((input) => {
     values[input.dataset.settingName] = input.value;
   });
   settingsStatus.textContent = "Saving…";
@@ -3924,6 +4166,43 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
     await Promise.all([loadLocalRecipeAiStatus(), refreshTone3000Status()]);
   } catch (err) {
     settingsStatus.textContent = "Save failed: " + err;
+  }
+});
+settingsGroups.addEventListener("change", async (event) => {
+  if (event.target.dataset.settingName !== "NAM_MIXER_AI_PROVIDER") return;
+  const provider = event.target.value;
+  settingsGroups.querySelectorAll("[data-cloudflare-setup]").forEach((row) => { row.hidden = provider !== "cloudflare"; });
+  if (provider === "cloudflare") {
+    const modelInput = settingsGroups.querySelector('[data-setting-name="NAM_MIXER_AI_MODEL"]');
+    if (modelInput && (!modelInput.value || modelInput.value === "@cf/openai/gpt-oss-20b")) {
+      modelInput.value = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    }
+  }
+  settingsGroups.querySelector("[data-ai-status-row]")?.refreshAiStatus?.();
+  settingsGroups.querySelectorAll("[data-provider-field]").forEach((row) => {
+    const fieldName = row.querySelector("[data-setting-name]")?.dataset.settingName;
+    const field = settingsFields.find((candidate) => candidate.name === fieldName);
+    row.hidden = Boolean(field?.providers?.length && !field.providers.includes(provider));
+  });
+  // Persist the provider immediately. This is intentionally a narrow save so
+  // changing provider cannot be lost because another settings control is
+  // blank/hidden; the full Save button still persists the remaining fields.
+  const providerValues = { NAM_MIXER_AI_PROVIDER: provider };
+  const modelInput = settingsGroups.querySelector('[data-setting-name="NAM_MIXER_AI_MODEL"]');
+  if (modelInput?.value) providerValues.NAM_MIXER_AI_MODEL = modelInput.value;
+  settingsStatus.textContent = "Saving provider…";
+  try {
+    const response = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: providerValues }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "provider save failed");
+    await loadSettings();
+    settingsStatus.textContent = "Provider saved.";
+  } catch (err) {
+    settingsStatus.textContent = "Provider save failed: " + err;
   }
 });
 document.getElementById("btn-reload-settings").addEventListener("click", () => loadSettings());
@@ -4042,6 +4321,7 @@ document.getElementById("btn-tone3000-search").addEventListener("click", async (
   const query = tone3000Query.value.trim();
   if (!query) { tone3000Status.textContent = "Enter an amp or tone to search for."; return; }
   tone3000Status.textContent = "Searching TONE3000…";
+  const stopActivity = beginActivity("Searching TONE3000 captures…");
   tone3000Results.hidden = true;
   tone3000Results.replaceChildren();
   try {
@@ -4069,6 +4349,8 @@ document.getElementById("btn-tone3000-search").addEventListener("click", async (
     tone3000Status.textContent = data.results.length + " capture" + (data.results.length === 1 ? "" : "s") + " found.";
   } catch (error) {
     tone3000Status.textContent = error.message;
+  } finally {
+    stopActivity();
   }
 });
 aiAssistantTab.addEventListener("click", () => {

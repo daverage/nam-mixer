@@ -47,12 +47,12 @@ becomes something you can load anywhere a NAM runs.
 | 🎧 **Real NAM inference** | Amps are rendered through the same [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore) C++ engine the official plugin uses — not a reimplementation, not an approximation. |
 | 🔊 **Live audition** | A/B the two source amps against the blended result over a bundled library of real guitar/bass performances, with input-profile simulation, test gain, coverage analysis, and an optional cabinet IR — all without re-running inference on every tweak. |
 | 🧠 **Train a real model** | Generate a proper training bundle from the official NAM training excitation and train a new A2 model on it — locally, or with one click on a private Kaggle GPU. |
-| ✍️ **Optional local AI recipes** | A configured local OpenAI-compatible model can turn a plain-English tone description into editable blend settings; built-in rules remain available with no AI service. |
+| ✍️ **Optional AI recipes** | A local, Cloudflare Workers AI, or custom OpenAI-compatible model can turn a plain-English tone description into editable blend settings; built-in rules remain available with no AI service. |
 | ✅ **Built-in validation** | Every exported model is re-rendered and compared against its frozen teacher (ESR, RMS, peak, quiet-response) so you know exactly how close the trained model landed, not just that training finished. |
 | 💾 **Sessions library** | Save, reload, import/export, and revisit designs and completed models without losing your place. |
 | 🔒 **Local-first & private** | No cloud dependency, no telemetry, no account required. Kaggle training is fully opt-in and uses your own credentials and quota. |
-| ⚙️ **In-app Settings** | Configure the renderer path, local AI assistant, and TONE3000 API key from a Settings tab — no shell environment variables required. See [Settings](#settings). |
-| ✅ **Getting-started checklist** | The Settings tab's "Getting started" section shows at a glance what's ready and what's still optional (renderer, training input, local A2 training env, Kaggle, local LLM). |
+| ⚙️ **In-app Settings** | Configure the renderer path, AI provider, and TONE3000 API key from a Settings tab — no shell environment variables required. See [Settings](#settings). |
+| ✅ **Getting-started checklist** | The Settings tab's "Getting started" section shows at a glance what's ready and what's still optional (renderer, training input, local A2 training env, Kaggle, AI provider). |
 
 The app never claims that a completed training run sounds identical to its
 teacher. Always listen to and validate exported models.
@@ -69,7 +69,7 @@ teacher. Always listen to and validate exported models.
 - [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
 - [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
 - [Quick start](#quick-start) (macOS, Linux, Windows) · [Running it](#running-it)
-- [Settings](#settings) — configuring the renderer, local AI assistant, and TONE3000 from the app itself
+- [Settings](#settings) — configuring the renderer, AI providers, and TONE3000 from the app itself
 - [Current status and limitations](#current-status-and-limitations)
 - [Safety: training target vs. live preview](#safety-training-target-vs-live-preview)
 - [Project layout](#project-layout) · [NAM Tools](#nam-tools-output-volume-and-metadata)
@@ -546,15 +546,35 @@ The Settings tab (next to Sessions) covers anything that used to only be
 configurable via a shell environment variable or an `.env` file. Its
 **Getting started** section gives an at-a-glance checklist of what's ready
 and what's still optional (renderer, training input, local A2 training
-environment, Kaggle, local LLM assistant) so a fresh checkout doesn't
+environment, Kaggle, AI provider) so a fresh checkout doesn't
 require hunting for each setup button individually.
 
 - **NAM render executable** — normally auto-detected (downloaded via
   `scripts/download_nam_render.*`, or the in-app **Download nam_render
   automatically** button). Change it here only if you built/downloaded a
   custom `nam_render`.
-- **Local AI assistant** — base URL and model name for the optional local
-  recipe assistant. Any host that speaks the OpenAI-compatible `/v1` API
+- **AI Assistant** — choose **Local**, **Cloudflare Workers AI**, or **Custom
+  OpenAI-compatible**. Local uses a localhost `/v1` endpoint and needs only a
+  model name. Custom remote endpoints must use HTTPS; their hostname is
+  resolved and private/loopback/link-local/reserved addresses are rejected.
+- **Cloudflare Workers AI** — in the Cloudflare dashboard, open **Workers AI →
+  Use REST API → Create a Workers AI API Token**, then copy the token and the
+  account ID. In NAM Mixer choose Cloudflare, enter the 32-character Account
+  ID, the token, and a JSON-mode model such as
+  `@cf/meta/llama-3.3-70b-instruct-fp8-fast`; the app builds
+  `https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1` and sends
+  the request to `/chat/completions` for you. A manually created token needs
+  the account-scoped **Workers AI Read** permission (the dashboard's template
+  is the easiest route). Cloudflare quota, capacity limits, and billing may
+  apply. **Test connection** performs a small real JSON-mode inference request,
+  so it may consume quota.
+- **Automation boundary** — NAM Mixer automates endpoint construction,
+  authentication headers, JSON-mode requests, connection testing, and safe
+  error handling. It deliberately does not create Cloudflare accounts/tokens,
+  store tokens in browser code, or silently rotate/reuse tokens when switching
+  providers. Use the explicit **Clear API token** action to remove a saved
+  token from `.env` and the running process.
+- **Local AI assistant** — any host that speaks the OpenAI-compatible `/v1` API
   works (Ollama, LM Studio, llama.cpp server, ...); Google's Gemma
   (`gemma4:e4b`) is a good default if you don't already run something
   else, and a **Pull via Ollama** button offers a one-click download when

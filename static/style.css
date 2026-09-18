@@ -425,6 +425,7 @@ input[type="range"].slider::-moz-range-thumb {
 .btn:hover:not(:disabled) { border-color: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-block { width: 100%; margin-top: 0.9rem; }
+.btn-download-artifact { display: flex; flex-grow: 1; text-align: center; flex-wrap: nowrap; align-content: center; justify-content: center; align-items: center; }
 .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: transparent; }
 .btn-danger:hover:not(:disabled) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
@@ -514,6 +515,10 @@ input[type="range"].slider::-moz-range-thumb {
 }
 .status-bar:empty { display: none; }
 .status-bar #status { flex: 1; min-width: 0; }
+.status-bar #status.is-error { color: var(--danger); }
+.activity-indicator { display: inline-flex; align-items: center; gap: 0.45rem; margin-right: 1rem; color: var(--accent, #4f46e5); font-weight: 600; white-space: nowrap; }
+.activity-spinner { width: 0.8rem; height: 0.8rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: activity-spin 0.75s linear infinite; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
 .system-usage { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 details.advanced {
@@ -549,8 +554,6 @@ details.advanced summary:hover { color: var(--text); }
 }
 .status-row .info { margin: 0; }
 
-#kaggle-progress-box { line-height: 1.5; }
-#kaggle-progress-state { font-size: 0.9rem; }
 .hint { color: var(--text-muted); font-size: 0.75rem; }
 
 .progress-track {
@@ -567,8 +570,6 @@ details.advanced summary:hover { color: var(--text); }
   transition: width 0.4s ease;
 }
 
-#kaggle-log-details { margin-top: 0.5rem; font-size: 0.75rem; }
-#kaggle-log-details summary { cursor: pointer; color: var(--text-muted); }
 .log-tail {
   margin: 0.4rem 0 0;
   padding: 0.5rem;
@@ -583,6 +584,20 @@ details.advanced summary:hover { color: var(--text); }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.7rem;
 }
+.training-activity-card {
+  margin: 0.65rem 0 0.8rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  line-height: 1.5;
+}
+.training-activity-title { font-weight: 700; font-size: 0.95rem; }
+.training-activity-meta { margin-top: 0.25rem; color: var(--text-muted); font-size: 0.8rem; }
+.training-current-line { margin-top: 0.45rem; color: var(--text-muted); font: 0.72rem/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.training-log-details { margin-top: 0.7rem; }
+.training-log-details summary { cursor: pointer; color: var(--text-muted); font-size: 0.78rem; }
 
 .generate-result {
   margin-top: 0.75rem;

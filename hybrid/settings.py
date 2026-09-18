@@ -28,6 +28,9 @@ class SettingField:
     kind: str = "text"  # "text" | "path" | "number" | "secret"
     placeholder: str = ""
     restart_required: bool = False
+    options: tuple[tuple[str, str], ...] = ()
+    providers: tuple[str, ...] = ()
+    suggestions: tuple[str, ...] = ()
 
 
 SETTINGS: tuple[SettingField, ...] = (
@@ -58,37 +61,59 @@ SETTINGS: tuple[SettingField, ...] = (
         restart_required=True,
     ),
     SettingField(
-        name="NAM_MIXER_LOCAL_LLM_BASE_URL",
-        label="Local AI assistant: base URL",
-        description="Any local LLM host that exposes an OpenAI-compatible /v1 API will work here "
-                     "-- Ollama, LM Studio, llama.cpp server, etc. -- this app has no preference. "
-                     "Must be http:// and point at localhost -- never a remote host. Nothing needs "
-                     "to be running for the rest of the app to work; only the AI Assistant tab uses this.",
+        name="NAM_MIXER_AI_PROVIDER",
+        label="Provider",
+        description="Choose Local, Cloudflare Workers AI, or another OpenAI-compatible HTTPS provider.",
+        group="AI Assistant",
+        kind="select",
+        options=(("local", "Local"), ("cloudflare", "Cloudflare Workers AI"), ("custom", "Custom OpenAI-compatible")),
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_BASE_URL",
+        label="Base URL",
+        description="Local URLs may use HTTP only on localhost. Custom remote endpoints must use HTTPS and public addresses.",
         group="AI Assistant",
         placeholder="http://127.0.0.1:11434/v1",
+        providers=("local", "custom"),
     ),
     SettingField(
-        name="NAM_MIXER_LOCAL_LLM_MODEL",
-        label="Local AI assistant: model name",
-        description="Model name as known to your local server. We recommend Google's Gemma "
-                     "(gemma4:e4b) as a good balance of speed and quality for this app's recipe "
-                     "suggestions, but any chat-capable model your host serves will work. Leave "
-                     "blank to disable the AI Assistant tab entirely.",
-        group="AI Assistant",
-        placeholder="gemma4:e4b",
+        name="NAM_MIXER_AI_ACCOUNT_ID",
+        label="Cloudflare Account ID",
+        description="Copy this from Cloudflare's Workers AI → Use REST API page. It must be 32 hexadecimal characters; NAM Mixer constructs the fixed Workers AI URL for you.",
+        group="AI Assistant", providers=("cloudflare",),
     ),
     SettingField(
-        name="NAM_MIXER_LOCAL_LLM_TEMPERATURE",
-        label="Local AI assistant: temperature",
+        name="NAM_MIXER_AI_MODEL",
+        label="Model",
+        description="Model name exposed by your selected provider. For Cloudflare JSON recipes, start with Llama 3.3 70B for general quality or DeepSeek R1 Distill Qwen 32B for stronger reasoning; all suggestions support Workers AI JSON Mode. Leave blank to disable the AI Assistant.",
+        group="AI Assistant", placeholder="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        suggestions=(
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+            "@hf/nousresearch/hermes-2-pro-mistral-7b",
+            "@cf/meta/llama-3-8b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "@hf/thebloke/deepseek-coder-6.7b-instruct-awq",
+        ),
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_API_KEY",
+        label="API token",
+        description="Create it from Workers AI → Use REST API (or grant a manual token Account > Workers AI > Read). Stored server-side only; tests and requests can consume quota or incur billing.",
+        group="AI Assistant", kind="secret", placeholder="Bearer token", providers=("cloudflare", "custom"),
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_TEMPERATURE",
+        label="Temperature",
         description="Sampling temperature (0.0-2.0).",
         group="AI Assistant",
         kind="number",
         placeholder="0.2",
     ),
     SettingField(
-        name="NAM_MIXER_LOCAL_LLM_TIMEOUT_SECONDS",
-        label="Local AI assistant: request timeout (seconds)",
-        description="How long to wait for the local model before giving up.",
+        name="NAM_MIXER_AI_TIMEOUT_SECONDS",
+        label="AI request timeout (seconds)",
+        description="How long to wait for an AI provider before giving up.",
         group="AI Assistant",
         kind="number",
         placeholder="60",
@@ -107,6 +132,12 @@ SETTINGS: tuple[SettingField, ...] = (
 
 _KNOWN_NAMES = {field.name for field in SETTINGS}
 _FIELDS_BY_NAME = {field.name: field for field in SETTINGS}
+_LEGACY_ALIASES = {
+    "NAM_MIXER_AI_BASE_URL": "NAM_MIXER_LOCAL_LLM_BASE_URL",
+    "NAM_MIXER_AI_MODEL": "NAM_MIXER_LOCAL_LLM_MODEL",
+    "NAM_MIXER_AI_TEMPERATURE": "NAM_MIXER_LOCAL_LLM_TEMPERATURE",
+    "NAM_MIXER_AI_TIMEOUT_SECONDS": "NAM_MIXER_LOCAL_LLM_TIMEOUT_SECONDS",
+}
 
 
 def get_settings() -> list[dict]:
@@ -116,10 +147,10 @@ def get_settings() -> list[dict]:
     one is currently set (`has_value`) -- so an already-saved API key never
     round-trips back out over the API or onto a screen someone might share.
     """
-    values = read_env_values(_KNOWN_NAMES)
+    values = read_env_values(_KNOWN_NAMES | set(_LEGACY_ALIASES.values()))
     result = []
     for field in SETTINGS:
-        raw_value = values.get(field.name, "")
+        raw_value = values.get(field.name, "") or values.get(_LEGACY_ALIASES.get(field.name, ""), "")
         entry = {
             "name": field.name,
             "label": field.label,
@@ -128,6 +159,9 @@ def get_settings() -> list[dict]:
             "kind": field.kind,
             "placeholder": field.placeholder,
             "restart_required": field.restart_required,
+            "options": [{"value": value, "label": label} for value, label in field.options],
+            "providers": list(field.providers),
+            "suggestions": list(field.suggestions),
         }
         if field.kind == "secret":
             entry["value"] = ""
@@ -138,7 +172,7 @@ def get_settings() -> list[dict]:
     return result
 
 
-def save_settings(values: dict) -> dict:
+def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
     """Persist `{name: value}` for known setting names only; silently ignores the rest.
 
     A blank submitted value for a `kind="secret"` field means "leave it
@@ -154,5 +188,9 @@ def save_settings(values: dict) -> dict:
         if field.kind == "secret" and not value.strip():
             continue
         filtered[name] = value
+    for name in clear_secrets or []:
+        field = _FIELDS_BY_NAME.get(str(name))
+        if field and field.kind == "secret":
+            filtered[field.name] = ""
     env_file = write_env_values(filtered)
     return {"saved": sorted(filtered), "env_file": str(env_file)}

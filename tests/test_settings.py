@@ -85,6 +85,13 @@ def test_save_settings_ignores_unknown_names(isolated_env_file):
     assert env_file.read_env_value("NAM_RENDER_EXE") == "/opt/nam_render"
 
 
+def test_ai_provider_selection_round_trips(isolated_env_file):
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "cloudflare"})
+    values = {field["name"]: field for field in settings.get_settings()}
+    assert values["NAM_MIXER_AI_PROVIDER"]["value"] == "cloudflare"
+    assert isolated_env_file.read_text().strip() == "NAM_MIXER_AI_PROVIDER=cloudflare"
+
+
 def test_secret_field_value_never_returned_by_get_settings(isolated_env_file):
     settings.save_settings({"TONE3000_API_KEY": "t3k_cs_realsecret"})
     result = {field["name"]: field for field in settings.get_settings()}
@@ -98,6 +105,16 @@ def test_blank_secret_on_save_means_unchanged_not_cleared(isolated_env_file):
     result = settings.save_settings({"TONE3000_API_KEY": ""})
     assert result["saved"] == []
     assert env_file.read_env_value("TONE3000_API_KEY") == "t3k_cs_realsecret"
+
+
+def test_ai_api_token_is_secret_and_can_be_explicitly_cleared(isolated_env_file):
+    settings.save_settings({"NAM_MIXER_AI_API_KEY": "cloudflare-secret"})
+    field = {field["name"]: field for field in settings.get_settings()}["NAM_MIXER_AI_API_KEY"]
+    assert field["value"] == ""
+    assert field["has_value"] is True
+    settings.save_settings({}, clear_secrets=["NAM_MIXER_AI_API_KEY"])
+    assert env_file.read_env_value("NAM_MIXER_AI_API_KEY") == ""
+    assert "NAM_MIXER_AI_API_KEY" not in os.environ
 
 
 def test_secret_field_not_set_reports_no_value(isolated_env_file):

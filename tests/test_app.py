@@ -114,6 +114,7 @@ def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch
         if len(calls) == 1:
             return SimpleNamespace(
                 tone3000_queries=["Vox AC30", "Marshall JCM800"],
+                source_plan={"ampA": "Vox AC30", "ampB": "Marshall JCM800"},
                 to_dict=lambda: {"reply": "Tell me your amps."},
             )
         return SimpleNamespace(
@@ -136,6 +137,8 @@ def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch
     # back in on a second call so the FINAL reply can reference them by name.
     assert calls[0]["request_tone3000_queries"] is True
     assert calls[1]["request_tone3000_queries"] is False
+    assert calls[0]["known_source_plan"] is None
+    assert calls[1]["known_source_plan"] == {"ampA": "Vox AC30", "ampB": "Marshall JCM800"}
     assert "Vox AC30 capture" in calls[1]["research_notes"]
     assert "Marshall JCM800 capture" in calls[1]["research_notes"]
     data = response.get_json()

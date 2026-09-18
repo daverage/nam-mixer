@@ -118,7 +118,7 @@
       <div class="recipe-prompt-footer">
         <span class="info">This suggests editable settings; it never changes either source amp.</span>
         <div class="recipe-research-controls" aria-label="Assistant research options">
-          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-local-ai" disabled> Use local AI <span id="recipe-ai-status">(not configured)</span></label>
+          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-local-ai" disabled> <span id="recipe-ai-provider-label">Use AI</span> <span id="recipe-ai-status">(not configured)</span></label>
           <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-web-research" checked> Web research</label>
           <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-tone3000"> Search TONE3000</label>
           <label class="recipe-search-option">Rigs <select id="recipe-tone3000-rig-scope" class="select-input"><option value="heads">Heads only</option><option value="anything">Anything</option></select></label>
@@ -153,7 +153,7 @@
         <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend><label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label><input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover"><div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div></fieldset>
         <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend><label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label><input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix"></fieldset>
         <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
-        <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend><label for="wizard-tone-source">Broad tone / EQ comes from</label><select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select><label for="wizard-drive-source">Feel and drive response comes from</label><select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select><div class="info">For an AC30 in Amp A and a JCM800 in Amp B, choose Amp A for tone and Amp B for feel/drive.</div></fieldset>
+        <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend><label for="wizard-tone-source">Broad tone / EQ comes from</label><select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select><label for="wizard-drive-source">Feel and drive response comes from</label><select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select><div class="info">Choose which source supplies the broad tone and which supplies the feel/drive response.</div></fieldset>
       </div>
       <div class="wizard-actions"><button type="button" id="btn-wizard-apply" class="btn btn-primary">Apply this starting point</button><button type="button" id="btn-wizard-analyse" class="btn btn-secondary" disabled>Explain my rendered amps</button></div>
       <div id="wizard-result" class="wizard-result" hidden aria-live="polite"></div>
@@ -176,7 +176,7 @@
   <div class="layout">
     <aside class="col col-setup">
 
-      <section class="card workflow-stage workflow-configure">
+      <section class="card workflow-stage workflow-configure visual-section-group">
         <h2>Choose your amps <span class="cost-badge cost-badge-expensive" title="Changing anything here re-runs both NAMs">⚡ prepare again after changes</span></h2>
 
         <div class="amp-grid">
@@ -378,7 +378,7 @@
       <div class="group-label workflow-stage workflow-compare">Compare your amp choices</div>
 
       <section class="card audition-card workflow-stage workflow-compare workflow-shape">
-        <div class="audition-heading"><div><div class="eyebrow compare-only">Start here</div><div class="eyebrow shape-only">Listen and refine</div><h2><span class="compare-only">Hear your two amps</span><span class="shape-only">Compare the sound</span></h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
+        <div class="audition-heading"><div><div class="eyebrow compare-only">Start here</div><div class="eyebrow shape-only">Compare the sound</div><h2><span class="compare-only">Hear your two amps</span><span class="shape-only">Compare the sound</span></h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
         <p class="audition-intro compare-only">Listen to each amp on the same performance before deciding how they should combine.</p>
         <p class="audition-intro shape-only">Adjust the controls below, then compare Amp A, your result, and Amp B at the same level.</p>
         <div class="preview-row">
@@ -534,12 +534,13 @@
             <button id="btn-kaggle-install" class="btn btn-secondary btn-block" hidden>Install Kaggle CLI</button>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
             <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train model</button>
-            <div id="kaggle-progress-box" class="generate-result" hidden>
-              <div id="kaggle-progress-line"><strong id="kaggle-progress-state" aria-live="polite">--</strong></div>
+            <div id="kaggle-progress-box" class="training-activity-card" hidden aria-live="polite">
+              <div id="kaggle-progress-line"><strong id="kaggle-progress-state" class="training-activity-title">--</strong></div>
               <div id="kaggle-progress-bar-track" class="progress-track" hidden><div id="kaggle-progress-bar-fill" class="progress-fill"></div></div>
-              <div id="kaggle-progress-meta" class="hint"></div>
-              <details id="kaggle-log-details">
-                <summary>Recent log output</summary>
+              <div id="kaggle-progress-meta" class="training-activity-meta"></div>
+              <div id="kaggle-current-line" class="training-current-line" hidden></div>
+              <details id="kaggle-log-details" class="training-log-details">
+                <summary>Show detailed training log</summary>
                 <pre id="kaggle-log-tail" class="log-tail"></pre>
               </details>
             </div>
@@ -547,14 +548,18 @@
           </div>
 
           <div id="local-panel" hidden>
-            <div id="local-training-status" class="info" aria-live="polite">Checking local training environment…</div>
-            <div id="local-training-meta" class="hint" aria-live="polite"></div>
+            <div class="training-activity-card" aria-live="polite">
+              <div id="local-training-status" class="training-activity-title">Checking local training environment…</div>
+              <div id="local-training-meta" class="training-activity-meta"></div>
+              <div id="local-training-progress-track" class="progress-track" hidden><div id="local-training-progress-fill" class="progress-fill"></div></div>
+              <div id="local-training-current-line" class="training-current-line" hidden></div>
+            </div>
             <div id="local-setup-size-hint" class="hint">Downloads and installs PyTorch + neural-amp-modeler into their own dedicated ~1.4&nbsp;GB environment (never mixed into this app itself). One-time only. Prefer the cloud GPU tab above if you'd rather skip this download entirely.</div>
             <button id="btn-local-setup" class="btn btn-secondary btn-block" type="button">Set up local training (~1.4 GB download)</button>
             <button id="btn-local-train" class="btn btn-primary btn-block" type="button" disabled>Train model on this computer</button>
             <div id="local-train-blocked-reason" class="hint" aria-live="polite" hidden></div>
             <button id="btn-local-cancel" class="btn btn-danger btn-block" type="button" hidden>Stop local process</button>
-            <details><summary>Live local-training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
+            <details id="local-training-log-details" class="training-log-details"><summary>Show detailed training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
             <div id="local-result" class="generate-result" hidden aria-live="polite"></div>
           </div>
 
@@ -582,6 +587,10 @@
   </div>
 
   <div class="status-bar">
+    <div id="activity-indicator" class="activity-indicator" hidden role="status" aria-live="polite">
+      <span class="activity-spinner" aria-hidden="true"></span>
+      <span id="activity-message">Working…</span>
+    </div>
     <div id="status"></div>
     <span id="system-usage" class="system-usage" aria-live="off"></span>
   </div>

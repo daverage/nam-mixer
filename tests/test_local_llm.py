@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 
 import pytest
 
@@ -116,6 +117,9 @@ def test_local_llm_teaches_mode_selection_from_signal_behaviour(monkeypatch):
     assert "constant mixture" in seen["system"]
     assert "entire amp to become the other" in seen["system"]
     assert "stable tonal foundation" in seen["system"]
+    assert "2-18 dB" in seen["system"]
+    assert "Changes as you play harder" in seen["system"]
+    assert "Parallel Blend" not in seen["system"]
 
 
 def test_local_llm_compacts_prose_but_preserves_a_structured_source_plan(monkeypatch):
@@ -162,3 +166,121 @@ def test_local_llm_keeps_a_detailed_but_bounded_explanation(monkeypatch):
     })
 
     assert len(recipe.explanation) == local_llm.MAX_LOCAL_RECIPE_EXPLANATION_LENGTH
+
+
+def test_cloudflare_constructs_fixed_url_and_sends_bearer_token(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    monkeypatch.setenv("NAM_MIXER_AI_ACCOUNT_ID", "a" * 32)
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "secret-token")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "@cf/openai/gpt-oss-20b")
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen["url"] = request.full_url
+        seen["authorization"] = request.get_header("Authorization")
+        return _Response({"choices": [{"message": {"content": '{"reply":"ok","recipe":null}'}}]})
+
+    assert local_llm.converse("hello", opener=fake_open).reply == "ok"
+    assert seen == {
+        "url": "https://api.cloudflare.com/client/v4/accounts/" + "a" * 32 + "/ai/v1/chat/completions",
+        "authorization": "Bearer secret-token",
+    }
+
+
+def test_cloudflare_and_local_receive_the_same_conversation_payload(monkeypatch):
+    bodies = {}
+
+    def fake_open(request, timeout):
+        bodies[request.full_url.split("/")[2]] = json.loads(request.data.decode())
+        return _Response({"choices": [{"message": {"content": '{"reply":"ok","recipe":null}'}}]})
+
+    common = {
+        "prompt": "Keep the Vox EQ, then move to Marshall crunch as I play harder.",
+        "history": [{"role": "assistant", "content": "Use a broad hybrid."}],
+        "research_notes": "TONE3000: Vox AC30 and Marshall JVM captures.",
+    }
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "local")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "gemma4:e4b")
+    local_llm.converse(opener=fake_open, **common)
+
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    monkeypatch.setenv("NAM_MIXER_AI_ACCOUNT_ID", "d" * 32)
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "token")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    local_llm.converse(opener=fake_open, **common)
+
+    local_body = bodies["127.0.0.1:11434"]
+    cloudflare_body = bodies["api.cloudflare.com"]
+    assert {key: local_body[key] for key in ("messages", "temperature", "max_tokens")} == {
+        key: cloudflare_body[key] for key in ("messages", "temperature", "max_tokens")
+    }
+    assert local_body["response_format"]["type"] == "json_object"
+    assert cloudflare_body["response_format"]["type"] == "json_schema"
+
+
+def test_local_provider_never_sends_authorization(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "local")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "test")
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "should-not-be-used")
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen["authorization"] = request.get_header("Authorization")
+        return _Response({"choices": [{"message": {"content": '{"reply":"ok","recipe":null}'}}]})
+
+    local_llm.converse("hello", opener=fake_open)
+    assert seen["authorization"] is None
+
+
+def test_provider_json_mode_accepts_fenced_or_typed_content(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    monkeypatch.setenv("NAM_MIXER_AI_ACCOUNT_ID", "b" * 32)
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "token")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "@cf/openai/gpt-oss-20b")
+
+    def fake_open(request, timeout):
+        fenced = "```json\n" + json.dumps({"reply": "ok", "recipe": None}) + "\n```"
+        return _Response({"choices": [{"message": {"content": [{"type": "text", "text": fenced}]}}]})
+
+    assert local_llm.test_connection(opener=fake_open)["ok"] is True
+
+
+def test_connection_returns_safe_shape_diagnostics_for_malformed_content(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    monkeypatch.setenv("NAM_MIXER_AI_ACCOUNT_ID", "c" * 32)
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "token")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "@cf/meta/llama-3-8b-instruct")
+
+    def fake_open(request, timeout):
+        return _Response({"choices": [{"message": {"content": "not JSON"}}]})
+
+    result = local_llm.test_connection(opener=fake_open)
+    assert result["ok"] is False
+    assert result["error"] == "AI provider did not return valid JSON"
+    assert result["diagnostics"] == {
+        "response_keys": ["choices"],
+        "choice_keys": ["message"],
+        "message_keys": ["content"],
+        "content_type": "str",
+        "content_length": 8,
+        "exception": "JSONDecodeError",
+    }
+
+
+def test_custom_remote_requires_https_and_public_resolution(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "custom")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "test")
+    monkeypatch.setenv("NAM_MIXER_AI_BASE_URL", "http://example.com/v1")
+    assert "HTTPS" in local_llm.status()["error"]
+
+    monkeypatch.setenv("NAM_MIXER_AI_BASE_URL", "https://example.com/v1")
+    monkeypatch.setattr(local_llm.socket, "getaddrinfo", lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))])
+    with pytest.raises(local_llm.LocalLlmError, match="disallowed"):
+        local_llm._config()
+
+
+def test_legacy_settings_remain_usable_when_new_names_are_absent(monkeypatch):
+    monkeypatch.delenv("NAM_MIXER_AI_MODEL", raising=False)
+    monkeypatch.delenv("NAM_MIXER_AI_PROVIDER", raising=False)
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "legacy-model")
+    assert local_llm._config().model == "legacy-model"
