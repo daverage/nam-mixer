@@ -11,6 +11,25 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <div id="welcome-overlay" class="welcome-overlay" hidden>
+    <div class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+      <h2 id="welcome-title">Welcome to NAM Mixer</h2>
+      <p>This blends two NAM amp captures into one sound, then trains a fresh model on the
+        result. Everything below is free to try -- nothing is trained or downloaded until you
+        explicitly ask for it.</p>
+      <ol class="welcome-steps">
+        <li><strong>Choose two amps</strong> -- pick your Amp A/Amp B <code>.nam</code> files above.</li>
+        <li><strong>Render &amp; audition</strong> -- hear the blend live before committing to anything.</li>
+        <li><strong>Create training files</strong> -- once you're happy with the sound, turn it into a training bundle.</li>
+        <li><strong>Train it</strong> -- <em>Kaggle GPU</em> is free and needs no download, just a Kaggle sign-in;
+          <em>local training</em> is the alternative but is a real ~1.4&nbsp;GB one-time download.</li>
+      </ol>
+      <p class="hint">Check <strong>Settings</strong> any time for exactly what each feature needs and why --
+        every optional download is explained there before you commit to it.</p>
+      <button type="button" id="btn-welcome-dismiss" class="btn btn-primary btn-block">Get started</button>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand-lockup"><img src="{{ url_for('static', filename='nam-mixer-logo.png') }}" alt="" class="brand-logo"><h1>NAM Mixer <span class="badge">Beta</span></h1></div>
     <p class="tagline">Combine two NAM captures into one sound that responds the way you want to play.</p>
@@ -510,8 +529,9 @@
           <div id="kaggle-panel">
             <div class="status-row">
               <div id="kaggle-status" class="info" aria-live="polite">Checking Kaggle connection...</div>
-              <button id="btn-kaggle-refresh" type="button" class="link-btn">Refresh</button>
+              <button id="btn-kaggle-refresh" type="button" class="btn btn-secondary btn-small">Refresh</button>
             </div>
+            <button id="btn-kaggle-install" class="btn btn-secondary btn-block" hidden>Install Kaggle CLI</button>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
             <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train model</button>
             <div id="kaggle-progress-box" class="generate-result" hidden>
@@ -529,11 +549,12 @@
           <div id="local-panel" hidden>
             <div id="local-training-status" class="info" aria-live="polite">Checking local training environment…</div>
             <div id="local-training-meta" class="hint" aria-live="polite"></div>
-            <button id="btn-local-setup" class="btn btn-secondary btn-block" type="button">Set up local training</button>
+            <div id="local-setup-size-hint" class="hint">Downloads and installs PyTorch + neural-amp-modeler into their own dedicated ~1.4&nbsp;GB environment (never mixed into this app itself). One-time only. Prefer the cloud GPU tab above if you'd rather skip this download entirely.</div>
+            <button id="btn-local-setup" class="btn btn-secondary btn-block" type="button">Set up local training (~1.4 GB download)</button>
             <button id="btn-local-train" class="btn btn-primary btn-block" type="button" disabled>Train model on this computer</button>
+            <div id="local-train-blocked-reason" class="hint" aria-live="polite" hidden></div>
             <button id="btn-local-cancel" class="btn btn-danger btn-block" type="button" hidden>Stop local process</button>
             <details><summary>Live local-training log</summary><pre id="local-training-log" class="log-tail"></pre></details>
-            <div class="hint">Sets up the required training environment automatically. No Terminal commands needed.</div>
             <div id="local-result" class="generate-result" hidden aria-live="polite"></div>
           </div>
 
@@ -560,7 +581,10 @@
     </main>
   </div>
 
-  <div id="status" class="status-bar"></div>
+  <div class="status-bar">
+    <div id="status"></div>
+    <span id="system-usage" class="system-usage" aria-live="off"></span>
+  </div>
 
   <section id="sessions-panel" class="sessions-panel" hidden aria-labelledby="sessions-panel-title">
     <div class="session-manager-heading"><div><div class="eyebrow">Project library</div><h2 id="sessions-panel-title">Sessions</h2><span id="session-settings-status" class="info" aria-live="polite"></span></div><button type="button" id="btn-close-sessions" class="btn btn-secondary btn-small">Back to builder</button></div>
@@ -581,6 +605,7 @@
     <div class="settings-group">
       <h3>Getting started</h3>
       <p class="info">What's set up and what's optional, all in one place -- each item still has its own controls below/in its own tab.</p>
+      <button type="button" id="btn-show-welcome" class="btn btn-secondary btn-small">Show the welcome guide again</button>
       <div id="setup-checklist" class="setup-checklist"></div>
     </div>
     <div id="settings-groups" class="settings-groups"></div>
@@ -592,7 +617,8 @@
 
   <footer class="site-footer">
     <span>Created by Andrzej Marczewski · © 2026</span>
-    <a href="https://github.com/daverage/hybrid-nam-builder/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    <a href="https://github.com/daverage/nam-mixer" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/daverage/nam-mixer/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a>
   </footer>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>

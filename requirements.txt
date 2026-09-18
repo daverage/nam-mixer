@@ -3,6 +3,7 @@ ddgs
 numpy
 scipy
 soundfile
+psutil
 pytest
 
 # Kaggle GPU training backend (hybrid/kaggle_training.py) -- lightweight,

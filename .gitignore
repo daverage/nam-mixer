@@ -38,3 +38,15 @@ native/nam_render/build-sequential/
 /build/
 /dist/
 *.spec.bak
+
+# Tauri desktop shell (desktop/src-tauri) -- Rust build output (multiple
+# GB once release-built and bundled into .app/.dmg/.exe) and its
+# auto-regenerated capability schema cache, neither meant to be committed.
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# PyInstaller-built backend the desktop shell bundles as a Tauri resource
+# (packaging/backend/nam_mixer_backend.spec) -- built locally per-platform
+# before `cargo tauri build`, never committed (100+ MB, one per OS/arch).
+packaging/backend/dist/
+packaging/backend/build/

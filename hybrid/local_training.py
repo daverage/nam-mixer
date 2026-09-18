@@ -73,6 +73,10 @@ class LocalTrainingManager:
         self.process: subprocess.Popen | None = None
         self.state = "not_configured"
         self.log = deque(maxlen=300)
+        # The most recent '\r'-updated, not-yet-newline-terminated line
+        # (a live progress bar) -- see _collect()'s docstring. Folded into
+        # status()'s log_tail/progress parsing, never into self.log itself.
+        self._live_line = ""
         self.started_at: float | None = None
         self.finished_at: float | None = None
         self.exit_code: int | None = None
@@ -88,6 +92,51 @@ class LocalTrainingManager:
     @property
     def python(self) -> Path:
         return self.venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    @property
+    def _setup_complete_marker(self) -> Path:
+        return self.venv_dir / ".setup_complete"
+
+    @property
+    def is_ready(self) -> bool:
+        """True only once a setup run has actually finished successfully.
+
+        `self.python.is_file()` alone is NOT enough: a venv directory (and
+        its `bin/python`) exists the moment `python -m venv` runs, long
+        before pip has installed anything into it. An interrupted or failed
+        setup (killed process, network error, disk full, a still-missing
+        package like the `soundfile` import failing) leaves exactly that
+        half-built venv behind. Gating readiness on a marker written only
+        after every install step -- including a real import of every package
+        `scripts/train_a2.py` needs -- succeeded means Train can never be
+        enabled against a broken environment.
+
+        A venv built by the OTHER supported path -- manually running
+        scripts/setup_a2_env.sh/.ps1 per the README, into this same
+        `venv_dir` -- never writes that marker either, since that script
+        knows nothing about this app. Rather than declare it not-ready and
+        push a user into re-running a multi-GB install that already
+        succeeded, this does one lightweight adoption check: if the
+        packages actually import, stamp the marker so every later call is
+        the cheap file-existence check again.
+        """
+        if self._setup_complete_marker.is_file():
+            return self.python.is_file()
+        if not self.python.is_file():
+            return False
+        if self.process and self.process.poll() is None:
+            # A setup/training run is currently writing into this venv --
+            # never race an import check against it mid-install.
+            return False
+        try:
+            subprocess.run(
+                [str(self.python), "-c", "import torch, soundfile, numpy, scipy"],
+                capture_output=True, timeout=15, check=True,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return False
+        self._setup_complete_marker.write_text("ok")
+        return True
 
     def _bootstrap_python(self) -> list[str]:
         """Return a real CPython command for making the training venv.
@@ -142,6 +191,7 @@ class LocalTrainingManager:
 
     def _start(self, command: list[str], state: str) -> None:
         self.log.clear()
+        self._live_line = ""
         self.state = state
         self.started_at, self.finished_at, self.exit_code = time.time(), None, None
         self.cancel_requested = False
@@ -152,12 +202,22 @@ class LocalTrainingManager:
         # blocking native window on macOS -- training then sits at ~0 CPU
         # until a human closes it, which looks identical to a genuine hang
         # in this headless/background subprocess.
-        # bufsize=1/text=True below only govern how WE read the pipe -- the
-        # child's own stdout is block-buffered (~8KB) because it's a pipe,
-        # not a tty, so without PYTHONUNBUFFERED=1 every print() (including
-        # the "Epoch X/Y" progress line _collect()/status() parse) sits in
-        # the child's buffer and never reaches log_tail/progress until it
-        # fills or the process exits -- looks like the epoch count is frozen.
+        # The child's own stdout is block-buffered (~8KB) because it's a
+        # pipe, not a tty, so without PYTHONUNBUFFERED=1 every print()
+        # (including the "Epoch X/Y" progress line _collect()/status()
+        # parse) sits in the child's buffer and never reaches log_tail/
+        # progress until it fills or the process exits -- looks like the
+        # epoch count is frozen.
+        #
+        # bufsize=0 (raw, unbuffered binary mode -- deliberately NOT
+        # text=True) is just as deliberate: PyTorch Lightning's progress
+        # bar (tqdm) updates via '\r' on one line and text-mode's
+        # universal-newlines translation combined with `.read(1)`
+        # produced spurious empty reads that looked exactly like EOF while
+        # the process was still very much alive and sleeping -- verified
+        # directly against os.read() on the same fd, which behaved
+        # correctly. _collect() below does its own '\r'/'\n' splitting on
+        # raw decoded bytes instead of trusting a text-mode wrapper.
         env = {
             **os.environ,
             "PYTORCH_ENABLE_MPS_FALLBACK": "1",
@@ -170,15 +230,60 @@ class LocalTrainingManager:
         )
         self.process = subprocess.Popen(
             command, cwd=self.repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, env=env, **process_group_options,
+            bufsize=0, env=env, **process_group_options,
         )
         threading.Thread(target=self._collect, daemon=True).start()
 
     def _collect(self) -> None:
+        """Reads the subprocess's combined stdout/stderr as raw bytes off
+        the pipe's file descriptor, splitting on '\\r'/'\\n' ourselves,
+        rather than `for line in self.process.stdout` (which only ever
+        yields on '\\n') or a text-mode `.read(1)` (which, verified
+        directly, produced spurious empty reads indistinguishable from
+        EOF while the process was still alive, apparently an interaction
+        between universal-newlines translation and single-character
+        decoding -- os.read() on the same fd does not have this problem).
+
+        PyTorch Lightning's own progress bar (tqdm) updates via '\\r' on a
+        single line, exactly like a terminal overwriting itself, and never
+        emits '\\n' until an epoch actually finishes -- so naive line-based
+        iteration left `log_tail` looking frozen for an entire epoch's
+        duration (this is what "we never see anything" during the epoch
+        phase was: the bytes were arriving fine, PYTHONUNBUFFERED=1 above
+        already saw to that, but a '\\r'-only update was never a complete
+        "line" to yield). A '\\r' update now REPLACES `self._live_line` in
+        place, exactly like a real terminal would show it, without
+        spamming the capped `self.log` deque with one entry per
+        progress-bar tick (which happens several times a second and would
+        otherwise push real output out of the last-300-lines window
+        within seconds)."""
         assert self.process and self.process.stdout
-        for line in self.process.stdout:
+        fd = self.process.stdout.fileno()
+        buffer = ""
+        while True:
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            text = chunk.decode("utf-8", errors="replace")
+            for char in text:
+                if char == "\n":
+                    with self._lock:
+                        self.log.append(buffer)
+                        self._live_line = ""
+                    buffer = ""
+                elif char == "\r":
+                    with self._lock:
+                        self._live_line = buffer
+                    buffer = ""
+                else:
+                    buffer += char
+        if buffer:
             with self._lock:
-                self.log.append(line.rstrip())
+                self.log.append(buffer)
+                self._live_line = ""
         code = self.process.wait()
         with self._lock:
             self.exit_code, self.finished_at = code, time.time()
@@ -212,10 +317,16 @@ class LocalTrainingManager:
         # Setup completion is not training completion; never expose a report
         # left over from the preceding training run.
         self.manifest_path = None
+        # Never let a stale marker from a previous successful setup claim
+        # readiness while this run is in flight or if it fails partway.
+        self._setup_complete_marker.unlink(missing_ok=True)
         # A tiny Python bootstrap avoids shell quoting and works on Windows/macOS.
+        # `env` must be self.venv_dir itself (not a path derived from cwd) --
+        # that is the exact directory `self.python`/`ready` check afterwards.
         bootstrap = (
             "import subprocess,sys,pathlib; "
-            "root=pathlib.Path.cwd(); env=root/'.venv-a2'; "
+            f"root=pathlib.Path.cwd(); env=pathlib.Path({str(self.venv_dir)!r}); "
+            "env.parent.mkdir(parents=True, exist_ok=True); "
             "subprocess.check_call([sys.executable,'-m','venv',str(env)]); "
             "py=env/('Scripts/python.exe' if sys.platform=='win32' else 'bin/python'); "
             "subprocess.check_call([str(py),'-m','pip','install','--upgrade','pip']); "
@@ -224,8 +335,14 @@ class LocalTrainingManager:
             # intentionally do not install a generic wheel here: that could
             # replace a user's CUDA-specific Torch installation.
             "(subprocess.check_call([str(py),'-m','pip','install','--upgrade','torch','torchvision']) if sys.platform=='darwin' else None); "
-            "import_torch=\"import torch; print('MPS available: ' + str(torch.backends.mps.is_available())); print('MPS built: ' + str(torch.backends.mps.is_built()))\"; "
-            "subprocess.check_call([str(py),'-c',import_torch])"
+            # Actually import every package scripts/train_a2.py needs at
+            # training time (not just torch) -- soundfile in particular is
+            # a hybrid/cab_ir.py dependency that pip can silently skip if an
+            # earlier install step was interrupted, which used to leave
+            # `ready` true and Train enabled against a broken environment.
+            "import_check=\"import torch, soundfile, numpy, scipy; print('MPS available: ' + str(torch.backends.mps.is_available())); print('MPS built: ' + str(torch.backends.mps.is_built()))\"; "
+            "subprocess.check_call([str(py),'-c',import_check]); "
+            f"pathlib.Path({str(self._setup_complete_marker)!r}).write_text('ok')"
         )
         self._start([*self._bootstrap_python(), "-c", bootstrap], "setting_up")
 
@@ -235,7 +352,7 @@ class LocalTrainingManager:
             raise RuntimeError("Training manifest must be a generated bundle inside work/a2.")
         if self.process and self.process.poll() is None:
             raise RuntimeError("Local setup or training is already running.")
-        if not self.python.is_file():
+        if not self.is_ready:
             raise RuntimeError("Local A2 environment is not ready. Click Set up local training first.")
         previous_manifest = self.manifest_path
         self.manifest_path = manifest
@@ -247,9 +364,14 @@ class LocalTrainingManager:
 
     def status(self) -> dict:
         running = bool(self.process and self.process.poll() is None)
-        state = self.state if running or self.state in ("complete", "failed", "cancelled") else ("ready" if self.python.is_file() else "not_configured")
+        state = self.state if running or self.state in ("complete", "failed", "cancelled") else ("ready" if self.is_ready else "not_configured")
         with self._lock:
-            tail = "\n".join(self.log)
+            # The live progress-bar line is appended last, exactly as it
+            # would appear on a real terminal -- both for display and so
+            # the epoch/total_epochs regex below can actually see it
+            # (Lightning's own progress bar text is what usually carries
+            # "Epoch X/Y" in the first place).
+            tail = "\n".join(self.log) + (f"\n{self._live_line}" if self._live_line else "")
         matches = re.findall(r"[Ee]poch\s+(\d+)\s*/\s*(\d+)", tail)
         progress = None if not matches else {"epoch": int(matches[-1][0]), "total_epochs": int(matches[-1][1])}
         now = time.time()
@@ -261,7 +383,7 @@ class LocalTrainingManager:
             except (OSError, ValueError, json.JSONDecodeError):
                 pass
         return {
-            "state": state, "ready": self.python.is_file(), "python": str(self.python),
+            "state": state, "ready": self.is_ready, "python": str(self.python),
             "log_tail": tail, "started_at": self.started_at, "finished_at": self.finished_at,
             "elapsed_s": elapsed_s, "exit_code": self.exit_code,
             "progress": progress,

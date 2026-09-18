@@ -22,6 +22,29 @@ def test_cancel_stops_an_app_owned_process_and_reports_cancelled(tmp_path):
     assert "Cancellation requested" in status["log_tail"]
 
 
+def test_carriage_return_progress_bar_is_visible_before_the_epoch_finishes(tmp_path):
+    """PyTorch Lightning's own progress bar updates via '\\r' on a single
+    line and never emits '\\n' until an epoch actually completes -- a
+    naive `for line in process.stdout` misses it entirely until then,
+    which is exactly what "we never see anything during the epoch phase"
+    was. Simulates that shape directly: a long-running '\\r' update with
+    no trailing newline while the process is still alive."""
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    manager._start(
+        [sys.executable, "-c",
+         "import sys, time; sys.stdout.write('Epoch 3/60: 40%\\r'); sys.stdout.flush(); time.sleep(30)"],
+        "training",
+    )
+    deadline = time.monotonic() + 2
+    status = manager.status()
+    while "Epoch 3/60" not in status["log_tail"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+        status = manager.status()
+    assert "Epoch 3/60" in status["log_tail"]
+    assert status["progress"] == {"epoch": 3, "total_epochs": 60}
+    manager.cancel()
+
+
 def test_setup_cannot_expose_previous_training_validation_report(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     old_manifest = tmp_path / "old-manifest.json"
@@ -153,6 +176,7 @@ def test_training_ownership_follows_accepted_manifest_and_survives_launch_failur
     manager = LocalTrainingManager(tmp_path, tmp_path / "a2")
     manager.python.parent.mkdir(parents=True)
     manager.python.touch()
+    manager._setup_complete_marker.touch()
     manifests = []
     for name in ("first", "second"):
         path = manager.output_root / name / "training_manifest.json"

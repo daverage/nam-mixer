@@ -202,7 +202,19 @@ class KaggleCli:
         """The macOS user-site console-script directory is commonly absent
         from GUI-app PATHs.  The package is still a valid CLI via
         ``sys.executable -m kaggle``; detect it without importing Kaggle or
-        touching its credential directory."""
+        touching its credential directory.
+
+        Deliberately always False when this process is a frozen/bundled
+        executable (e.g. the desktop app's PyInstaller-built backend --
+        see packaging/backend/): `sys.executable` there is OUR OWN app
+        binary, not a real Python interpreter, so `-m kaggle` would try to
+        re-invoke this app with module-exec args it doesn't understand --
+        the exact relaunch-loop bug class that killed the previous
+        pywebview-based desktop app (see docs/history/). A frozen build
+        must find a real standalone `kaggle` executable via PATH instead.
+        """
+        if getattr(sys, "frozen", False):
+            return False
         return importlib.util.find_spec("kaggle") is not None
 
     def is_installed(self) -> bool:
@@ -210,6 +222,12 @@ class KaggleCli:
 
     def _build_argv(self, args: list[str]) -> list[str]:
         if self.executable is None:
+            if getattr(sys, "frozen", False):
+                raise KaggleCliUnavailable(
+                    "Kaggle CLI not found on PATH. This app is a bundled build, so it cannot "
+                    "fall back to 'python -m kaggle' -- install the Kaggle CLI (pip install "
+                    "kaggle) somewhere on PATH and restart."
+                )
             # Fall back to `python -m kaggle` in case the console script
             # isn't on PATH but the package is importable in this interpreter.
             return [sys.executable, "-m", "kaggle", *args]
@@ -1282,6 +1300,38 @@ class KaggleJobManager:
             if not result.ok:
                 errors.append(f"kernel delete failed: {result.stderr.strip() or result.stdout.strip()}")
 
+        if errors:
+            job.cleanup_state = "cleanup_pending"
+            job.cleanup_error = "; ".join(errors)
+        else:
+            job.cleanup_state = "cleaned"
+            job.cleanup_error = None
+        save_job(self.a2_output_dir, job)
+        return job
+
+    def cancel_active(self, job: KaggleJob) -> KaggleJob:
+        """Stop a still-running job outright -- e.g. when the user deletes
+        the session that owns it (see app.py's DELETE /api/sessions route)
+        and has been warned that will happen. Unlike cleanup() (which only
+        tidies up remnants AFTER a job reaches a terminal state, and
+        deliberately refuses anything still active), this is the
+        user-initiated "stop this now" action: Kaggle's API has no narrower
+        "stop this kernel run" call, so deleting the kernel/dataset
+        resources outright IS what stops it running.
+        """
+        if job.state in TERMINAL_STATES:
+            raise KaggleTrainingError(f"job is already finished (state={job.state}); use cleanup() instead")
+        errors = []
+        if job.dataset_ref:
+            result = self.cli.datasets_delete(job.dataset_ref)
+            if not result.ok:
+                errors.append(f"dataset delete failed: {result.stderr.strip() or result.stdout.strip()}")
+        if job.kernel_ref:
+            result = self.cli.kernels_delete(job.kernel_ref)
+            if not result.ok:
+                errors.append(f"kernel delete failed: {result.stderr.strip() or result.stdout.strip()}")
+        job.state = "failed"
+        job.error = "Cancelled: the session that owned this job was deleted."
         if errors:
             job.cleanup_state = "cleanup_pending"
             job.cleanup_error = "; ".join(errors)

@@ -1,0 +1,18 @@
+# Grants access to this app's OWN custom commands (main.rs's
+# save_file_from_url/save_bytes/open_external_url) -- these are NOT
+# plugin commands, so nothing in tauri-plugin-dialog's or core's default
+# permission sets covers them. Without this, every invoke() call to them
+# is rejected with "Command <name> not allowed by ACL": this app's window
+# loads an external http://127.0.0.1:<port> URL (see main.rs's
+# module docstring for why -- it's the real app.py Flask server, not
+# Tauri's own asset protocol), which Tauri's IPC layer does not consider
+# "local", so ACL enforcement applies to every custom command regardless
+# of the "core:default" permission already granted.
+[[permission]]
+identifier = "allow-app-commands"
+description = "Allows the desktop shell's save-dialog and external-link commands."
+commands.allow = [
+    "save_file_from_url",
+    "save_bytes",
+    "open_external_url",
+]

@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -28,6 +29,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import psutil
 import soundfile as sf
 from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -126,8 +128,21 @@ _kaggle_manager = KaggleJobManager(
 _local_training_manager = LocalTrainingManager(
     TRAINING_ROOT,
     A2_OUTPUT_DIR,
-    venv_dir=WORK_DIR / ".venv-a2",
+    # Deliberately the SAME location scripts/setup_a2_env.sh/.ps1 (README's
+    # documented manual path) creates by default -- not a separate work/
+    # copy. Two independent training venvs (each ~1.4GB with Torch) would
+    # otherwise exist for the exact same purpose depending on whether a user
+    # followed the README or clicked "Set up local training" in the app.
+    venv_dir=TRAINING_ROOT / ".venv-a2",
 )
+
+_kaggle_install_lock = threading.Lock()
+_kaggle_install_state = {"state": "idle", "error": None}
+
+# Primes psutil's internal baseline -- its first-ever cpu_percent() call
+# always returns 0.0 (nothing to compare against yet); every call after
+# this one measures the delta since the previous call, as intended.
+psutil.cpu_percent(interval=None)
 
 app = Flask(__name__)
 # This app accepts audio and model uploads, so leave enough room for a normal
@@ -679,30 +694,47 @@ def api_setup_status():
     except OSError:
         training_input_ready = False
 
+    # Every item below states, in order: whether it's required or optional,
+    # exactly what it unlocks, and its real size/cost when that's non-trivial
+    # -- so nothing (especially the ~1.4GB local-training download) is ever
+    # a silent surprise. See desktop/README.md and CLAUDE.md's "three
+    # separate level concepts" note for the underlying architecture this
+    # summarizes; this text is the one place a user actually reads it.
+    is_frozen_build = bool(getattr(sys, "frozen", False))
     items = [
         {
             "id": "renderer",
             "label": "NAM renderer (nam_render)",
             "applicable": True,
             "ready": renderer["verified"],
-            "detail": f"Found and verified at {renderer.get('path')}." if renderer["verified"]
-            else "Not found -- required before any amp can be rendered. Use the download button below, or build from source (native/nam_render/README.md).",
+            "detail": f"Required. Found and verified at {renderer.get('path')}." if renderer["verified"]
+            else "Required before any amp can be rendered -- a small (under 2 MB) native tool, "
+                 "not a Python package. Use the download button below, or build from source "
+                 "(native/nam_render/README.md).",
         },
         {
             "id": "training_input",
             "label": "Official NAM training input",
             "applicable": True,
             "ready": training_input_ready,
-            "detail": "Ready -- bundled input.wav is in place." if training_input_ready
-            else "Missing -- upload the official NAM v3.0.0 training input before generating a training bundle.",
+            "detail": "Required only to generate a training bundle (not for live preview/design). "
+                      "Ready -- the bundled copy is already in place, no upload needed." if training_input_ready
+            else "Only needed once you're ready to generate a training bundle -- live preview/design/"
+                 "audition all work without it. This ships with the app and should already be here; "
+                 "seeing this means that copy is missing for some reason -- upload the official NAM "
+                 "v3.0.0 training input WAV (a few MB) yourself as a fallback.",
         },
         {
             "id": "local_training",
             "label": "Local A2 training environment",
             "applicable": True,
-            "ready": _local_training_manager.python.is_file(),
-            "detail": "Ready -- .venv-a2 is set up." if _local_training_manager.python.is_file()
-            else "Not set up -- optional, only needed to train a generated bundle into a .nam on this machine (Kaggle GPU training is an alternative that needs no local setup).",
+            "ready": _local_training_manager.is_ready,
+            "detail": "Optional. Ready -- the dedicated environment is set up." if _local_training_manager.is_ready
+            else "Optional -- only needed to train a generated bundle into a finished .nam ON THIS "
+                 "COMPUTER. This is a real ~1.4 GB one-time download (PyTorch + neural-amp-modeler "
+                 "into their own dedicated environment, never mixed into this app's own Python). "
+                 "Kaggle GPU training below is the alternative that needs no local install and no "
+                 "large download at all.",
         },
         {
             "id": "kaggle",
@@ -723,17 +755,24 @@ def api_setup_status():
     kaggle_status = _kaggle_manager.status()
     kaggle_item = next(i for i in items if i["id"] == "kaggle")
     if not kaggle_status["cli_installed"]:
-        kaggle_item["detail"] = "Optional -- CLI not installed (pip install kaggle) needed only if you want cloud GPU training instead of local."
+        kaggle_item["detail"] = (
+            "Optional -- needed only if you want free cloud GPU training instead of the ~1.4 GB "
+            "local install above. This app build cannot run the Kaggle CLI yet -- install the "
+            "standalone Kaggle CLI and make sure it's on your PATH, then reopen this app."
+            if is_frozen_build else
+            "Optional -- CLI not installed (pip install kaggle) needed only if you want cloud GPU "
+            "training instead of local."
+        )
     elif not kaggle_status["authenticated"]:
-        kaggle_item["detail"] = "Optional -- CLI installed, not authenticated yet. Use the Kaggle tab's sign-in button when you want cloud training."
+        kaggle_item["detail"] = "Optional -- CLI installed, not authenticated yet. Use the Kaggle tab's sign-in button when you want cloud training (no download, needs only your free Kaggle account)."
     else:
         kaggle_item["ready"] = True
-        kaggle_item["detail"] = "Ready -- authenticated."
+        kaggle_item["detail"] = "Ready -- authenticated. No download needed; training runs on Kaggle's own GPU."
 
     llm_status = local_llm_status()
     llm_item = next(i for i in items if i["id"] == "local_llm")
     if not llm_status.get("enabled"):
-        llm_item["detail"] = "Optional -- not configured. Only needed for the AI Assistant tab's recipe suggestions; everything else works without it."
+        llm_item["detail"] = "Optional -- not configured. Only needed for the AI Assistant tab's recipe suggestions; everything else (preview, design, generate, train) works fully without it."
     elif llm_status.get("reachable"):
         llm_item["ready"] = True
         llm_item["detail"] = f"Ready -- reachable at {llm_status.get('base_url')}."
@@ -1017,6 +1056,17 @@ def api_session_save():
                 raise ValueError("generated session bundle not found")
             _sync_generated_session_name(session, bundle_dir)
             path = _generated_session_path(bundle_dir)
+            # A session that started as a plain settings-only record (no
+            # bundle yet) and is only NOW being promoted to "generated"
+            # leaves its old plain file behind at a DIFFERENT path -- GET
+            # /api/sessions lists both locations unconditionally, so an
+            # orphaned plain file would show up as a duplicate entry with
+            # the same id/name forever. Only ever removes the plain file
+            # for THIS SAME id, never another session's.
+            try:
+                _session_path(session_id).unlink(missing_ok=True)
+            except ValueError:
+                pass
         else:
             path = _session_path(session_id)
         path.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
@@ -1049,21 +1099,45 @@ def _find_session_record(session_id: str) -> tuple[Path, dict, Path | None] | No
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
 def api_session_delete(session_id: str):
+    """Deleting a session whose training is still active does not just
+    fail outright: the caller can pass `?cancel_active_jobs=1` (only after
+    the user has been warned exactly what that means -- see
+    static/app.js's delete-session handler) to have this cascade into
+    actually stopping that job first, rather than leaving an orphaned
+    Kaggle kernel/dataset or local training process behind with no session
+    left to manage it."""
     found = _find_session_record(session_id)
     if found is None:
         try: _session_path(session_id)
         except ValueError as exc: return jsonify({"error": str(exc)}), 400
         return jsonify({"error": "session not found"}), 404
     path, _session, bundle_dir = found
+    cancel_active_jobs = request.args.get("cancel_active_jobs") == "1"
     design_id = _session.get("designId") if isinstance(_session, dict) else None
     if design_id:
         active_kaggle = find_active_job(A2_OUTPUT_DIR, design_id)
         if active_kaggle is not None and active_kaggle.state not in ("complete", "failed"):
-            return jsonify({"error": "cannot delete a session while its Kaggle training job is active"}), 409
+            if not cancel_active_jobs:
+                return jsonify({
+                    "error": "cannot delete a session while its Kaggle training job is active",
+                    "active_kaggle_job": True,
+                }), 409
+            try:
+                _kaggle_manager.cancel_active(active_kaggle)
+            except KaggleTrainingError as exc:
+                return jsonify({"error": f"could not cancel the active Kaggle job: {exc}"}), 409
         local_state = _local_training_manager.status()
         if local_training_design_id := getattr(_local_training_manager, "design_id", None):
             if local_training_design_id == design_id and local_state["state"] in ("setting_up", "training", "cancelling"):
-                return jsonify({"error": "cannot delete a session while its local training job is active"}), 409
+                if not cancel_active_jobs:
+                    return jsonify({
+                        "error": "cannot delete a session while its local training job is active",
+                        "active_local_job": True,
+                    }), 409
+                try:
+                    _local_training_manager.cancel()
+                except RuntimeError as exc:
+                    return jsonify({"error": f"could not stop the active local training job: {exc}"}), 409
     if bundle_dir is not None:
         shutil.rmtree(bundle_dir)
     else:
@@ -2549,11 +2623,48 @@ def api_kaggle_status():
     see hybrid/kaggle_training.py. Never raises for a missing/unauthenticated
     CLI -- reports that plainly instead."""
     info = _kaggle_manager.status()
+    with _kaggle_install_lock:
+        info["install_state"] = dict(_kaggle_install_state)
     design_id = request.args.get("design_id")
     if design_id:
         job = find_active_job(A2_OUTPUT_DIR, design_id)
         info["job"] = _job_dict_for_client(job) if job else None
     return jsonify(info)
+
+
+@app.post("/api/kaggle/install")
+def api_kaggle_install():
+    """Explicitly install the optional Kaggle CLI into this app's Python
+    environment. It is opt-in and runs off the request thread so the UI can
+    show progress without blocking Flask."""
+    if _kaggle_manager.cli.is_installed():
+        return jsonify({"state": "ready", "message": "Kaggle CLI is already installed."})
+    if getattr(sys, "frozen", False):
+        return jsonify({"error": "This bundled app cannot install Python packages into itself. Install the standalone Kaggle CLI on PATH, then restart the app."}), 409
+    with _kaggle_install_lock:
+        if _kaggle_install_state["state"] == "running":
+            return jsonify({"state": "running"}), 202
+        _kaggle_install_state.update(state="running", error=None)
+
+    def _install() -> None:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "kaggle>=2.2.4"],
+                shell=False, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=600,
+            )
+            if proc.returncode:
+                raise RuntimeError((proc.stderr or proc.stdout or "pip install failed").strip()[-1000:])
+            # Refresh the cached executable/module detection after pip.
+            _kaggle_manager.cli.executable = _kaggle_manager.cli._locate()
+            with _kaggle_install_lock:
+                _kaggle_install_state.update(state="complete", error=None)
+        except Exception as exc:  # noqa: BLE001 - reported in the UI
+            with _kaggle_install_lock:
+                _kaggle_install_state.update(state="failed", error=str(exc))
+
+    threading.Thread(target=_install, daemon=True, name="kaggle-install").start()
+    return jsonify({"state": "running"}), 202
 
 
 @app.route("/api/kaggle/auth/start", methods=["POST"])
@@ -2714,6 +2825,47 @@ def api_kaggle_job_cleanup(job_id: str):
     except KaggleTrainingError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(_job_dict_for_client(job))
+
+
+@app.route("/api/health")
+def api_health():
+    """Polled by the desktop shell (desktop/src-tauri) to detect that this
+    backend process is up before it points its window at us."""
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/system/usage")
+def api_system_usage():
+    """Polled by the footer's CPU/memory readout so a long local training
+    run (which shows nothing per-epoch for minutes at a time otherwise --
+    see hybrid/local_training.py's _collect() docstring) has SOME visible
+    sign the machine is actually doing something, not silently stuck.
+    GPU is best-effort: NVIDIA systems are queried through nvidia-smi when
+    available; unsupported platforms simply omit the GPU value."""
+    cpu_percent = psutil.cpu_percent(interval=None)
+    mem = psutil.virtual_memory()
+    gpu = None
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi:
+        try:
+            result = subprocess.run(
+                [nvidia_smi, "--query-gpu=utilization.gpu,memory.used,memory.total",
+                 "--format=csv,noheader,nounits"],
+                shell=False, capture_output=True, text=True, timeout=2,
+                encoding="utf-8", errors="replace",
+            )
+            fields = [part.strip() for part in result.stdout.splitlines()[0].split(",")]
+            if result.returncode == 0 and len(fields) >= 3:
+                gpu = {"utilization_percent": float(fields[0]), "memory_used_mb": float(fields[1]), "memory_total_mb": float(fields[2])}
+        except (OSError, IndexError, ValueError, subprocess.TimeoutExpired):
+            pass
+    return jsonify({
+        "cpu_percent": cpu_percent,
+        "memory_percent": mem.percent,
+        "memory_used_gb": round(mem.used / (1024 ** 3), 1),
+        "memory_total_gb": round(mem.total / (1024 ** 3), 1),
+        "gpu": gpu,
+    })
 
 
 if __name__ == "__main__":

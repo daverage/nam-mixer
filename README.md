@@ -261,9 +261,10 @@ card:
    Kaggle requires this before it will grant GPU/TPU accelerator quota to any
    account, regardless of how you submit the job. This is the step people
    most often miss.
-3. **Install and authenticate the Kaggle CLI**, once, in your normal shell
-   (this is separate from the app's own Python environment — no `kaggle`
-   import ever runs inside this app, only the CLI as a subprocess):
+3. **Install and authenticate the Kaggle CLI.** The Create A2 card offers an
+   explicit **Install Kaggle CLI** button when it is missing; alternatively,
+   install it once in your normal shell (the app never imports Kaggle's
+   library; it invokes the CLI/module only for cloud operations):
    ```bash
    pip install kaggle
    kaggle auth login
@@ -277,7 +278,7 @@ card:
 Each training run stages a private, uniquely-named Kaggle dataset + kernel
 under your account, polls it without blocking the app, downloads the result,
 and re-validates it locally before calling the job complete — see
-[`docs/kaggle_training.md`](docs/kaggle_training.md) for the full mechanics,
+the in-app setup checklist and [Setting up Kaggle GPU training](#setting-up-kaggle-gpu-training) for the mechanics,
 troubleshooting, and how to recover a job that trained but failed to
 download. Kaggle's free T4 quota is weekly and account-wide; the "Create A2"
 card shows your remaining quota before you submit.

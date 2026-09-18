@@ -15,6 +15,13 @@
 # (scripts/train_a2.py does this automatically).
 neural-amp-modeler==0.13.0
 
+# scripts/train_a2.py imports hybrid/cab_ir.py and hybrid/envelope.py,
+# which need soundfile and scipy directly -- pin both explicitly rather than
+# relying on them arriving as transitive dependencies of neural-amp-modeler's
+# own librosa dependency.
+soundfile
+scipy
+
 # Torch is intentionally NOT pinned here -- pick the build that matches your
 # platform/CUDA (see https://pytorch.org/get-started/locally/ for the current
 # install command) and record what actually got installed via

@@ -1,6 +1,127 @@
 // Minimal UI wiring. No build step, no framework -- plain DOM + fetch.
 
+// The desktop shell (desktop/src-tauri) loads this exact page in a native
+// window. WKWebView/WebView2 do not honor the HTML `download` attribute --
+// a click on `<a download>` just silently does nothing there. When running
+// inside Tauri, intercept every such click and hand it to a native command
+// that shows a real save dialog instead. Ordinary browser use is untouched.
+const isTauriDesktop = typeof window.__TAURI__ !== "undefined";
+// Labels for buttons/links that actually go through the native save-dialog
+// path above (NOT the couple of purely server-side "download this into the
+// app's own folder" actions, e.g. fetching nam_render itself) -- "Download"
+// implies a browser's silent auto-save-to-Downloads, which is not what
+// happens here; calling it "Save" matches the dialog the user actually
+// sees, so a save that succeeded doesn't read as the button doing nothing.
+function desktopSaveLabel(text) {
+  return isTauriDesktop ? text.replace(/^Download\b/, "Save") : text;
+}
+// The ONE place every desktop save goes through -- the delegated click
+// listener below (for raw innerHTML `<a download>` anchors) and
+// triggerFileDownload/saveBlobAsFile (for anything built through those
+// helpers) all call this, so every save in the app notifies the user the
+// same way at each stage: starting, saved-to-path, cancelled, or failed.
+// Uses the existing global status line (setStatus), not a blocking
+// window.alert, so it behaves like every other in-app status message.
+async function desktopSave(invokeName, args, filename) {
+  setStatus(`Saving ${filename}…`);
+  try {
+    const path = await window.__TAURI__.core.invoke(invokeName, args);
+    setStatus(`Saved ${filename} to ${path}`);
+    return true;
+  } catch (err) {
+    if (String(err) === "save cancelled") {
+      setStatus("Save cancelled.");
+    } else {
+      console.error("Desktop save failed:", err);
+      setStatus(`Could not save ${filename}: ${err}`, true);
+    }
+    return false;
+  }
+}
+
+// Plain window.confirm() -- WKWebView (Tauri's engine on macOS) supports
+// it natively via its own UI delegate, so there's no need for (and real
+// risk in) routing this through a Rust dialog command instead: an earlier
+// attempt at that used tauri-plugin-dialog's blocking_show() from an async
+// command, which hung indefinitely with no visible dialog and no error,
+// breaking every delete button on desktop. Kept as its own named function
+// (rather than inlining window.confirm at each call site) so every
+// confirmation in the app is easy to find and change together later.
+async function desktopConfirm(message, title = "Confirm") {
+  return window.confirm(message);
+}
+
+if (isTauriDesktop) {
+  // target="_blank" links (the footer's GitHub/license links) don't open
+  // anything in WKWebView/WebView2 -- there's no real "new window" handler
+  // -- so route them to the OS's default browser via open_external_url
+  // instead of letting the click fall through and silently do nothing.
+  document.addEventListener("click", async (event) => {
+    const externalLink = event.target.closest('a[target="_blank"]');
+    if (externalLink) {
+      event.preventDefault();
+      const url = externalLink.getAttribute("href");
+      try {
+        await window.__TAURI__.core.invoke("open_external_url", { url });
+      } catch (err) {
+        console.error("Could not open external link:", err);
+      }
+      return;
+    }
+  });
+  document.addEventListener("click", async (event) => {
+    const link = event.target.closest("a[download]");
+    if (!link) return;
+    event.preventDefault();
+    const href = link.getAttribute("href");
+    const filename = link.getAttribute("download") || "download";
+    if (href.startsWith("blob:")) {
+      const resp = await fetch(href);
+      const buf = await resp.arrayBuffer();
+      const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      await desktopSave("save_bytes", { filename, dataBase64 }, filename);
+    } else {
+      const absoluteUrl = new URL(href, window.location.origin).toString();
+      await desktopSave("save_file_from_url", { url: absoluteUrl, filename }, filename);
+    }
+  });
+}
+
 const statusEl = document.getElementById("status");
+const systemUsageEl = document.getElementById("system-usage");
+async function refreshSystemUsage() {
+  if (!systemUsageEl) return;
+  try {
+    const response = await fetch("/api/system/usage");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "unavailable");
+    const parts = [`CPU ${Number(data.cpu_percent).toFixed(0)}%`, `RAM ${data.memory_used_gb}/${data.memory_total_gb} GB`];
+    if (data.gpu) parts.push(`GPU ${Number(data.gpu.utilization_percent).toFixed(0)}% · VRAM ${(data.gpu.memory_used_mb / 1024).toFixed(1)}/${(data.gpu.memory_total_mb / 1024).toFixed(1)} GB`);
+    systemUsageEl.textContent = parts.join("  ·  ");
+  } catch {
+    systemUsageEl.textContent = "System usage unavailable";
+  }
+}
+refreshSystemUsage();
+setInterval(refreshSystemUsage, 3000);
+
+// ---- First-launch welcome guide -----------------------------------------
+// Shown once (tracked via localStorage, so it survives a refresh but not a
+// private window/cleared site data -- acceptable here since it's purely a
+// convenience prompt, never state anything else depends on) then available
+// again any time from Settings > Getting started.
+const WELCOME_SEEN_KEY = "nam-mixer-welcome-seen";
+const welcomeOverlay = document.getElementById("welcome-overlay");
+function showWelcome() { welcomeOverlay.hidden = false; }
+function hideWelcome() {
+  welcomeOverlay.hidden = true;
+  try { localStorage.setItem(WELCOME_SEEN_KEY, "1"); } catch { /* private window etc. -- just re-show next time */ }
+}
+document.getElementById("btn-welcome-dismiss").addEventListener("click", hideWelcome);
+document.getElementById("btn-show-welcome").addEventListener("click", showWelcome);
+let welcomeAlreadySeen = false;
+try { welcomeAlreadySeen = localStorage.getItem(WELCOME_SEEN_KEY) === "1"; } catch { /* default to showing it */ }
+if (!welcomeAlreadySeen) showWelcome();
 
 // ---- Design mode tabs (Dynamic Hybrid / Parallel Blend / Character Blend) ----
 // Tabs are DESIGN MODES, not separate applications -- Amp A/B, the preview
@@ -1062,6 +1183,15 @@ recipeConversationResetButton.addEventListener("click", () => {
   recipePromptInput.focus();
 });
 async function saveBlobAsFile(filename, blob) {
+  if (isTauriDesktop) {
+    // Read the blob directly rather than going through an <a download>
+    // click -- the anchor-based path revokes its object URL synchronously
+    // right after the click, before an async Tauri save could ever read it.
+    const buf = await blob.arrayBuffer();
+    const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    await desktopSave("save_bytes", { filename, dataBase64 }, filename);
+    return filename;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1074,6 +1204,11 @@ async function saveBlobAsFile(filename, blob) {
 }
 
 async function triggerFileDownload(url, filename) {
+  if (isTauriDesktop) {
+    const absoluteUrl = new URL(url, window.location.origin).toString();
+    await desktopSave("save_file_from_url", { url: absoluteUrl, filename }, filename);
+    return filename;
+  }
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -2113,15 +2248,20 @@ modelNameInput.addEventListener("change", () => {
     sessionSettingsStatus.textContent = "Could not save the model name: " + err.message;
   });
 });
-generateBtn.addEventListener("click", async () => {
-  if (generationPending) return;
+// Shared by the explicit "Create training files" button AND by the Train
+// buttons (local/Kaggle), which call this first whenever there's no bundle
+// yet -- that's the whole point of the merge: a user can go straight from
+// rendering to clicking Train without a separate manual Generate step.
+// Returns true only once `lastDesignId` is actually set on success.
+async function runGenerate() {
+  if (generationPending) return false;
   if (!havePair) {
     setStatus("Render and audition an amp pair first.", true);
-    return;
+    return false;
   }
   if (!trainingInputReady) {
     setStatus("Upload the official NAM training input first.", true);
-    return;
+    return false;
   }
   generationPending = true;
   syncTrainingControls();
@@ -2148,11 +2288,11 @@ generateBtn.addEventListener("click", async () => {
       }),
     });
     const data = await resp.json();
-    if (requestGeneration !== renderGeneration) return;
+    if (requestGeneration !== renderGeneration) return false;
     if (!resp.ok) {
       generateStatus.textContent = "Error: " + (data.error || "generation failed");
       setStatus("Training bundle generation failed.", true);
-      return;
+      return false;
     }
     generateStatus.textContent = `Training files are ready for ${data.model_name}.`;
     generateResult.hidden = false;
@@ -2187,7 +2327,13 @@ generateBtn.addEventListener("click", async () => {
     completedValidationReport = null;
     invalidateModelComparison("");
     syncComparisonPanel();
-    activeSessionId = sessionId();
+    // Keep the SAME session identity across a regenerate (e.g. after
+    // loading a session, tweaking a setting, and clicking "Create training
+    // files" again) -- this used to always mint a fresh random id here
+    // regardless of whether one was already active, silently leaving the
+    // previously loaded/saved session behind as an orphaned duplicate
+    // instead of updating it.
+    activeSessionId = activeSessionId || sessionId();
     activeSessionName = data.model_name;
     activeSessionGenerated = true;
     try {
@@ -2200,16 +2346,20 @@ generateBtn.addEventListener("click", async () => {
     if (data.default_epoch_preset === "high_def") document.getElementById("a2-preset-high_def").checked = true;
     refreshLocalTraining();
     refreshKaggleStatus();
+    return true;
   } catch (err) {
-    if (requestGeneration !== renderGeneration) return;
+    if (requestGeneration !== renderGeneration) return false;
     generateStatus.textContent = "Request failed: " + err;
     setStatus("Training bundle generation failed.", true);
+    return false;
   } finally {
     stopElapsed();
     generationPending = false;
     syncTrainingControls();
   }
-});
+}
+
+generateBtn.addEventListener("click", () => { runGenerate(); });
 
 // --- Kaggle GPU training backend -----------------------------------------
 let lastDesignId = null;
@@ -2224,6 +2374,7 @@ let kaggleAuthenticated = false;
 let kaggleJobPollTimer = null;
 
 const kaggleStatusEl = document.getElementById("kaggle-status");
+const kaggleInstallBtn = document.getElementById("btn-kaggle-install");
 const kaggleConnectBtn = document.getElementById("btn-kaggle-connect");
 const trainA2Btn = document.getElementById("btn-train-a2");
 const kaggleProgressBox = document.getElementById("kaggle-progress-box");
@@ -2258,7 +2409,10 @@ function resetGeneratedModel(reason) {
   activeSessionId = null;
   activeSessionName = null;
   activeSessionGenerated = false;
-  document.getElementById("a2-training-section").hidden = true;
+  // Do NOT force the section hidden here: syncTrainingControls keeps it
+  // visible as long as generating is still possible, so Train can just
+  // regenerate a fresh bundle on click instead of the user needing to
+  // notice it disappeared and re-click "Create training files" first.
   kaggleResultEl.hidden = true;
   localResultEl.hidden = true;
   if (reason) setStatus(reason);
@@ -2266,7 +2420,15 @@ function resetGeneratedModel(reason) {
 
 function syncTrainingControls() {
   const locked = trainingIsActive();
-  generateBtn.disabled = locked || generationPending || !havePair || !activeRenderId || !trainingInputReady;
+  const canGenerate = havePair && activeRenderId && trainingInputReady;
+  generateBtn.disabled = locked || generationPending || !canGenerate;
+  // Train buttons generate their own bundle on click if one isn't already
+  // there (see localTrainBtn/trainA2Btn) -- so the quality/backend/train
+  // controls only need the same preconditions as generating, not an
+  // already-completed generate step. This is what lets a user go straight
+  // from rendering to clicking Train without a separate "Create training
+  // files" click in between.
+  document.getElementById("a2-training-section").hidden = !(canGenerate || lastDesignId);
   trainingInputFile.disabled = locked;
   modelNameInput.disabled = locked;
   document.querySelectorAll('input[name="a2-epoch-preset"], input[name="a2-backend"]').forEach((input) => { input.disabled = locked; });
@@ -2282,7 +2444,9 @@ const localTrainingStatus = document.getElementById("local-training-status");
 const localTrainingMeta = document.getElementById("local-training-meta");
 const localTrainingLog = document.getElementById("local-training-log");
 const localSetupBtn = document.getElementById("btn-local-setup");
+const localSetupSizeHint = document.getElementById("local-setup-size-hint");
 const localTrainBtn = document.getElementById("btn-local-train");
+const localTrainBlockedReasonEl = document.getElementById("local-train-blocked-reason");
 const localCancelBtn = document.getElementById("btn-local-cancel");
 const localResultEl = document.getElementById("local-result");
 let localTrainingPoll = null;
@@ -2425,7 +2589,7 @@ function renderLocalDownloadResult(designId, validationReport = null) {
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download class="btn btn-primary btn-block" style="
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download="trained-model.nam" class="btn btn-primary btn-block" style="
       width: 100%;
       flex-grow: 1;
       display: flex;
@@ -2434,7 +2598,7 @@ function renderLocalDownloadResult(designId, validationReport = null) {
       align-content: center;
       justify-content: center;
       align-items: center;
-  ">Download trained .nam</a>${validationSummaryHtml(validationReport)}`;
+  ">${desktopSaveLabel("Download trained .nam")}</a>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -2448,6 +2612,27 @@ async function refreshLocalTraining() {
         : data.state === "cancelled"
           ? "Local process stopped. You can set up or train again when ready."
         : `Local training: ${data.state.replace("_", " ")}.`;
+    // The Train button can be blocked for a few independent reasons; always
+    // say which one, rather than leaving a disabled button unexplained.
+    // Note: a missing training bundle is NOT one of them -- Train generates
+    // one itself on click (see localTrainBtn's click handler) -- so this
+    // only needs to check what Train genuinely cannot do anything about.
+    let blockedReason = "";
+    if (!data.ready) {
+      blockedReason = data.state === "setting_up"
+        ? "Waiting for the local environment setup to finish…"
+        : data.state === "failed"
+          ? "Local environment setup failed -- see the log below, then click Set up local training again."
+          : "Click “Set up local training” first -- the dedicated Python environment is not ready.";
+    } else if (["setting_up", "training", "cancelling"].includes(data.state)) {
+      blockedReason = "A local setup/training process is currently running.";
+    } else if (!lastDesignId && !(havePair && activeRenderId && trainingInputReady)) {
+      blockedReason = "Render and audition an amp pair, and upload the official NAM training input, before training.";
+    }
+    if (localTrainBlockedReasonEl) {
+      localTrainBlockedReasonEl.textContent = blockedReason;
+      localTrainBlockedReasonEl.hidden = !blockedReason;
+    }
     localTrainingLog.textContent = data.log_tail || "(no local training output yet)";
     if (data.elapsed_s !== null && data.elapsed_s !== undefined) {
       const minutes = Math.floor(data.elapsed_s / 60);
@@ -2464,8 +2649,9 @@ async function refreshLocalTraining() {
     // re-running pip install for no reason and looks like the previous
     // setup didn't take.
     localSetupBtn.hidden = Boolean(data.ready);
+    localSetupSizeHint.hidden = Boolean(data.ready);
     localSetupBtn.disabled = localTrainingActive;
-    localTrainBtn.disabled = !data.ready || !lastDesignId || localTrainingActive;
+    localTrainBtn.disabled = !data.ready || localTrainingActive || !(lastDesignId || (havePair && activeRenderId && trainingInputReady));
     localCancelBtn.hidden = !localTrainingActive;
     localCancelBtn.disabled = data.state === "cancelling";
     syncTrainingControls();
@@ -2507,7 +2693,11 @@ localSetupBtn.addEventListener("click", async () => {
 });
 
 localTrainBtn.addEventListener("click", async () => {
-  if (!lastDesignId) return;
+  if (!lastDesignId) {
+    localTrainBtn.disabled = true;
+    const ok = await runGenerate();
+    if (!ok || !lastDesignId) { localTrainBtn.disabled = !lastDesignId; return; }
+  }
   localTrainBtn.disabled = true;
   localResultEl.hidden = true;
   localTrainingDesignId = lastDesignId;
@@ -2559,7 +2749,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   kaggleResultEl.innerHTML = `
-    <a href="${downloadUrl}" download class="btn btn-primary btn-block">Download ${namFilename}</a>
+    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel(`Download ${namFilename}`)}</a>
     <div class="hint" title="${data.output_nam_path || ""}">Full path: <code>${data.output_nam_path || "(unknown)"}</code></div>
     <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
     ${validationSummaryHtml(completedValidationReport)}
@@ -2621,12 +2811,19 @@ async function refreshKaggleStatus() {
     const resp = await fetch("/api/kaggle/status" + (lastDesignId ? `?design_id=${encodeURIComponent(lastDesignId)}` : ""));
     const data = await resp.json();
     if (!data.cli_installed) {
-      kaggleStatusEl.textContent = "Kaggle CLI not installed. Run: pip install kaggle";
+      kaggleStatusEl.textContent = isTauriDesktop
+        ? "Kaggle CLI not available in this app build yet -- install the standalone Kaggle CLI and make sure it's on your PATH, then reopen this app."
+        : "Kaggle CLI not installed. Run: pip install kaggle";
       kaggleConnectBtn.hidden = true;
+      kaggleInstallBtn.hidden = isTauriDesktop;
+      kaggleInstallBtn.disabled = data.install_state?.state === "running";
+      if (data.install_state?.state === "running") kaggleStatusEl.textContent = "Installing Kaggle CLI…";
+      if (data.install_state?.state === "failed") kaggleStatusEl.textContent += ` Install failed: ${data.install_state.error}`;
       kaggleAuthenticated = false;
       trainA2Btn.disabled = true;
       return;
     }
+    kaggleInstallBtn.hidden = true;
     if (!data.authenticated) {
       kaggleStatusEl.textContent = `Kaggle CLI ${data.cli_version || ""} installed, not connected.`;
       kaggleConnectBtn.hidden = false;
@@ -2660,6 +2857,28 @@ async function refreshKaggleStatus() {
 refreshKaggleStatus();
 
 kaggleRefreshBtn.addEventListener("click", () => refreshKaggleStatus());
+
+kaggleInstallBtn.addEventListener("click", async () => {
+  kaggleInstallBtn.disabled = true;
+  kaggleStatusEl.textContent = "Installing Kaggle CLI into this app environment…";
+  try {
+    const resp = await fetch("/api/kaggle/install", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "installation could not start");
+    const timer = setInterval(async () => {
+      const statusResp = await fetch("/api/kaggle/status");
+      const status = await statusResp.json();
+      await refreshKaggleStatus();
+      if (status.cli_installed || status.install_state?.state === "failed") {
+        clearInterval(timer);
+        kaggleInstallBtn.disabled = false;
+      }
+    }, 2000);
+  } catch (err) {
+    kaggleStatusEl.textContent = "Could not install Kaggle CLI: " + err;
+    kaggleInstallBtn.disabled = false;
+  }
+});
 
 kaggleConnectBtn.addEventListener("click", async () => {
   kaggleConnectBtn.disabled = true;
@@ -2707,8 +2926,9 @@ function pollKaggleAuth() {
 
 trainA2Btn.addEventListener("click", async () => {
   if (!lastDesignId) {
-    setStatus("Generate a training bundle first.", true);
-    return;
+    trainA2Btn.disabled = true;
+    const ok = await runGenerate();
+    if (!ok || !lastDesignId) { trainA2Btn.disabled = !lastDesignId; return; }
   }
   trainA2Btn.disabled = true;
   kaggleTrainingActive = true;
@@ -2802,11 +3022,22 @@ function pollKaggleJob(designId, jobId) {
 // /api/nam/upload and /api/cab/upload. Loading never renders automatically,
 // so a stale or missing file is reported by the normal Render Amps flow.
 
+// applySessionSettings appends " (restored)" to these labels purely for
+// display. collectSessionSettings used to read that same mutated DOM text
+// straight back as the "clean" label -- so load-then-save (without
+// re-uploading the file) baked " (restored)" into the stored session, and
+// each further load/save cycle appended ANOTHER one on top of whatever was
+// already there. Stripping it on both read and write means an old session
+// that already has several stacked up self-heals the next time it's saved.
+function stripRestoredSuffix(label) {
+  return label.replace(/(\s*\(restored\))+$/, "");
+}
+
 function collectSessionSettings() {
   return {
     mode: currentMode,
-    ampA: { path: ampServerPaths.a, label: document.getElementById("amp-a-info").textContent },
-    ampB: { path: ampServerPaths.b, label: document.getElementById("amp-b-info").textContent },
+    ampA: { path: ampServerPaths.a, label: stripRestoredSuffix(document.getElementById("amp-a-info").textContent) },
+    ampB: { path: ampServerPaths.b, label: stripRestoredSuffix(document.getElementById("amp-b-info").textContent) },
     diFile: diSelector.value,
     instrument: instrumentSelect.value,
     inputProfileId: profileSelect.value,
@@ -2827,7 +3058,7 @@ function collectSessionSettings() {
     ampBTrim: ampBTrimSlider.value,
     cab: {
       path: cabServerPath,
-      label: cabInfoEl.textContent,
+      label: stripRestoredSuffix(cabInfoEl.textContent),
       previewEnabled: cabPreviewEnabled.checked,
       exportMode: cabExportMode.value,
     },
@@ -2841,8 +3072,8 @@ function applySessionSettings(s) {
   instrumentExplicitlySelected = true;
   ampServerPaths.a = s.ampA.path;
   ampServerPaths.b = s.ampB.path;
-  document.getElementById("amp-a-info").textContent = s.ampA.path ? `${s.ampA.label} (restored)` : "";
-  document.getElementById("amp-b-info").textContent = s.ampB.path ? `${s.ampB.label} (restored)` : "";
+  document.getElementById("amp-a-info").textContent = s.ampA.path ? `${stripRestoredSuffix(s.ampA.label)} (restored)` : "";
+  document.getElementById("amp-b-info").textContent = s.ampB.path ? `${stripRestoredSuffix(s.ampB.label)} (restored)` : "";
 
   diSelector.value = s.diFile;
   instrumentSelect.value = s.instrument;
@@ -2886,7 +3117,7 @@ function applySessionSettings(s) {
   ampBTrimValue.textContent = `${fmtSigned(ampBTrimSlider.value)} dB`;
 
   cabServerPath = s.cab.path;
-  cabInfoEl.textContent = s.cab.path ? `${s.cab.label} (restored)` : "";
+  cabInfoEl.textContent = s.cab.path ? `${stripRestoredSuffix(s.cab.label)} (restored)` : "";
   cabPreviewEnabled.disabled = !s.cab.path;
   cabExportMode.disabled = !s.cab.path;
   cabPreviewEnabled.checked = s.cab.previewEnabled;
@@ -3009,6 +3240,36 @@ function importedSession(raw, filename) {
   return session;
 }
 
+// Deleting a session whose training is still active used to just fail
+// with a raw server error ("cannot delete a session while its Kaggle
+// training job is active") and leave the user stuck. This retries with
+// `cancel_active_jobs=1` -- but only after a SEPARATE, explicit warning
+// naming exactly what that cascades into (stopping the Kaggle
+// kernel/dataset or the local training process) -- rather than silently
+// cancelling active training as a side effect of the first delete
+// confirmation, which said nothing about training jobs at all.
+async function deleteSessionCascading(sessionId, name) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  if (response.ok) return;
+  const data = await response.json().catch(() => ({}));
+  if (data.active_kaggle_job || data.active_local_job) {
+    const jobKind = data.active_kaggle_job ? "Kaggle cloud training job" : "local training process";
+    const proceed = await desktopConfirm(
+      `“${name}” has an active ${jobKind}. Deleting this session will also cancel that ${jobKind} now. Continue?`,
+      "Cancel active training?",
+    );
+    if (!proceed) {
+      const err = new Error(`Delete cancelled -- "${name}" and its ${jobKind} were left as they were.`);
+      err.userCancelled = true;
+      throw err;
+    }
+    const retry = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}?cancel_active_jobs=1`, { method: "DELETE" });
+    if (!retry.ok) throw new Error((await retry.json().catch(() => ({}))).error || "could not delete session");
+    return;
+  }
+  throw new Error(data.error || "could not delete session");
+}
+
 async function renderSessions() {
   const sessions = await readSessions();
   sessionList.replaceChildren();
@@ -3064,22 +3325,24 @@ async function renderSessions() {
     });
     const deleteButton = document.createElement("button"); deleteButton.type = "button"; deleteButton.className = "btn btn-secondary btn-small"; deleteButton.textContent = "Delete";
     deleteButton.addEventListener("click", async () => {
+      const name = session.name || "Untitled session";
       const deleteMessage = session.generated
-        ? `Delete “${session.name || "Untitled session"}” and its entire training bundle? This removes all files under work/a2/${session.designId}.`
-        : `Delete “${session.name || "Untitled session"}”? This removes its saved session file.`;
-      if (!confirm(deleteMessage)) return;
+        ? `Delete “${name}” and its entire training bundle? This removes all files under work/a2/${session.designId}.`
+        : `Delete “${name}”? This removes its saved session file.`;
+      if (!(await desktopConfirm(deleteMessage, "Delete session"))) return;
       try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
-        if (!response.ok) throw new Error((await response.json()).error || "could not delete session");
+        await deleteSessionCascading(session.id, name);
         sessionManagerStatus.textContent = "Session deleted.";
         await renderSessions();
-      } catch (err) { sessionManagerStatus.textContent = "Delete failed: " + err; }
+      } catch (err) {
+        sessionManagerStatus.textContent = err.userCancelled ? err.message : "Delete failed: " + err.message;
+      }
     });
     const exportButton = document.createElement("button"); exportButton.type = "button"; exportButton.className = "btn btn-secondary btn-small"; exportButton.textContent = "Export JSON";
     exportButton.addEventListener("click", () => downloadSessionJson(session));
     actions.append(detailButton, loadButton, exportButton);
     if (summary.artifact?.downloadUrl) {
-      const downloadButton = document.createElement("button"); downloadButton.type = "button"; downloadButton.className = "btn btn-secondary btn-small"; downloadButton.textContent = "Download NAM";
+      const downloadButton = document.createElement("button"); downloadButton.type = "button"; downloadButton.className = "btn btn-secondary btn-small"; downloadButton.textContent = desktopSaveLabel("Download NAM");
       downloadButton.addEventListener("click", () => downloadSessionNam(summary.artifact));
       actions.append(downloadButton);
     }
@@ -3109,15 +3372,24 @@ document.getElementById("session-save-form").addEventListener("submit", async (e
   const name = sessionNameInput.value.trim();
   if (!name) return;
   try {
-    const session = await currentSession(name);
+    // A session tied to an ALREADY-TRAINED bundle has its model name frozen
+    // server-side (renaming it would invalidate that build's validation
+    // report -- see app.py's immutable-name-after-training guard). "Save
+    // as <name>" here must not try to rename that locked record; treat it
+    // as bookmarking the current settings under a new, independent plain
+    // session instead, so it can never collide with that guard.
+    const reuseActiveId = activeSessionId && !activeSessionGenerated;
+    const session = await currentSession(name, false);
+    if (!reuseActiveId) session.id = sessionId();
     activeSessionId = session.id;
     activeSessionName = name;
+    activeSessionGenerated = false;
     await writeSession(session);
     sessionNameInput.value = "";
     sessionManagerStatus.textContent = `Saved “${name}”.`;
     sessionSettingsStatus.textContent = `Saved ${name}`;
     await renderSessions();
-  } catch (err) { sessionManagerStatus.textContent = "Save failed: " + err; }
+  } catch (err) { sessionManagerStatus.textContent = "Save failed: " + err.message; }
 });
 
 document.getElementById("btn-export-current-session").addEventListener("click", async () => {
@@ -3321,7 +3593,7 @@ function showToolResult(data) {
   toolResult.replaceChildren();
   const changed = document.createElement("div");
   changed.textContent = `Validated changes: ${data.changed_paths.join(", ")}`;
-  const link = document.createElement("button"); link.type = "button"; link.className = "btn btn-primary"; link.textContent = `Download ${data.filename}`;
+  const link = document.createElement("button"); link.type = "button"; link.className = "btn btn-primary"; link.textContent = desktopSaveLabel(`Download ${data.filename}`);
   link.addEventListener("click", () => triggerFileDownload(data.download_url, data.filename));
   toolResult.append(changed, link);
   if (data.validation_report_invalidated) {
@@ -3500,7 +3772,11 @@ function renderSettings() {
       }
       row.append(labelText, input, desc);
       section.append(row);
-      if (field.name === "NAM_RENDER_EXE") {
+      if (field.name === "NAM_RENDER_EXE" && !isTauriDesktop) {
+        // The desktop build always ships nam_render already bundled inside
+        // the app itself (see packaging/backend/nam_mixer_backend.spec) --
+        // this "fetch it from GitHub releases" flow only applies to a
+        // browser/web checkout that hasn't built/downloaded one yet.
         section.append(renderNamRenderDownloadRow());
       }
       if (field.name === "NAM_MIXER_LOCAL_LLM_MODEL") {
@@ -3749,7 +4025,7 @@ function showSelectedTone3000Capture(capture) {
     const download = document.createElement("button");
     download.type = "button";
     download.className = "btn btn-secondary btn-small";
-    download.textContent = "Download " + model.name;
+    download.textContent = desktopSaveLabel("Download " + model.name);
     const url = `/api/tone3000/tones/${encodeURIComponent(capture.id)}/models/${encodeURIComponent(model.id)}/download`;
     download.addEventListener("click", () => triggerFileDownload(url, model.name));
     models.append(download);

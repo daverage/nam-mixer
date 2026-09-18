@@ -483,6 +483,53 @@ def test_file_backed_session_embeds_nam_for_download_and_tools(client, tmp_path,
     assert not (model_dir / "saved-session.nam").exists()
 
 
+def test_deleting_a_session_with_an_active_kaggle_job_requires_explicit_confirmation(client, tmp_path, monkeypatch):
+    """The first DELETE must fail with a machine-readable flag (not just a
+    string the frontend has to pattern-match) so it can show a SEPARATE,
+    specific warning about cancelling the Kaggle job -- then actually
+    cancel it once the caller passes ?cancel_active_jobs=1, rather than
+    leaving an orphaned Kaggle kernel/dataset with no session managing it."""
+    from hybrid.kaggle_training import KaggleJob, save_job
+
+    session_dir = tmp_path / "sessions"
+    model_dir = session_dir / "models"
+    a2_dir = tmp_path / "a2"
+    model_dir.mkdir(parents=True)
+    a2_dir.mkdir()
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module._kaggle_manager, "a2_output_dir", a2_dir)
+
+    session = {
+        "type": "nam-mixer-session", "version": 1, "id": "active-kaggle-session",
+        "name": "Active Kaggle session", "savedAt": "2026-09-18T10:00:00Z",
+        "settings": {"mode": "hybrid"}, "designId": "design-1",
+    }
+    assert client.post("/api/sessions", json=session).status_code == 201
+
+    job = KaggleJob(job_id="job-1", design_id="design-1", state="running",
+                     dataset_ref="user/dataset-1", kernel_ref="user/kernel-1")
+    save_job(a2_dir, job)
+
+    calls = []
+    monkeypatch.setattr(app_module._kaggle_manager.cli, "datasets_delete",
+                         lambda ref: (calls.append(("dataset", ref)), SimpleNamespace(ok=True, stdout="", stderr=""))[1])
+    monkeypatch.setattr(app_module._kaggle_manager.cli, "kernels_delete",
+                         lambda ref: (calls.append(("kernel", ref)), SimpleNamespace(ok=True, stdout="", stderr=""))[1])
+
+    blocked = client.delete("/api/sessions/active-kaggle-session")
+    assert blocked.status_code == 409
+    assert blocked.get_json()["active_kaggle_job"] is True
+    assert calls == []  # must not touch Kaggle resources without the explicit flag
+
+    confirmed = client.delete("/api/sessions/active-kaggle-session?cancel_active_jobs=1")
+    assert confirmed.status_code == 204
+    assert ("dataset", "user/dataset-1") in calls
+    assert ("kernel", "user/kernel-1") in calls
+    assert not (session_dir / "active-kaggle-session.nam-mixer.json").exists()
+
+
 def test_session_validation_report_must_match_embedded_nam(client, tmp_path, monkeypatch):
     session_dir = tmp_path / "sessions"
     model_dir = session_dir / "models"

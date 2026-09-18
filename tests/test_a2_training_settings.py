@@ -5,6 +5,7 @@ mechanism that makes local/cloud training-hyperparameter drift a test
 failure instead of a silent divergence.
 """
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -112,6 +113,36 @@ def test_cloud_worker_settings_match_shared_constants():
 
     assert cloud.NEURAL_AMP_MODELER_VERSION == NEURAL_AMP_MODELER_VERSION
     assert cloud.OFFICIAL_V3_INPUT_MD5 == OFFICIAL_V3_INPUT_MD5
+
+
+def test_template_epoch_preset_hints_match_shared_constants():
+    """templates/index.html's radio-button hint text ("20 epochs, fastest"
+    etc.) is a THIRD hardcoded copy of A2_EPOCH_PRESETS' actual numbers --
+    app.py's /api/generate response already sends the real dict as
+    `epoch_presets`, but the frontend never reads it back into these hints,
+    so nothing previously caught the HTML drifting from the Python values
+    it describes.
+    """
+    template_text = (REPO_ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    for preset, epochs in A2_EPOCH_PRESETS.items():
+        pattern = rf'id="a2-preset-{re.escape(preset)}"[^>]*>[^<]*<span class="hint">\(({epochs}) epochs'
+        assert re.search(pattern, template_text), (
+            f"templates/index.html's hint for preset {preset!r} does not say "
+            f"'{epochs} epochs' -- it has drifted from A2_EPOCH_PRESETS[{preset!r}] == {epochs}"
+        )
+
+
+def test_requirements_training_pin_matches_shared_constant():
+    """requirements-training.txt is a THIRD independent place this version
+    is written (pip cannot import a Python constant) -- the local/cloud
+    parity test above only compares the two Python copies to each other, so
+    a bump to this file alone would silently leave local training on a
+    different neural-amp-modeler release than Kaggle. Catch that here.
+    """
+    requirements_text = (REPO_ROOT / "requirements-training.txt").read_text(encoding="utf-8")
+    match = re.search(r"^neural-amp-modeler==([0-9.]+)\s*$", requirements_text, re.MULTILINE)
+    assert match, "requirements-training.txt must pin neural-amp-modeler==<version>"
+    assert match.group(1) == NEURAL_AMP_MODELER_VERSION
 
 
 def test_cloud_worker_epoch_presets_match_shared_constants():

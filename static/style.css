@@ -513,6 +513,8 @@ input[type="range"].slider::-moz-range-thumb {
   font-size: 0.82rem;
 }
 .status-bar:empty { display: none; }
+.status-bar #status { flex: 1; min-width: 0; }
+.system-usage { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 details.advanced {
   margin-top: 0.9rem;
@@ -839,3 +841,29 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
   .workflow-tab:last-of-type { flex-basis: 100%; }
   .card { padding: 1rem; }
 }
+
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(20, 20, 30, 0.45);
+}
+.welcome-card {
+  max-width: 34rem;
+  width: 100%;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+}
+.welcome-card h2 { margin-top: 0; }
+.welcome-steps { margin: 1rem 0; padding-left: 1.4rem; }
+.welcome-steps li { margin-bottom: 0.6rem; line-height: 1.4; }
+.welcome-card .btn { margin-top: 0.75rem; }
