@@ -22,10 +22,13 @@ jobs:
         include:
           - name: macOS arm64
             os: macos-14
+            bundles: app,dmg
           - name: Linux x64
             os: ubuntu-22.04
+            bundles: deb,appimage
           - name: Windows x64
             os: windows-latest
+            bundles: msi,nsis
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out source
@@ -61,7 +64,7 @@ jobs:
 
       - name: Build Tauri installers
         working-directory: desktop/src-tauri
-        run: cargo tauri build --bundles all
+        run: cargo tauri build --bundles ${{ matrix.bundles }}
 
       - name: Upload desktop installers
         uses: actions/upload-artifact@v4
