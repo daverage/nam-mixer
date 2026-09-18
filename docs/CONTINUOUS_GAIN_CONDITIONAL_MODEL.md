@@ -217,10 +217,20 @@ on the exact held-out eval segment: perfectly smooth and monotonic
 (-22.06, -21.37, -20.98, -20.84, -21.04 dBFS) -- **no capture-level anomaly
 like the earlier-documented 5150 Gain 4 case**. Since both methods fail
 almost identically here, this looks like a shared artifact in that specific
-audio moment (e.g. a transient in the held-out clip that both
-reconstructions handle differently in timing) rather than a model-specific
-failure. Not investigated further -- flagged so it isn't mistaken for
-either method's typical behaviour.
+audio moment rather than a model-specific failure.
+
+**Root cause identified in
+docs/CONTINUOUS_GAIN_VIRTUAL_GAIN_BENCHMARK.md**: this is a genuine
+~105-sample (~2.2ms @ 48kHz) LATENCY offset baked into the Gain 8.5 `.nam`
+capture file itself, relative to its immediate Gain 8.0/9.0 neighbours
+(which are aligned to within 1 sample of each other). It reproduced
+identically across three methods that share nothing except this one target
+capture (virtual-input-gain reconstructions from 3 different anchors, and
+dense discrete interpolation) -- conclusive evidence the anomaly lives in
+the Gain 8.5 file, not in any reconstruction method tested against it. Any
+future benchmark on this dataset should flag or exclude Gain 8.5 from
+aggregate statistics rather than re-investigating it as a modelling
+failure.
 
 ## 11. Effect of capture/training spacing
 
