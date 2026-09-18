@@ -577,7 +577,12 @@
 
   <section id="settings-panel" class="sessions-panel" hidden aria-labelledby="settings-panel-title">
     <div class="session-manager-heading"><div><div class="eyebrow">App configuration</div><h2 id="settings-panel-title">Settings</h2><span id="settings-status" class="info" aria-live="polite"></span></div><button type="button" id="btn-close-settings" class="btn btn-secondary btn-small">Back to builder</button></div>
-    <p class="info">These settings are the same environment variables the app has always read (e.g. <code>NAM_RENDER_EXE</code>); this page just gives the standalone desktop app -- which has no shell to set them in -- a place to change them. Values are stored locally, never uploaded anywhere. Settings marked "restart required" only take effect the next time the app starts.</p>
+    <p class="info">These settings are the same environment variables the app has always read (e.g. <code>NAM_RENDER_EXE</code>); this page just gives you a place to change them without a shell. Values are stored locally, never uploaded anywhere. Settings marked "restart required" only take effect the next time the app starts.</p>
+    <div class="settings-group">
+      <h3>Getting started</h3>
+      <p class="info">What's set up and what's optional, all in one place -- each item still has its own controls below/in its own tab.</p>
+      <div id="setup-checklist" class="setup-checklist"></div>
+    </div>
     <div id="settings-groups" class="settings-groups"></div>
     <div class="session-import-row">
       <button type="button" id="btn-save-settings" class="btn btn-primary btn-small">Save settings</button>

@@ -1,14 +1,13 @@
 """Shared, minimal `.env` reader/writer used by the optional local-AI helpers
-and the standalone desktop app's Settings page.
+and the Settings page (`/api/settings`).
 
 Only ever consulted as a fallback for names the caller allow-lists -- never
 overrides an already-set environment variable, and never used for anything
 outside this repo's own opt-in local-LLM/TONE3000/render-path settings.
 
 The file location defaults to the repo root, but can be overridden via
-`NAM_MIXER_ENV_FILE` -- the standalone desktop app (desktop/main.py) points
-this at a per-user config directory instead, since a frozen app's install
-directory (e.g. Program Files) is often not writable.
+`NAM_MIXER_ENV_FILE` for deployments that want config kept somewhere else
+(e.g. a per-user config directory).
 """
 from __future__ import annotations
 
@@ -64,10 +63,9 @@ def read_saved_env_values(names: "set[str]") -> "dict[str, str]":
     """Return allow-listed non-empty values stored in the selected `.env` file.
 
     Unlike :func:`read_env_values`, this intentionally does not inspect the
-    inherited process environment.  The frozen desktop launcher uses it to
-    restore values the player explicitly saved in the app, before importing
-    the Flask application.  That prevents an unrelated value inherited from
-    the build shell from shadowing the desktop app's own configuration.
+    inherited process environment -- only values the user explicitly saved
+    via the Settings page, so an unrelated value inherited from the calling
+    shell can never shadow a saved setting.
     """
     env_file = _env_file()
     if not env_file.is_file():

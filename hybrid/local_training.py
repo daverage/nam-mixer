@@ -92,14 +92,16 @@ class LocalTrainingManager:
     def _bootstrap_python(self) -> list[str]:
         """Return a real CPython command for making the training venv.
 
-        ``sys.executable`` is the right interpreter while running from a
-        checkout.  In a PyInstaller build it is the desktop app's executable,
-        however, so using it with ``-c`` opens a second app instead of running
-        the setup script.  A packaged app must use an installed Python for
-        training because PyTorch and NAM's training dependencies are kept out
-        of the render-only bundle.
+        Prefers the interpreter running this app (``sys.executable``) when it
+        already satisfies neural-amp-modeler's own Python floor, since that
+        is the environment the user actually ran `python app.py` from.
+        Otherwise falls back to `NAM_MIXER_TRAINING_PYTHON` (an explicit
+        override) or a search across other installed interpreters -- the app
+        environment itself deliberately stays torch-free (see CLAUDE.md), so
+        it may not meet the training venv's own requirement.
         """
-        if not getattr(sys, "frozen", False):
+        own_version = _training_python_version([sys.executable])
+        if own_version is not None and own_version >= MIN_TRAINING_PYTHON:
             return [sys.executable]
 
         configured = os.environ.get("NAM_MIXER_TRAINING_PYTHON", "").strip()

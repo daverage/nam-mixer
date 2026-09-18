@@ -1,7 +1,0 @@
-# Extra dependencies for building/running the standalone desktop app
-# (desktop/main.py). Not needed for the normal `python app.py` web-server
-# workflow -- see requirements.txt for that. Never adds torch; see
-# CLAUDE.md's note that training requires a separate environment.
--r requirements.txt
-pywebview>=5.0
-pyinstaller>=6.0

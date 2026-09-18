@@ -1,6 +1,6 @@
 """Tests for hybrid/settings.py and the .env read/write helpers it relies on
-(hybrid/env_file.py) -- these back the standalone desktop app's Settings
-page (see desktop/main.py), which has no shell to `export` env vars into.
+(hybrid/env_file.py) -- these back the browser Settings page, which lets
+someone configure the app without a shell to `export` env vars into.
 """
 import os
 

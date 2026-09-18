@@ -9,11 +9,10 @@ plugin, blends the results using one of three design modes, and lets you
 train the blend into a brand-new NAM model that stands on its own — no
 switching, no source models required at inference time.
 
-Everything runs locally — as a standalone desktop app, or as a small Flask
-app run from source, your choice: your amp captures, DI files, and
-generated training material never leave your computer unless you
-explicitly send a training job to your own Kaggle account for free GPU
-time.
+Everything runs locally as a small Flask app run from source: your amp
+captures, DI files, and generated training material never leave your
+computer unless you explicitly send a training job to your own Kaggle
+account for free GPU time.
 
 **Status: Beta. It renders source NAMs through real NAMCore inference and
 generates trainable A2 bundles end to end — listen to and validate every
@@ -23,14 +22,12 @@ generated model before you trust it.**
 
 ## Get NAM Mixer
 
-Two ways to run it — pick whichever fits you:
-
-| | |
-| --- | --- |
-| 🖱️ **Standalone app (no Python)** | Download a double-clickable app for Windows, macOS, or Linux from the [**Releases page**](../../releases/latest) — no Python install, `pip`, or separately-built renderer required. Everything (including the native NAM inference engine) is bundled. See [Standalone desktop app](#standalone-desktop-app) below. |
-| 🐍 **Run from source** | Clone the repo and run it as a local Flask app with `python3`. Gives you the same features plus direct access to the code. See [Quick start](#quick-start) below. |
-
-Both paths give you the full render/design/audition/generate experience described in this README. Local A2 training uses a separate environment and needs Python 3 installed; the desktop app creates that environment from its bundled training sources. Kaggle training remains opt-in and uses your own Kaggle CLI/account — see [Workflow](#workflow).
+Clone the repo and run it as a local Flask app with `python3` — see
+[Quick start](#quick-start) below. This gives you the full
+render/design/audition/generate experience described in this README, plus
+direct access to the code. Local A2 training uses a separate environment and
+needs Python 3 installed; Kaggle training remains opt-in and uses your own
+Kaggle CLI/account — see [Workflow](#workflow).
 
 ## Why this exists
 
@@ -54,15 +51,15 @@ becomes something you can load anywhere a NAM runs.
 | ✅ **Built-in validation** | Every exported model is re-rendered and compared against its frozen teacher (ESR, RMS, peak, quiet-response) so you know exactly how close the trained model landed, not just that training finished. |
 | 💾 **Sessions library** | Save, reload, import/export, and revisit designs and completed models without losing your place. |
 | 🔒 **Local-first & private** | No cloud dependency, no telemetry, no account required. Kaggle training is fully opt-in and uses your own credentials and quota. |
-| 🖥️ **Standalone desktop app** | Windows/macOS/Linux builds with the native renderer already bundled — no Python, `pip`, or separate `nam_render` download. See [Standalone desktop app](#standalone-desktop-app). |
 | ⚙️ **In-app Settings** | Configure the renderer path, local AI assistant, and TONE3000 API key from a Settings tab — no shell environment variables required. See [Settings](#settings). |
+| ✅ **Getting-started checklist** | The Settings tab's "Getting started" section shows at a glance what's ready and what's still optional (renderer, training input, local A2 training env, Kaggle, local LLM). |
 
 The app never claims that a completed training run sounds identical to its
 teacher. Always listen to and validate exported models.
 
 ## Contents
 
-- [Get NAM Mixer](#get-nam-mixer) · [Standalone desktop app](#standalone-desktop-app)
+- [Get NAM Mixer](#get-nam-mixer)
 - [Why this exists](#why-this-exists) · [Features](#features)
 - [What this is](#what-this-is) · [This is NOT model-weight merging](#this-is-not-model-weight-merging)
 - [How the blend works](#why-the-dry-inputs-level-controls-the-transition):
@@ -542,56 +539,19 @@ it landed for your platform. From here:
 - **Kaggle GPU training** needs no local training environment at all — see
   [Setting up Kaggle GPU training](#setting-up-kaggle-gpu-training) above.
 
-## Standalone desktop app
-
-If you'd rather not install Python at all, grab a prebuilt app from the
-[**Releases page**](../../releases/latest):
-
-| Platform | Download |
-| --- | --- |
-| macOS (Apple Silicon) | `NAMMixer-macos-arm64.zip` |
-| Windows (x64) | `NAMMixer-windows-x64.zip` |
-| Linux (x64) | `NAMMixer-linux-x64.tar.gz` |
-
-Unzip it and run the app inside — `NAMMixer.app` on macOS,
-`NAMMixer.exe` on Windows, or `NAMMixer` on Linux. It opens
-in its own window (built on [pywebview](https://pywebview.flet.dev/), your
-OS's own native webview — not a bundled browser), with the native
-`nam_render` inference engine already inside it — nothing else to install or
-download for render/design/audition/generate. There's nothing to configure
-before first launch; anything you *do* want to change (a custom renderer
-path, the optional local AI assistant, a TONE3000 API key) lives in the
-in-app [Settings](#settings) tab.
-
-> **Unsigned builds**: these aren't code-signed/notarized yet, so macOS
-> Gatekeeper and Windows SmartScreen will warn on first launch. On macOS,
-> right-click the app → *Open* (instead of double-clicking) the first time.
-> On Windows, click *More info* → *Run anyway* on the SmartScreen prompt.
-
-The standalone app bundles the A2 training scripts, but local A2 training
-still needs a system Python 3 interpreter so it can create its separate
-training environment. Everything else — rendering, all three design modes, live audition,
-Cabinet IR, generating a training bundle, Sessions, NAM Tools — works
-identically to running from source. See
-[docs/standalone_packaging.md](docs/standalone_packaging.md) for how it's
-built, and [.github/workflows/build-desktop.yml](.github/workflows/build-desktop.yml)
-for the CI that produces these binaries on every push and release tag.
-
-<!-- TODO: add a screenshot of the standalone app window here, e.g.
-     assets/screenshot-desktop-app.png -->
-
 ## Settings
 
-Both the standalone app and the source checkout share one Settings tab
-(next to Sessions) for anything that used to only be configurable via a
-shell environment variable or an `.env` file:
+The Settings tab (next to Sessions) covers anything that used to only be
+configurable via a shell environment variable or an `.env` file. Its
+**Getting started** section gives an at-a-glance checklist of what's ready
+and what's still optional (renderer, training input, local A2 training
+environment, Kaggle, local LLM assistant) so a fresh checkout doesn't
+require hunting for each setup button individually.
 
-- **NAM render executable** — normally auto-detected (bundled in the
-  standalone app; downloaded via `scripts/download_nam_render.*` for a
-  source checkout). Change it here only if you built/downloaded a custom
-  `nam_render`. A **Download nam_render automatically** button fetches the
-  right prebuilt binary for your OS with one click, without touching a
-  terminal.
+- **NAM render executable** — normally auto-detected (downloaded via
+  `scripts/download_nam_render.*`, or the in-app **Download nam_render
+  automatically** button). Change it here only if you built/downloaded a
+  custom `nam_render`.
 - **Local AI assistant** — base URL and model name for the optional local
   recipe assistant. Any host that speaks the OpenAI-compatible `/v1` API
   works (Ollama, LM Studio, llama.cpp server, ...); Google's Gemma
@@ -602,11 +562,8 @@ shell environment variable or an `.env` file:
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
 
-Settings are saved to a local `.env`-style file — the source checkout's own
-`.env` for `python app.py`, or a per-user config folder
-(`~/Library/Application Support/NAMMixer` on macOS, `%APPDATA%\NAMMixer`
-on Windows, `~/.config/nam-mixer` on Linux) for the standalone
-app — never uploaded anywhere.
+Settings are saved to the source checkout's own `.env` file — never uploaded
+anywhere.
 
 <!-- TODO: add a screenshot of the Settings tab here, e.g.
      assets/screenshot-settings.png -->
@@ -698,10 +655,9 @@ hybrid-nam-builder/
 │   ├── nam_tools.py        -- safe output-volume and metadata editing
 │   ├── wizard.py           -- guided setup flow shared by the UI modes
 │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
-│   ├── settings.py         -- Settings tab registry (backs the standalone app too)
+│   ├── settings.py         -- Settings tab registry
 │   ├── render_bootstrap.py -- in-app "download nam_render" for Settings
 │   └── metadata.py         -- hybrid provenance metadata (JSON sidecar)
-├── desktop/                -- standalone app: pywebview launcher + PyInstaller spec/icons
 ├── native/nam_render/      -- C++ NAM inference tool (NeuralAmpModelerCore), see its README
 ├── assets/nam_models/      -- user's own .nam amp captures (gitignored)
 ├── assets/di/              -- genre/style DI library + its own README

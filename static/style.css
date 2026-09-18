@@ -762,6 +762,13 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
 .settings-row-label { font-weight: 600; font-size: 0.9rem; color: var(--text); }
 .settings-download-row { flex-direction: row; align-items: center; gap: 0.75rem; margin: -0.4rem 0 1rem; }
 .settings-download-row .btn { flex: none; }
+.setup-checklist { display: flex; flex-direction: column; gap: 0.5rem; }
+.setup-checklist-item { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt, transparent); }
+.setup-checklist-item.is-ready { border-color: var(--accent, var(--border)); }
+.setup-checklist-icon { flex: none; width: 1.1rem; text-align: center; line-height: 1.4; }
+.setup-checklist-body { display: flex; flex-direction: column; gap: 0.15rem; }
+.setup-checklist-label { font-weight: 600; font-size: 0.88rem; color: var(--text); }
+.setup-checklist-detail { font-size: 0.8rem; color: var(--text-muted); }
 .session-manager-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
 .session-manager-heading h2 { margin: 0; font-size: 1.05rem; text-transform: none; letter-spacing: normal; color: var(--text); }
 .session-manager-heading .info { margin: 0.35rem 0 0; }

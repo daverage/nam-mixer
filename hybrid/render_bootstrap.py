@@ -8,9 +8,6 @@ manually-fetched install/path the user has to go find. It writes into the
 exact `native/nam_render/build/` location `hybrid.render.find_nam_render_exe`
 already auto-detects, so NAM_RENDER_EXE never needs to be set by hand for
 this path.
-
-The standalone desktop app never needs this: its own `nam_render` is already
-bundled inside the packaged app (see desktop/build.spec) at build time.
 """
 from __future__ import annotations
 

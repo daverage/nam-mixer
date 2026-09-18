@@ -1,6 +1,6 @@
 """Tests for hybrid/render_bootstrap.py -- the in-app "download nam_render"
 button's backend (Settings page), mocked at the urlopen boundary so these
-never hit the real network. See docs/standalone_packaging.md.
+never hit the real network.
 """
 import json
 import sys

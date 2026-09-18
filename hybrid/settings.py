@@ -1,9 +1,8 @@
 """Registry of user-configurable environment-variable settings.
 
-This exists mainly for the standalone desktop app (see desktop/main.py):
-someone running a double-clicked app has no shell to `export` an env var
-into, so anything that would normally be set that way needs a Settings page
-instead. The web/`python app.py` workflow gets the same page for free.
+This exists so anything normally set via `export FOO=bar` before `python
+app.py` can instead be set from the Settings page in the browser, no shell
+required.
 
 Every setting here is backed by the existing `.env` fallback mechanism in
 hybrid/env_file.py -- this module adds no new storage, just describes what's
@@ -48,12 +47,11 @@ SETTINGS: tuple[SettingField, ...] = (
     # experimental NAMCore compatibility gate (tests/test_namcore_sequential_gate.py,
     # native/nam_render/README.md's "Experimental Sequential compatibility
     # gate"), comparing two separately-built renderers against a pinned
-    # commit. No web or desktop end user needs to set this.
+    # commit. No end user needs to set this.
     SettingField(
         name="PORT",
         label="Server port",
-        description="Local port the app listens on. Only used by `python app.py` directly "
-                     "(the standalone desktop app always picks a free port automatically).",
+        description="Local port the app listens on.",
         group="Server",
         kind="number",
         placeholder="5001",

@@ -1061,27 +1061,7 @@ recipeConversationResetButton.addEventListener("click", () => {
   recipeSaveMarkdownButton.hidden = true;
   recipePromptInput.focus();
 });
-// The standalone desktop app (desktop/main.py) runs inside pywebview's
-// native OS webview, not a real browser -- and pywebview does not honor
-// <a download>: clicking it just navigates/opens the content inline
-// instead of triggering an OS save dialog. window.pywebview.api.save_file
-// (exposed via js_api= on the desktop window) opens a real native save
-// dialog and writes the bytes there; a plain browser keeps the standard
-// blob+<a download> trick, which already works correctly.
-function isDesktopApp() {
-  return typeof window.pywebview !== "undefined" && Boolean(window.pywebview.api);
-}
-
 async function saveBlobAsFile(filename, blob) {
-  if (isDesktopApp()) {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-    }
-    return window.pywebview.api.save_file(filename, btoa(binary));
-  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -1094,11 +1074,6 @@ async function saveBlobAsFile(filename, blob) {
 }
 
 async function triggerFileDownload(url, filename) {
-  if (isDesktopApp()) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`download failed (${response.status})`);
-    return saveBlobAsFile(filename, await response.blob());
-  }
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -3417,8 +3392,7 @@ tone3000Tab.addEventListener("click", () => setTone3000Open(true));
 document.getElementById("btn-close-tone3000").addEventListener("click", () => setTone3000Open(false));
 
 // ---- Settings: exposes the same env vars the app has always read (see
-// hybrid/settings.py) so the standalone desktop app -- with no shell to
-// `export` them in -- has a place to change them. ----
+// hybrid/settings.py), with a place to change them without a shell. ----
 const settingsGroups = document.getElementById("settings-groups");
 const settingsStatus = document.getElementById("settings-status");
 let settingsFields = [];
@@ -3434,6 +3408,56 @@ async function loadSettings() {
     settingsStatus.textContent = "";
   } catch (err) {
     settingsStatus.textContent = "Load failed: " + err;
+  }
+  loadSetupChecklist();
+}
+
+// ---- Getting-started checklist: aggregates the nam_render / local A2
+// training / Kaggle / local LLM status endpoints each subsystem already
+// exposes into one glance-able list, so a fresh checkout doesn't require
+// discovering each setup button separately. See /api/setup/status.
+const setupChecklist = document.getElementById("setup-checklist");
+
+async function loadSetupChecklist() {
+  if (!setupChecklist) return;
+  setupChecklist.replaceChildren();
+  const loading = document.createElement("p");
+  loading.className = "info";
+  loading.textContent = "Checking setup status…";
+  setupChecklist.append(loading);
+  try {
+    const response = await fetch("/api/setup/status");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "failed to load setup status");
+    renderSetupChecklist(data.items || []);
+  } catch (err) {
+    setupChecklist.replaceChildren();
+    const failed = document.createElement("p");
+    failed.className = "info";
+    failed.textContent = "Could not check setup status: " + err;
+    setupChecklist.append(failed);
+  }
+}
+
+function renderSetupChecklist(items) {
+  setupChecklist.replaceChildren();
+  for (const item of items.filter((i) => i.applicable)) {
+    const row = document.createElement("div");
+    row.className = "setup-checklist-item" + (item.ready ? " is-ready" : "");
+    const icon = document.createElement("span");
+    icon.className = "setup-checklist-icon";
+    icon.textContent = item.ready ? "✓" : "○";
+    const body = document.createElement("div");
+    body.className = "setup-checklist-body";
+    const label = document.createElement("span");
+    label.className = "setup-checklist-label";
+    label.textContent = item.label;
+    const detail = document.createElement("span");
+    detail.className = "setup-checklist-detail";
+    detail.textContent = item.detail || "";
+    body.append(label, detail);
+    row.append(icon, body);
+    setupChecklist.append(row);
   }
 }
 

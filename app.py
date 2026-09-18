@@ -86,9 +86,9 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 DI_DIR = BASE_DIR / "assets" / "di"
-# Desktop/main.py sets this before importing us in a frozen build.  Keep the
-# checkout-relative default for `python app.py`, but never write uploads,
-# sessions, or generated models into a read-only app bundle.
+# Override the checkout-relative default work directory (uploads, sessions,
+# generated models) for deployments that want it elsewhere, e.g. a container
+# volume mount.
 _data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
 WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
@@ -299,9 +299,8 @@ def api_input_profiles():
 def api_settings_get():
     """Current values + UI metadata for every user-configurable setting.
 
-    See hybrid/settings.py -- exists mainly for the standalone desktop app,
-    which has no shell to `export` env vars into, but works the same in the
-    normal `python app.py` workflow too.
+    See hybrid/settings.py -- lets anything normally set via `export FOO=bar`
+    be configured from the browser instead.
     """
     return jsonify({"settings": get_app_settings()})
 
@@ -647,14 +646,101 @@ def api_renderer_download():
     """Fetch a prebuilt nam_render binary for this OS -- see hybrid/render_bootstrap.py.
 
     Makes nam_render part of the app's own setup flow rather than a separate
-    manual install/path the user has to go find; not used by the standalone
-    desktop app, whose nam_render is already bundled at build time.
+    manual install/path the user has to go find.
     """
     try:
         dest = download_prebuilt_nam_render()
     except NamRenderDownloadError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 200
     return jsonify({"ok": True, "path": str(dest)})
+
+
+@app.get("/api/setup/status")
+def api_setup_status():
+    """Aggregates every optional setup subsystem's own status endpoint into
+    one "Getting Started" checklist for the Settings page, so a fresh
+    checkout doesn't require discovering each button separately (nam_render,
+    local A2 training env, Kaggle auth, local LLM/Ollama). Each subsystem
+    keeps its own dedicated status endpoint too -- this just re-reads them,
+    it is not a new source of truth. Cheap: no NAM inference, no network
+    calls beyond what each subsystem's own status check already makes
+    (Kaggle CLI invocation, local LLM /models probe)."""
+    renderer: dict = {"found": False, "verified": False}
+    try:
+        exe = find_nam_render_exe()
+        renderer["found"] = True
+        renderer["path"] = str(exe)
+        renderer["verified"] = True
+    except NamRenderError as exc:
+        renderer["error"] = str(exc)
+
+    try:
+        training_input_ready = TRAINING_INPUT_PATH.is_file()
+    except OSError:
+        training_input_ready = False
+
+    items = [
+        {
+            "id": "renderer",
+            "label": "NAM renderer (nam_render)",
+            "applicable": True,
+            "ready": renderer["verified"],
+            "detail": f"Found and verified at {renderer.get('path')}." if renderer["verified"]
+            else "Not found -- required before any amp can be rendered. Use the download button below, or build from source (native/nam_render/README.md).",
+        },
+        {
+            "id": "training_input",
+            "label": "Official NAM training input",
+            "applicable": True,
+            "ready": training_input_ready,
+            "detail": "Ready -- bundled input.wav is in place." if training_input_ready
+            else "Missing -- upload the official NAM v3.0.0 training input before generating a training bundle.",
+        },
+        {
+            "id": "local_training",
+            "label": "Local A2 training environment",
+            "applicable": True,
+            "ready": _local_training_manager.python.is_file(),
+            "detail": "Ready -- .venv-a2 is set up." if _local_training_manager.python.is_file()
+            else "Not set up -- optional, only needed to train a generated bundle into a .nam on this machine (Kaggle GPU training is an alternative that needs no local setup).",
+        },
+        {
+            "id": "kaggle",
+            "label": "Kaggle GPU training",
+            "applicable": True,
+            "ready": False,
+            "detail": "",
+        },
+        {
+            "id": "local_llm",
+            "label": "Local LLM assistant (Ollama, etc.)",
+            "applicable": True,
+            "ready": False,
+            "detail": "",
+        },
+    ]
+
+    kaggle_status = _kaggle_manager.status()
+    kaggle_item = next(i for i in items if i["id"] == "kaggle")
+    if not kaggle_status["cli_installed"]:
+        kaggle_item["detail"] = "Optional -- CLI not installed (pip install kaggle) needed only if you want cloud GPU training instead of local."
+    elif not kaggle_status["authenticated"]:
+        kaggle_item["detail"] = "Optional -- CLI installed, not authenticated yet. Use the Kaggle tab's sign-in button when you want cloud training."
+    else:
+        kaggle_item["ready"] = True
+        kaggle_item["detail"] = "Ready -- authenticated."
+
+    llm_status = local_llm_status()
+    llm_item = next(i for i in items if i["id"] == "local_llm")
+    if not llm_status.get("enabled"):
+        llm_item["detail"] = "Optional -- not configured. Only needed for the AI Assistant tab's recipe suggestions; everything else works without it."
+    elif llm_status.get("reachable"):
+        llm_item["ready"] = True
+        llm_item["detail"] = f"Ready -- reachable at {llm_status.get('base_url')}."
+    else:
+        llm_item["detail"] = f"Optional -- configured for {llm_status.get('base_url')} but nothing responded. Start your local LLM host (e.g. `ollama serve`), or pull a model below."
+
+    return jsonify({"items": items})
 
 
 @app.route("/api/nam/upload", methods=["POST"])
