@@ -119,6 +119,16 @@ SETTINGS: tuple[SettingField, ...] = (
         placeholder="60",
     ),
     SettingField(
+        name="TONE3000_API_KEY",
+        label="TONE3000 API key",
+        description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
+                     "capture search. Leave blank to disable that tab. Never logged or returned "
+                     "by the API once saved.",
+        group="TONE3000",
+        kind="secret",
+        placeholder="t3k_cs_...",
+    ),
+    SettingField(
         name="NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES",
         label="Enable experimental NAM architectures",
         description="Shows Sequential Embedded (a valid NAM Sequential model: trained amp "
@@ -128,16 +138,6 @@ SETTINGS: tuple[SettingField, ...] = (
                      "standard, broadly compatible way to include a cabinet.",
         group="Advanced",
         kind="checkbox",
-    ),
-    SettingField(
-        name="TONE3000_API_KEY",
-        label="TONE3000 API key",
-        description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
-                     "capture search. Leave blank to disable that tab. Never logged or returned "
-                     "by the API once saved.",
-        group="TONE3000",
-        kind="secret",
-        placeholder="t3k_cs_...",
     ),
 )
 

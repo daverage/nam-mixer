@@ -779,6 +779,15 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
 .settings-row-label { font-weight: 600; font-size: 0.9rem; color: var(--text); }
 .settings-download-row { flex-direction: row; align-items: center; gap: 0.75rem; margin: -0.4rem 0 1rem; }
 .settings-download-row .btn { flex: none; }
+.settings-group-advanced { border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.settings-group-advanced summary { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); cursor: pointer; }
+.settings-group-advanced summary:hover { color: var(--text); }
+.settings-group-advanced[open] summary { margin-bottom: 0.85rem; }
+.settings-group-advanced .settings-row { margin-top: 0.85rem; margin-bottom: 0; }
+.settings-row-checkbox { display: grid; grid-template-columns: auto 1fr; column-gap: 0.6rem; row-gap: 0.2rem; align-items: center; }
+.settings-row-checkbox input[type="checkbox"] { grid-row: 1; grid-column: 1; margin: 0; }
+.settings-row-checkbox .settings-row-label { grid-row: 1; grid-column: 2; }
+.settings-row-checkbox .info { grid-row: 2; grid-column: 2; }
 .setup-checklist { display: flex; flex-direction: column; gap: 0.5rem; }
 .setup-checklist-item { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt, transparent); }
 .setup-checklist-item.is-ready { border-color: var(--accent, var(--border)); }

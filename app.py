@@ -761,7 +761,7 @@ def api_setup_status():
         },
         {
             "id": "local_llm",
-            "label": "Local LLM assistant (Ollama, etc.)",
+            "label": "AI Assistant (local LLM, Cloudflare, or custom)",
             "applicable": True,
             "ready": False,
             "detail": "",
@@ -787,8 +787,16 @@ def api_setup_status():
 
     llm_status = local_llm_status()
     llm_item = next(i for i in items if i["id"] == "local_llm")
+    llm_provider = llm_status.get("provider")
     if not llm_status.get("enabled"):
         llm_item["detail"] = "Optional -- not configured. Only needed for the AI Assistant tab's recipe suggestions; everything else (preview, design, generate, train) works fully without it."
+    elif llm_provider != "local":
+        # Cloudflare/custom providers have no local process to "reach" --
+        # status()'s `reachable` field is local-only (see hybrid/local_llm.py),
+        # so "enabled" already means fully configured for these.
+        llm_item["ready"] = True
+        provider_label = "Cloudflare Workers AI" if llm_provider == "cloudflare" else "a custom AI provider"
+        llm_item["detail"] = f"Ready -- configured for {provider_label} (model: {llm_status.get('model')})."
     elif llm_status.get("reachable"):
         llm_item["ready"] = True
         llm_item["detail"] = f"Ready -- reachable at {llm_status.get('base_url')}."

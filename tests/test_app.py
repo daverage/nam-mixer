@@ -67,6 +67,18 @@ def test_selected_cab_warns_for_explicit_amp_cab_source_metadata(tmp_path):
     assert warning and "double-cabinet" in warning and source.name in warning
 
 
+def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client, monkeypatch):
+    # provider != "local" never gets a `reachable` probe (see hybrid/local_llm.py's
+    # status()) -- the checklist must not fall through to a bogus "start ollama
+    # serve" message for a fully-configured Cloudflare/custom provider.
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True, "provider": "cloudflare", "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
+    items = client.get("/api/setup/status").get_json()["items"]
+    llm_item = next(i for i in items if i["id"] == "local_llm")
+    assert llm_item["ready"] is True
+    assert "ollama" not in llm_item["detail"].lower()
+    assert "Cloudflare Workers AI" in llm_item["detail"]
+
+
 def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch):
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
     assert client.get("/api/local_llm/status").get_json()["enabled"] is False

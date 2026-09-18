@@ -3943,15 +3943,22 @@ function renderSettings() {
     groups.get(field.group).push(field);
   }
   for (const [groupName, fields] of groups) {
-    const section = document.createElement("div");
-    section.className = "settings-group";
-    const heading = document.createElement("h3");
-    heading.textContent = groupName;
-    section.append(heading);
+    const isAdvanced = groupName === "Advanced";
+    const section = document.createElement(isAdvanced ? "details" : "div");
+    section.className = isAdvanced ? "settings-group settings-group-advanced" : "settings-group";
+    if (isAdvanced) {
+      const summary = document.createElement("summary");
+      summary.textContent = groupName;
+      section.append(summary);
+    } else {
+      const heading = document.createElement("h3");
+      heading.textContent = groupName;
+      section.append(heading);
+    }
     const provider = (settingsFields.find((field) => field.name === "NAM_MIXER_AI_PROVIDER") || {}).value || "local";
     for (const field of fields) {
       const row = document.createElement("label");
-      row.className = "settings-row";
+      row.className = field.kind === "checkbox" ? "settings-row settings-row-checkbox" : "settings-row";
       if (field.providers?.length) {
         row.hidden = !field.providers.includes(provider);
         row.dataset.providerField = "true";
@@ -4005,7 +4012,8 @@ function renderSettings() {
         }
         desc.textContent = field.description;
       }
-      row.append(labelText, input, desc);
+      if (field.kind === "checkbox") row.append(input, labelText, desc);
+      else row.append(labelText, input, desc);
       section.append(row);
       if (suggestionsList) section.append(suggestionsList);
       if (field.name === "NAM_MIXER_AI_PROVIDER") {
