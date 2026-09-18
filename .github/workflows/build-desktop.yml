@@ -59,6 +59,12 @@ jobs:
           --workpath packaging/backend/build
           --noconfirm
 
+      - name: Install Tauri Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev
+
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
