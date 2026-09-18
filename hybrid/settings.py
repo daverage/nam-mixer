@@ -25,7 +25,7 @@ class SettingField:
     label: str
     description: str
     group: str
-    kind: str = "text"  # "text" | "path" | "number" | "secret"
+    kind: str = "text"  # "text" | "path" | "number" | "secret" | "checkbox"
     placeholder: str = ""
     restart_required: bool = False
     options: tuple[tuple[str, str], ...] = ()
@@ -119,6 +119,17 @@ SETTINGS: tuple[SettingField, ...] = (
         placeholder="60",
     ),
     SettingField(
+        name="NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES",
+        label="Enable experimental NAM architectures",
+        description="Shows Sequential Embedded (a valid NAM Sequential model: trained amp "
+                     "followed by a separate Linear/FIR cabinet stage) as a cabinet export "
+                     "choice. This is a real, valid NAM structure, but A2-only players may "
+                     "reject it -- see README.md. Off by default; Baked In remains the "
+                     "standard, broadly compatible way to include a cabinet.",
+        group="Advanced",
+        kind="checkbox",
+    ),
+    SettingField(
         name="TONE3000_API_KEY",
         label="TONE3000 API key",
         description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
@@ -166,6 +177,8 @@ def get_settings() -> list[dict]:
         if field.kind == "secret":
             entry["value"] = ""
             entry["has_value"] = bool(raw_value)
+        elif field.kind == "checkbox":
+            entry["value"] = raw_value.strip().lower() in ("1", "true", "yes", "on")
         else:
             entry["value"] = raw_value
         result.append(entry)
@@ -184,7 +197,10 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
         field = _FIELDS_BY_NAME.get(name)
         if field is None:
             continue
-        value = str(value)
+        if field.kind == "checkbox":
+            value = "true" if (value is True or str(value).strip().lower() in ("1", "true", "yes", "on")) else "false"
+        else:
+            value = str(value)
         if field.kind == "secret" and not value.strip():
             continue
         filtered[name] = value
@@ -194,3 +210,15 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
             filtered[field.name] = ""
     env_file = write_env_values(filtered)
     return {"saved": sorted(filtered), "env_file": str(env_file)}
+
+
+def experimental_architectures_enabled() -> bool:
+    """Whether Sequential Embedded (and any future experimental NAM
+    architecture) may be selected. Off by default -- see the
+    NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES SettingField above. Callers
+    that produce or serve a Sequential-embedded artifact MUST check this
+    server-side; the UI hiding the option is not itself the gate."""
+    raw = read_env_values({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"}).get(
+        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", ""
+    )
+    return raw.strip().lower() in ("1", "true", "yes", "on")

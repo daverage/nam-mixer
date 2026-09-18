@@ -1323,6 +1323,36 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
+def test_generate_embedded_cab_rejected_when_experimental_architectures_disabled(
+    client, isolated_training_paths, tmp_path, monkeypatch
+):
+    """Sequential Embedded is an advanced/experimental NAM architecture, off
+    by default -- see hybrid/settings.py's
+    NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES. The UI hides the choice,
+    but the server must reject it regardless of what the client sends."""
+    import soundfile as sf
+    training_path, a2_dir = isolated_training_paths
+    _write_training_wav(training_path)
+    monkeypatch.delenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", raising=False)
+
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+
+    ir_path = tmp_path / "ir.wav"
+    ir_data = np.zeros(10, dtype=np.float32)
+    ir_data[0] = 0.6
+    sf.write(ir_path, ir_data, 48000, subtype="FLOAT")
+
+    resp = client.post("/api/generate", json={
+        "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
+        "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_export_mode": "embedded",
+    })
+    assert resp.status_code == 400
+    assert "experimental" in resp.get_json()["error"].lower()
+
+
 def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / ".env"))
     monkeypatch.delenv("NAM_RENDER_EXE", raising=False)

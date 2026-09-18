@@ -75,7 +75,10 @@ def test_get_settings_lists_all_registered_fields(isolated_env_file):
     result = settings.get_settings()
     names = {field["name"] for field in result}
     assert names == {field.name for field in settings.SETTINGS}
-    assert all(field["value"] == "" for field in result)
+    assert all(
+        field["value"] == ("" if field["kind"] != "checkbox" else False)
+        for field in result
+    )
 
 
 def test_save_settings_ignores_unknown_names(isolated_env_file):
@@ -121,3 +124,24 @@ def test_secret_field_not_set_reports_no_value(isolated_env_file):
     result = {field["name"]: field for field in settings.get_settings()}
     assert result["TONE3000_API_KEY"]["has_value"] is False
     assert result["TONE3000_API_KEY"]["value"] == ""
+
+
+def test_experimental_architectures_default_off(isolated_env_file):
+    assert settings.experimental_architectures_enabled() is False
+    field = {field["name"]: field for field in settings.get_settings()}[
+        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"
+    ]
+    assert field["kind"] == "checkbox"
+    assert field["value"] is False
+
+
+def test_experimental_architectures_checkbox_round_trips(isolated_env_file):
+    settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": True})
+    assert settings.experimental_architectures_enabled() is True
+    field = {field["name"]: field for field in settings.get_settings()}[
+        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"
+    ]
+    assert field["value"] is True
+
+    settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": False})
+    assert settings.experimental_architectures_enabled() is False

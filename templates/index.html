@@ -421,10 +421,11 @@
         <label class="field-label" for="cab-export-mode">Final cabinet export</label>
         <select id="cab-export-mode" disabled>
           <option value="none">No cabinet — export the trained amp/blend only</option>
-          <option value="embedded">Embed exact cabinet (experimental Sequential NAM)</option>
-          <option value="learned">Train cabinet into A2 (compatible approximation)</option>
+          <option value="learned">Baked In — cabinet trained into the A2 model (recommended, broadly compatible)</option>
+          <option value="embedded" id="cab-export-option-embedded" hidden>Sequential Embedded (Experimental) — separate Linear/FIR cab stage, limited compatibility</option>
         </select>
-        <div class="info">Preview is independent. Embedded export keeps a head-only A2 and prepared IR alongside the experimental Sequential NAM.</div>
+        <div class="info" id="cab-export-mode-info">Preview is independent of the final export. Baked In trains the cabinet response into the A2 model itself and is the standard choice when broad NAM player/A2 compatibility matters.</div>
+        <div class="info" id="cab-export-experimental-hint" hidden>Sequential Embedded is an advanced, experimental export -- enable it under Settings &gt; Advanced &gt; "Enable experimental NAM architectures".</div>
 
         <label class="field-label" for="cab-display-name">Cabinet display name <span class="hint">(shown in the exported model's name)</span></label>
         <input type="text" id="cab-display-name" class="file-input" maxlength="80" placeholder="e.g. Modern Boutique 4x12" autocomplete="off">

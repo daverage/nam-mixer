@@ -363,9 +363,9 @@ function updateCabStatus() {
   if (!cabServerPath) {
     cabStatusEl.textContent = "Cab: off";
   } else if (cabExportMode.value === "embedded") {
-    cabStatusEl.textContent = "Cab: exact IR embedded in experimental Sequential NAM";
+    cabStatusEl.textContent = "Cab: Sequential Embedded (Experimental) -- exact IR in a separate Linear/FIR stage";
   } else if (cabExportMode.value === "learned") {
-    cabStatusEl.textContent = "Cab: learned approximation in conventional A2";
+    cabStatusEl.textContent = "Cab: Baked In -- trained into the A2 model";
   } else if (cabPreviewEnabled.checked) {
     cabStatusEl.textContent = "Cab: preview only -- exported A2 remains amp/head only";
   } else {
@@ -429,6 +429,21 @@ cabPreviewEnabled.addEventListener("change", () => {
   if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
 cabExportMode.addEventListener("change", () => {
+  if (cabExportMode.value === "embedded" && !sequentialEmbeddedWarningAcknowledged) {
+    const proceed = confirm(
+      "Experimental compatibility\n\n" +
+      "This export uses NAM's Sequential architecture to place the trained amp model before " +
+      "an embedded Linear/FIR cabinet stage. Although this is a valid NAM model structure, " +
+      "some NAM players only accept A2 architectures and may reject this file. Use Baked In " +
+      "for broader compatibility."
+    );
+    if (!proceed) {
+      cabExportMode.value = "learned";
+      updateCabStatus();
+      return;
+    }
+    sequentialEmbeddedWarningAcknowledged = true;
+  }
   // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
   // is also enabled" -- docs/blend-mode.md "CAB UI".
   updateCabStatus();
@@ -3308,6 +3323,7 @@ function applySessionSettings(s) {
   cabExportMode.disabled = !s.cab.path;
   cabPreviewEnabled.checked = s.cab.previewEnabled;
   cabExportMode.value = s.cab.exportMode || (s.cab.baked ? "learned" : "none");
+  applyExperimentalArchitecturesVisibility();
   updateCabStatus();
 
   outputGainAutoCheckbox.checked = s.outputGainAuto;
@@ -3944,8 +3960,9 @@ function renderSettings() {
       labelText.className = "settings-row-label";
       labelText.textContent = field.label + (field.restart_required ? " (restart required)" : "");
       const input = field.kind === "select" ? document.createElement("select") : document.createElement("input");
-      input.className = "select-input";
-      if (field.kind !== "select") input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
+      if (field.kind !== "checkbox") input.className = "select-input";
+      if (field.kind === "checkbox") input.type = "checkbox";
+      else if (field.kind !== "select") input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
       input.dataset.settingName = field.name;
       let suggestionsList = null;
       if (field.suggestions?.length) {
@@ -3977,6 +3994,9 @@ function renderSettings() {
         input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
         input.value = "";
         desc.textContent = field.description + (field.has_value ? " (a key is currently saved)" : "");
+      } else if (field.kind === "checkbox") {
+        input.checked = !!field.value;
+        desc.textContent = field.description;
       } else {
         input.placeholder = field.placeholder || "";
         input.value = field.value || "";
@@ -4034,6 +4054,31 @@ function renderSettings() {
       }
     }
     settingsGroups.append(section);
+  }
+  applyExperimentalArchitecturesVisibility();
+}
+
+// ---- Experimental NAM architectures gate (Sequential Embedded) ----
+// Off by default; see hybrid/settings.py's
+// NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES and app.py's server-side
+// enforcement in _resolve_cab_design -- this UI-side hide is a convenience,
+// not the real gate.
+const cabExportOptionEmbedded = document.getElementById("cab-export-option-embedded");
+const cabExportExperimentalHint = document.getElementById("cab-export-experimental-hint");
+let sequentialEmbeddedWarningAcknowledged = false;
+
+function experimentalArchitecturesEnabled() {
+  const field = settingsFields.find((f) => f.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES");
+  return !!field?.value;
+}
+
+function applyExperimentalArchitecturesVisibility() {
+  const enabled = experimentalArchitecturesEnabled();
+  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = !enabled;
+  if (cabExportExperimentalHint) cabExportExperimentalHint.hidden = enabled;
+  if (!enabled && cabExportMode.value === "embedded") {
+    cabExportMode.value = "learned";
+    updateCabStatus();
   }
 }
 
@@ -4209,7 +4254,7 @@ function renderLocalLlmStatusRow() {
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
   const values = {};
   settingsGroups.querySelectorAll("[data-setting-name]").forEach((input) => {
-    values[input.dataset.settingName] = input.value;
+    values[input.dataset.settingName] = input.type === "checkbox" ? input.checked : input.value;
   });
   settingsStatus.textContent = "Saving…";
   try {
@@ -4467,3 +4512,9 @@ document.getElementById("btn-tool-metadata").addEventListener("click", async () 
   if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
   showToolResult(data);
 });
+
+// Load settings eagerly (not just when the Settings tab opens) so the
+// experimental-architectures gate on cab-export-mode reflects a
+// previously-saved preference immediately, without requiring a detour
+// through the Settings tab first.
+loadSettings();

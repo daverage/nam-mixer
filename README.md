@@ -335,19 +335,39 @@ final-model modes:
 
 - **No cabinet**: train/export the conventional head-only A2. A selected IR
   remains a reusable preview/bundle artifact, not part of the target.
-- **Train cabinet into A2** (`learned`): preserve the legacy baked-cab path.
-  The exact FIR is applied to the teacher and the conventional A2 learns an
-  approximation; it is not an exact stored cabinet.
-- **Embed exact cabinet** (`embedded`, experimental): train the head without
-  cabinet convolution, retain its normal Full/Lite A2 artifact, and package
-  an explicitly extracted Full WaveNet followed by canonical Linear FIR taps
-  in a Sequential NAM. The unscaled prepared IR WAV is also retained.
+- **Baked In** (`learned`, the standard, recommended choice): preserve the
+  legacy baked-cab path. The exact FIR is applied to the teacher and the
+  conventional A2 learns an approximation; it is not an exact stored
+  cabinet, but it is a normal NAM A2 file, which is what broad player/host
+  compatibility depends on.
+- **Sequential Embedded (Experimental)** (`embedded`): train the head
+  without cabinet convolution, retain its normal Full/Lite A2 artifact, and
+  package an explicitly extracted Full WaveNet followed by canonical Linear
+  FIR taps in a NAM **Sequential** model. The unscaled prepared IR WAV is
+  also retained. This is a genuinely valid NAM structure — but valid NAM
+  does not imply NAM A2 support: an A2-only host may simply reject a
+  `Sequential` file. **This option is hidden by default.** Turn on
+  *Settings → Advanced → "Enable experimental NAM architectures"* to reveal
+  it; selecting it shows a one-time warning per session, and the exported
+  file is always named with an unmistakable `-embedded-experimental` (or
+  `-embedded-experimental-full`) suffix so it can never be confused with a
+  standard head/A2 export. The choice is enforced server-side
+  (`hybrid/settings.py`'s `experimental_architectures_enabled`,
+  checked in `app.py`'s `_resolve_cab_design`) — hiding it in the UI is a
+  convenience, not the actual gate.
 
 Embedded output folds the recorded post-cab safety scalar into the Linear
 weights and is downloadable only after validation using the bundled,
-Sequential-capable renderer. It remains experimental at the host-format level:
-hosts that only support ordinary NAM A2 should use the learned compatibility
-option instead.
+Sequential-capable renderer. **NAM format validity and NAM A2 compatibility
+are two separate claims** — a model can be valid NAM (parses correctly,
+uses supported NAM child architectures, comes from A2-trained weights)
+without an A2-only player accepting it. This repo does not infer A2
+compatibility from any of those signals; until Sequential Embedded's
+compatibility is verified against real hosts (official NAM Core/plugin,
+NAM standalone, TONE3000, other significant hosts, relevant hardware — each
+recorded as Supported / Unsupported / Untested, never inferred), treat it as
+a research/advanced feature and use Baked In whenever broad compatibility
+matters.
 
 **Receptive-field policy: one hard check, two advisory ones.** Amp A/Amp B
 (+, for Hybrid and Character, the bounded crossover envelope) are the CORE
@@ -606,6 +626,12 @@ require hunting for each setup button individually.
 - **TONE3000 API key** — enables the TONE3000 tab's capture search. Get a
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
+- **Advanced → Enable experimental NAM architectures** — off by default.
+  Turning it on reveals **Sequential Embedded (Experimental)** as a cabinet
+  export choice (see [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)).
+  Leave it off unless you specifically want that export; ordinary users
+  should keep using **Baked In**. This is a real feature flag enforced on
+  the server, not just a UI hide.
 
 Settings are saved to the source checkout's own `.env` file — never uploaded
 anywhere.

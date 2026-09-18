@@ -46,7 +46,7 @@ from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
 from hybrid.design import freeze_design
 from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
-from hybrid.settings import get_settings as get_app_settings, save_settings as save_app_settings
+from hybrid.settings import experimental_architectures_enabled, get_settings as get_app_settings, save_settings as save_app_settings
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
@@ -1375,6 +1375,17 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     export_mode = data.get("cab_export_mode") or "none"
     if export_mode not in ("none", "learned", "embedded"):
         raise ValueError("cab_export_mode must be 'none', 'learned', or 'embedded'")
+    if export_mode == "embedded" and not experimental_architectures_enabled():
+        # Sequential Embedded is an advanced/experimental NAM architecture --
+        # a valid NAM Sequential model, but not guaranteed to be accepted by
+        # A2-only players. Hidden by default; see hybrid/settings.py's
+        # NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES and README.md. The UI
+        # hides this choice unless the setting is on, but this is the real
+        # gate -- never trust the client to have enforced it.
+        raise ValueError(
+            "Sequential Embedded is an experimental NAM architecture and is disabled. "
+            "Enable 'Enable experimental NAM architectures' under Settings > Advanced to use it."
+        )
     # Preview is intentionally independent of final export: a user may
     # audition cabless while training a learned target or package an exact
     # embedded FIR. A non-none mode still requires the selected cab path
@@ -2455,7 +2466,7 @@ def api_generate():
 
     try:
         cab = _resolve_cab_design(data, pair.sample_rate)
-    except CabIrError as exc:
+    except (CabIrError, ValueError) as exc:
         return jsonify({"error": f"cab error: {exc}"}), 400
 
     # A timestamp is useful for a log, but a poor identity for a model: it
