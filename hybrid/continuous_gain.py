@@ -33,7 +33,7 @@ from typing import Optional
 
 import numpy as np
 
-from .audio_metrics import rms_dbfs
+from .audio_metrics import band_energy_dbfs, rms_dbfs
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU, input_calibration_gain_db
 from .coverage import ACTIVE_SIGNAL_THRESHOLD_DBFS, active_signal_mask
 from .envelope import DEFAULT_BOUNDED_ENVELOPE_CONFIG, BoundedEnvelopeConfig, bounded_causal_envelope_db
@@ -271,22 +271,34 @@ def run_ground_truth_harness(
     )
 
 
+def _local_blend(capture_set: GainCaptureSet, lower: GainCapture, upper: GainCapture, normalized_position: float) -> float:
+    lower_pos = capture_set.normalized_position(lower)
+    upper_pos = capture_set.normalized_position(upper)
+    span = upper_pos - lower_pos
+    local_blend = 0.0 if span <= 0 else (normalized_position - lower_pos) / span
+    return float(np.clip(local_blend, 0.0, 1.0))
+
+
 def interpolate_output(
     harness: GroundTruthHarnessResult,
     capture_set: GainCaptureSet,
     normalized_position: float,
+    *,
+    neighbors: Optional[tuple[GainCapture, GainCapture]] = None,
 ) -> np.ndarray:
     """Phase 2 baseline -- doc "Approach A: Output Interpolation": linear
     crossfade of the two bracketing TRAINING captures' rendered output.
     Deliberately the simplest possible reconstruction, to be used as the
     control comparison for any more elaborate method (Approach B/C in the
-    doc) -- do not treat this as the final interpolation method."""
-    lower, upper = capture_set.neighbors(normalized_position)
-    lower_pos = capture_set.normalized_position(lower)
-    upper_pos = capture_set.normalized_position(upper)
-    span = upper_pos - lower_pos
-    local_blend = 0.0 if span <= 0 else (normalized_position - lower_pos) / span
-    local_blend = float(np.clip(local_blend, 0.0, 1.0))
+    doc) -- do not treat this as the final interpolation method.
+
+    `neighbors`, if given, overrides `capture_set.neighbors()` -- used to
+    test wider-than-nearest spacing (doc: "does capture spacing matter more
+    than capture count?"), e.g. reconstructing Gain 6 from Gain 2/Gain 10
+    instead of its immediate Gain 4/Gain 8 neighbours.
+    """
+    lower, upper = neighbors if neighbors is not None else capture_set.neighbors(normalized_position)
+    local_blend = _local_blend(capture_set, lower, upper, normalized_position)
 
     lower_output = harness.by_label(lower.label).output
     upper_output = harness.by_label(upper.label).output
@@ -294,23 +306,85 @@ def interpolate_output(
     return lower_output[:n] * (1.0 - local_blend) + upper_output[:n] * local_blend
 
 
+def interpolate_output_level_matched(
+    harness: GroundTruthHarnessResult,
+    capture_set: GainCaptureSet,
+    normalized_position: float,
+    target_active_rms_dbfs: float,
+    *,
+    neighbors: Optional[tuple[GainCapture, GainCapture]] = None,
+) -> np.ndarray:
+    """Research ABLATION ONLY -- not a candidate production method.
+
+    Doc: "The RMS progression is already nonlinear, so a 50/50 blend may not
+    be the most accurate midpoint even when the knob position is halfway."
+    This answers that question in isolation from everything else: it takes
+    `interpolate_output`'s same waveform-shape crossfade, but rescales the
+    RESULT to `target_active_rms_dbfs` -- the withheld capture's OWN real
+    measured level, an oracle a production system does not have access to
+    (the whole point of interpolation is not knowing the hidden capture's
+    level in advance). Comparing this against plain `interpolate_output`
+    isolates "does getting the waveform SHAPE right via linear-knob
+    crossfade already capture most of the achievable accuracy" from "is
+    knob-linear LEVEL blending the main source of error" -- the latter would
+    point at a measured-level-based reconstruction method as more promising
+    than knob-linear blending, without yet claiming the shape is also solved.
+    """
+    reconstructed = interpolate_output(harness, capture_set, normalized_position, neighbors=neighbors)
+    current_dbfs = rms_dbfs(reconstructed)
+    if not np.isfinite(current_dbfs) or not np.isfinite(target_active_rms_dbfs):
+        return reconstructed
+    trim_db = target_active_rms_dbfs - current_dbfs
+    return reconstructed * (10.0 ** (trim_db / 20.0))
+
+
+# Doc decision gate: "If errors mainly come from spectral differences above
+# 3 kHz, a simpler frequency-aware correction may be more useful than the
+# full Hybrid machinery" -- so the low/high split point is fixed at 3 kHz
+# rather than left as an unlabelled magic number in every caller.
+SPECTRAL_SPLIT_HZ = 3000.0
+
+
 @dataclass
 class LeaveOneOutResult:
     capture_label: str
     control_position: float
     normalized_position: float
+    neighbor_labels: tuple[str, str]
     metrics: dict
+
+
+def _spectral_band_metrics(reconstructed: np.ndarray, real: np.ndarray, sample_rate: int) -> dict:
+    n = min(len(reconstructed), len(real))
+    low_delta = abs(
+        band_energy_dbfs(reconstructed[:n], sample_rate, 0.0, SPECTRAL_SPLIT_HZ)
+        - band_energy_dbfs(real[:n], sample_rate, 0.0, SPECTRAL_SPLIT_HZ)
+    )
+    high_delta = abs(
+        band_energy_dbfs(reconstructed[:n], sample_rate, SPECTRAL_SPLIT_HZ, None)
+        - band_energy_dbfs(real[:n], sample_rate, SPECTRAL_SPLIT_HZ, None)
+    )
+    return {"low_freq_delta_db": low_delta, "high_freq_delta_db": high_delta}
 
 
 def leave_one_out_validation(
     harness: GroundTruthHarnessResult,
     capture_set: GainCaptureSet,
+    sample_rate: int,
+    *,
+    neighbors: Optional[tuple[GainCapture, GainCapture]] = None,
 ) -> list[LeaveOneOutResult]:
     """Doc "Critical Validation Strategy": for every HIDDEN capture, build the
     Phase 2 baseline reconstruction from its bracketing training captures and
     score it against the real rendered output for that same capture, using
     `hybrid.validation.compute_esr_metrics` (already the project's ESR/RMS/
-    peak comparison, not a new metric implementation).
+    peak comparison, not a new metric implementation) plus a low/high
+    spectral-band delta split at `SPECTRAL_SPLIT_HZ` (doc's Phase-3 decision
+    gate on whether errors concentrate above 3 kHz).
+
+    `neighbors` overrides the automatically-chosen bracketing pair for every
+    hidden capture -- used to test wider-than-nearest spacing (only sensible
+    with exactly one hidden capture per call in that case).
 
     Requires the hidden captures to already be inside the harness's
     positions and inside the training captures' normalized range (interior
@@ -329,14 +403,17 @@ def leave_one_out_validation(
                 f"Hidden capture {hidden.label!r} lies outside the training range -- "
                 "leave-one-out validation only evaluates interpolation, not extrapolation."
             )
-        reconstructed = interpolate_output(harness, capture_set, pos)
+        pair = neighbors if neighbors is not None else capture_set.neighbors(pos)
+        reconstructed = interpolate_output(harness, capture_set, pos, neighbors=pair)
         real = rendered_hidden.output
         n = min(len(reconstructed), len(real))
         metrics = compute_esr_metrics(reconstructed[:n], real[:n])
+        metrics.update(_spectral_band_metrics(reconstructed, real, sample_rate))
         results.append(LeaveOneOutResult(
             capture_label=hidden.label,
             control_position=hidden.control_position,
             normalized_position=pos,
+            neighbor_labels=(pair[0].label, pair[1].label),
             metrics=metrics,
         ))
     return results

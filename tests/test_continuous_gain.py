@@ -156,13 +156,16 @@ def test_leave_one_out_validation_reports_esr_against_real_hidden_capture():
     # from Gain-3/Gain-7 neighbours (matching the doc's "Test 1").
     capture_set = _training_set(hidden_gain=(0.5, 5.0))
     harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
-    results = leave_one_out_validation(harness, capture_set)
+    results = leave_one_out_validation(harness, capture_set, 48000)
     assert len(results) == 1
     result = results[0]
     assert result.capture_label == "hidden"
     assert result.normalized_position == pytest.approx(4.0 / 9.0)
+    assert result.neighbor_labels == ("g3", "g7")
     assert np.isfinite(result.metrics["raw_esr"])
     assert result.metrics["raw_esr"] >= 0.0
+    assert np.isfinite(result.metrics["high_freq_delta_db"])
+    assert np.isfinite(result.metrics["low_freq_delta_db"])
 
 
 def test_leave_one_out_validation_rejects_extrapolation():
@@ -177,4 +180,26 @@ def test_leave_one_out_validation_rejects_extrapolation():
     capture_set = GainCaptureSet(captures)
     harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
     with pytest.raises(ValueError):
-        leave_one_out_validation(harness, capture_set)
+        leave_one_out_validation(harness, capture_set, 48000)
+
+
+def test_leave_one_out_validation_accepts_wide_spacing_neighbor_override():
+    """Doc: 'does capture spacing matter more than capture count?' -- allow
+    reconstructing a hidden capture from wider-than-nearest neighbours."""
+    capture_set = _training_set(hidden_gain=(0.5, 5.0))
+    harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
+    g1 = capture_set.training_captures()[0]
+    g10 = capture_set.training_captures()[-1]
+    results = leave_one_out_validation(harness, capture_set, 48000, neighbors=(g1, g10))
+    assert results[0].neighbor_labels == ("g1", "g10")
+
+
+def test_interpolate_output_level_matched_rescales_to_target_rms():
+    from hybrid.continuous_gain import interpolate_output_level_matched
+    from hybrid.audio_metrics import rms_dbfs
+
+    capture_set = _training_set()
+    harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
+    target_dbfs = -6.0
+    reconstructed = interpolate_output_level_matched(harness, capture_set, 0.42, target_dbfs)
+    assert rms_dbfs(reconstructed) == pytest.approx(target_dbfs, abs=1e-3)
