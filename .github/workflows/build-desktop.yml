@@ -1,0 +1,95 @@
+name: Build desktop release
+
+# A version tag (for example v0.2.0) builds the complete downloadable
+# desktop app for each supported platform. Manual runs build artifacts but do
+# not create a release, which makes it safe to use this workflow as a CI
+# smoke-test before tagging.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-14
+          - name: Linux x64
+            os: ubuntu-22.04
+          - name: Windows x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install backend build dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build native renderer
+        run: |
+          cmake -B native/nam_render/build -S native/nam_render -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/nam_render/build --config Release --target nam_render --parallel
+
+      - name: Package backend
+        run: >-
+          python -m PyInstaller packaging/backend/nam_mixer_backend.spec
+          --distpath packaging/backend/dist
+          --workpath packaging/backend/build
+          --noconfirm
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build Tauri installers
+        working-directory: desktop/src-tauri
+        run: cargo tauri build --bundles all
+
+      - name: Upload desktop installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: nam-mixer-${{ matrix.os }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download desktop installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Attach installers to release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/**

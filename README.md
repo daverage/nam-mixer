@@ -406,8 +406,10 @@ slow, or returns invalid settings, NAM Mixer uses its built-in recipe rules.
 
 Every platform needs **Python 3.10+** plus a working `nam_render` — the
 native NAM inference executable. You don't need a C++ compiler to get one:
-CI builds `nam_render` for macOS, Linux, and Windows on every release (see
-`.github/workflows/build-nam-render.yml`), so downloading a prebuilt binary
+CI builds `nam_render` for macOS, Linux, and Windows on renderer releases (see
+`.github/workflows/build-nam-render.yml`). Version tags such as `v0.2.0` also
+build and attach the complete NAM Mixer desktop installers for macOS, Linux,
+and Windows (see `.github/workflows/build-desktop.yml`). Downloading a prebuilt binary
 is the default path below. Building from source is the fallback, for a
 platform/architecture CI doesn't cover or if you'd rather not run a
 downloaded binary.
