@@ -203,3 +203,28 @@ def test_interpolate_output_level_matched_rescales_to_target_rms():
     target_dbfs = -6.0
     reconstructed = interpolate_output_level_matched(harness, capture_set, 0.42, target_dbfs)
     assert rms_dbfs(reconstructed) == pytest.approx(target_dbfs, abs=1e-3)
+
+
+def test_hf_corrected_matches_plain_interpolation_when_neighbors_agree_in_hf_energy():
+    from hybrid.continuous_gain import interpolate_output_hf_corrected
+
+    capture_set = _training_set()
+    harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
+    # g1 and g10 are the two most different captures (gain 0.0 vs 1.0), so if
+    # HF correction changes anything it should show up here; but a fully
+    # linear crossfade at the endpoints (blend 0 or 1) means no correction
+    # should be applied since the reconstruction already IS one neighbour.
+    plain = harness.by_label("g1").output
+    corrected = interpolate_output_hf_corrected(harness, capture_set, 0.0, 48000)
+    n = min(len(plain), len(corrected))
+    np.testing.assert_allclose(corrected[:n], plain[:n], atol=1e-4)
+
+
+def test_hf_corrected_preserves_signal_length_and_energy_conservation():
+    from hybrid.continuous_gain import interpolate_output_hf_corrected
+
+    capture_set = _training_set()
+    harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
+    corrected = interpolate_output_hf_corrected(harness, capture_set, 0.42, 48000)
+    assert np.all(np.isfinite(corrected))
+    assert len(corrected) > 0

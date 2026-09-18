@@ -271,6 +271,13 @@ def run_ground_truth_harness(
     )
 
 
+# Doc decision gate: "If errors mainly come from spectral differences above
+# 3 kHz, a simpler frequency-aware correction may be more useful than the
+# full Hybrid machinery" -- so the low/high split point is fixed at 3 kHz
+# rather than left as an unlabelled magic number in every caller.
+SPECTRAL_SPLIT_HZ = 3000.0
+
+
 def _local_blend(capture_set: GainCaptureSet, lower: GainCapture, upper: GainCapture, normalized_position: float) -> float:
     lower_pos = capture_set.normalized_position(lower)
     upper_pos = capture_set.normalized_position(upper)
@@ -306,6 +313,70 @@ def interpolate_output(
     return lower_output[:n] * (1.0 - local_blend) + upper_output[:n] * local_blend
 
 
+def _split_bands(audio: np.ndarray, sample_rate: int, split_hz: float) -> tuple[np.ndarray, np.ndarray]:
+    """Split `audio` into (below split_hz, at-or-above split_hz) bands via a
+    hard FFT-domain mask -- the two halves sum back to the original signal
+    exactly (up to float rounding), unlike `band_energy_dbfs` which only
+    measures one band's level."""
+    spectrum = np.fft.rfft(audio)
+    freqs = np.fft.rfftfreq(len(audio), 1.0 / sample_rate)
+    low_mask = freqs < split_hz
+    low_spectrum = np.zeros_like(spectrum)
+    low_spectrum[low_mask] = spectrum[low_mask]
+    low = np.fft.irfft(low_spectrum, n=len(audio))
+    high = audio - low
+    return low, high
+
+
+def interpolate_output_hf_corrected(
+    harness: GroundTruthHarnessResult,
+    capture_set: GainCaptureSet,
+    normalized_position: float,
+    sample_rate: int,
+    *,
+    split_hz: float = SPECTRAL_SPLIT_HZ,
+    neighbors: Optional[tuple[GainCapture, GainCapture]] = None,
+) -> np.ndarray:
+    """Phase 3 candidate -- doc "a simpler frequency-aware correction" for
+    the case where the baseline's residual error concentrates above
+    `split_hz` (see docs/CONTINUOUS_GAIN_PHASE2_RESULTS.md). Still causal/
+    production-plausible (unlike `interpolate_output_level_matched`): it
+    predicts the missing capture's high-frequency band energy by linearly
+    interpolating the TWO NEIGHBOURS' OWN measured high-band energy at the
+    same knob-linear blend weight used for the waveform crossfade -- no
+    access to the real hidden capture's level -- then rescales only the
+    reconstruction's high band (>= split_hz) to match that prediction,
+    leaving the low band untouched.
+
+    This is a targeted correction, not a claim that linear HF-energy
+    interpolation is the right model of a real amp's high-frequency gain
+    response -- it exists to test whether ANY lightweight, local correction
+    recovers more accuracy than plain `interpolate_output`, before reaching
+    for full Hybrid/Character machinery.
+    """
+    lower, upper = neighbors if neighbors is not None else capture_set.neighbors(normalized_position)
+    local_blend = _local_blend(capture_set, lower, upper, normalized_position)
+
+    lower_output = harness.by_label(lower.label).output
+    upper_output = harness.by_label(upper.label).output
+    n = min(len(lower_output), len(upper_output))
+    lower_output, upper_output = lower_output[:n], upper_output[:n]
+    reconstructed = lower_output * (1.0 - local_blend) + upper_output * local_blend
+
+    lower_hf_dbfs = band_energy_dbfs(lower_output, sample_rate, split_hz, None)
+    upper_hf_dbfs = band_energy_dbfs(upper_output, sample_rate, split_hz, None)
+    if not (np.isfinite(lower_hf_dbfs) and np.isfinite(upper_hf_dbfs)):
+        return reconstructed
+    predicted_hf_dbfs = lower_hf_dbfs * (1.0 - local_blend) + upper_hf_dbfs * local_blend
+
+    low_band, high_band = _split_bands(reconstructed, sample_rate, split_hz)
+    current_hf_dbfs = rms_dbfs(high_band)
+    if not np.isfinite(current_hf_dbfs):
+        return reconstructed
+    trim_db = predicted_hf_dbfs - current_hf_dbfs
+    return low_band + high_band * (10.0 ** (trim_db / 20.0))
+
+
 def interpolate_output_level_matched(
     harness: GroundTruthHarnessResult,
     capture_set: GainCaptureSet,
@@ -336,13 +407,6 @@ def interpolate_output_level_matched(
         return reconstructed
     trim_db = target_active_rms_dbfs - current_dbfs
     return reconstructed * (10.0 ** (trim_db / 20.0))
-
-
-# Doc decision gate: "If errors mainly come from spectral differences above
-# 3 kHz, a simpler frequency-aware correction may be more useful than the
-# full Hybrid machinery" -- so the low/high split point is fixed at 3 kHz
-# rather than left as an unlabelled magic number in every caller.
-SPECTRAL_SPLIT_HZ = 3000.0
 
 
 @dataclass
