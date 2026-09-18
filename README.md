@@ -414,6 +414,28 @@ is the default path below. Building from source is the fallback, for a
 platform/architecture CI doesn't cover or if you'd rather not run a
 downloaded binary.
 
+### Desktop app downloads
+
+For the native desktop app, open the project's [GitHub Releases](https://github.com/daverage/nam-mixer/releases) page and choose a version tag such as `v0.2.0`. Each version release contains the installers built by
+`.github/workflows/build-desktop.yml`:
+
+| Platform | Download | What it contains |
+| --- | --- | --- |
+| macOS Apple Silicon | `.dmg` | Tauri app for arm64 Macs (`macos-14`) |
+| Linux x64 | `.AppImage` or `.deb` | Portable app or Debian/Ubuntu package |
+| Windows x64 | `.msi` or `.exe` | Windows installer/package |
+
+The desktop release bundles the Flask backend, web UI, training support files,
+and the native `nam_render` executable; users do not need to install Python or
+the renderer separately. Local A2 training still creates its own training
+environment the first time it is used, and Kaggle training still needs Kaggle
+authentication.
+
+Releases are currently unsigned, so macOS may require **Open** from the Finder
+context menu (or an approval in Privacy & Security) on first launch. If no
+`v*` release is available yet, use the standard browser setup below or run the
+desktop build locally as documented in [`desktop/README.md`](desktop/README.md).
+
 After first-time setup below, `scripts/run.sh` (macOS/Linux) or
 `scripts/run.ps1` (Windows) is a one-line way to relaunch later — it creates/
 activates `.venv`, installs/updates dependencies only when
