@@ -3959,6 +3959,7 @@ function renderSettings() {
     for (const field of fields) {
       const row = document.createElement("label");
       row.className = field.kind === "checkbox" ? "settings-row settings-row-checkbox" : "settings-row";
+      if (field.kind === "number") row.classList.add("settings-row-narrow");
       if (field.providers?.length) {
         row.hidden = !field.providers.includes(provider);
         row.dataset.providerField = "true";
