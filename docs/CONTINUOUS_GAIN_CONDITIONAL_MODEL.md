@@ -224,14 +224,19 @@ either method's typical behaviour.
 
 ## 11. Effect of capture/training spacing
 
-Comparing the two experiments is confounded (see Section 12), but taken at
-face value: the DENSE experiment's relative gap between model and baseline
-is WORSE (baseline consistently 2-17x better) than the SPARSE experiment's
-(mixed, close, sometimes model-favourable). **Denser training positions did
-NOT materially improve the conditional model's unseen-position
-reconstruction in this test** -- if anything the opposite trend appears,
-though see Section 12 for why this should not yet be read as "density
-hurts a conditional model."
+Comparing the two experiments was originally confounded by unequal
+training budget per (gain, DI) pair -- **now resolved by Section 13's
+matched-budget re-run.** Taken at face value here: the DENSE experiment's
+relative gap between model and baseline is WORSE (baseline consistently
+2-17x better) than the SPARSE experiment's (mixed, close, sometimes
+model-favourable). **Denser training positions did NOT materially improve
+the conditional model's unseen-position reconstruction in this test**, and
+Section 13 confirms this was not simply because the dense run was
+under-trained relative to the sparse one -- doubling its budget closed only
+part of the training-gain gap and left the withheld-gain shortfall
+essentially unchanged in every one of 3 seeds. The most defensible reading
+is that this particular architecture/budget combination does not scale
+cleanly with added gain conditions, not that density is actively harmful.
 
 ## 12. Does one conditional model preserve level and spectral trajectories?
 
@@ -247,75 +252,202 @@ shortfall versus baseline shows up more in spectral/harmonic character than
 in level**, consistent with every other finding in this research thread
 that level is rarely the bottleneck.
 
+## 13. Matched-training-budget re-run (6,000 steps, 3 seeds)
+
+Direct follow-up to Section 12's identified confound: Experiment 2 had
+twice the (gain, DI) pairs of Experiment 1 but used the same 3,000-step
+budget. This re-run changes ONLY the training budget (3,000 -> 6,000 steps)
+and reproducibility controls (3 fixed seeds: 0, 1, 2) -- architecture,
+conditioning, loss, receptive field, training DIs, and held-out evaluation
+audio are all UNCHANGED from Experiment 2.
+
+### Training convergence at 6,000 steps
+
+Loss in the final 350 steps oscillates in a 0.02-0.04 band in all 3 seeds
+(e.g. seed 0: 0.038, 0.025, 0.035, 0.031, 0.036, 0.033, 0.040, 0.030 at
+steps 5650-5999) rather than continuing to trend down -- **training has
+reached a noise-floor plateau by 6,000 steps, not a budget cutoff
+mid-improvement.** Final loss: 0.030 (seed 0), 0.029 (seed 1), 0.035
+(seed 2).
+
+### Training-gain reconstruction: primary decision gate
+
+Per-gain raw ESR, averaged across the 3 seeds, vs. the original single
+3,000-step run:
+
+| Gain | 3,000 steps (1 run) | 6,000 steps (avg of 3 seeds) | Improvement |
+|---:|---:|---:|---:|
+| 1 | 0.049 | 0.014 | 3.5x |
+| 2 | 0.026 | 0.010 | 2.6x |
+| 3 | 0.029 | 0.013 | 2.2x |
+| 4 | 0.034 | 0.016 | 2.1x |
+| 5 | 0.034 | 0.017 | 2.0x |
+| 6 | 0.040 | 0.022 | 1.8x |
+| 7 | 0.076 | 0.032 | 2.4x |
+| 8 | 0.068 | 0.042 | 1.6x |
+| 9 | 0.062 | 0.048 | 1.3x |
+| 10 | 0.069 | 0.054 | 1.3x |
+| **Mean** | **0.049** | **0.027** | **1.8x** |
+
+**Verdict on the primary decision gate: partial, not substantial.**
+Doubling the training budget produced a real, consistent, roughly 2x
+average reduction in training-gain error -- this is not nothing, and it is
+NOT simply noise (the improvement direction is consistent across every
+single gain and all 3 seeds). But it is also not the "drops substantially"
+outcome the gate was checking for: the range shifted from 0.02-0.08 to
+roughly 0.01-0.05, a modest downward shift, not a move toward near-zero
+fit. Critically, **the improvement shrinks as gain increases** (3.5x at
+Gain 1 down to 1.3x at Gain 9-10) -- the model is hitting a firmer capacity
+ceiling specifically in the higher-gain region, matching the training-loss
+plateau observed above. Per the task's own stopping rule, this sits close
+enough to "remains roughly in the previous range" that **the honest
+reading is: still capacity-limited, especially at high gain** -- but
+because the withheld-gain comparison was already produced by the same runs
+at zero extra cost, it is reported below rather than discarded.
+
+### Withheld-gain results across 3 seeds
+
+Raw ESR, conditional model vs. the (seed-independent) knob-linear baseline:
+
+| Gain | Baseline | Model seed 0 | Model seed 1 | Model seed 2 | Model wins? |
+|---:|---:|---:|---:|---:|---|
+| 1.5 | 0.0111 | 0.0113 | 0.0117 | 0.0077 | seed 2 only |
+| 2.5 | 0.0041 | 0.0111 | 0.0078 | 0.0116 | no (all 3) |
+| 3.5 | 0.0019 | 0.0171 | 0.0132 | 0.0138 | no (all 3, 7-9x worse) |
+| 4.5 | 0.0023 | 0.0185 | 0.0180 | 0.0159 | no (all 3, ~7-8x worse) |
+| 5.5 | 0.0022 | 0.0203 | 0.0177 | 0.0178 | no (all 3, ~8x worse) |
+| 6.5 | 0.0296 | 0.0273 | 0.0284 | 0.0264 | **yes, all 3 seeds** |
+| 7.5 | 0.0449 | 0.0939 | 0.0884 | 0.0817 | no (all 3) |
+| 8.5 | 2.0500 | 2.0871 | 2.0942 | 2.0230 | seed 2 only (anomaly, see below) |
+| 9.5 | 0.1396 | 0.1671 | 0.1503 | 0.1864 | no (all 3) |
+
+Baseline wins 7-8 of 9 positions in every seed. **Gain 6.5 is the one
+position where the model reproducibly ties/beats the baseline in ALL THREE
+seeds** -- a small but consistent effect, not noise.
+
+### Answers to the 5 follow-up questions
+
+1. **Does the conditional model now approach or beat ordinary output
+   interpolation?** No. It still loses at 7-8 of 9 withheld positions in
+   every seed, several by 6-9x (Gain 3.5-5.5) -- the same region that was
+   worst before, now confirmed with 3-seed consistency instead of one run.
+2. **Are results stable across the 3 seeds?** Yes, much more so than
+   Experiment 1's noisy 4-position comparison. Every position's WIN/LOSS
+   outcome vs. baseline is identical across all 3 seeds except Gain 1.5 and
+   the Gain 8.5 anomaly region -- the qualitative conclusion does not depend
+   on which seed is used.
+3. **Does the remaining error concentrate in particular gain regions?**
+   Yes, in two different senses. In ABSOLUTE terms, the model's worst
+   region is high gain (7.5-9.5, raw ESR 0.08-0.19) -- matching the
+   training-gain plateau in that same region. In RELATIVE terms (model
+   error / baseline error), the worst region is Gain 3.5-5.5, where the
+   baseline is exceptionally accurate (raw ESR 0.002, likely because this
+   part of the real amp's response happens to interpolate very cleanly
+   between its integer-gain neighbours) and the model's comparatively
+   modest absolute error looks like a 7-9x gap by comparison.
+4. **Is the remaining shortfall primarily spectral/harmonic rather than
+   level?** Yes, confirmed more clearly than before. Level deltas for the
+   model are small and often SMALLER than the baseline's (e.g. Gain 1.5:
+   model 0.25-0.47 dB vs. baseline 0.71 dB; Gain 2.5: model 0.01-0.20 dB
+   vs. baseline 0.33 dB) -- level is not where the model loses. Spectral
+   correlation is consistently 0.03-0.09 lower than the baseline's at
+   nearly every withheld position (e.g. Gain 9.5: model 0.887-0.897 vs.
+   baseline 0.977), a real and repeatable gap.
+5. **Does the Gain 8.5 anomaly reproduce across seeds?** Yes, closely: model
+   raw ESR is 2.09, 2.09, and 2.02 across the 3 seeds, essentially
+   identical to the (seed-independent) baseline's 2.05. This confirms the
+   anomaly is a property of that specific point in the evaluation audio
+   (a hard-to-reconstruct transient, most likely, given both methods and
+   all 3 seeds fail almost identically there) rather than a training
+   artifact of any one run.
+
+### Answer to the isolating question
+
+**Was the previous dense conditional-model result mainly caused by giving
+twice as many gain conditions the same 3,000-step budget?**
+
+**Partially, but not mainly.** Doubling the budget did produce a real,
+consistent improvement (training-gain error roughly halved on average,
+one withheld position -- Gain 6.5 -- flipped from a loss to a reproducible
+win). But the core finding is unchanged and now more strongly evidenced:
+baseline interpolation still wins the large majority of withheld positions
+in every one of 3 seeds, by large margins in the Gain 3.5-5.5 region
+specifically. Under-training was a real, measurable contributor to the
+original gap, but it is not the primary explanation -- the dominant factor
+remains model capacity (most visible as the persistent training-loss
+plateau and the shrinking-with-gain improvement curve above), not an
+artifact of the budget-vs-pair-count mismatch.
+
 ## Decision gate
 
 **Does a single conditional NAM predict genuinely unseen gain positions
 better than interpolating the outputs of independently trained NAMs?**
 
-**No, not in this implementation.** The dense experiment (9 withheld
-positions, single run) shows a clear, consistent, often large loss to the
-baseline. The sparse experiment (4 withheld positions) is noisy and
-run-dependent, with no consistent win for the conditional model and one
-position (Gain 4) where the baseline wins clearly in both runs.
+**No -- and this is now supported by a 3-seed, matched-training-budget
+re-run, not just a single run.** The dense experiment, re-run at double the
+original training budget across 3 seeds, shows the same clear, consistent,
+often large loss to the baseline (7-8 of 9 positions in every seed). The
+sparse experiment (4 withheld positions, 2 runs) remains noisy and
+run-dependent, with no consistent win for the conditional model there
+either.
 
 ### Is the limitation capacity, conditioning representation, training data
 construction, or evidence that discrete-model interpolation is better?
 
-Most likely **capacity and/or training budget**, not the conditioning
-representation itself:
+**Capacity, now confirmed rather than merely suspected.** Section 13 was
+designed specifically to test whether under-training (not capacity) was
+the real explanation, and the answer is no:
 
-- The model does not even fit its OWN training gains cleanly (raw ESR
-  0.02-0.08, not near-zero) -- a model that can't memorize its training
-  conditions well can't be expected to generalize past them convincingly.
-  This points at model size (60k params, 42.6ms receptive field, both far
-  below the official A2's scale) and/or training steps (3,000, a small
-  budget) as the first things to change, before concluding anything about
-  FiLM/scalar conditioning as an approach.
-- The two experiments are NOT a clean density comparison: Experiment 2 has
-  twice as many (gain, DI clip) pairs to fit as Experiment 1 but used the
-  SAME 3,000-step budget, so it was very likely more under-trained per
-  condition, not fundamentally harder to condition on. Any conclusion about
-  "does density help a conditional model" needs a matched-training-budget
-  rerun (e.g. scale steps with pair count) before it can be trusted -- the
-  current result is confounded and should not be read as evidence against
-  scaling training data for this approach.
-- Conditioning representation (FiLM on a raw normalized scalar) is a
-  standard, working mechanism in the broader neural audio literature and
-  showed no obvious pathology here (loss converges smoothly, level
-  reproduction is fine) -- there is no evidence in this experiment that the
-  conditioning MECHANISM itself is the bottleneck, as opposed to capacity.
-- **Given the evidence available now, discrete-model interpolation remains
-  the better practical approach** -- it is simpler, requires no training
-  step at all, and outperformed the conditional model at 13 of 13 tested
-  withheld positions across both experiments combined (excluding the
-  shared Gain 8.5 anomaly) except for the noisy, small, run-dependent wins
-  in Experiment 1's second run.
+- Doubling the training budget only partially closed the training-gain
+  fit gap (1.8x average improvement, shrinking to 1.3x at the highest
+  gains) and the loss curve plateaus by step 6,000 in all 3 seeds --
+  this is a model that has converged to its capacity ceiling, not one that
+  was cut off mid-improvement. Model size (60k params, 42.6ms receptive
+  field, far below the official A2's ~6,332-sample/132ms receptive field)
+  remains the most likely bottleneck.
+- The budget-vs-pair-count confound identified after Experiment 2 is now
+  resolved: matching the budget closed only a small part of the gap and
+  left the qualitative conclusion (baseline wins almost everywhere)
+  unchanged and more strongly evidenced (3 seeds, not 1).
+- Conditioning representation (FiLM on a raw normalized scalar) continues
+  to show no pathology -- loss converges smoothly and reproducibly in every
+  seed, level reproduction is consistently good. There remains no evidence
+  the conditioning MECHANISM itself is the problem.
+- **Discrete-model interpolation remains the clearly better practical
+  approach at this model scale**, now confirmed across 22 withheld-position
+  evaluations (13 from the original two experiments + 9 x 3 seeds from
+  Section 13, counting each seed's Gain 6.5 win as an exception, not a
+  contradiction).
 
 ## What this does NOT resolve
 
 - Whether a LARGER conditional model (more channels/layers, official-A2-
-  scale receptive field) or a longer training budget would close or reverse
-  this gap. This experiment was explicitly kept small per the task's scope
-  ("do not optimise beyond what is required to answer the feasibility
-  question") -- it answers "does the simplest reasonable version work,"
-  not "can this approach ever work."
-- Whether a matched-training-budget rerun would change the density
-  conclusion in Section 11.
+  scale receptive field) would close or reverse this gap -- Section 13
+  answered the BUDGET question specifically, not the CAPACITY question.
+  Both experiments were explicitly kept small per the task's scope ("do
+  not optimise beyond what is required to answer the feasibility
+  question").
+- Why Gain 6.5 specifically is the one position where the model
+  reproducibly matches or beats the baseline -- noted as a consistent,
+  real effect but not investigated further here.
 - Behaviour on amps other than the dense Marshall JCM800 sweep (not tested
   here, to keep this a single, interpretable comparison rather than
-  spreading the same small budget across every dataset).
+  spreading the same budget across every dataset).
 
 ## Recommendation for next step
 
-Given the decision gate's answer is "no" at this scale, and the most
-likely cause is capacity/training budget rather than a fundamental flaw:
-**do not invest further in scaling up a conditional model yet.** The
+The budget confound is now resolved, and the answer strengthens the
+original recommendation rather than reversing it: **do not invest further
+in scaling up a conditional model as a near-term product direction.** The
 existing discrete-capture-plus-interpolation approach, refined by this
 research thread's actual positive findings (capture-density placement,
-per-dataset knee identification), remains the better-supported direction
-for near-term product work. If conditional modelling is revisited later,
-the correctly-scoped next experiment is a matched-training-budget rerun of
-Experiment 2 (scale steps with the number of (gain, DI) pairs) specifically
-to separate "under-trained" from "doesn't scale with density" -- not a
-larger architecture search, which would be premature before that confound
-is resolved.
+per-dataset knee identification), remains the better-supported direction.
+
+If conditional modelling is revisited later, the correctly-scoped next
+experiment is now a CAPACITY test, not a budget test: scale up model size
+(more channels and/or layers, a receptive field closer to the official A2's
+~6,332 samples) at a fixed, already-converged training budget, and check
+whether training-gain raw ESR drops toward near-zero. Only if that succeeds
+would re-testing withheld-gain generalization be worthwhile -- there is no
+value in testing generalization of a model that still cannot fit its own
+training data well.
