@@ -23,6 +23,7 @@ every channel/gain combination, e.g. "JCM800 Hi P6 B8 M4 T7 G6.nam".
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -51,8 +52,30 @@ DI_FILES = {
 }
 
 
-def _find_capture(amp_dir: Path, channel: str, gain: int, gain_prefix: str) -> Path:
-    matches = [p for p in amp_dir.glob("*.nam") if channel in p.stem and f"{gain_prefix}{gain}" == p.stem.split()[-1]]
+def _find_capture(
+    amp_dir: Path, channel: str, gain: int, gain_prefix: str,
+    include_substr: str = "", exclude_substr: str = "",
+) -> Path:
+    """Match "<gain_prefix> <gain>" as a whole token within the filename
+    stem, tolerant of the label and number being separated by whitespace
+    (e.g. "VOL 1") and of trailing text after the number (e.g.
+    "Gain 1 (Boosted)") -- a plain last-token-equality check breaks on both.
+    A negative lookahead on the following character stops "Gain 1" from
+    also matching "Gain 10". `include_substr`/`exclude_substr` disambiguate
+    filename variants that share the same channel/gain token (e.g. splitting
+    a "(Boosted)" variant from the stock one).
+    """
+    pattern = re.compile(rf"{re.escape(gain_prefix)}\s*{gain}(?!\d)", re.IGNORECASE)
+    matches = []
+    for p in amp_dir.glob("*.nam"):
+        stem = p.stem
+        if channel not in stem or not pattern.search(stem):
+            continue
+        if include_substr and include_substr not in stem:
+            continue
+        if exclude_substr and exclude_substr in stem:
+            continue
+        matches.append(p)
     if not matches:
         raise FileNotFoundError(f"No capture found for channel={channel!r} gain={gain} in {amp_dir}")
     if len(matches) > 1:
@@ -71,7 +94,9 @@ def main() -> None:
     parser.add_argument("amp_dir", type=Path, help="Directory containing the gain-sweep .nam captures")
     parser.add_argument("--channels", default="Hi,Lo", help="Comma-separated channel name substrings (default: Hi,Lo)")
     parser.add_argument("--gains", default="2,4,6,8,10", help="Comma-separated gain positions (default: 2,4,6,8,10)")
-    parser.add_argument("--gain-prefix", default="G", help='Filename label preceding the gain number, e.g. "G" or "V" (default: G)')
+    parser.add_argument("--gain-prefix", default="G", help='Filename label preceding the gain number, e.g. "G" or "VOL" (default: G)')
+    parser.add_argument("--include-substr", default="", help="Only match filenames containing this substring (disambiguates variants)")
+    parser.add_argument("--exclude-substr", default="", help="Skip filenames containing this substring (disambiguates variants)")
     parser.add_argument("--seconds", type=int, default=6, help="Seconds of each DI clip to render (default: 6)")
     args = parser.parse_args()
 
@@ -84,7 +109,10 @@ def main() -> None:
     def load_cached(channel: str, gain: int):
         key = (channel, gain)
         if key not in model_cache:
-            model_cache[key] = load_nam(_find_capture(args.amp_dir, channel, gain, args.gain_prefix))
+            model_cache[key] = load_nam(_find_capture(
+                args.amp_dir, channel, gain, args.gain_prefix,
+                include_substr=args.include_substr, exclude_substr=args.exclude_substr,
+            ))
         return model_cache[key]
 
     def full_set(channel: str, hidden_gain: int) -> GainCaptureSet:
@@ -112,13 +140,13 @@ def main() -> None:
                     "di": di_name, "spacing": "narrow", **result.metrics,
                 })
 
-    header = f"{'ch':<6}{'hid':>4}{'neighbors':>20}{'di':>11}{'spacing':>12}  raw_esr  gnorm_esr  rms_d   peak_d  lowΔdB  highΔdB"
+    header = f"{'ch':<6}{'hid':>4}{'neighbors':>20}{'di':>11}{'spacing':>12}  raw_esr  gnorm_esr  rms_d   peak_d  lowΔdB  highΔdB  specCorr"
     print(header)
     for row in rows:
         print(
             f"{row['channel']:<6}{row['hidden']:>4}{str(row['neighbors']):>20}{row['di']:>11}{row['spacing']:>12}  "
             f"{row['raw_esr']:.4f}   {row['gain_normalized_esr']:.4f}    {row['rms_difference']:.4f}  "
-            f"{row['peak_difference']:.4f}  {row['low_freq_delta_db']:.2f}   {row['high_freq_delta_db']:.2f}"
+            f"{row['peak_difference']:.4f}  {row['low_freq_delta_db']:.2f}   {row['high_freq_delta_db']:.2f}   {row['spectral_correlation']:.3f}"
         )
 
     # Wide-spacing ablation: reconstruct the middle interior gain from the

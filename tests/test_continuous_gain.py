@@ -166,6 +166,7 @@ def test_leave_one_out_validation_reports_esr_against_real_hidden_capture():
     assert result.metrics["raw_esr"] >= 0.0
     assert np.isfinite(result.metrics["high_freq_delta_db"])
     assert np.isfinite(result.metrics["low_freq_delta_db"])
+    assert np.isfinite(result.metrics["spectral_correlation"])
 
 
 def test_leave_one_out_validation_rejects_extrapolation():
@@ -228,3 +229,56 @@ def test_hf_corrected_preserves_signal_length_and_energy_conservation():
     corrected = interpolate_output_hf_corrected(harness, capture_set, 0.42, 48000)
     assert np.all(np.isfinite(corrected))
     assert len(corrected) > 0
+
+
+def test_detect_capture_anomalies_flags_a_non_monotonic_level_capture():
+    from hybrid.continuous_gain import detect_capture_anomalies
+
+    # Positions climb 1..10 as normal, but the capture AT position 7 was
+    # mislabelled/miscaptured with a lower underlying "gain" than both its
+    # neighbours -- exactly the real Peavey 5150 stock Gain-4 anomaly this
+    # check exists to catch.
+    captures = [
+        GainCapture(model=_model(0.0), control_position=1.0, label="g1"),
+        GainCapture(model=_model(0.5), control_position=5.0, label="g5"),
+        GainCapture(model=_model(0.1), control_position=7.0, label="g7_anomalous"),
+        GainCapture(model=_model(0.9), control_position=10.0, label="g10"),
+    ]
+    capture_set = GainCaptureSet(captures)
+    harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
+    anomalies = detect_capture_anomalies(harness, capture_set)
+    assert len(anomalies) == 1
+    assert anomalies[0].label == "g7_anomalous"
+    assert anomalies[0].kind == "non_monotonic_level"
+
+
+def test_detect_capture_anomalies_reports_nothing_for_a_clean_monotonic_sweep():
+    from hybrid.continuous_gain import detect_capture_anomalies
+
+    capture_set = _training_set()
+    harness = run_ground_truth_harness(capture_set, _dry(), 48000, calibration_mode="raw")
+    assert detect_capture_anomalies(harness, capture_set) == []
+
+
+def test_spectral_magnitude_correlation_is_high_for_identical_signals():
+    from hybrid.audio_metrics import spectral_magnitude_correlation
+
+    rng = np.random.default_rng(0)
+    signal = rng.uniform(-1.0, 1.0, 4000).astype(np.float32)
+    assert spectral_magnitude_correlation(signal, signal) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_spectral_magnitude_correlation_stays_high_despite_sample_decorrelation():
+    """The whole point of this metric: a signal and a slightly time-shifted
+    (decorrelated at the sample level) copy of ITSELF should still show high
+    spectral correlation, since shifting doesn't change the magnitude
+    spectrum -- unlike sample-domain correlation, which collapses."""
+    from hybrid.audio_metrics import spectral_magnitude_correlation
+
+    rng = np.random.default_rng(0)
+    signal = rng.uniform(-1.0, 1.0, 4000).astype(np.float32)
+    shifted = np.roll(signal, 500)
+    sample_corr = np.corrcoef(signal, shifted)[0, 1]
+    spectral_corr = spectral_magnitude_correlation(signal, shifted)
+    assert abs(sample_corr) < 0.3
+    assert spectral_corr > 0.5

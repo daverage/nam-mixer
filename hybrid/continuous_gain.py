@@ -33,7 +33,7 @@ from typing import Optional
 
 import numpy as np
 
-from .audio_metrics import band_energy_dbfs, rms_dbfs
+from .audio_metrics import band_energy_dbfs, rms_dbfs, spectral_magnitude_correlation
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU, input_calibration_gain_db
 from .coverage import ACTIVE_SIGNAL_THRESHOLD_DBFS, active_signal_mask
 from .envelope import DEFAULT_BOUNDED_ENVELOPE_CONFIG, BoundedEnvelopeConfig, bounded_causal_envelope_db
@@ -286,6 +286,62 @@ def _local_blend(capture_set: GainCaptureSet, lower: GainCapture, upper: GainCap
     return float(np.clip(local_blend, 0.0, 1.0))
 
 
+@dataclass
+class CaptureAnomaly:
+    """One advisory finding from `detect_capture_anomalies` -- doc: 'Warnings
+    should be advisory. Do not reject captures simply because an amplifier
+    behaves unusually.'"""
+
+    label: str
+    kind: str  # "non_monotonic_level"
+    detail: str
+
+
+def detect_capture_anomalies(
+    harness: GroundTruthHarnessResult,
+    capture_set: GainCaptureSet,
+    *,
+    reversal_threshold_db: float = 0.5,
+) -> list[CaptureAnomaly]:
+    """Doc "Capture Validation": flag TRAINING captures whose active RMS goes
+    the wrong way relative to their control-position neighbours (doc's
+    "unusual level jumps" / "non-monotonic distortion changes") -- e.g. a
+    Gain-4 capture measuring quieter than BOTH its Gain-3 and Gain-5
+    neighbours, which never happens for a real, correctly-labelled gain
+    sweep of an amp whose output level increases (even nonlinearly) with
+    gain. Advisory only: this does not change interpolation behaviour, it
+    only surfaces a finding a caller can choose to warn about or exclude
+    the affected capture over.
+
+    `reversal_threshold_db` filters out sub-threshold measurement noise --
+    only a reversal at least this large (in dB) relative to BOTH neighbours
+    is reported.
+    """
+    training = capture_set.training_captures()
+    anomalies = []
+    for i in range(1, len(training) - 1):
+        prev_r = harness.by_label(training[i - 1].label).active_rms_dbfs
+        curr_r = harness.by_label(training[i].label).active_rms_dbfs
+        next_r = harness.by_label(training[i + 1].label).active_rms_dbfs
+        if not all(np.isfinite(v) for v in (prev_r, curr_r, next_r)):
+            continue
+        drop_from_prev = prev_r - curr_r
+        drop_from_next = next_r - curr_r
+        if drop_from_prev >= reversal_threshold_db and drop_from_next >= reversal_threshold_db:
+            anomalies.append(CaptureAnomaly(
+                label=training[i].label,
+                kind="non_monotonic_level",
+                detail=(
+                    f"{training[i].label} measures {curr_r:.2f} dBFS active RMS, "
+                    f"{drop_from_prev:.2f} dB quieter than {training[i-1].label} ({prev_r:.2f} dBFS) "
+                    f"and {drop_from_next:.2f} dB quieter than {training[i+1].label} ({next_r:.2f} dBFS) -- "
+                    "both its control-position neighbours are louder, which should not happen for a "
+                    "correctly labelled monotonic gain sweep."
+                ),
+            ))
+    return anomalies
+
+
 def interpolate_output(
     harness: GroundTruthHarnessResult,
     capture_set: GainCaptureSet,
@@ -428,7 +484,15 @@ def _spectral_band_metrics(reconstructed: np.ndarray, real: np.ndarray, sample_r
         band_energy_dbfs(reconstructed[:n], sample_rate, SPECTRAL_SPLIT_HZ, None)
         - band_energy_dbfs(real[:n], sample_rate, SPECTRAL_SPLIT_HZ, None)
     )
-    return {"low_freq_delta_db": low_delta, "high_freq_delta_db": high_delta}
+    return {
+        "low_freq_delta_db": low_delta,
+        "high_freq_delta_db": high_delta,
+        # See spectral_magnitude_correlation's docstring: raw ESR is a
+        # sample-domain metric and can look catastrophic on heavily
+        # saturated/high-gain material even when the reconstruction is
+        # spectrally/tonally close -- this is the check that catches that.
+        "spectral_correlation": spectral_magnitude_correlation(reconstructed[:n], real[:n]),
+    }
 
 
 def leave_one_out_validation(
