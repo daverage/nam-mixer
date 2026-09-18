@@ -76,6 +76,32 @@ def test_setup_cannot_expose_previous_training_validation_report(tmp_path, monke
     assert manager.design_id is None
 
 
+def test_status_surfaces_embedded_artifact_so_the_ui_can_offer_it(tmp_path, monkeypatch):
+    """Sequential Embedded's real deliverable is the packaged Sequential
+    (head + cab) file recorded at manifest["training"]["embedded_artifact"],
+    never the bare SlimmableContainer head that `status()` already exposed
+    via `output_nam_path`. Before this fix, `status()` dropped
+    `embedded_artifact` entirely, so the UI had no way to know a validated
+    embedded package existed and could only ever link to the head -- the
+    file a user would (wrongly) call "Sequential Embedded.nam" and observe
+    as amp-only/gear_type amp, even though the amp+cab package genuinely
+    reports gear_type amp_cab (see tests/test_cab_export_modes.py)."""
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        '{"training": {"validation_report": {"state": "passed"}, '
+        '"embedded_artifact": {"state": "validated", '
+        '"artifacts": {"sequential_nam_path": "/tmp/x-embedded-experimental-full.nam"}}}}'
+    )
+    manager.manifest_path = manifest
+    monkeypatch.setattr(manager, "state", "complete")
+
+    status = manager.status()
+
+    assert status["embedded_artifact"]["state"] == "validated"
+    assert status["embedded_artifact"]["artifacts"]["sequential_nam_path"].endswith("-embedded-experimental-full.nam")
+
+
 def test_setup_uses_own_interpreter_when_it_already_meets_the_version_floor(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     monkeypatch.setattr("hybrid.local_training._training_python_version", lambda argv: (3, 11))

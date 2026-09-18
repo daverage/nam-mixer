@@ -94,6 +94,7 @@ DI_DIR = BASE_DIR / "assets" / "di"
 _data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
 WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
+APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.2.1")
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
@@ -295,6 +296,7 @@ def index():
         guitar_profiles=_profile_options("guitar"),
         bass_profiles=_profile_options("bass"),
         default_reference_input_level_dbu=DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
+        app_version=APP_VERSION,
     )
 
 
@@ -2846,6 +2848,59 @@ def api_kaggle_job_cleanup(job_id: str):
     return jsonify(_job_dict_for_client(job))
 
 
+def _apple_gpu_usage() -> "dict | None":
+    """Live Apple Silicon GPU utilization/memory via `ioreg`, no sudo needed.
+
+    `ioreg -r -d 1 -c IOAccelerator` dumps the AGX accelerator's live
+    "PerformanceStatistics" dict, which includes "Device Utilization %" and
+    "In use system memory" (both already updated by the kernel driver every
+    call, no sampling window needed) -- confirmed present without elevated
+    privileges on this machine. `system_profiler` (name only) is kept as a
+    fallback so the GPU field still shows the device name if `ioreg`'s
+    output shape ever changes on a future macOS version.
+    """
+    try:
+        result = subprocess.run(
+            ["ioreg", "-r", "-d", "1", "-c", "IOAccelerator"],
+            shell=False, capture_output=True, text=True, timeout=2,
+            encoding="utf-8", errors="replace",
+        )
+        text = result.stdout
+        name_match = re.search(r'"model"\s*=\s*"([^"]+)"', text)
+        stats_match = re.search(r'"PerformanceStatistics"\s*=\s*\{([^}]*)\}', text)
+        if result.returncode == 0 and stats_match:
+            stats = stats_match.group(1)
+            util_match = re.search(r'"Device Utilization %"\s*=\s*(\d+)', stats)
+            # Not "(driver)" -- that variant is a separate, usually-zero counter.
+            used_match = re.search(r'"In use system memory"\s*=\s*(\d+)', stats)
+            if util_match and used_match:
+                return {
+                    "name": name_match.group(1) if name_match else "Apple GPU",
+                    "accelerator": "mps",
+                    "utilization_percent": float(util_match.group(1)),
+                    # Unified memory: "used" is the GPU driver's own live
+                    # figure; "total" is the whole machine's RAM (shared
+                    # with the CPU), not a separate VRAM pool.
+                    "memory_used_mb": int(used_match.group(1)) / (1024 ** 2),
+                    "memory_total_mb": psutil.virtual_memory().total / (1024 ** 2),
+                }
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        result = subprocess.run(
+            ["system_profiler", "SPDisplaysDataType", "-json"],
+            shell=False, capture_output=True, text=True, timeout=2,
+            encoding="utf-8", errors="replace",
+        )
+        data = json.loads(result.stdout) if result.returncode == 0 else {}
+        cards = data.get("SPDisplaysDataType") or []
+        name = str(cards[0].get("sppci_model") or cards[0].get("_name") or "Apple GPU") if cards else "Apple GPU"
+        return {"name": name, "accelerator": "mps", "utilization_percent": None,
+                "memory_used_mb": None, "memory_total_mb": None}
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired, IndexError):
+        return None
+
+
 @app.route("/api/health")
 def api_health():
     """Polled by the desktop shell (desktop/src-tauri) to detect that this
@@ -2860,7 +2915,14 @@ def api_system_usage():
     see hybrid/local_training.py's _collect() docstring) has SOME visible
     sign the machine is actually doing something, not silently stuck.
     GPU is best-effort: NVIDIA systems are queried through nvidia-smi when
-    available; unsupported platforms simply omit the GPU value."""
+    available. Apple Silicon has no nvidia-smi equivalent, but the kernel's
+    IOAccelerator driver publishes a live "PerformanceStatistics" dict
+    (Device Utilization %, In use/Alloc system memory -- unified memory, not
+    a separate VRAM pool) via `ioreg`, readable WITHOUT sudo (unlike
+    `powermetrics`' GPU sampler, which needs root) -- see
+    `_apple_gpu_usage`. Only when even that fails does this fall back to
+    reporting the Metal device's name with null usage; any other
+    unsupported platform omits the GPU value entirely."""
     cpu_percent = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory()
     gpu = None
@@ -2878,6 +2940,8 @@ def api_system_usage():
                 gpu = {"utilization_percent": float(fields[0]), "memory_used_mb": float(fields[1]), "memory_total_mb": float(fields[2])}
         except (OSError, IndexError, ValueError, subprocess.TimeoutExpired):
             pass
+    elif sys.platform == "darwin":
+        gpu = _apple_gpu_usage()
     return jsonify({
         "cpu_percent": cpu_percent,
         "memory_percent": mem.percent,

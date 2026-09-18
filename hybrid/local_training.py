@@ -387,9 +387,17 @@ class LocalTrainingManager:
         now = time.time()
         elapsed_s = None if self.started_at is None else int((self.finished_at or now) - self.started_at)
         validation_report = None
+        embedded_artifact = None
         if state == "complete" and self.manifest_path and self.manifest_path.is_file():
             try:
-                validation_report = json.loads(self.manifest_path.read_text(encoding="utf-8")).get("training", {}).get("validation_report")
+                training = json.loads(self.manifest_path.read_text(encoding="utf-8")).get("training", {})
+                validation_report = training.get("validation_report")
+                # Surfaced so the UI can offer the experimental Sequential
+                # (embedded-cab) download alongside the head model instead
+                # of only ever exposing the head -- see app.py's
+                # api_local_training_download `artifact` query param, which
+                # the frontend previously had no data to ever request.
+                embedded_artifact = training.get("embedded_artifact")
             except (OSError, ValueError, json.JSONDecodeError):
                 pass
         return {
@@ -399,4 +407,5 @@ class LocalTrainingManager:
             "progress": progress,
             "latest_line": latest_line[-500:],
             "validation_report": validation_report,
+            "embedded_artifact": embedded_artifact,
         }

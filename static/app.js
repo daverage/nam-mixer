@@ -133,7 +133,18 @@ async function refreshSystemUsage() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "unavailable");
     const parts = [`CPU ${Number(data.cpu_percent).toFixed(0)}%`, `RAM ${data.memory_used_gb}/${data.memory_total_gb} GB`];
-    if (data.gpu) parts.push(`GPU ${Number(data.gpu.utilization_percent).toFixed(0)}% · VRAM ${(data.gpu.memory_used_mb / 1024).toFixed(1)}/${(data.gpu.memory_total_mb / 1024).toFixed(1)} GB`);
+    if (data.gpu && data.gpu.utilization_percent !== null && data.gpu.utilization_percent !== undefined) {
+      // Apple Silicon reports real, live usage too (via ioreg's
+      // IOAccelerator PerformanceStatistics -- see app.py's
+      // _apple_gpu_usage), just against unified memory rather than a
+      // separate VRAM pool, so label it accordingly instead of "VRAM".
+      const memoryLabel = data.gpu.accelerator === "mps" ? "Memory" : "VRAM";
+      parts.push(`GPU ${Number(data.gpu.utilization_percent).toFixed(0)}% · ${memoryLabel} ${(data.gpu.memory_used_mb / 1024).toFixed(1)}/${(data.gpu.memory_total_mb / 1024).toFixed(1)} GB`);
+    } else if (data.gpu && data.gpu.name) {
+      // Fallback only: ioreg's output shape didn't match, so just confirm
+      // the Metal/MPS device local training will actually use.
+      parts.push(`GPU ${data.gpu.name} (Metal)`);
+    }
     systemUsageEl.textContent = parts.join("  ·  ");
   } catch {
     systemUsageEl.textContent = "System usage unavailable";
@@ -2198,6 +2209,7 @@ document.getElementById("btn-preview-b").addEventListener("click", () => preview
 liveBlendButton.addEventListener("click", startLiveBlend);
 const trainingInputFile = document.getElementById("training-input-file");
 const trainingInputStatus = document.getElementById("training-input-status");
+const trainingInputDefaultNote = document.getElementById("training-input-default-note");
 const generateStatus = document.getElementById("generate-status");
 const generateResult = document.getElementById("generate-result");
 let trainingInputReady = false;
@@ -2207,12 +2219,20 @@ async function refreshTrainingInputStatus() {
     const resp = await fetch("/api/training_input/status");
     const data = await resp.json();
     trainingInputReady = !!data.ready;
+    // A "ready" file is always byte-identical to the official NAM v3.0.0
+    // input -- validate_training_input (hybrid/training_target.py) rejects
+    // anything else outright, including a different custom sweep. So
+    // "ready" and "the bundled default (or an identical copy of it) is
+    // loaded" are the same fact; make that obvious instead of leaving the
+    // bundled file silently in place with no indication it's the default.
+    if (trainingInputDefaultNote) trainingInputDefaultNote.hidden = !data.ready;
     trainingInputStatus.textContent = data.ready
       ? `Ready: valid training input loaded (${data.sample_rate / 1000} kHz)`
       : "Add the official NAM training input to continue.";
   } catch (err) {
     trainingInputStatus.textContent = "Could not check training input status: " + err;
     trainingInputReady = false;
+    if (trainingInputDefaultNote) trainingInputDefaultNote.hidden = true;
   } finally {
     syncTrainingControls();
   }
@@ -2233,9 +2253,11 @@ trainingInputFile.addEventListener("change", async () => {
     if (!resp.ok) {
       trainingInputStatus.textContent = "Error: " + data.error;
       trainingInputReady = false;
+      if (trainingInputDefaultNote) trainingInputDefaultNote.hidden = true;
       return;
     }
     trainingInputReady = true;
+    if (trainingInputDefaultNote) trainingInputDefaultNote.hidden = false;
     trainingInputStatus.textContent = `Ready: valid training input loaded (${data.sample_rate / 1000} kHz)`;
   } catch (err) {
     trainingInputStatus.textContent = "Upload failed: " + err;
@@ -2515,6 +2537,7 @@ const comparisonSwitches = document.getElementById("comparison-switches");
 const comparisonStatus = document.getElementById("comparison-status");
 const comparisonMetrics = document.getElementById("comparison-metrics");
 const comparisonMetricsBody = document.getElementById("comparison-metrics-body");
+const comparisonUnavailableNote = document.getElementById("comparison-unavailable-note");
 let comparisonRequestGeneration = 0;
 let comparisonPlayback = null;
 let comparisonData = null;
@@ -2522,7 +2545,7 @@ let comparisonData = null;
 function stopModelComparison(invalidateRequest = false) {
   if (invalidateRequest) {
     comparisonRequestGeneration += 1;
-    comparisonBuildBtn.disabled = false;
+    comparisonBuildBtn.disabled = completedNamArtifact?.embeddedArtifact?.state === "validated";
   }
   if (comparisonPlayback) {
     try { comparisonPlayback.source.stop(); } catch (_) { /* already stopped */ }
@@ -2541,6 +2564,22 @@ function invalidateModelComparison(message = "") {
 
 function syncComparisonPanel() {
   comparisonPanel.hidden = !(completedNamArtifact && lastDesignId);
+  // The comparison only ever renders/evaluates the reusable head model
+  // (see buildModelComparison's body.model_path = completedNamArtifact.toolPath,
+  // which is always the head's output_nam_path, never a packaged Sequential
+  // embedded-cab file). For a Sequential Embedded design that means the
+  // comparison would silently compare the amp-only head against the
+  // teacher while the actual deliverable is amp+cab -- misleading rather
+  // than useful, so disable it with an explanation until it can evaluate
+  // the real embedded package too.
+  const embeddedValidated = completedNamArtifact?.embeddedArtifact?.state === "validated";
+  if (comparisonBuildBtn) comparisonBuildBtn.disabled = embeddedValidated;
+  if (comparisonUnavailableNote) {
+    comparisonUnavailableNote.hidden = !embeddedValidated;
+    if (embeddedValidated) {
+      comparisonUnavailableNote.textContent = "Unavailable for this design: this comparison only evaluates the reusable head model, not the amp+cab Sequential package you'd actually export. Use the downloaded model in a NAM player to audition it instead.";
+    }
+  }
 }
 
 function selectComparisonSource(id) {
@@ -2634,15 +2673,26 @@ function validationSummaryHtml(report) {
   return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
 }
 
-function renderLocalDownloadResult(designId, validationReport = null, downloadFilename = "model.nam") {
+function renderLocalDownloadResult(designId, validationReport = null, downloadFilename = "model.nam", embeddedArtifact = null) {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
   const namFilename = downloadFilename || "model.nam";
-  completedNamArtifact = { type: "local", designId, downloadUrl, filename: namFilename };
+  const embeddedValidated = embeddedArtifact?.state === "validated";
+  const embeddedFilename = namFilename.replace(/\.nam$/, "-embedded-experimental-full.nam");
+  const finalDownloadUrl = embeddedValidated ? `${downloadUrl}&artifact=embedded` : downloadUrl;
+  const finalFilename = embeddedValidated ? embeddedFilename : namFilename;
+  completedNamArtifact = { type: "local", designId, downloadUrl: finalDownloadUrl, filename: finalFilename, embeddedArtifact };
   completedValidationReport = validationReport;
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel(`Download ${namFilename}`)}</a><div class="hint">Saved as <code>${escapeHtml(namFilename)}</code></div>${validationSummaryHtml(validationReport)}`;
+  // Embedded selection makes the validated Sequential package the final
+  // deliverable. Keep the conventional head available only as an explicit
+  // secondary download so the primary action cannot silently omit the cab.
+  const headHtml = embeddedValidated
+    ? `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-secondary btn-block btn-download-artifact">${desktopSaveLabel("Download reusable head-only A2")}</a>`
+    : "";
+  const finalLabel = embeddedValidated ? "Download final Sequential (amp + embedded cab)" : `Download ${namFilename}`;
+  localResultEl.innerHTML = `<a href="${finalDownloadUrl}" download="${escapeHtml(finalFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel(finalLabel)}</a><div class="hint">Saved as <code>${escapeHtml(finalFilename)}</code>${embeddedValidated ? " (validated Sequential amp + embedded cab)" : ""}</div>${headHtml}${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -2731,7 +2781,7 @@ async function refreshLocalTraining() {
       clearInterval(localTrainingPoll); localTrainingPoll = null;
     }
     if (data.state === "complete" && data.exit_code === 0 && localTrainingDesignId) {
-      renderLocalDownloadResult(localTrainingDesignId, data.validation_report, data.download_filename);
+      renderLocalDownloadResult(localTrainingDesignId, data.validation_report, data.download_filename, data.embedded_artifact);
     } else if (data.state !== "complete") {
       localResultEl.hidden = true;
     }
@@ -2817,14 +2867,26 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // basename), which previously made the button's label lie about what
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
-  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename, toolPath: data.output_nam_path || null };
+  const embeddedValidated = data.embedded_artifact?.state === "validated";
+  const embeddedFilename = namFilename.replace(/\.nam$/, "-embedded-experimental-full.nam");
+  const finalDownloadUrl = embeddedValidated ? `${downloadUrl}&artifact=embedded` : downloadUrl;
+  const finalFilename = embeddedValidated ? embeddedFilename : namFilename;
+  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl: finalDownloadUrl, filename: finalFilename, toolPath: data.output_nam_path || null, embeddedArtifact: data.embedded_artifact || null };
   completedValidationReport = data.local_validation?.validation_report || null;
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
+  // Embedded selection makes the validated Sequential package the final
+  // deliverable. Keep the conventional head available only as an explicit
+  // secondary download so the primary action cannot silently omit the cab.
+  const headHtml = embeddedValidated
+    ? `<a href="${downloadUrl}" download="${namFilename}" class="btn btn-secondary btn-block">${desktopSaveLabel("Download reusable head-only A2")}</a>`
+    : "";
+  const finalLabel = embeddedValidated ? "Download final Sequential (amp + embedded cab)" : `Download ${namFilename}`;
   kaggleResultEl.innerHTML = `
-    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel(`Download ${namFilename}`)}</a>
-    <div class="hint" title="${data.output_nam_path || ""}">Full path: <code>${data.output_nam_path || "(unknown)"}</code></div>
+    <a href="${finalDownloadUrl}" download="${finalFilename}" class="btn btn-primary btn-block">${desktopSaveLabel(finalLabel)}</a>
+    <div class="hint" title="${data.output_nam_path || ""}">Final artifact: <code>${finalFilename}</code>${embeddedValidated ? " (validated Sequential amp + embedded cab)" : ` Full path: <code>${data.output_nam_path || "(unknown)"}</code>`}</div>
     <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
+    ${headHtml}
     ${validationSummaryHtml(completedValidationReport)}
   `;
 }

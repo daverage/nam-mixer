@@ -501,8 +501,10 @@
         </div>
 
         <label class="field-label" for="training-input-file">Official NAM training input (48&nbsp;kHz mono WAV)</label>
+        <div id="training-input-default-note" class="info" hidden>The official NAM v3.0.0 training input is bundled with this app and already loaded below -- you don't need to upload anything to continue.</div>
         <input type="file" id="training-input-file" accept=".wav" class="file-input">
         <div id="training-input-status" class="info" aria-live="polite">Checking...</div>
+        <div class="warning-box">Replacing it with your own reamp/training sweep is only usable if it is byte-identical to the official NAM v3.0.0 input file -- any other file (including a similar-looking custom sweep) will be rejected, since the crossover timing and A2 receptive-field checks in this pipeline are only validated against that exact excitation signal.</div>
 
         <label class="field-label" for="model-name">Model name</label>
         <input type="text" id="model-name" class="file-input" maxlength="100" placeholder="e.g. Mesa Mark V Clean + JCM800 Crunch" autocomplete="off">
@@ -565,11 +567,12 @@
 
           <div id="model-comparison-panel" class="generate-result" hidden>
             <div class="field-label">Hear the finished model on musical material</div>
-            <p class="info">Uses the selected test performance and the frozen design that produced this NAM. Playback keeps the real output levels.</p>
+            <p class="info">Renders the frozen teacher target and the actual exported Full/Lite NAM on a held-out test performance (not the training material) and lets you A/B them at real playback level, plus reports ESR/RMS/peak differences between each export and the teacher. "Quiet playing" re-runs the same comparison at -24&nbsp;dB input to catch a model that only sounds right when played hard.</p>
             <div class="radio-row" aria-label="Comparison input level">
               <label><input type="radio" name="comparison-level" value="0" checked> Normal playing</label>
               <label><input type="radio" name="comparison-level" value="-24"> Quiet playing <span class="hint">(-24 dB)</span></label>
             </div>
+            <div id="comparison-unavailable-note" class="hint" hidden></div>
             <button id="btn-build-comparison" type="button" class="btn btn-secondary btn-block">Build held-out comparison</button>
             <div id="comparison-switches" class="radio-row" hidden aria-label="Comparison source">
               <button type="button" class="btn btn-secondary btn-small" data-comparison-source="teacher">Teacher</button>
@@ -626,6 +629,7 @@
 
   <footer class="site-footer">
     <span>Created by Andrzej Marczewski · © 2026</span>
+    <span>Version {{ app_version }}</span>
     <a href="https://github.com/daverage/nam-mixer" target="_blank" rel="noopener">GitHub</a>
     <a href="https://github.com/daverage/nam-mixer/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a>
   </footer>
