@@ -113,6 +113,27 @@ def _normalize(values: np.ndarray) -> np.ndarray:
     return _normalize_with_range(values, _value_range(values))
 
 
+def level_spectral_correlation(steps: list[AdjacentStepMetrics]) -> float:
+    """Pearson correlation between a sweep's per-step level change and
+    spectral distance -- quantifies whether collapsing them into one
+    combined response-axis score (`combined_step_scores`) is discarding
+    real information. A value near +-1 means one dimension is nearly
+    redundant given the other; a value near 0 (or reliably negative, as
+    seen on several real amp sweeps -- see
+    docs/CONTINUOUS_GAIN_RESPONSE_COORDINATE_ADDENDUM.md) means the two
+    dimensions disagree often enough that keeping them separate for
+    capture-placement scoring is more informative than any single
+    collapsed axis.
+    """
+    if len(steps) < 2:
+        return float("nan")
+    level = np.array([s.level_change_db for s in steps])
+    spectral = np.array([s.spectral_distance for s in steps])
+    if np.std(level) < 1e-12 or np.std(spectral) < 1e-12:
+        return float("nan")
+    return float(np.corrcoef(level, spectral)[0, 1])
+
+
 DEFAULT_RESPONSE_WEIGHTS = {"level": 1.0, "spectral": 1.0}
 RMS_ONLY_WEIGHTS = {"level": 1.0, "spectral": 0.0}
 

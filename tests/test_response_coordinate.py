@@ -163,3 +163,29 @@ def test_oracle_response_mismatch_is_diagnostic_only_and_detects_offset_knee():
     # the knob-linear midpoint of 0.5.
     assert result.true_response_fraction < 0.3
     assert result.mismatch > 0.2
+
+
+def test_level_spectral_correlation_detects_redundant_dimensions():
+    from hybrid.response_coordinate import AdjacentStepMetrics, level_spectral_correlation
+
+    # level and spectral distance move in lockstep -- collapsing loses
+    # nothing here, so correlation should be strongly positive.
+    steps = [
+        AdjacentStepMetrics("a", "b", 1.0, 2.0, level_change_db=1.0, peak_change_db=0.0, spectral_distance=0.01),
+        AdjacentStepMetrics("b", "c", 2.0, 3.0, level_change_db=2.0, peak_change_db=0.0, spectral_distance=0.02),
+        AdjacentStepMetrics("c", "d", 3.0, 4.0, level_change_db=4.0, peak_change_db=0.0, spectral_distance=0.04),
+    ]
+    assert level_spectral_correlation(steps) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_level_spectral_correlation_detects_independent_dimensions():
+    from hybrid.response_coordinate import AdjacentStepMetrics, level_spectral_correlation
+
+    # level is large exactly where spectral distance is small -- collapsing
+    # these into one score would hide the real disagreement.
+    steps = [
+        AdjacentStepMetrics("a", "b", 1.0, 2.0, level_change_db=5.0, peak_change_db=0.0, spectral_distance=0.01),
+        AdjacentStepMetrics("b", "c", 2.0, 3.0, level_change_db=1.0, peak_change_db=0.0, spectral_distance=0.05),
+        AdjacentStepMetrics("c", "d", 3.0, 4.0, level_change_db=0.2, peak_change_db=0.0, spectral_distance=0.09),
+    ]
+    assert level_spectral_correlation(steps) < -0.9
