@@ -253,3 +253,61 @@ Raw ESR, mean of 3 held-out DIs (`*` = in that model's training set):
 - **Input-level weakness.** At a quiet DI (-12 dB) the 10-capture model degrades at V4-V8 (raw ESR 0.19-0.26 versus 0.00-0.05
   for the V5 NAM); the 3-capture model degrades less (0.12-0.19). At normal and +6 dB levels it is fine except V3
   (0.07 / 0.23 for 10 cap). So the model is less trustworthy with a quiet guitar at mid volumes on this amp.
+
+## Phase 4: Peavey 5150 (Gain 1-10, unboosted) - stress test, inconclusive as a method test
+
+`SINGLE_NAM_AMP=peavey SINGLE_NAM_LAW=level`, `work/single_nam_peavey/`. Models
+`Peavey5150_ContinuousGain_10Captures.nam` and `..._3Captures.nam` (G1, G5, G10). Single seed, integers only, latency
+alignment as for the Super-Sonic (all captures click-latency 73 samples, so effectively a no-op).
+
+**The dataset does not provide a usable input-gain law.** With the same ESR-based law fit as the other amps, the
+search hit its boundary (G1 -38 dB) and was non-monotonic (G3 -20.8, G4 -21.4), with fit ESR 0.13-0.64 at G1-G4
+(`control_law_esr_search_rejected.json` kept). Switching to matching output RMS level (with a monotone constraint)
+did not help, because the real captures' loudness is not monotone in the Gain setting: measured output RMS on
+moderate_brit is -18.3, -16.2, -15.3, -18.6, -14.0, -13.9, -14.0, -14.1, -14.4, -14.5 dBFS for G1-G10. Loudness is
+flat from G5 to G10 and G4 is quieter than G3. The captures may have been level-normalised or made at differing
+settings; not investigated. The resulting law (G1 -34.4, G2 -27.4, G3 -20.6, G4 -20.6, G5 0, G6-G10 all +5.0 dB) has
+G3=G4 and G6=G7=G8=G9=G10, i.e. input level cannot separate them, and G2/G3 targets are nearly uncorrelated
+(raw ESR 0.97). So this run tests the identifiability limit, not the method under a fair control law.
+
+Raw ESR, mean of 3 held-out DIs (`*` = trained; baseline = G5 NAM, same law):
+
+| Gain | 10 cap | 3 cap | G5 same law |
+|---:|---:|---:|---:|
+| 1 | 0.0892* | 0.0137* | 0.8468 |
+| 2 | 0.3124* | 0.0450 | 0.8447 |
+| 3 | 0.1599* | 1.0734 | 0.1560 |
+| 4 | 0.2419* | 1.8524 | 0.3674 |
+| 5 | 0.0498* | 0.0782* | 0.0000 |
+| 6 | 0.0871* | 0.1383 | 0.0324 |
+| 7 | 0.0744* | 0.1233 | 0.0327 |
+| 8 | 0.0493* | 0.0542 | 0.1128 |
+| 9 | 0.0552* | 0.0449 | 0.1462 |
+| 10 | 0.0750* | 0.0489* | 0.1814 |
+| mean | 0.1194 | 0.3472 | 0.2720 |
+| worst | 0.3124 | 1.8524 | 0.8468 |
+
+- Both trained models beat the G5 baseline at G1-G2 and G8-G10 (0.05-0.09 versus 0.11-0.85), and lose to it at G6-G7.
+- G3-G4 fail: the 10-capture model is poor but bounded (0.16-0.24); the 3-capture model never saw those positions
+  and is worse than outputting silence (ESR 1.07, 1.85). Because the law gives G3 and G4 the same input level and
+  the 3-capture set has no example between G1 and G5, this is a data/law problem and not evidence about the method.
+- The 3-capture model's mean (0.347) is dominated by G3-G4 and is worse than the baseline mean; excluding those two it
+  is comparable to the 10-capture model. Level error stays within 1.6 dB, except a +1.2 dB at G3 for the 3-capture model.
+- High-band energy is 0.6-2.6 dB low (darker), as on the other amps. Quiet-DI behaviour at G3-G4 is worse still
+  (ESR 0.8-2.6 at -12 dB).
+- Waveform ESR on saturated 5150 captures was previously flagged as an unreliable metric; these numbers are
+  additionally undermined by the degenerate law. Nothing here should be treated as a conclusion about capture count.
+
+## Cross-amp summary (raw ESR, mean over gains, single seed, three held-out DIs)
+
+| Amp | Gains | Baseline (mid NAM, same law) | 3 cap | 10 cap | Notes |
+|---|---:|---:|---:|---:|---|
+| JCM800 | 18 (G8.5 excl.) | 0.0928 | 0.0377 | 0.0328 | weak at G6.5-G7.5, G9.5 |
+| Twin | 10 | 0.0268 | 0.0164 | 0.0158 | baseline already good at V1-V6 |
+| Super-Sonic | 10 | 0.0767 | 0.0332 | 0.0291 | mid-volume, quiet-DI weakness |
+| Peavey 5150 | 10 | 0.2720 | 0.3472 | 0.1194 | degenerate law; inconclusive |
+
+On the three amps with a usable law, one standard NAM trained on the sweep beats the unchanged mid-gain NAM on average
+and three captures come close to ten. On all four, the trained models win at the extremes of the sweep and the
+mid-gain NAM wins near its own position, and trained models are slightly darker at high gain. Still not done:
+Hybrid/Blended-assisted targets, multiple seeds, any human listening.
