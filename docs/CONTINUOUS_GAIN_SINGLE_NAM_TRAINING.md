@@ -9,8 +9,8 @@ Done: ten-capture training (Method A, direct), capture-count reduction (5/3/2), 
 input-level validation, latency-anomaly detection, conflict analysis.
 
 NOT done: Method B (Hybrid-assisted) and Method C (Blended-assisted) targets; Hybrid/Blended code review write-up;
-multiple seeds; blind listening (WAVs are generated, no human listening has happened); Fender Super-Sonic, 57 Twin
-and Peavey 5150; alternative three-capture subsets; equal-compute vs converged comparison. Nothing here should be
+multiple seeds; blind listening (WAVs are generated, no human listening has happened); Fender Super-Sonic
+and Peavey 5150 (the 57 Twin is covered in Phase 2 below); alternative three-capture subsets; equal-compute vs converged comparison. Nothing here should be
 read as covering those.
 
 ## Objective and method
