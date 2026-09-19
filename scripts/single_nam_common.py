@@ -42,7 +42,17 @@ VAL_DIS = ["high_metalcore"]
 TEST_DIS = ["moderate_brit", "clean_mayer", "bass_rollin"]
 
 
+SUPERSONIC_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/[500 Epochs] Fender Super-Sonic 60W Head mk.1 - Flat EQ - Complete Pack")
+
+
+PEAVEY_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/Peavy 5150 (Head Only)")
+
+
 def capture_path(g: float) -> Path:
+    if AMP == "peavey":
+        return PEAVEY_DIR / f"AMP HEAD - 5150 Gain {int(g)}.nam"
+    if AMP == "supersonic":
+        return SUPERSONIC_DIR / f"Super-Sonic Bassman Ch T5 B5 V{int(g)}.nam"
     if AMP == "twin":
         return TWIN_DIR / f"57 CUSTOM TWIN -  CH 1 - VOL {int(g)}.nam"
     return AMP_DIR / ("jcm800-high-ga10-11.4dBu.nam" if g == 10.0 else f"jcm800-high-g{g:.1f}-11.4dBu.nam")
@@ -69,8 +79,26 @@ def db(x: float) -> float:
     return 10.0 ** (x / 20.0)
 
 
+@lru_cache(maxsize=None)
+def capture_lag(g: float) -> int:
+    """Samples by which capture g lags the G5 capture (click test). Only applied for amps whose captures carry
+    real, differing latencies (Super-Sonic); the shift is applied identically to targets, references and baselines."""
+    if AMP not in ("supersonic", "peavey"):
+        return 0
+    click = np.zeros(SR, dtype=np.float32)
+    click[SR // 2] = 0.05
+    peak = lambda gg: int(np.argmax(np.abs(render(capture(gg), click, SR))))
+    return peak(g) - peak(5.0)
+
+
 def render_capture(g: float, audio: np.ndarray, input_db: float = 0.0) -> np.ndarray:
-    return render(capture(g), (audio * db(input_db)).astype(np.float32), SR)
+    y = render(capture(g), (audio * db(input_db)).astype(np.float32), SR)
+    lag = capture_lag(g)
+    if lag > 0:
+        y = np.concatenate([y[lag:], np.zeros(lag, y.dtype)])
+    elif lag < 0:
+        y = np.concatenate([np.zeros(-lag, y.dtype), y[:lag]])
+    return y
 
 
 def render_file_nam(path: Path, audio: np.ndarray) -> np.ndarray:

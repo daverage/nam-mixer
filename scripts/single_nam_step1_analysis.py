@@ -1,6 +1,7 @@
 """Step 1: capture latency check, frozen control law (integers only), conflict analysis."""
 from __future__ import annotations
 
+import os
 import time
 
 import numpy as np
@@ -25,11 +26,17 @@ def cal_clip() -> np.ndarray:
     return np.concatenate([load_di(n)[SR * 8: SR * 11] for n in TRAIN_DIS])
 
 
+LEVEL_LAW = os.environ.get("SINGLE_NAM_LAW", "esr") == "level"
+
+
 def best_gain(anchor: float, ref: np.ndarray, x: np.ndarray) -> tuple[float, float]:
     def esr(d):
         y = render_capture(anchor, x, d)
+        if LEVEL_LAW:  # match output RMS level instead of waveform ESR (used when the ESR search is degenerate)
+            return abs(metrics(y, ref)["level_delta_db"])
         return metrics(y, ref)["raw_esr"]
-    coarse = {d: esr(d) for d in np.arange(-36, 24.1, 2.0)}
+    lo, hi = (-60, 30.1) if LEVEL_LAW else (-36, 24.1)
+    coarse = {d: esr(d) for d in np.arange(lo, hi, 2.0)}
     c = min(coarse, key=coarse.get)
     fine = {d: esr(d) for d in np.arange(c - 2, c + 2.01, 0.2)}
     best = min({**coarse, **fine}, key=lambda d: {**coarse, **fine}[d])
@@ -50,9 +57,13 @@ def main():
         law[g], fit_esr[g] = best_gain(5.0, ref, x)
         print(f"G{g:g}: law {law[g]:+.1f} dB  ESR {fit_esr[g]:.4f}  ({time.time()-t:.0f}s)", flush=True)
     law[5.0] = 0.0
+    if LEVEL_LAW:
+        vals = np.maximum.accumulate([law[g] for g in INT_GAINS])  # enforce a monotone law
+        law = dict(zip(INT_GAINS, (float(v) for v in vals)))
     p = PchipInterpolator(INT_GAINS, [law[g] for g in INT_GAINS])
     full = {g: round(float(p(g)), 2) if g not in law else law[g] for g in ALL_GAINS}
     save_json("control_law.json", {
+        "law_mode": "level" if LEVEL_LAW else "esr",
         "definition": "G5 NAM anchor; per integer physical Gain, input dB minimising raw ESR vs the real capture on "
                       "3s clips of the TRAINING DIs (integers only; no half-step or test data). Half-steps: PCHIP "
                       "interpolation of the integer law. Frozen before any training/eval.",

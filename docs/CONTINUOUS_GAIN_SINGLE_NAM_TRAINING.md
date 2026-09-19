@@ -210,3 +210,46 @@ level sensitivity are not repeated here, which points to those being amp- or dat
 sharp knee around G6-G7) rather than a general limit of input-level control. Multi-gain training does not
 beat the unchanged V5 NAM at low volumes on this amp, only at V7-V10. Listening WAVs (V3, V6, V8, V9, V10) are in
 `work/single_nam_twin/listening/`. Still not done: Super-Sonic, 5150, Hybrid/Blended targets, seeds, listening.
+
+## Phase 3: Fender Super-Sonic 60W (Bassman channel, T5/B5, Volume 1-10)
+
+Same procedure, DIs and 60 epochs (`SINGLE_NAM_AMP=supersonic`, `work/single_nam_supersonic/`). Models
+`SuperSonic_ContinuousGain_10Captures.nam` and `..._3Captures.nam` (V1, V5, V10). Single seed, integer volumes only
+(no half-steps), no 5/2-capture runs.
+
+**Latency alignment (deviation, applies to this amp and the Peavey only).** A click test shows the captures'
+latencies differ: V1 9 samples, V2 17, V3 26, V4-V10 30. Raw ESR is very sensitive to that, and it ruined the first
+law fit (V1 ESR 0.95). Every capture is therefore advanced/delayed to the V5 capture's latency (V1 -21, V2 -13, V3 -4,
+V7/V8 +1 samples) inside `render_capture`, identically for training targets, evaluation references, the law fit
+and the V5 baseline. The trained models thus learn latency-aligned targets.
+
+Frozen law (dB): V1 -20.0, V2 -14.4, V3 -6.4, V4 -2.6, V5 0, V6 +1.8, V7 +3.0, V8 +4.8, V9 +7.2, V10 +7.4. The V5 NAM
+fits V1-V3 poorly at any input gain (fit ESR 0.10-0.13): this amp changes tone at low volume, not just level.
+
+Raw ESR, mean of 3 held-out DIs (`*` = in that model's training set):
+
+| Volume | 10 cap | 3 cap | V5 same law |
+|---:|---:|---:|---:|
+| 1 | 0.0155* | 0.0264* | 0.2127 |
+| 2 | 0.0218* | 0.0381 | 0.2373 |
+| 3 | 0.0414* | 0.0976 | 0.1723 |
+| 4 | 0.0566* | 0.0328 | 0.0093 |
+| 5 | 0.0310* | 0.0243* | 0.0000 |
+| 6 | 0.0272* | 0.0269 | 0.0056 |
+| 7 | 0.0315* | 0.0241 | 0.0340 |
+| 8 | 0.0305* | 0.0263 | 0.0442 |
+| 9 | 0.0165* | 0.0186 | 0.0180 |
+| 10 | 0.0186* | 0.0167* | 0.0334 |
+| mean | 0.0291 | 0.0332 | 0.0767 |
+| worst | 0.0566 | 0.0976 | 0.2373 |
+
+- The trained models win most clearly at V1-V3 (0.016-0.098 versus 0.17-0.24), where the V5 NAM cannot follow the
+  low-volume tone; the V5 NAM is better at V4-V6 and about equal or worse at V7-V10.
+- Ten and three captures are again close on average (0.029 versus 0.033), but the 3-capture model's worst omitted
+  position is V3 (0.098), which the 10-capture model gets right (0.041). V4 is the 10-capture model's worst (0.057).
+- Level error is within 0.3 dB. Character metrics: high-band (>3 kHz) energy is 0.4-2.0 dB LOW (10 cap: -0.9 to -2.0;
+  3 cap: -0.4 to -2.0, largest at V3) and crest factor is 0.1-0.9 dB high, so again slightly darker, larger than on
+  the JCM800/Twin. Not verified by listening.
+- **Input-level weakness.** At a quiet DI (-12 dB) the 10-capture model degrades at V4-V8 (raw ESR 0.19-0.26 versus 0.00-0.05
+  for the V5 NAM); the 3-capture model degrades less (0.12-0.19). At normal and +6 dB levels it is fine except V3
+  (0.07 / 0.23 for 10 cap). So the model is less trustworthy with a quiet guitar at mid volumes on this amp.
