@@ -52,7 +52,7 @@ def main():
                 n = new_render(a.nam, c, di, law[g])
                 row["new_lag_aligned"] = metrics(n[:-LAG_8_5], ref[LAG_8_5:])
             rows[str(g)] = row
-            if a.wavs and name == "moderate_brit" and g in (3.0, 6.0, 9.0):
+            if a.wavs and name == "moderate_brit" and g in (3.0, 6.0, 8.0, 9.0, 10.0):
                 w = OUT / "listening" / a.label
                 w.mkdir(parents=True, exist_ok=True)
                 sf.write(w / f"g{g:g}_real.wav", ref[: 10 * SR], SR, subtype="FLOAT")

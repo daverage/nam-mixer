@@ -141,3 +141,72 @@ cd scripts
 ../.venv-a2/bin/python single_nam_evaluate.py <model.nam> --manifest <manifest.json> --label X --trained-gains 1 5 10
 ../.venv-a2/bin/python single_nam_summary.py
 ```
+
+## Phase 2: Fender 57 Custom Twin (Channel 1, Volume 1-10)
+
+Same architecture, procedure, DIs, epochs (60) and law method as the JCM800 (`SINGLE_NAM_AMP=twin`; outputs in
+`work/single_nam_twin/`). Models: `Twin_ContinuousGain_10Captures.nam`, `Twin_ContinuousGain_3Captures.nam`
+(V1, V5, V10). Caveats specific to this amp: the dataset has integer volumes only, so there are no half-step
+captures; the 10-capture model has no unseen positions, and the 3-capture model's omitted integers are the only
+held-out positions. No latency anomalies (click latency 4-6 samples on all ten). Single seed. No 5- or 2-capture
+runs, and the old calibrated-G5 baseline does not exist for this amp.
+
+Frozen law (dB): V1 -21.6, V2 -12.8, V3 -5.0, V4 -2.0, V5 0, V6 +2.2, V7 +5.6, V8 +7.0, V9 +7.8, V10 +7.8.
+
+Raw ESR, mean of 3 held-out DIs (`*` = in that model's training set):
+
+| Volume | 10 cap | 3 cap | V5 same law |
+|---:|---:|---:|---:|
+| 1 | 0.0262* | 0.0320* | 0.0096 |
+| 2 | 0.0215* | 0.0255 | 0.0062 |
+| 3 | 0.0166* | 0.0205 | 0.0022 |
+| 4 | 0.0135* | 0.0182 | 0.0007 |
+| 5 | 0.0106* | 0.0156* | 0.0000 |
+| 6 | 0.0080* | 0.0129 | 0.0013 |
+| 7 | 0.0071* | 0.0051 | 0.0329 |
+| 8 | 0.0134* | 0.0080 | 0.0583 |
+| 9 | 0.0201* | 0.0126 | 0.0776 |
+| 10 | 0.0210* | 0.0136* | 0.0793 |
+| mean | 0.0158 | 0.0164 | 0.0268 |
+| worst | 0.0262 | 0.0320 | 0.0793 |
+
+- Same pattern as the JCM800: the trained models have a small, fairly uniform error floor and win clearly at the
+  high end (V8-V10 about 0.01-0.02 versus 0.06-0.08), while the unchanged V5 NAM is better at V1-V6, where it is
+  nearly exact. Level error is within 0.2 dB everywhere.
+- Ten and three captures are equivalent overall (mean 0.0158 versus 0.0164). The three-capture model is better at
+  V7-V10 (for example V9 0.013 versus 0.020) and worse at V1-V6 (V4 0.018 versus 0.014). One seed, so these
+  differences are not established.
+- The high end shows no JCM800-style breakdown: the trained models' worst high-end value is 0.021 (10 cap).
+  Input-level tests are flat too: at V8-V10 raw ESR stays 0.008-0.015 for the 3-capture model and 0.012-0.021 for
+  the 10-capture model from -12 dB to +6 dB DI, versus 0.03-0.08 for V5 under the same law. At V1-V6 the 3-capture
+  model degrades with quiet playing (V1 0.046 at -12 dB).
+- The Twin is an easy test for the baseline: V5 plus input gain already reproduces V1-V6 to ESR under 0.01.
+
+### High-gain character metrics (both amps; new, crude)
+
+Mean over 3 DIs of crest-factor difference and above-3 kHz energy difference against the real capture, dB
+(0 = matches). These are simple aggregates, not perception.
+
+| Model | Gain | Crest (dB) | HF >3 kHz (dB) |
+|---|---|---:|---:|
+| JCM800 10 cap | 8 / 9 / 10 | -0.08 / +0.03 / +0.08 | -0.62 / -0.72 / -0.77 |
+| JCM800 3 cap | 8 / 9 / 10 | +0.57 / +0.60 / +0.66 | -0.25 / -0.22 / -0.26 |
+| JCM800 G5 same law | 8 / 9 / 10 | -0.28 / +0.38 / +0.44 | +0.13 / -0.01 / -0.06 |
+| Twin 10 cap | 8 / 9 / 10 | -0.35 / -0.28 / -0.36 | -0.20 / -0.15 / -0.13 |
+| Twin 3 cap | 8 / 9 / 10 | -0.42 / -0.37 / -0.45 | -0.32 / -0.27 / -0.25 |
+
+At high gain the trained models are slightly LESS bright than the real captures on both amps (up to 0.8 dB
+less energy above 3 kHz), with crest factor within about 0.6 dB. On these metrics they are not more distorted than
+the real amp; if anything they are a little darker. The unchanged G5 NAM's high-band energy is closer to the real
+capture on the JCM800 but its waveform error is far larger. The same sign on both amps suggests a property of
+the training rather than of the JCM800, but that hypothesis (for example a smoothing bias from the loss) has not been
+tested. Whether the real G10 character is reproduced still needs listening; the numbers cannot answer it.
+
+### What the Twin adds
+
+It supports the method generalising to a second amp: both trained models reproduce the full sweep at level
+error under 0.2 dB and mean ESR 0.016, with no high-end failure. The JCM800's G7 and G9.5 weakness and its strong
+level sensitivity are not repeated here, which points to those being amp- or dataset-specific (the JCM800's
+sharp knee around G6-G7) rather than a general limit of input-level control. Multi-gain training does not
+beat the unchanged V5 NAM at low volumes on this amp, only at V7-V10. Listening WAVs (V3, V6, V8, V9, V10) are in
+`work/single_nam_twin/listening/`. Still not done: Super-Sonic, 5150, Hybrid/Blended targets, seeds, listening.

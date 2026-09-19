@@ -1,8 +1,9 @@
 import json,numpy as np
 from single_nam_common import OUT as W
-runs={"10":"ten_capture","5":"cap5","3":"three_capture","2":"cap2"}
-gs=sorted([str(float(g)) for g in range(1,11)]+[str(g+.5) for g in range(1,10)],key=float)
+import sys
+runs={"10":"ten_capture","5":"cap5","3":"three_capture","2":"cap2"} if len(sys.argv)<2 else {"10":"ten_capture","3":"three_capture"}
 ev={k:json.load(open(W/f"eval_{v}.json")) for k,v in runs.items()}
+gs=sorted(ev["10"]["per_di"]["moderate_brit"],key=float)
 print("raw ESR, mean of 3 held-out DIs | 10cap 5cap 3cap 2cap | G5-same-law   (G8.5 excluded)")
 tot={k:[] for k in list(runs)+["g5"]}
 for g in gs:
