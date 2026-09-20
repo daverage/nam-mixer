@@ -364,3 +364,16 @@ on structural results.
   captures code *structure*; the memory files capture user preferences,
   project context, and standing feedback that no re-index will ever recover.
   Save to both where relevant; don't treat one as a substitute for the other.
+## Codebase memory usage
+
+Use `codebase-memory-mcp` as the primary source of repository context before searching or inferring from scratch.
+
+When working on an existing codebase:
+
+- Query `codebase-memory-mcp` first for relevant architecture, files, symbols, prior decisions, and known relationships.
+- Use it to locate likely implementation areas before performing broad repository searches.
+- Reuse established codebase knowledge rather than repeatedly rediscovering the same structure.
+- Verify important details against the actual source files before making changes.
+- If memory results are incomplete, stale, or conflict with the source code, treat the source code as authoritative.
+- After significant architectural discoveries or changes, update codebase memory when the MCP supports doing so.
+- Do not invent repository structure, APIs, symbols, or implementation details when they can be retrieved from codebase memory or source.

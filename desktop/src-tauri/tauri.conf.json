@@ -24,6 +24,9 @@
     ],
     "resources": {
       "../../packaging/backend/dist/nam-mixer-backend": "nam-mixer-backend"
+    },
+    "macOS": {
+      "signingIdentity": "-"
     }
   }
 }

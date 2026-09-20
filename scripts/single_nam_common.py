@@ -48,9 +48,24 @@ SUPERSONIC_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/[50
 PEAVEY_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/Peavy 5150 (Head Only)")
 
 
+P6505_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/6505+ Gain Range Pack (High Gain)")
+
+
+MESA_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/MESA DUAL RECTIFIER (REV G 1998) - FULL GAIN PACK")
+ORANGE_DIR = Path("/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/Orange Dual Terror (0.5.2)")
+
+
 def capture_path(g: float) -> Path:
+    if AMP == "mesa":
+        return MESA_DIR / f"MESADUAL - RED - MODERN - GAIN {'MAX' if g == 10 else int(g)}.nam"
+    if AMP == "orange":
+        return ORANGE_DIR / f"ORANGE - DUAL TERROR - FAT - G{int(g)}.nam"
+    if AMP == "peavey6505":
+        return P6505_DIR / f"APP-6505Plus-Scooped-Gain-{int(g):02d}.nam"
     if AMP == "peavey":
         return PEAVEY_DIR / f"AMP HEAD - 5150 Gain {int(g)}.nam"
+    if AMP == "vibrolux":
+        return SUPERSONIC_DIR / f"Super-Sonic Vibrolux Ch T5 B5 V{int(g)}.nam"
     if AMP == "supersonic":
         return SUPERSONIC_DIR / f"Super-Sonic Bassman Ch T5 B5 V{int(g)}.nam"
     if AMP == "twin":
@@ -83,7 +98,7 @@ def db(x: float) -> float:
 def capture_lag(g: float) -> int:
     """Samples by which capture g lags the G5 capture (click test). Only applied for amps whose captures carry
     real, differing latencies (Super-Sonic); the shift is applied identically to targets, references and baselines."""
-    if AMP not in ("supersonic", "peavey"):
+    if AMP not in ("supersonic", "vibrolux", "peavey", "peavey6505", "mesa", "orange"):
         return 0
     click = np.zeros(SR, dtype=np.float32)
     click[SR // 2] = 0.05
