@@ -247,6 +247,79 @@ jobs:
           echo "LINUX SHARED LIBRARY DIAGNOSTICS COMPLETE"
           echo "=========================================="
 
+      # Fix missing runtime search paths in PyInstaller's
+      # bundled Linux Fortran libraries.
+      #
+      # SciPy's libgfortran requires a hash-suffixed libquadmath.
+      # Both files are present, but linuxdeploy cannot resolve
+      # the dependency without the correct runtime search path.
+
+      - name: Fix Linux bundled Fortran library paths
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BACKEND_DIR="packaging/backend/dist/nam-mixer-backend/_internal"
+
+          echo "Fixing bundled Fortran library search paths"
+
+          while IFS= read -r -d '' library; do
+
+            echo ""
+            echo "Checking: $library"
+
+            CURRENT_RPATH="$(patchelf --print-rpath "$library")"
+
+            echo "Current RPATH: ${CURRENT_RPATH:-<empty>}"
+
+            # Preserve existing paths while adding the
+            # library's own directory to its search path.
+
+            case ":$CURRENT_RPATH:" in
+              *:'$ORIGIN':*)
+                echo "ORIGIN already present"
+                ;;
+              *)
+                if [ -n "$CURRENT_RPATH" ]; then
+                  NEW_RPATH="\$ORIGIN:$CURRENT_RPATH"
+                else
+                  NEW_RPATH='$ORIGIN'
+                fi
+
+                patchelf --set-rpath "$NEW_RPATH" "$library"
+
+                echo "Updated RPATH:"
+                patchelf --print-rpath "$library"
+                ;;
+            esac
+
+            # Confirm that the bundled libraries can now
+            # resolve their dependencies.
+
+            echo ""
+            echo "Resolved dependencies:"
+
+            DEPENDENCIES="$(ldd "$library")"
+
+            printf '%s\n' "$DEPENDENCIES"
+
+            if printf '%s\n' "$DEPENDENCIES" | grep -q "not found"; then
+              echo "ERROR: Unresolved dependency in $library" >&2
+              exit 1
+            fi
+
+            echo "Library dependencies resolved successfully"
+
+          done < <(
+            find "$BACKEND_DIR" \
+              -type f \
+              -name 'libgfortran*.so*' \
+              -print0
+          )
+
+          echo ""
+          echo "Fortran library path verification complete"
       # ============================================================
       # 5. Tauri CLI
       # ============================================================
