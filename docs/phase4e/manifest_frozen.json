@@ -1,0 +1,521 @@
+{
+ "experiment": "Continuous Gain Phase 4E pilot",
+ "frozen_on": "before the first Phase 4E training run",
+ "brief": "docs/CONTINUOUS_GAIN_PHASE4E_REVISED.md (user brief)",
+ "code_commit_at_freeze": "23a311631f0a8f2b5d110367143ce99c1c00197b",
+ "note_on_commit": "The commit that adds this file is the freeze commit; code_commit_at_freeze is its parent, containing the scripts used.",
+ "decisions_from_user": [
+  "JCM800 primary set is G1,G2,G4,G10 as selected by the frozen rule; G1,G2,G4,G9 is an optional follow-up only",
+  "no optional adaptive-C3 models",
+  "primary budget: 4 configurations (A/B x 2 amps) x 2 seeds = 8 models"
+ ],
+ "selection_rule": "top-5 profile-ranked sets at the amp's k*, lowest combined (profile + audio-domain) rank, ties by J (docs/CONTINUOUS_GAIN_PHASE4E_PLAN.md)",
+ "amps": {
+  "jcm800": {
+   "channel": "High channel, Gain 1-10 (+ genuine half-steps 1.5-9.5 for independent validation)",
+   "captures": {
+    "G1": {
+     "file": "jcm800-high-g1.0-11.4dBu.nam",
+     "sha256": "819aa9478785443e9c1bf8607e16d102bc6030fdcebbfb5b7cb3b7f4f6609662",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G2": {
+     "file": "jcm800-high-g2.0-11.4dBu.nam",
+     "sha256": "eff64b0d7ee0f020595a2a298ea56ca20f5c6d40113cb025736ceb7420244f14",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G3": {
+     "file": "jcm800-high-g3.0-11.4dBu.nam",
+     "sha256": "8265f3b6da736b01ff1e49368f51cde70c7e5f1e9994520f09c0e21e33a82b59",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": false
+    },
+    "G4": {
+     "file": "jcm800-high-g4.0-11.4dBu.nam",
+     "sha256": "1a07a2ff4ffa171d043b5d5d04c675f42b586d0fffe6b5a98a9e5e9f7a9e6d0f",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G5": {
+     "file": "jcm800-high-g5.0-11.4dBu.nam",
+     "sha256": "6f4f9da38305dcfd855dd9f2aab5330be0351cdb478b862b56a7f288a17718af",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": false
+    },
+    "G7": {
+     "file": "jcm800-high-g7.0-11.4dBu.nam",
+     "sha256": "45322f5263d1c4e9bdcc21daab3c44baf4d8e41633dafb74f60e8ebe7af1ddaa",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": false
+    },
+    "G10": {
+     "file": "jcm800-high-ga10-11.4dBu.nam",
+     "sha256": "1e9108ef5f4fa696caf8449393297930b268804fa79bb2da9009016e9ef93925",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    }
+   },
+   "half_step_captures": {
+    "G1.5": {
+     "file": "jcm800-high-g1.5-11.4dBu.nam",
+     "sha256": "6e56a71f59f65d54f50c9f77ef9999fd22cfe7037364ad8ecf153ad97412c363",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G2.5": {
+     "file": "jcm800-high-g2.5-11.4dBu.nam",
+     "sha256": "e935318691df16ca7913abd187e94d58e215b6c0e2dbed2b4a2c81a075236921",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G3.5": {
+     "file": "jcm800-high-g3.5-11.4dBu.nam",
+     "sha256": "44d2a38e442144013efc04be0ccb80d53d968672ea334c4150831b811e73295a",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G4.5": {
+     "file": "jcm800-high-g4.5-11.4dBu.nam",
+     "sha256": "c697b6a0491b654da960c4fec7a5ffd5b6ee16b01b3fee7bfa0827ead4d8ebe3",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G5.5": {
+     "file": "jcm800-high-g5.5-11.4dBu.nam",
+     "sha256": "d99dfb3a1fc92730b95643f88ff713df45ac21420bf346a9716c576897941cf4",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G6.5": {
+     "file": "jcm800-high-g6.5-11.4dBu.nam",
+     "sha256": "a2d5a94bb94c0e008d38ed9580786da9ca82b1d453092ad9569020cad6e26356",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G7.5": {
+     "file": "jcm800-high-g7.5-11.4dBu.nam",
+     "sha256": "ab888acd5debb0a16600dc74dc471c6570e642e59cf14af0a1723db0eabeaf4a",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    },
+    "G8.5": {
+     "file": "jcm800-high-g8.5-11.4dBu.nam",
+     "sha256": "2826918c7b396b8f6b93e5340c2af282c0241783afc71600e965ff0a8e89f4a5",
+     "qa_status": "CORRECTED",
+     "alignment_correction_samples": -692,
+     "use": "independent validation only"
+    },
+    "G9.5": {
+     "file": "jcm800-high-g9.5-11.4dBu.nam",
+     "sha256": "f9338d62fcc10f55da9b7003a7b1096f7f911e17b2fc4d71d6e0d6e1ad026d32",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "use": "independent validation only"
+    }
+   },
+   "selected_positions": [
+    1,
+    2,
+    4,
+    10
+   ],
+   "eligible_anchor_positions": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "anchors_designated_input_gain_db": {
+    "A_fixed_physical_position_spacing": {
+     "G1": -22.0,
+     "G2": -18.0,
+     "G4": -10.0,
+     "G10": 14.0
+    },
+    "B_response_distance_spacing": {
+     "G1": -22.0,
+     "G2": -10.5,
+     "G4": -2.6,
+     "G10": 14.0
+    }
+   },
+   "reference_level_dbfs": -30.0,
+   "training_level_of_anchor_dbfs": "anchor dB + reference (-30 dBFS)",
+   "regions_for_reporting": {
+    "plateau_from_position": 9.0,
+    "rule": "plateau = positions at/after the last position where any measured dimension still changes quickly (4B profile); positions before it are split into equal-count thirds by knob order: low, transition, high"
+   },
+   "response_coordinate": {
+    "gains": [
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0,
+     3.5,
+     4.0,
+     4.5,
+     5.0,
+     5.5,
+     6.0,
+     6.5,
+     7.0,
+     7.5,
+     8.0,
+     8.5,
+     9.0,
+     9.5,
+     10.0
+    ],
+    "arc": [
+     0.0,
+     0.22256996979169916,
+     0.3182649171964874,
+     0.3975209888028132,
+     0.45946112711101994,
+     0.5022207998988,
+     0.5388777101515404,
+     0.568775572601259,
+     0.5900861592179774,
+     0.6220901221967117,
+     0.6430497522519714,
+     0.6696314193508487,
+     0.743388483677567,
+     0.8212612066227063,
+     0.8778730554228042,
+     0.9176430363765053,
+     0.9483799823633223,
+     0.989598573364978,
+     1.0
+    ],
+    "total": 7.833931328205636
+   },
+   "profile_source": "work/p4/jcm800/profile.json (sha256 d1398aa13e514e9c)",
+   "audit_source": "work/p4/jcm800/audit.json"
+  },
+  "vibrolux": {
+   "channel": "Vibrolux channel, T5 B5, Volume 1-10 (integers only)",
+   "captures": {
+    "G1": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V1.nam",
+     "sha256": "93ff61d99a81ab1244ce435a2878a7314434cde10bfe74b65cbed21e076ee74b",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G2": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V2.nam",
+     "sha256": "aee22def2433a4da3caa701cb60cd721b248b7e14674a00b9409df097773b685",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G3": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V3.nam",
+     "sha256": "8e80ecbee0e4194509765e058ae923297a30ed55f52bb4045c1b4b07ed49b520",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G4": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V4.nam",
+     "sha256": "5d88ae6dfbb6ac2c781630de0a9e88b8a6eabd9de9eb9386b8c2ae5fa89039d2",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G5": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V5.nam",
+     "sha256": "33ed39715e09fe4bfb6c744936229bf51d73929e28c9ea3be38460b792367d19",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": false
+    },
+    "G7": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V7.nam",
+     "sha256": "3fbc4ea0817bd5844f7e7715a798ff44942f2093557b3d50d6d7b4e735f2b4f4",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    },
+    "G10": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V10.nam",
+     "sha256": "2bc96f0c23de3898d80f0e689ae8f816000427cc8f276c5a3803d102d7afed16",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0,
+     "used_for_training": true
+    }
+   },
+   "half_step_captures": {},
+   "selected_positions": [
+    1,
+    2,
+    3,
+    4,
+    7,
+    10
+   ],
+   "eligible_anchor_positions": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "anchors_designated_input_gain_db": {
+    "A_fixed_physical_position_spacing": {
+     "G1": -22.0,
+     "G2": -18.0,
+     "G3": -14.0,
+     "G4": -10.0,
+     "G7": 2.0,
+     "G10": 14.0
+    },
+    "B_response_distance_spacing": {
+     "G1": -22.0,
+     "G2": -17.4,
+     "G3": -8.4,
+     "G4": -3.1,
+     "G7": 5.3,
+     "G10": 14.0
+    }
+   },
+   "reference_level_dbfs": -30.0,
+   "training_level_of_anchor_dbfs": "anchor dB + reference (-30 dBFS)",
+   "regions_for_reporting": {
+    "plateau_from_position": 4.0,
+    "rule": "plateau = positions at/after the last position where any measured dimension still changes quickly (4B profile); positions before it are split into equal-count thirds by knob order: low, transition, high"
+   },
+   "response_coordinate": {
+    "gains": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     6.0,
+     7.0,
+     8.0,
+     9.0,
+     10.0
+    ],
+    "arc": [
+     0.0,
+     0.12804467107552875,
+     0.37801951622391605,
+     0.5245440092120904,
+     0.5959973786111751,
+     0.6893633073579737,
+     0.756952924445411,
+     0.8486178113287676,
+     0.929507191284744,
+     1.0
+    ],
+    "total": 6.898512348520919
+   },
+   "profile_source": "work/p4/vibrolux/profile.json (sha256 89b9d218bab0aec5)",
+   "audit_source": "work/p4/vibrolux/audit.json"
+  }
+ },
+ "architecture": {
+  "type": "standard NAM A2 (PackedWaveNet)",
+  "parameters": 22783,
+  "trainer": "official nam.train.core.train via scripts/single_nam_train.py (data-split/input-detection hooks patched only)",
+  "trainer_script_sha256": "9e920a998d0f69576938c1453490d27d641677a2d0f393b5143e9369c486ec6b",
+  "exported_format": "standard .nam; no conditioning input, no custom metadata, no post-processing"
+ },
+ "training": {
+  "epochs": 60,
+  "batch_size": 16,
+  "ny": 8192,
+  "optimiser": "Adam (official trainer default), lr 0.004, exponential decay gamma 0.994 per epoch",
+  "checkpoint_selection": "stock best-validation checkpoint (pooled validation ESR); identical for every configuration",
+  "seeds": [
+   0,
+   1
+  ],
+  "expected_optimiser_updates": "about 175 per epoch x 60 = about 10,500 (set by the length of the training audio, identical for every configuration; recorded from the final checkpoints after training)",
+  "exposure_note": "training audio length is identical (467 s) for every configuration, so a 4-capture or 6-capture model sees the same number of updates as v3 C3, C5 and C10 but each capture is exposed differently (fewer captures = more exposure per capture). This is a disclosed confound for comparisons with the v3 models.",
+  "concurrency": "all 8 models train concurrently on one machine (MPS); wall-clock per model is recorded with the concurrency level; v3 solo/concurrent timings (about 17-24 min) are the reference",
+  "v3_baselines_preserved": {
+   "C3": {
+    "model": "work/cg/vibrolux/cg_3/",
+    "trained_gains": [
+     1.0,
+     5.0,
+     10.0
+    ]
+   },
+   "C5": {
+    "model": "work/cg/vibrolux/cg_5/",
+    "trained_gains": [
+     1.0,
+     3.0,
+     5.0,
+     7.0,
+     10.0
+    ]
+   },
+   "C10": {
+    "model": "work/cg/vibrolux/cg_10/",
+    "trained_gains": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     6.0,
+     7.0,
+     8.0,
+     9.0,
+     10.0
+    ]
+   }
+  }
+ },
+ "data": {
+  "builder": "scripts/p4e_build.py (new; v3 cg_build.py untouched and validated bit-identical to v3 for JCM800 G1,G5,G10 with fixed anchors)",
+  "builder_sha256": "a41f74ee42c9c20977c17dd7ff0621ba43eef5e7ba45c3357a1045d5c8df4c05",
+  "recipe": "official NAM input (190 s) + clean_smooth/moderate_hotrod/high_thrash (25 s each) at -16,-8,0,+8 dB; validation high_metalcore 12 s; teacher = level-driven blend of selected real captures (hybrid.multi_blend), each rendered at the -30 dBFS reference level; one fixed -0.2 dBFS peak ceiling; no per-capture level matching",
+  "alignment": "verified Phase 4A music-derived shifts only (none needed for either pilot amp's selected captures); no click-based shifts (v3 used click-based shifts for the Vibrolux: -2,-2,-1 samples on G1-G3, disclosed)",
+  "bundles": {
+   "jcm800_A": {
+    "path": "work/p4e/jcm800/A_bundle",
+    "train_seconds": 467.497,
+    "val_seconds": 12.5,
+    "levels_db": [
+     -52.0,
+     -48.0,
+     -40.0,
+     -16.0
+    ],
+    "output_scale_c": 0.5812467863375447,
+    "target_audio_sha256": "489a5e725823d67f188c6fbd11cd69173bf96c0a88f70746cf3a9d774556f617",
+    "input_audio_sha256": "e5b5f182951dd6c848bd57be74ec97f70ad7bf7494385aa4e047a79bf15e2e85"
+   },
+   "jcm800_B": {
+    "path": "work/p4e/jcm800/B_bundle",
+    "train_seconds": 467.497,
+    "val_seconds": 12.5,
+    "levels_db": [
+     -52.0,
+     -40.5,
+     -32.6,
+     -16.0
+    ],
+    "output_scale_c": 0.5812467863375447,
+    "target_audio_sha256": "a2c2441a61fb4b0cf5ee92eeb05a32fdfe33aaa4229d00303e349f6670ca374f",
+    "input_audio_sha256": "e5b5f182951dd6c848bd57be74ec97f70ad7bf7494385aa4e047a79bf15e2e85"
+   },
+   "vibrolux_A": {
+    "path": "work/p4e/vibrolux/A_bundle",
+    "train_seconds": 467.497,
+    "val_seconds": 12.5,
+    "levels_db": [
+     -52.0,
+     -48.0,
+     -44.0,
+     -40.0,
+     -28.0,
+     -16.0
+    ],
+    "output_scale_c": 1.0,
+    "target_audio_sha256": "e98337f127f367b177045cc10e402c4ca75214e0927b895f1e01183c5c757b33",
+    "input_audio_sha256": "e5b5f182951dd6c848bd57be74ec97f70ad7bf7494385aa4e047a79bf15e2e85"
+   },
+   "vibrolux_B": {
+    "path": "work/p4e/vibrolux/B_bundle",
+    "train_seconds": 467.497,
+    "val_seconds": 12.5,
+    "levels_db": [
+     -52.0,
+     -47.4,
+     -38.4,
+     -33.1,
+     -24.7,
+     -16.0
+    ],
+    "output_scale_c": 1.0,
+    "target_audio_sha256": "7258b62bf93f26ad341cbb9efe84073a2770e59fd6a8a7f2603ed046a35ec50c",
+    "input_audio_sha256": "e5b5f182951dd6c848bd57be74ec97f70ad7bf7494385aa4e047a79bf15e2e85"
+   }
+  }
+ },
+ "evaluation": {
+  "held_out_dis": [
+   "moderate_brit",
+   "clean_mayer",
+   "bass_rollin"
+  ],
+  "fit_dis": [
+   "clean_smooth",
+   "moderate_hotrod",
+   "high_thrash",
+   "high_metalcore"
+  ],
+  "clip_seconds": 15,
+  "di_offsets_db": [
+   -12,
+   -6,
+   0,
+   6
+  ],
+  "positions": "all real integer captures, plus the nine genuine half-steps on the JCM800 (independent check); omitted-from-training positions reported separately from trained positions",
+  "independence": "JCM800: half-steps and held-out DIs are fully independent. Vibrolux: omitted integer positions are neural-training holdouts but were used in 4D subset selection, so they are NOT fully independent research validation.",
+  "metrics": [
+   "native output RMS, peak and signed level error",
+   "EQ band errors (six bands), HF>3 kHz, tilt, signed coloration direction",
+   "sine THD at input levels -42,-30,-18,-6 dBFS, H2/H3 distribution",
+   "input/output slopes (-54->-30, -30->0), response to changing DI intensity (output change from -12 to +6 dB DI)",
+   "crest, dynamic range, transient rise rate (p95 of positive 5 ms envelope steps)",
+   "level-matched ESR (supporting only)"
+  ],
+  "reporting": "mean, worst-position and per-region (low / transition / high / plateau) errors, per DI level, no composite score; real-vs-model curves; signed errors kept",
+  "playback_mappings": {
+   "intended": "A: fixed rule -22+4(N-1) dB at every position; B: linear in the response coordinate between its declared anchors (reproduces them exactly); v3 C3/C5/C10: fixed rule",
+   "fixed": "the v3 fixed rule for every model (for B this is a deliberate mismatch and is labelled so)",
+   "fitted": "one ordered (non-decreasing) mapping per model, fitted ONLY on the fit DIs by the Phase 4C objective (tone + saturation + compression, level excluded, 1 dB grid, T <= 30 dB, monotone DP over integer positions; half-steps by PCHIP), then frozen for all held-out DIs and levels"
+  },
+  "flags_only": "Phase 4C working thresholds (tone 0.15/1.0 dB, HF 0.2/1.0, crest 0.2/1.0, THD 1.5/5, IO 0.5/2, dyn 0.3/1.5, level 0.4/1.5) flag differences for examination; they are not validated perceptual thresholds"
+ },
+ "comparison_rules": {
+  "A_vs_v3_C3": "compares a new capture set (count AND placement change) under the original anchor rule; NOT claimed to isolate placement alone",
+  "B_vs_A": "isolates the training-anchor rule within each selected set (all other settings identical)",
+  "seed_rule": "a difference is conclusive only if it is larger than the seed-to-seed difference for that metric and has the same sign in both seeds; otherwise inconclusive",
+  "no_composite": "no composite score and no single-metric victory; trade-offs (e.g. compression better but level/tone/transients worse) are reported as trade-offs",
+  "criteria_not_revised_after_results": true
+ },
+ "outputs": {
+  "root": "work/p4e/",
+  "models": "work/p4e/<amp>/<A|B>_bundle/<amp>_P4E_<A|B>_s<seed>/*.nam",
+  "results_doc": "docs/CONTINUOUS_GAIN_PHASE4E_RESULTS.md",
+  "listening": "work/p4e/listening/ (+ docs/phase4e/)"
+ }
+}
