@@ -13,7 +13,7 @@ button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 1
 input[type=text]{width:100%;box-sizing:border-box;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
 .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0} .pill{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px}
 </style></head><body><main>
-<h1>Does it still sound like that amp when you play softer or harder?</h1>
+<h1>Does it still sound like that amp when you play softer or harder?</h1><div class="mut" id="sub">/*SUBTITLE*/</div>
 <div class="mut">Blind comparison. The Input gain is fixed for each item; only the playing changes. Use the same headphones and volume throughout. Status of this listening: <b>pending until you complete it</b>.</div>
 <div class="card"><div class="bar"><label>Your name / id <input id="who" type="text" style="width:180px"></label><label>Headphones / speakers <input id="gear" type="text" style="width:200px"></label>
 <label><input type="radio" name="mode" value="native" checked> Native level</label><label><input type="radio" name="mode" value="levelmatched"> Level-matched</label></div>
@@ -21,11 +21,11 @@ input[type=text]{width:100%;box-sizing:border-box;padding:6px;border-radius:6px;
 <div class="bar"><button class="sec" id="prev">Prev</button><span class="pill" id="prog"></span><button class="sec" id="next">Next</button><span style="flex:1"></span><button id="export">Export results (CSV)</button><button class="sec" id="clear">Clear my ratings</button></div>
 <div id="stim"></div>
 <script>
-const STIMULI = /*STIMULI_JSON*/[];
+const STIMULI = /*STIMULI_JSON*/[]; const STORE_KEY = "/*STORE_KEY*/fg_listen_v1";
 const ISSUES = ["too bright / fizzy","too dark / dull","too compressed / squashed","not saturated enough / too clean","too distorted / saturated","thin","boomy","noisy / artefacts","loudness wrong","sounds like a different amp"];
-let idx = 0; let store = {}; try { store = JSON.parse(localStorage.getItem("fg_listen_v1") || "{}"); } catch (e) { store = {}; }   // storage can be blocked (file:// in some browsers, private windows): ratings then live in memory only
+let idx = 0; let store = {}; try { store = JSON.parse(localStorage.getItem(STORE_KEY) || "{}"); } catch (e) { store = {}; }   // storage can be blocked (file:// in some browsers, private windows): ratings then live in memory only
 const $ = s => document.querySelector(s); const mode = () => document.querySelector('input[name=mode]:checked').value;
-function save(){ try{ localStorage.setItem("fg_listen_v1", JSON.stringify(store)); }catch(e){} }
+function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(store)); }catch(e){} }
 function key(sid,label){ return sid + "|" + label; }
 function render(){
   const s = STIMULI[idx]; $("#prog").textContent = "Item " + (idx+1) + " of " + STIMULI.length;
@@ -49,7 +49,7 @@ function render(){
 function switchMode(){ const s = STIMULI[idx]; document.querySelectorAll("audio").forEach(a => { const was = !a.paused, t = a.currentTime; const L = a.dataset.role === "ref" ? "REFERENCE" : a.dataset.label; a.src = s.files[L][mode()]; a.currentTime = t; if (was) a.play(); }); }
 document.querySelectorAll("input[name=mode]").forEach(el => el.addEventListener("change", switchMode));
 $("#prev").onclick = () => { if (idx > 0) { idx--; render(); } }; $("#next").onclick = () => { if (idx < STIMULI.length - 1) { idx++; render(); } };
-$("#clear").onclick = () => { if (confirm("Clear all ratings stored in this browser?")) { try { localStorage.removeItem("fg_listen_v1"); } catch (e) {} for (const k in store) delete store[k]; render(); } };
+$("#clear").onclick = () => { if (confirm("Clear all ratings stored in this browser?")) { try { localStorage.removeItem(STORE_KEY); } catch (e) {} for (const k in store) delete store[k]; render(); } };
 $("#export").onclick = () => {
   const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"'; const rows = [["listener","gear","date","stimulus_id","label","closeness","issues","notes","mode_at_rating"].join(",")];
   for (const s of STIMULI) for (const L of s.labels) { const r = store[key(s.id, L)]; if (!r || !r.touched) continue; rows.push([q($("#who").value), q($("#gear").value), q(new Date().toISOString()), q(s.id), q(L), r.closeness, q((r.issues||[]).join("; ")), q(r.notes), q(r.mode||"")].join(",")); }

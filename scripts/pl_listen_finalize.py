@@ -41,7 +41,7 @@ for i, s in enumerate(stim, 1):
     pub.append({"id": sid, "kind": s["kind"], "title": title, "instruction": instr, "labels": LABELS, "files": files})
     key[sid] = {"amp": s["amp"], "virtual_gain": g, "pick": s["pick"], "kind": s["kind"], "di": s["di"], "labels": lab, "input_gain_db": s["input_gain_db"], "stage_id": s["sid"]}
 (LG / "listening_KEY_do_not_open_before_listening.json").write_text(json.dumps(key, indent=1))
-html = (ROOT / "scripts" / "pl_listening_tool_template.html").read_text().replace("/*STIMULI_JSON*/[]", json.dumps(pub))
+html = (ROOT / "scripts" / "pl_listening_tool_template.html").read_text().replace("/*STIMULI_JSON*/[]", json.dumps(pub)).replace("/*STORE_KEY*/", "").replace("/*SUBTITLE*/", "Full set (32 items).")
 (LG / "listening_tool.html").write_text(html)
 (LG / "stimuli_public.json").write_text(json.dumps(pub, indent=1))
 rows = [{"stimulus": p["id"], "kind": p["kind"], "title": p["title"], **{f"{L} closeness (0-100)": "" for L in LABELS}, "closest (letter)": "", "which sound like a different amp when played harder/softer": "", "notes": ""} for p in pub]
