@@ -24,7 +24,7 @@ jobs:
             os: macos-14
             bundles: app,dmg
           - name: Linux x64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             bundles: deb,appimage
           - name: Windows x64
             os: windows-latest
@@ -63,14 +63,66 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y \
+            build-essential \
+            file \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+          pkg-config --modversion gdk-3.0
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
+      - name: Remove stale macOS bundle output
+        if: runner.os == 'macOS'
+        working-directory: desktop/src-tauri
+        run: rm -rf target/release/bundle
+
       - name: Build Tauri installers
+        if: runner.os != 'macOS'
         working-directory: desktop/src-tauri
         run: cargo tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Build signed macOS app
+        if: runner.os == 'macOS'
+        working-directory: desktop/src-tauri
+        run: cargo tauri build --bundles app
+
+      - name: Verify macOS ad-hoc signature before DMG packaging
+        if: runner.os == 'macOS'
+        working-directory: desktop/src-tauri
+        shell: bash
+        run: |
+          APP_PATH="$(find target/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP_PATH" || { echo "No macOS .app bundle was produced" >&2; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          SIGNING_INFO="$(codesign -dv --verbose=4 "$APP_PATH" 2>&1)"
+          printf '%s\n' "$SIGNING_INFO"
+          printf '%s\n' "$SIGNING_INFO" | grep -q '^Signature=adhoc$' || {
+            echo "Expected an ad-hoc macOS signature" >&2
+            exit 1
+          }
+
+      - name: Package DMG from verified macOS app
+        if: runner.os == 'macOS'
+        working-directory: desktop/src-tauri
+        run: cargo tauri bundle --bundles dmg
+
+      - name: Re-verify macOS app after DMG packaging
+        if: runner.os == 'macOS'
+        working-directory: desktop/src-tauri
+        shell: bash
+        run: |
+          APP_PATH="$(find target/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP_PATH" || { echo "No macOS .app bundle was produced" >&2; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/nam-mixer-codesign.txt
+          grep -q '^Signature=adhoc$' /tmp/nam-mixer-codesign.txt
 
       - name: Upload desktop installers
         uses: actions/upload-artifact@v4

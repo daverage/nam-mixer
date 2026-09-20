@@ -132,13 +132,13 @@ async function refreshSystemUsage() {
     const response = await fetch("/api/system/usage");
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "unavailable");
-    const parts = [`CPU ${Number(data.cpu_percent).toFixed(0)}%`, `RAM ${data.memory_used_gb}/${data.memory_total_gb} GB`];
+    const parts = [`CPU ${Number(data.cpu_percent).toFixed(0)}%`, `System RAM ${data.memory_used_gb}/${data.memory_total_gb} GB`];
     if (data.gpu && data.gpu.utilization_percent !== null && data.gpu.utilization_percent !== undefined) {
       // Apple Silicon reports real, live usage too (via ioreg's
       // IOAccelerator PerformanceStatistics -- see app.py's
       // _apple_gpu_usage), just against unified memory rather than a
       // separate VRAM pool, so label it accordingly instead of "VRAM".
-      const memoryLabel = data.gpu.accelerator === "mps" ? "Memory" : "VRAM";
+      const memoryLabel = data.gpu.accelerator === "mps" ? "GPU memory (unified)" : "GPU VRAM";
       parts.push(`GPU ${Number(data.gpu.utilization_percent).toFixed(0)}% · ${memoryLabel} ${(data.gpu.memory_used_mb / 1024).toFixed(1)}/${(data.gpu.memory_total_mb / 1024).toFixed(1)} GB`);
     } else if (data.gpu && data.gpu.name) {
       // Fallback only: ioreg's output shape didn't match, so just confirm
@@ -146,6 +146,11 @@ async function refreshSystemUsage() {
       parts.push(`GPU ${data.gpu.name} (Metal)`);
     }
     systemUsageEl.textContent = parts.join("  ·  ");
+    systemUsageEl.title = data.gpu?.accelerator === "mps"
+      ? "System RAM is shared by CPU and Apple GPU; GPU memory is the GPU driver's portion of that unified pool."
+      : data.gpu
+        ? "System RAM is whole-machine memory; GPU VRAM is dedicated NVIDIA graphics memory."
+        : "System RAM is whole-machine memory. GPU telemetry is unavailable on this platform.";
   } catch {
     systemUsageEl.textContent = "System usage unavailable";
   }
