@@ -9,13 +9,17 @@ name: Build desktop release
 #   Linux x64:   .deb and .AppImage
 #   Windows x64: .msi and NSIS .exe
 #
-# Linux DEB and AppImage packaging are separate steps so AppImage failures
-# can be diagnosed without losing the successfully built DEB artifact.
+# Linux DEB and AppImage packaging are separate.
+# The DEB is uploaded before attempting AppImage packaging.
+#
+# Linux AppImage diagnostics inspect PyInstaller's bundled native
+# libraries, particularly SciPy/OpenBLAS/Fortran dependencies.
 
 on:
   push:
     tags:
       - "v*"
+
   workflow_dispatch: {}
 
 permissions:
@@ -45,9 +49,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      # ------------------------------------------------------------
+
+      # ============================================================
       # 1. Checkout and build environment
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Check out source
         uses: actions/checkout@v4
@@ -62,12 +67,9 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # ------------------------------------------------------------
-      # 2. Install Linux system dependencies
-      #
-      # Install these before compiling the native renderer so both
-      # the renderer and Tauri have their required build libraries.
-      # ------------------------------------------------------------
+      # ============================================================
+      # 2. Linux system dependencies
+      # ============================================================
 
       - name: Install Tauri Linux system dependencies
         if: runner.os == 'Linux'
@@ -88,7 +90,8 @@ jobs:
             libayatana-appindicator3-dev \
             libfuse2t64 \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            binutils
 
           echo "GTK version:"
           pkg-config --modversion gdk-3.0
@@ -96,12 +99,13 @@ jobs:
           echo "WebKitGTK version:"
           pkg-config --modversion webkit2gtk-4.1
 
-          echo "FUSE libraries:"
-          ldconfig -p | grep -E 'libfuse\.so|libfuse3\.so' || true
+          echo "Available FUSE libraries:"
+          ldconfig -p | grep -E \
+            'libfuse\.so|libfuse3\.so' || true
 
-      # ------------------------------------------------------------
-      # 3. Build the Python backend and native NAM renderer
-      # ------------------------------------------------------------
+      # ============================================================
+      # 3. Python backend and native NAM renderer
+      # ============================================================
 
       - name: Install backend build dependencies
         run: python -m pip install -r requirements.txt pyinstaller
@@ -118,18 +122,143 @@ jobs:
           --workpath packaging/backend/build
           --noconfirm
 
-      # ------------------------------------------------------------
-      # 4. Install Tauri CLI
-      # ------------------------------------------------------------
+      # ============================================================
+      # 4. Linux native library diagnostics
+      #
+      # Investigate the missing hash-suffixed libquadmath dependency.
+      #
+      # Do not modify, rename or replace the bundled libraries here.
+      # ============================================================
+
+      - name: Diagnose Linux backend shared libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "PYINSTALLER OUTPUT"
+          echo "=========================================="
+
+          find packaging/backend/dist \
+            -maxdepth 3 \
+            -type f \
+            -print | head -100
+
+          echo ""
+          echo "=========================================="
+          echo "FORTRAN AND QUADMATH LIBRARIES"
+          echo "=========================================="
+
+          find packaging/backend/dist \
+            \( -type f -o -type l \) \
+            \( \
+              -name 'libgfortran*' \
+              -o -name 'libquadmath*' \
+              -o -name 'libopenblas*' \
+              -o -name 'libscipy_openblas*' \
+            \) \
+            -print
+
+          echo ""
+          echo "=========================================="
+          echo "FORTRAN LIBRARY DEPENDENCIES"
+          echo "=========================================="
+
+          while IFS= read -r library; do
+
+            echo ""
+            echo "------------------------------------------"
+            echo "Library: $library"
+            echo "------------------------------------------"
+
+            echo "File information:"
+            file "$library"
+
+            echo ""
+            echo "Dynamic dependencies:"
+
+            readelf -d "$library" | grep -E \
+              'NEEDED|RPATH|RUNPATH|SONAME' || true
+
+            echo ""
+            echo "Resolved dependencies:"
+
+            ldd "$library" || true
+
+          done < <(
+            find packaging/backend/dist \
+              -type f \
+              -name 'libgfortran*'
+          )
+
+          echo ""
+          echo "=========================================="
+          echo "QUADMATH LIBRARY DEPENDENCIES"
+          echo "=========================================="
+
+          while IFS= read -r library; do
+
+            echo ""
+            echo "------------------------------------------"
+            echo "Library: $library"
+            echo "------------------------------------------"
+
+            file "$library"
+
+            readelf -d "$library" | grep -E \
+              'NEEDED|RPATH|RUNPATH|SONAME' || true
+
+            echo ""
+            echo "Resolved dependencies:"
+
+            ldd "$library" || true
+
+          done < <(
+            find packaging/backend/dist \
+              -type f \
+              -name 'libquadmath*'
+          )
+
+          echo ""
+          echo "=========================================="
+          echo "SCIPY AND NUMPY BUNDLED LIBRARIES"
+          echo "=========================================="
+
+          find packaging/backend/dist \
+            \( -type d -o -type f \) \
+            \( \
+              -name 'scipy.libs' \
+              -o -name 'numpy.libs' \
+              -o -name '*openblas*' \
+            \) \
+            -print
+
+          echo ""
+          echo "=========================================="
+          echo "SYSTEM QUADMATH AVAILABILITY"
+          echo "=========================================="
+
+          ldconfig -p | grep -E \
+            'libquadmath|libgfortran' || true
+
+          echo ""
+          echo "=========================================="
+          echo "LINUX SHARED LIBRARY DIAGNOSTICS COMPLETE"
+          echo "=========================================="
+
+      # ============================================================
+      # 5. Tauri CLI
+      # ============================================================
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
-      # ------------------------------------------------------------
-      # 5. macOS build and packaging
+      # ============================================================
+      # 6. macOS build and packaging
       #
-      # Retains the existing working ad-hoc signing process.
-      # ------------------------------------------------------------
+      # Preserve the existing ad-hoc signing process.
+      # ============================================================
 
       - name: Remove stale macOS bundle output
         if: runner.os == 'macOS'
@@ -239,28 +368,22 @@ jobs:
 
           echo "DMG contains a correctly signed application"
 
-      # ------------------------------------------------------------
-      # 6. Windows build and packaging
+      # ============================================================
+      # 7. Windows build
       #
-      # Retains the existing working MSI and NSIS build command.
-      # ------------------------------------------------------------
+      # Keep the existing working MSI and NSIS build process.
+      # ============================================================
 
       - name: Build Windows installers
         if: runner.os == 'Windows'
         working-directory: desktop/src-tauri
         run: cargo tauri build --bundles msi,nsis
 
-      # ------------------------------------------------------------
-      # 7. Linux build and packaging
+      # ============================================================
+      # 8. Linux executable and DEB
       #
-      # IMPORTANT:
-      #
-      # Build the executable and DEB first.
-      # Upload the DEB before attempting AppImage packaging.
-      #
-      # If AppImage packaging fails, the DEB artifact remains
-      # available from the GitHub Actions run.
-      # ------------------------------------------------------------
+      # Build and upload the DEB before attempting AppImage packaging.
+      # ============================================================
 
       - name: Build Linux executable and DEB
         if: runner.os == 'Linux'
@@ -304,14 +427,13 @@ jobs:
           echo "Linux executable:"
           ls -lh "$EXECUTABLE"
 
+          echo ""
           echo "Debian installer:"
           ls -lh "$DEB_PATH"
 
+          echo ""
           echo "Debian package metadata:"
           dpkg-deb --info "$DEB_PATH"
-
-      # Upload the DEB immediately.
-      # It remains downloadable even if AppImage packaging fails.
 
       - name: Upload Linux DEB
         if: runner.os == 'Linux'
@@ -322,17 +444,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ------------------------------------------------------------
-      # 8. Linux AppImage packaging
+      # ============================================================
+      # 9. Linux AppImage packaging
       #
       # Reuse the compiled Linux executable.
       #
-      # Enable verbose Tauri logging to help identify the underlying
-      # linuxdeploy error.
-      #
-      # APPIMAGE_EXTRACT_AND_RUN allows compatible AppImage tools to
-      # execute through extraction when direct FUSE mounting fails.
-      # ------------------------------------------------------------
+      # The previous failure involved a missing hash-suffixed
+      # libquadmath dependency during linuxdeploy processing.
+      # ============================================================
 
       - name: Build Linux AppImage
         if: runner.os == 'Linux'
@@ -344,23 +463,34 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Building Linux AppImage"
+          echo "=========================================="
+          echo "LINUX APPIMAGE BUILD"
+          echo "=========================================="
 
-          echo "AppImage extraction mode:"
-          echo "$APPIMAGE_EXTRACT_AND_RUN"
-
-          echo "Linux environment:"
+          echo "Kernel:"
           uname -a
 
+          echo ""
           echo "FUSE availability:"
           ls -l /dev/fuse || true
 
-          echo "AppImage packaging dependencies:"
+          echo ""
+          echo "AppImage packaging tools:"
+
           command -v file
           command -v patchelf
           command -v pkg-config
 
-          echo "Starting Tauri AppImage packaging"
+          echo ""
+          echo "Available shared library paths:"
+
+          ldconfig -p | grep -E \
+            'libquadmath|libgfortran|libfuse' || true
+
+          echo ""
+          echo "=========================================="
+          echo "STARTING TAURI APPIMAGE PACKAGING"
+          echo "=========================================="
 
           cargo tauri bundle --bundles appimage --verbose
 
@@ -392,12 +522,9 @@ jobs:
           echo "AppImage generated:"
           ls -lh "$APPIMAGE_PATH"
 
+          echo ""
           echo "AppImage file type:"
           file "$APPIMAGE_PATH"
-
-      # ------------------------------------------------------------
-      # 9. Upload completed installers
-      # ------------------------------------------------------------
 
       - name: Upload Linux AppImage
         if: runner.os == 'Linux'
@@ -407,6 +534,10 @@ jobs:
           path: desktop/src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
           retention-days: 30
+
+      # ============================================================
+      # 10. Upload Windows and macOS installers
+      # ============================================================
 
       - name: Upload Windows installers
         if: runner.os == 'Windows'
@@ -428,16 +559,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # --------------------------------------------------------------
-  # 10. Publish GitHub Release
+  # ================================================================
+  # 11. Publish GitHub Release
   #
   # Only version tags publish a release.
+  #
   # All platform builds must succeed.
   #
-  # A failed Linux AppImage build does not prevent the completed
-  # Linux DEB artifact from being downloaded from GitHub Actions,
-  # but it does prevent publication of an incomplete GitHub Release.
-  # --------------------------------------------------------------
+  # If AppImage packaging fails, the previously uploaded DEB
+  # remains available from the GitHub Actions run.
+  # ================================================================
 
   release:
     name: Publish GitHub release
@@ -449,6 +580,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Download desktop installers
         uses: actions/download-artifact@v4
         with:
