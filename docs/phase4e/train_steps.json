@@ -1,0 +1,42 @@
+{
+ "jcm800_P4E_A_s0": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_last_epoch=0059_step=10260.ckpt"
+ },
+ "jcm800_P4E_A_s1": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_best_epoch=0059_step=10260_ESR=0.02534_MSE=1.009e-04.ckpt"
+ },
+ "jcm800_P4E_B_s0": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_best_epoch=0059_step=10260_ESR=0.0166_MSE=6.365e-05.ckpt"
+ },
+ "jcm800_P4E_B_s1": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_last_epoch=0059_step=10260.ckpt"
+ },
+ "vibrolux_P4E_A_s0": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_best_epoch=0059_step=10260_ESR=0.01821_MSE=1.410e-04.ckpt"
+ },
+ "vibrolux_P4E_A_s1": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_last_epoch=0059_step=10260.ckpt"
+ },
+ "vibrolux_P4E_B_s0": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_last_epoch=0059_step=10260.ckpt"
+ },
+ "vibrolux_P4E_B_s1": {
+  "final_epoch": 59,
+  "global_step": 10260,
+  "ckpt": "checkpoint_best_epoch=0059_step=10260_ESR=0.01143_MSE=6.434e-05.ckpt"
+ }
+}
