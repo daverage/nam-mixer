@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fixed-gain listening</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#fff;--fg:#1c1c1e;--mut:#666;--line:#d8d8de;--acc:#2a5bd7;--card:#f6f6f9}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#ececf0;--mut:#9a9aa5;--line:#34343b;--acc:#7aa2ff;--card:#1e1e22}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 4px} .mut{color:var(--mut)} .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
+.row{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:start} .lab{font-weight:700;font-size:22px}
+label{display:inline-block;margin:2px 10px 2px 0;font-size:13px} input[type=range]{width:100%} audio{width:100%}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer} button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+input[type=text]{width:100%;box-sizing:border-box;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0} .pill{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px}
+</style></head><body><main>
+<h1>Does it still sound like that amp when you play softer or harder?</h1>
+<div class="mut">Blind comparison. The Input gain is fixed for each item; only the playing changes. Use the same headphones and volume throughout. Status of this listening: <b>pending until you complete it</b>.</div>
+<div class="card"><div class="bar"><label>Your name / id <input id="who" type="text" style="width:180px"></label><label>Headphones / speakers <input id="gear" type="text" style="width:200px"></label>
+<label><input type="radio" name="mode" value="native" checked> Native level</label><label><input type="radio" name="mode" value="levelmatched"> Level-matched</label></div>
+<div class="mut" style="font-size:12px">Native level keeps the real loudness differences (judge loudness progression). Level-matched removes them (judge tone, saturation and dynamics). Most items are best judged in both.</div></div>
+<div class="bar"><button class="sec" id="prev">Prev</button><span class="pill" id="prog"></span><button class="sec" id="next">Next</button><span style="flex:1"></span><button id="export">Export results (CSV)</button><button class="sec" id="clear">Clear my ratings</button></div>
+<div id="stim"></div>
+<script>
+const STIMULI = /*STIMULI_JSON*/[];
+const ISSUES = ["too bright / fizzy","too dark / dull","too compressed / squashed","not saturated enough / too clean","too distorted / saturated","thin","boomy","noisy / artefacts","loudness wrong","sounds like a different amp"];
+let idx = 0; let store = {}; try { store = JSON.parse(localStorage.getItem("fg_listen_v1") || "{}"); } catch (e) { store = {}; }   // storage can be blocked (file:// in some browsers, private windows): ratings then live in memory only
+const $ = s => document.querySelector(s); const mode = () => document.querySelector('input[name=mode]:checked').value;
+function save(){ try{ localStorage.setItem("fg_listen_v1", JSON.stringify(store)); }catch(e){} }
+function key(sid,label){ return sid + "|" + label; }
+function render(){
+  const s = STIMULI[idx]; $("#prog").textContent = "Item " + (idx+1) + " of " + STIMULI.length;
+  const seq = s.kind === "sequence";
+  let h = '<div class="card"><b>' + s.title + '</b><div class="mut">' + s.instruction + '</div></div>';
+  h += '<div class="card"><b>REFERENCE</b> <span class="mut">(the real amp at this setting)</span><audio controls preload="auto" data-role="ref" src="' + s.files.REFERENCE[mode()] + '"></audio></div>';
+  for (const L of s.labels) {
+    const k = key(s.id, L), r = store[k] || {};
+    h += '<div class="card row"><div class="lab">' + L + '</div><div><audio controls preload="auto" data-role="cand" data-label="' + L + '" src="' + s.files[L][mode()] + '"></audio>';
+    h += '<div>' + (seq ? "Keeps the reference\'s character from soft to hard (100 = identical behaviour)" : "How close is it to the reference? (100 = indistinguishable)") + ': <b class="v" data-v="' + L + '">' + (r.closeness ?? "-") + '</b></div>';
+    h += '<input type="range" min="0" max="100" value="' + (r.closeness ?? 50) + '" data-r="' + L + '">';
+    h += '<div>' + ISSUES.map((t,i) => '<label><input type="checkbox" data-i="' + L + '|' + i + '"' + ((r.issues||[]).includes(t) ? " checked" : "") + '> ' + t + '</label>').join("") + '</div>';
+    h += '<input type="text" placeholder="notes (optional)" data-n="' + L + '" value="' + (r.notes||"").replace(/"/g,"&quot;") + '"></div></div>';
+  }
+  $("#stim").innerHTML = h;
+  document.querySelectorAll("audio").forEach(a => a.addEventListener("play", () => document.querySelectorAll("audio").forEach(o => { if (o !== a) o.pause(); })));
+  document.querySelectorAll("input[data-r]").forEach(el => { el.addEventListener("input", () => { const L = el.dataset.r, k = key(s.id, L); store[k] = store[k] || {}; store[k].closeness = +el.value; store[k].touched = true; store[k].mode = mode(); document.querySelector('[data-v="' + L + '"]').textContent = el.value; save(); }); });
+  document.querySelectorAll("input[data-i]").forEach(el => { el.addEventListener("change", () => { const [L,i] = el.dataset.i.split("|"), k = key(s.id, L); store[k] = store[k] || {}; const set = new Set(store[k].issues || []); el.checked ? set.add(ISSUES[+i]) : set.delete(ISSUES[+i]); store[k].issues = [...set]; save(); }); });
+  document.querySelectorAll("input[data-n]").forEach(el => { el.addEventListener("input", () => { const L = el.dataset.n, k = key(s.id, L); store[k] = store[k] || {}; store[k].notes = el.value; save(); }); });
+}
+function switchMode(){ const s = STIMULI[idx]; document.querySelectorAll("audio").forEach(a => { const was = !a.paused, t = a.currentTime; const L = a.dataset.role === "ref" ? "REFERENCE" : a.dataset.label; a.src = s.files[L][mode()]; a.currentTime = t; if (was) a.play(); }); }
+document.querySelectorAll("input[name=mode]").forEach(el => el.addEventListener("change", switchMode));
+$("#prev").onclick = () => { if (idx > 0) { idx--; render(); } }; $("#next").onclick = () => { if (idx < STIMULI.length - 1) { idx++; render(); } };
+$("#clear").onclick = () => { if (confirm("Clear all ratings stored in this browser?")) { try { localStorage.removeItem("fg_listen_v1"); } catch (e) {} for (const k in store) delete store[k]; render(); } };
+$("#export").onclick = () => {
+  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"'; const rows = [["listener","gear","date","stimulus_id","label","closeness","issues","notes","mode_at_rating"].join(",")];
+  for (const s of STIMULI) for (const L of s.labels) { const r = store[key(s.id, L)]; if (!r || !r.touched) continue; rows.push([q($("#who").value), q($("#gear").value), q(new Date().toISOString()), q(s.id), q(L), r.closeness, q((r.issues||[]).join("; ")), q(r.notes), q(r.mode||"")].join(",")); }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([rows.join("\n")], {type: "text/csv"})); a.download = "fixed_gain_listening_results.csv"; a.click();
+};
+render();
+</script></main></body></html>
