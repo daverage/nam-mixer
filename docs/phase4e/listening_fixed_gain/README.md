@@ -22,6 +22,3 @@ Alternatively fill in `listening_worksheet.csv` by hand.
 
 ## Limits
 One DI per amp; three playing intensities (-12, 0, +6 dB) are global level changes of a recorded performance, not a real player changing touch; clips show tone, saturation and dynamics but **cannot establish playing feel** (see the live-guitar test). Raw model output for the JCM800 is scaled by a training constant (see the live guide); the clips already undo it.
-
-## Shortlist version (10 items)
-`python scripts/pl_listen_short.py` builds `work/p4e/listening_fixed_gain/listening_tool_short.html`: ten of the 32 items chosen by the automated preview (Vibrolux 10 soft/normal, Vibrolux 7 soft/hard/sequence, JCM800 8 soft/normal, Vibrolux 5 normal, JCM800 5 normal/hard), in that order. Same audio, same blind labels and key, same CSV format, so `pl_listening_analyze.py` works on either page's export; ratings are stored separately from the full page. About 15 minutes.

@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_KEY = ROOT / "work" / "p4e" / "listening_fixed_gain" / "listening_KEY_do_not_open_before_listening.json"
 MODEL_NAMES = {"v3_C3": "v3 C3 (old)", "B_s0": "Phase 4E B seed 0", "B_s1": "Phase 4E B seed 1", "HIDDEN_REFERENCE": "hidden real amp"}
 
-def load(paths, key):
+def load(paths, key, impute=None):
+    """impute: score assumed for a candidate of an item that appears in the file but has no row (an untouched slider stays at 50). None = leave missing."""
     rows = []
     for p in paths:
         for r in csv.DictReader(open(p, newline="")):
@@ -18,6 +19,14 @@ def load(paths, key):
             if not k or r["label"] not in k["labels"]: continue
             rows.append({"who": r.get("listener", ""), "sid": r["stimulus_id"], "model": k["labels"][r["label"]], "score": float(r["closeness"]), "amp": k["amp"], "gain": k["virtual_gain"],
                          "pick": k["pick"] if k["kind"] == "single" else "sequence", "kind": k["kind"], "issues": [t.strip() for t in (r.get("issues") or "").split(";") if t.strip()], "mode": r.get("mode_at_rating", "")})
+    if impute is not None:
+        seen = {(r["who"], r["sid"]) for r in rows}; have = {(r["who"], r["sid"], r["model"]) for r in rows}
+        for who, sid in sorted(seen):
+            k = key[sid]
+            for lab, m in k["labels"].items():
+                if (who, sid, m) not in have:
+                    rows.append({"who": who, "sid": sid, "model": m, "score": float(impute), "amp": k["amp"], "gain": k["virtual_gain"], "pick": k["pick"] if k["kind"] == "single" else "sequence",
+                                 "kind": k["kind"], "issues": [], "mode": "", "imputed": True})
     return rows
 
 def analyse(rows):
@@ -68,6 +77,6 @@ def markdown(a):
     return "\n".join(o) + "\n"
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("csv", nargs="+"); ap.add_argument("--key", default=str(DEFAULT_KEY)); ap.add_argument("--out"); a = ap.parse_args()
-    md = markdown(analyse(load(a.csv, json.loads(Path(a.key).read_text())))); print(md)
+    ap = argparse.ArgumentParser(); ap.add_argument("csv", nargs="+"); ap.add_argument("--key", default=str(DEFAULT_KEY)); ap.add_argument("--out"); ap.add_argument("--impute", type=float, default=50.0, help="score for candidates of visited items with no row (untouched slider = 50); use --impute -1 to leave missing"); a = ap.parse_args()
+    key = json.loads(Path(a.key).read_text()); imp = None if a.impute < 0 else a.impute; md = markdown(analyse(load(a.csv, key, imp))); print(md)
     if a.out: Path(a.out).write_text(md)

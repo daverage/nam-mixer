@@ -28,7 +28,7 @@ const $ = s => document.querySelector(s); const mode = () => document.querySelec
 function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(store)); }catch(e){} }
 function key(sid,label){ return sid + "|" + label; }
 function render(){
-  const s = STIMULI[idx]; $("#prog").textContent = "Item " + (idx+1) + " of " + STIMULI.length;
+  const s = STIMULI[idx]; $("#prog").textContent = "Item " + (idx+1) + " of " + STIMULI.length; store["__visited|" + s.id] = true; save();
   const seq = s.kind === "sequence";
   let h = '<div class="card"><b>' + s.title + '</b><div class="mut">' + s.instruction + '</div></div>';
   h += '<div class="card"><b>REFERENCE</b> <span class="mut">(the real amp at this setting)</span><audio controls preload="auto" data-role="ref" src="' + s.files.REFERENCE[mode()] + '"></audio></div>';
@@ -51,8 +51,9 @@ document.querySelectorAll("input[name=mode]").forEach(el => el.addEventListener(
 $("#prev").onclick = () => { if (idx > 0) { idx--; render(); } }; $("#next").onclick = () => { if (idx < STIMULI.length - 1) { idx++; render(); } };
 $("#clear").onclick = () => { if (confirm("Clear all ratings stored in this browser?")) { try { localStorage.removeItem(STORE_KEY); } catch (e) {} for (const k in store) delete store[k]; render(); } };
 $("#export").onclick = () => {
-  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"'; const rows = [["listener","gear","date","stimulus_id","label","closeness","issues","notes","mode_at_rating"].join(",")];
-  for (const s of STIMULI) for (const L of s.labels) { const r = store[key(s.id, L)]; if (!r || !r.touched) continue; rows.push([q($("#who").value), q($("#gear").value), q(new Date().toISOString()), q(s.id), q(L), r.closeness, q((r.issues||[]).join("; ")), q(r.notes), q(r.mode||"")].join(",")); }
+  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"'; const rows = [["listener","gear","date","stimulus_id","label","closeness","touched","issues","notes","mode_at_rating"].join(",")];
+  for (const s of STIMULI) { if (!store["__visited|" + s.id]) continue; for (const L of s.labels) { const r = store[key(s.id, L)] || {}; const t = !!r.touched;   // an untouched slider stays at 50 and is exported as 50 with touched=0
+    rows.push([q($("#who").value), q($("#gear").value), q(new Date().toISOString()), q(s.id), q(L), t ? r.closeness : 50, t ? 1 : 0, q((r.issues||[]).join("; ")), q(r.notes), q(r.mode||mode())].join(",")); } }
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([rows.join("\n")], {type: "text/csv"})); a.download = "fixed_gain_listening_results.csv"; a.click();
 };
 render();

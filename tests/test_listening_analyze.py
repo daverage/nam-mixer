@@ -29,3 +29,10 @@ def test_resolves_labels_and_ranks_models(tmp_path):
 def test_ignores_unknown_stimuli_and_labels(tmp_path):
     kp, cp = _fixture(tmp_path); key = json.loads(kp.read_text()); key.pop("S01")
     assert L.analyse(L.load([cp], key))["n_items"] == 7
+
+def test_untouched_sliders_are_scored_50(tmp_path):
+    kp, cp = _fixture(tmp_path); key = json.loads(kp.read_text()); rows = list(csv.DictReader(open(cp))); keep = [r for r in rows if not (r["stimulus_id"] == "S01" and key["S01"]["labels"][r["label"]] == "v3_C3")]
+    with open(cp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(keep)
+    a = L.analyse(L.load([cp], key, impute=50)); b = L.analyse(L.load([cp], key, impute=None))
+    assert a["n_ratings"] == 32 and b["n_ratings"] == 31
