@@ -1,6 +1,6 @@
 # Continuous Gain v3: real captures vs single trained NAMs
 
-One standard `.nam` per configuration (10, 5 or 3 captures, A2, 60 epochs, seed 0) driven only by input gain at frozen, designed gain positions, compared with the real per-gain captures on held-out DIs. `g5` is the real G5 capture pushed by the same input gains (baseline, not a goal). Deltas are candidate minus real capture (0 = matches). lmESR = level-matched error-to-signal ratio (captures are normalised, so level is compared separately). Single seed; no human listening has happened. Raw data: `work/cg/<amp>/report_<amp>.csv` (gitignored). Not yet included (still training): Peavey 6505+ Scooped (Gain 1-10), Mesa Dual Rectifier Modern Red (Gain 1-MAX), Orange Dual Terror Fat (G1-G10).
+One standard `.nam` per configuration (10, 5 or 3 captures, A2, 60 epochs, seed 0) driven only by input gain at frozen, designed gain positions, compared with the real per-gain captures on held-out DIs. `g5` is the real G5 capture pushed by the same input gains (baseline, not a goal). Deltas are candidate minus real capture (0 = matches). lmESR = level-matched error-to-signal ratio (captures are normalised, so level is compared separately). Single seed; no human listening has happened. Raw data: `work/cg/<amp>/report_<amp>.csv` (gitignored).
 
 ## Overview (integer gains, DI level 0 dB, mean of 3 held-out DIs)
 
@@ -11,18 +11,24 @@ One standard `.nam` per configuration (10, 5 or 3 captures, A2, 60 epochs, seed 
 | Fender Super-Sonic, Bassman channel (Volume 1-10) | 0.063 | 0.054 | 0.066 | 0.131 | 0.62 | 0.89 | 1.08 |
 | Fender Super-Sonic, Vibrolux channel (Volume 1-10) | 0.045 | 0.039 | 0.054 | 0.100 | 1.09 | 1.09 | 1.83 |
 | Peavey 5150 (Gain 1-10) | 0.171 | 0.212 | 0.124 | 0.252 | 0.56 | 0.86 | 0.82 |
+| Peavey 6505+ Scooped (Gain 1-10) | 0.220 | 0.205 | 0.227 | 0.441 | 0.54 | 0.84 | 0.64 |
+| Mesa Dual Rectifier Modern Red (Gain 1-MAX) | 0.259 | 0.320 | 0.251 | 0.503 | 1.54 | 1.56 | 1.10 |
+| Orange Dual Terror Fat (G1-G10) | 0.146 | 0.165 | 0.167 | 0.324 | 1.24 | 1.47 | 1.98 |
 
 Read with care: Peavey and Super-Sonic captures have timing offsets (see each amp's QA); heavily saturated material makes ESR a weak guide, so use the tone, EQ, saturation and dynamics columns as well. The Fender models compress and distort more than the real amp at high input levels (see each amp's saturation probe: out-level change for +24 dB input).
 
 ## Capture pre-screen (prototype, `scripts/cg_screen.py`)
 
-Flags captures that break the amp's smooth gain curve, timing offsets, and noisy captures. Nothing was excluded on any of the 5 amps below.
+Flags captures that break the amp's smooth gain curve, timing offsets, and noisy captures. Nothing was excluded on any of the 8 amps below.
 
 - **jcm800**: G8.5 NOTE: timing offset +690 samples vs the set (correctable by shifting; only some pipelines apply it automatically)
 - **twin**: no issues
 - **supersonic**: G1 NOTE: timing offset -21 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G10 WARN: noisy capture (silence renders at -49 dBFS)
 - **vibrolux**: no issues
 - **peavey**: G1 NOTE: timing offset -50 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G2 NOTE: timing offset -36 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G3 NOTE: timing offset -54 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G4 NOTE: timing offset -52 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G6 NOTE: timing offset +410 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G9 NOTE: timing offset +405 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G10 NOTE: timing offset +519 samples vs the set (correctable by shifting; only some pipelines apply it automatically)
+- **peavey6505**: no issues
+- **mesa**: no issues
+- **orange**: G7 WARN: noisy capture (silence renders at -44 dBFS); G9 NOTE: timing offset +24 samples vs the set (correctable by shifting; only some pipelines apply it automatically); G10 NOTE: timing offset +24 samples vs the set (correctable by shifting; only some pipelines apply it automatically)
 
 
 ## jcm800
@@ -549,3 +555,297 @@ Real capture progression (music at reference level, mean of DIs): RMS dBFS / HF>
 | 8 | -1.9 | -1.9 | -2.1 | -2.0 | -2.0 | 0.2 | -0.9 | -0.7 | -0.8 | 0.4 |
 | 9 | -2.0 | -1.9 | -2.2 | -1.9 | -2.1 | 0.1 | -1.0 | -0.8 | -0.7 | 0.3 |
 | 10 | -2.0 | -2.2 | -2.2 | -2.0 | -2.2 | 0.1 | -0.7 | -0.9 | -0.4 | 0.4 |
+
+
+## peavey6505
+
+**Capture QA.** Click latency median 12 samples; anomalies: none. Reversals in real-capture progression (integer gains; 0 = monotone): RMS 3, HF>3k 2, crest 3. Silence noise floor -92 to -52 dBFS.
+
+Real capture progression (music at reference level, mean of DIs): RMS dBFS / HF>3k dB / crest dB
+
+| Gain | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G9 | G10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RMS | -20.1 | -18.1 | -17.3 | -16.7 | -16.5 | -16.4 | -16.5 | -16.5 | -16.5 | -16.5 |
+| HF>3k | -10.6 | -9.1 | -8.1 | -7.4 | -7.0 | -6.5 | -6.6 | -6.8 | -7.0 | -6.9 |
+| crest | 14.8 | 13.6 | 13.2 | 13.0 | 13.0 | 13.1 | 13.4 | 13.2 | 13.5 | 13.8 |
+
+
+### peavey6505: new10 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.807 | 0.82 | 1.68 | -0.90 | +0.26 | -0.35 | +0.51 | +0.50 | +0.1 |
+| 2 | 0.155 | 0.34 | 0.26 | -0.08 | +0.13 | +0.38 | +1.51 | -0.13 | +0.3 |
+| 3 | 0.066 | 0.39 | 0.26 | -0.09 | -0.08 | +0.29 | +0.72 | -0.21 | +0.5 |
+| 4 | 0.079 | 0.35 | 0.69 | -0.30 | -0.43 | +0.03 | +0.15 | -0.38 | +0.1 |
+| 5 | 0.216 | 0.48 | 0.90 | -0.36 | -0.55 | -0.03 | -0.16 | -0.44 | +0.1 |
+| 6 | 0.261 | 0.83 | 1.57 | -1.29 | -0.98 | +0.05 | -0.10 | -0.60 | -0.2 |
+| 7 | 0.222 | 0.64 | 1.39 | -0.86 | -0.90 | -0.04 | -0.06 | -0.54 | -0.3 |
+| 8 | 0.162 | 0.54 | 1.24 | -0.52 | -0.66 | +0.29 | -0.07 | -0.41 | -0.2 |
+| 9 | 0.133 | 0.49 | 0.97 | -0.28 | -0.54 | +0.26 | +0.08 | -0.41 | +0.0 |
+| 10 | 0.098 | 0.57 | 1.04 | -0.44 | -0.67 | +0.85 | +0.33 | -0.23 | +0.3 |
+
+### peavey6505: new5 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.533 | 1.03 | 1.78 | -2.19 | -0.98 | -0.31 | -0.14 | -0.04 | +0.4 |
+| 2 | 0.227 | 0.41 | 0.68 | -0.71 | -0.44 | +0.47 | +1.71 | -0.43 | -1.0 |
+| 3 | 0.090 | 0.38 | 0.57 | -0.22 | -0.37 | +0.28 | +1.14 | -0.26 | +0.1 |
+| 4 | 0.077 | 0.61 | 0.93 | -0.38 | -0.68 | -0.01 | +0.32 | -0.33 | -0.1 |
+| 5 | 0.144 | 0.73 | 1.31 | -0.76 | -0.90 | -0.02 | +0.21 | -0.33 | -0.2 |
+| 6 | 0.376 | 0.90 | 1.78 | -1.58 | -1.25 | +0.22 | -0.09 | -0.38 | -0.5 |
+| 7 | 0.118 | 0.81 | 1.87 | -0.81 | -1.20 | -0.19 | -0.18 | -0.33 | -0.3 |
+| 8 | 0.209 | 0.79 | 1.94 | -0.68 | -1.17 | +0.42 | +0.14 | -0.30 | -0.6 |
+| 9 | 0.189 | 0.70 | 1.49 | -0.40 | -1.00 | +0.10 | +0.29 | -0.29 | -0.4 |
+| 10 | 0.087 | 0.60 | 1.18 | -0.41 | -0.90 | +0.12 | +0.34 | -0.11 | -0.3 |
+
+### peavey6505: new3 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.072 | 1.22 | 1.66 | -2.14 | -1.50 | -0.84 | -0.94 | -0.48 | -0.4 |
+| 2 | 0.436 | 1.51 | 2.93 | -3.56 | -2.48 | +0.39 | +0.55 | -1.48 | -1.7 |
+| 3 | 0.281 | 1.06 | 1.73 | -2.28 | -1.48 | +0.89 | +1.29 | -1.08 | -1.7 |
+| 4 | 0.125 | 0.43 | 0.72 | -0.96 | -0.84 | +0.64 | +0.86 | -0.70 | -0.6 |
+| 5 | 0.065 | 0.39 | 0.72 | -0.62 | -0.69 | +0.39 | +0.34 | -0.54 | +0.2 |
+| 6 | 0.423 | 0.86 | 1.75 | -1.76 | -1.33 | +0.44 | +0.04 | -0.73 | -0.7 |
+| 7 | 0.326 | 1.01 | 2.26 | -1.76 | -1.72 | +0.39 | -0.07 | -0.77 | -2.4 |
+| 8 | 0.273 | 0.87 | 1.89 | -1.38 | -1.44 | +0.59 | +0.19 | -0.59 | -2.3 |
+| 9 | 0.194 | 0.58 | 1.22 | -0.69 | -0.84 | +0.45 | +0.28 | -0.43 | -0.4 |
+| 10 | 0.073 | 0.47 | 0.83 | -0.58 | -0.60 | +0.11 | +0.31 | -0.18 | -0.3 |
+
+### peavey6505: g5 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.892 | 0.62 | 1.04 | -0.61 | +0.14 | -0.36 | -1.07 | +0.57 | +1.1 |
+| 2 | 0.043 | 0.51 | 0.84 | -0.51 | -0.53 | +0.23 | +0.67 | -0.44 | -0.4 |
+| 3 | 0.130 | 0.62 | 1.10 | -0.68 | -0.81 | +0.21 | +0.62 | -0.56 | -0.2 |
+| 4 | 0.112 | 0.57 | 1.15 | -0.72 | -0.92 | +0.35 | +0.46 | -0.57 | -0.3 |
+| 5 | 0.075 | 0.42 | 0.85 | -0.43 | -0.68 | +0.26 | +0.36 | -0.36 | -0.2 |
+| 6 | 0.483 | 0.58 | 1.23 | -0.59 | -0.69 | -0.08 | +0.24 | -0.24 | -0.4 |
+| 7 | 0.509 | 0.65 | 1.56 | +0.68 | -0.27 | -0.45 | +0.06 | +0.01 | -0.2 |
+| 8 | 0.664 | 0.74 | 1.84 | +1.59 | +0.24 | +0.01 | +0.04 | +0.21 | -0.0 |
+| 9 | 0.754 | 0.89 | 2.06 | +2.08 | +0.54 | -0.32 | +0.07 | +0.21 | +0.3 |
+| 10 | 0.746 | 0.83 | 1.64 | +1.68 | +0.48 | -0.24 | +0.11 | +0.25 | +0.2 |
+
+### peavey6505: DI level sweep (integer gains; mean lmESR / tone err dB)
+
+| DI offset dB | new10 | new5 | new3 | g5 |
+|---:|---:|---:|---:|---:|
+| -12 | 0.320 / 0.84 | 0.383 / 1.16 | 0.524 / 1.10 | 0.379 / 0.99 |
+| -6 | 0.187 / 0.57 | 0.220 / 0.84 | 0.352 / 0.89 | 0.407 / 0.78 |
+| +0 | 0.220 / 0.54 | 0.205 / 0.70 | 0.227 / 0.84 | 0.441 / 0.64 |
+| +6 | 0.341 / 0.84 | 0.306 / 0.77 | 0.252 / 0.91 | 0.489 / 0.62 |
+
+### peavey6505: saturation probe (sine THD dB @ 0 dB / compression: out level change for +24 dB in, at 440 Hz)
+
+| Gain | real THD | new10 THD | new5 THD | new3 THD | g5 THD | real dOut | new10 dOut | new5 dOut | new3 dOut | g5 dOut |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | -6.7 | -6.6 | -6.3 | -7.1 | -5.6 | 6.5 | 6.8 | 6.3 | 6.8 | 4.8 |
+| 2 | -3.5 | -3.3 | -4.5 | -5.2 | -4.0 | 2.2 | 4.0 | 3.4 | 3.9 | 2.9 |
+| 3 | -3.1 | -2.7 | -3.1 | -4.9 | -3.3 | 1.5 | 2.0 | 1.8 | 2.2 | 2.1 |
+| 4 | -2.8 | -2.7 | -2.9 | -3.4 | -3.1 | 1.0 | 1.2 | 1.8 | 0.8 | 1.5 |
+| 5 | -2.8 | -2.8 | -3.0 | -2.7 | -3.0 | 0.5 | 0.5 | 0.7 | 0.5 | 1.2 |
+| 6 | -2.5 | -2.7 | -3.0 | -3.2 | -3.0 | 0.1 | 0.1 | 0.2 | 1.0 | 0.7 |
+| 7 | -2.5 | -2.7 | -2.8 | -4.9 | -2.7 | 0.0 | 0.1 | 0.6 | 0.8 | 0.3 |
+| 8 | -2.5 | -2.6 | -3.1 | -4.8 | -2.5 | 0.2 | 0.2 | 1.1 | 0.5 | -0.3 |
+| 9 | -2.7 | -2.7 | -3.1 | -3.1 | -2.4 | 0.1 | 1.3 | 1.9 | 0.4 | -0.8 |
+| 10 | -2.8 | -2.6 | -3.1 | -3.1 | -2.7 | -0.0 | 2.7 | 1.8 | 1.1 | -0.7 |
+
+
+## mesa
+
+**Capture QA.** Click latency median 17 samples; anomalies: none. Reversals in real-capture progression (integer gains; 0 = monotone): RMS 2, HF>3k 1, crest 3. Silence noise floor -89 to -62 dBFS.
+
+Real capture progression (music at reference level, mean of DIs): RMS dBFS / HF>3k dB / crest dB
+
+| Gain | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G9 | G10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RMS | -23.8 | -18.2 | -16.5 | -17.0 | -16.5 | -16.1 | -15.9 | -15.7 | -15.5 | -15.3 |
+| HF>3k | -13.9 | -11.1 | -10.0 | -9.4 | -9.1 | -9.0 | -9.1 | -9.5 | -9.9 | -10.1 |
+| crest | 17.7 | 14.6 | 13.8 | 13.6 | 13.7 | 13.8 | 13.8 | 14.0 | 13.9 | 14.0 |
+
+
+### mesa: new10 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.410 | 2.52 | 3.61 | -0.74 | +1.45 | -1.34 | +1.64 | +2.00 | +1.2 |
+| 2 | 0.806 | 1.21 | 0.93 | -1.23 | -0.29 | -0.05 | +4.46 | -0.85 | -1.4 |
+| 3 | 0.126 | 0.91 | 0.59 | -0.65 | -0.37 | +0.05 | +2.28 | -1.25 | -0.0 |
+| 4 | 0.099 | 0.93 | 0.86 | -0.66 | -0.56 | +0.35 | +0.95 | -0.08 | +0.2 |
+| 5 | 0.123 | 0.92 | 1.16 | -0.97 | -0.77 | +0.23 | -0.24 | -0.21 | +0.3 |
+| 6 | 0.136 | 1.10 | 1.62 | -1.07 | -0.95 | -0.09 | -0.35 | -0.33 | -0.0 |
+| 7 | 0.201 | 1.46 | 1.99 | -1.48 | -1.22 | +0.09 | -0.23 | -0.24 | -0.1 |
+| 8 | 0.194 | 1.74 | 2.71 | -1.95 | -1.68 | -0.04 | +0.02 | -0.32 | -0.4 |
+| 9 | 0.292 | 2.12 | 3.66 | -2.40 | -2.34 | -0.14 | +0.21 | -0.30 | -0.5 |
+| 10 | 0.203 | 2.51 | 4.26 | -2.14 | -2.78 | -0.46 | +0.51 | -0.29 | -0.5 |
+
+### mesa: new5 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.742 | 2.54 | 4.60 | -0.44 | +1.69 | -0.07 | +1.97 | +0.92 | -4.1 |
+| 2 | 1.058 | 0.88 | 0.62 | -0.35 | +0.35 | +0.62 | +5.71 | -1.02 | -4.2 |
+| 3 | 0.072 | 0.70 | 0.45 | -0.43 | -0.16 | -0.01 | +3.43 | -0.98 | -0.0 |
+| 4 | 0.064 | 0.86 | 1.13 | -0.70 | -0.65 | +0.13 | +1.46 | +0.18 | +0.3 |
+| 5 | 0.105 | 0.97 | 1.71 | -1.17 | -1.08 | +0.04 | +0.45 | -0.12 | +0.2 |
+| 6 | 0.130 | 0.99 | 1.62 | -1.23 | -1.08 | +0.07 | +0.02 | -0.33 | +0.1 |
+| 7 | 0.106 | 1.18 | 1.54 | -1.83 | -1.14 | +0.15 | +0.26 | -0.52 | +0.4 |
+| 8 | 0.329 | 1.53 | 2.17 | -2.30 | -1.64 | -0.05 | +0.41 | -0.75 | +0.1 |
+| 9 | 0.429 | 1.75 | 2.83 | -1.92 | -1.93 | -0.49 | +0.37 | -0.59 | -0.1 |
+| 10 | 0.163 | 1.93 | 3.15 | -1.24 | -1.87 | +0.03 | +0.18 | -0.44 | -0.6 |
+
+### mesa: new3 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.126 | 1.69 | 2.43 | -2.22 | -0.81 | -1.54 | -1.56 | -0.53 | +0.2 |
+| 2 | 0.498 | 2.02 | 2.89 | -3.73 | -1.97 | +0.64 | +2.62 | -3.71 | -6.2 |
+| 3 | 0.215 | 1.35 | 1.70 | -2.42 | -1.09 | +0.84 | +3.34 | -2.95 | -4.5 |
+| 4 | 0.098 | 0.92 | 0.90 | -1.15 | -0.55 | +0.26 | +2.09 | -0.79 | -1.7 |
+| 5 | 0.049 | 0.74 | 0.81 | -1.03 | -0.52 | +0.05 | +0.63 | -0.58 | +0.2 |
+| 6 | 0.190 | 1.14 | 1.48 | -1.89 | -1.07 | -0.10 | +0.37 | -0.80 | +0.0 |
+| 7 | 0.361 | 1.85 | 2.48 | -3.30 | -1.96 | -0.25 | +0.43 | -0.90 | -0.7 |
+| 8 | 0.409 | 1.99 | 2.87 | -3.18 | -2.34 | -0.80 | +0.49 | -0.86 | -1.2 |
+| 9 | 0.437 | 1.88 | 2.82 | -2.29 | -2.13 | -0.57 | +0.30 | -0.63 | -0.9 |
+| 10 | 0.126 | 1.97 | 2.77 | -1.49 | -1.88 | -0.35 | +0.18 | -0.54 | -0.5 |
+
+### mesa: g5 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1.111 | 1.13 | 2.33 | -1.57 | -0.03 | -1.63 | -2.88 | +1.29 | +5.6 |
+| 2 | 1.104 | 1.17 | 2.56 | -1.90 | -1.71 | +0.41 | +0.90 | -2.48 | -1.5 |
+| 3 | 0.088 | 1.11 | 2.57 | -1.79 | -1.72 | +0.56 | +1.27 | -2.82 | -1.5 |
+| 4 | 0.071 | 0.96 | 2.16 | -1.35 | -1.46 | +0.19 | +1.00 | -1.24 | -0.6 |
+| 5 | 0.045 | 0.56 | 1.47 | -0.65 | -0.98 | +0.05 | +0.65 | -0.89 | -0.2 |
+| 6 | 0.174 | 0.58 | 1.38 | +0.42 | -0.35 | +0.11 | +0.51 | -0.61 | -0.0 |
+| 7 | 0.322 | 0.69 | 1.30 | +1.38 | +0.36 | -0.22 | +0.17 | -0.31 | -0.2 |
+| 8 | 0.562 | 1.18 | 2.19 | +2.72 | +1.20 | -0.53 | -0.14 | -0.22 | -0.2 |
+| 9 | 0.686 | 1.61 | 2.86 | +3.79 | +1.87 | -0.46 | -0.50 | -0.11 | -0.2 |
+| 10 | 0.862 | 2.03 | 3.45 | +4.64 | +2.35 | -0.40 | -0.87 | -0.05 | -0.2 |
+
+### mesa: DI level sweep (integer gains; mean lmESR / tone err dB)
+
+| DI offset dB | new10 | new5 | new3 | g5 |
+|---:|---:|---:|---:|---:|
+| -12 | 0.430 / 1.74 | 0.351 / 1.58 | 0.444 / 2.38 | 0.503 / 1.60 |
+| -6 | 0.204 / 1.26 | 0.218 / 1.04 | 0.274 / 1.63 | 0.500 / 1.32 |
+| +0 | 0.259 / 1.54 | 0.320 / 1.33 | 0.251 / 1.56 | 0.503 / 1.10 |
+| +6 | 0.466 / 2.15 | 0.463 / 1.89 | 0.392 / 2.08 | 0.515 / 1.00 |
+
+### mesa: saturation probe (sine THD dB @ 0 dB / compression: out level change for +24 dB in, at 440 Hz)
+
+| Gain | real THD | new10 THD | new5 THD | new3 THD | g5 THD | real dOut | new10 dOut | new5 dOut | new3 dOut | g5 dOut |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | -14.1 | -12.9 | -18.2 | -13.9 | -8.5 | 17.6 | 18.9 | 18.4 | 16.6 | 13.6 |
+| 2 | -3.8 | -5.2 | -8.0 | -10.0 | -5.3 | 8.8 | 15.6 | 14.6 | 14.3 | 10.6 |
+| 3 | -1.6 | -1.6 | -1.6 | -6.0 | -3.0 | 4.8 | 11.9 | 10.8 | 10.9 | 7.8 |
+| 4 | -1.1 | -0.9 | -0.8 | -2.8 | -1.7 | 3.6 | 7.8 | 8.2 | 7.2 | 5.3 |
+| 5 | -1.0 | -0.8 | -0.9 | -0.9 | -1.2 | 2.8 | 2.1 | 3.7 | 3.9 | 4.0 |
+| 6 | -1.0 | -1.0 | -0.9 | -1.0 | -1.0 | 2.2 | 1.2 | 0.5 | 2.7 | 3.2 |
+| 7 | -0.9 | -1.0 | -0.5 | -1.6 | -1.1 | 1.8 | 0.7 | 0.5 | 1.5 | 2.5 |
+| 8 | -0.9 | -1.3 | -0.7 | -2.1 | -1.1 | 1.6 | 0.1 | 0.3 | -0.1 | 2.0 |
+| 9 | -0.7 | -1.2 | -0.8 | -1.6 | -0.9 | 1.4 | -0.3 | 0.4 | -1.3 | 1.5 |
+| 10 | -0.6 | -1.1 | -1.1 | -1.1 | -0.8 | 1.2 | 2.0 | 0.3 | -1.9 | 1.0 |
+
+
+## orange
+
+**Capture QA.** Click latency median 6 samples; anomalies: {'9.0': 30, '10.0': 30}. Reversals in real-capture progression (integer gains; 0 = monotone): RMS 3, HF>3k 0, crest 4. Silence noise floor -86 to -44 dBFS.
+
+Real capture progression (music at reference level, mean of DIs): RMS dBFS / HF>3k dB / crest dB
+
+| Gain | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G9 | G10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| RMS | -34.1 | -23.8 | -20.1 | -19.2 | -19.0 | -19.3 | -19.0 | -18.0 | -18.2 | -18.4 |
+| HF>3k | -19.1 | -18.1 | -15.2 | -13.9 | -12.8 | -11.5 | -9.7 | -8.3 | -7.5 | -7.4 |
+| crest | 22.3 | 15.5 | 13.2 | 12.8 | 12.7 | 12.5 | 12.7 | 12.2 | 12.8 | 12.5 |
+
+
+### orange: new10 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.181 | 5.63 | 8.35 | +0.72 | +1.14 | -6.91 | +7.50 | +7.51 | +15.9 |
+| 2 | 0.102 | 3.10 | 6.34 | -0.00 | +1.58 | -2.57 | +6.12 | +1.13 | -1.0 |
+| 3 | 0.040 | 0.48 | 0.75 | -0.05 | +0.12 | -1.84 | +5.87 | -0.57 | +3.8 |
+| 4 | 0.032 | 0.33 | 0.26 | -0.18 | -0.15 | -2.13 | +3.39 | -0.58 | +0.5 |
+| 5 | 0.112 | 0.52 | 0.71 | -0.88 | -0.72 | -1.07 | +0.19 | -0.66 | +0.5 |
+| 6 | 0.375 | 0.36 | 0.48 | -0.40 | -0.44 | -0.18 | -0.30 | -0.12 | -0.7 |
+| 7 | 0.166 | 0.33 | 0.55 | -0.01 | -0.34 | -0.56 | +0.27 | +0.12 | -0.4 |
+| 8 | 0.157 | 0.50 | 1.24 | -0.18 | -0.75 | +0.08 | +0.13 | -0.56 | -0.1 |
+| 9 | 0.197 | 0.60 | 1.56 | -0.67 | -1.06 | +0.43 | +0.26 | -0.18 | +0.0 |
+| 10 | 0.093 | 0.49 | 1.07 | -0.29 | -0.67 | +1.73 | +0.42 | +0.19 | -0.0 |
+
+### orange: new5 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.201 | 6.07 | 9.03 | +1.67 | +2.24 | -6.56 | +7.87 | +6.92 | +19.1 |
+| 2 | 0.117 | 3.10 | 6.26 | +0.19 | +1.77 | -2.58 | +7.27 | +0.92 | +12.0 |
+| 3 | 0.039 | 0.50 | 0.81 | -0.15 | -0.13 | -1.66 | +6.59 | -0.61 | +2.8 |
+| 4 | 0.041 | 0.62 | 1.31 | -0.87 | -0.93 | -2.07 | +3.61 | -0.57 | +0.0 |
+| 5 | 0.169 | 0.78 | 1.53 | -1.78 | -1.66 | -1.83 | +0.21 | -0.55 | +0.1 |
+| 6 | 0.417 | 0.52 | 0.91 | -1.06 | -1.10 | -1.68 | -0.80 | -0.06 | -1.8 |
+| 7 | 0.113 | 0.83 | 2.14 | -1.18 | -1.64 | -1.42 | -0.56 | -0.21 | -0.1 |
+| 8 | 0.201 | 0.91 | 2.28 | -1.24 | -1.81 | +0.11 | -0.06 | -0.99 | -0.1 |
+| 9 | 0.263 | 0.80 | 1.75 | -1.33 | -1.53 | -0.21 | +0.28 | -0.45 | -0.3 |
+| 10 | 0.089 | 0.58 | 1.08 | -0.69 | -0.94 | +0.30 | +0.38 | -0.02 | -0.1 |
+
+### orange: new3 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.115 | 6.27 | 8.83 | +1.80 | +1.83 | -2.79 | +3.46 | +2.31 | +8.9 |
+| 2 | 0.125 | 3.44 | 6.99 | +0.64 | +1.79 | +0.91 | +6.24 | -2.64 | +4.0 |
+| 3 | 0.095 | 0.80 | 1.41 | +0.03 | +0.15 | +1.45 | +9.96 | -2.56 | +1.7 |
+| 4 | 0.049 | 0.36 | 0.63 | -0.22 | -0.15 | +0.28 | +6.79 | -1.29 | +0.3 |
+| 5 | 0.036 | 0.46 | 1.34 | -0.66 | -0.74 | -0.34 | +3.13 | -0.55 | +0.1 |
+| 6 | 0.104 | 0.80 | 2.32 | -1.47 | -1.70 | -0.52 | +0.70 | +0.08 | -1.2 |
+| 7 | 0.438 | 0.93 | 2.22 | -1.96 | -2.13 | -0.56 | +0.02 | -0.04 | -1.4 |
+| 8 | 0.333 | 0.73 | 1.53 | -1.46 | -1.59 | +0.51 | +0.04 | -0.80 | -2.0 |
+| 9 | 0.317 | 0.55 | 1.29 | -1.24 | -1.11 | +0.73 | +0.29 | -0.29 | -1.7 |
+| 10 | 0.059 | 0.37 | 0.89 | -0.45 | -0.52 | +2.29 | +0.33 | +0.08 | -0.4 |
+
+### orange: g5 vs real capture (music, DI level 0 dB; mean of 3 held-out DIs; deltas = candidate - real)
+
+| Gain | lmESR | tone err dB | max EQ band Δ dB | tilt Δ | HF>3k Δ | crest Δ | dyn-range Δ | level Δ dB | THD@440 Δ dB |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.189 | 5.02 | 5.82 | +0.71 | +0.71 | -6.17 | -1.66 | +7.58 | +5.1 |
+| 2 | 0.043 | 2.06 | 3.15 | +0.04 | +0.60 | -0.50 | -1.92 | -0.37 | +0.3 |
+| 3 | 0.038 | 1.16 | 2.59 | -0.75 | -1.36 | +1.00 | +2.51 | -2.19 | -5.2 |
+| 4 | 0.057 | 1.39 | 2.90 | -1.13 | -1.57 | +0.67 | +2.46 | -1.69 | -9.6 |
+| 5 | 0.050 | 1.17 | 2.56 | -1.27 | -1.55 | +0.22 | +1.60 | -0.98 | -6.5 |
+| 6 | 0.089 | 1.34 | 2.78 | -1.57 | -1.85 | +0.09 | +1.34 | +0.01 | -4.8 |
+| 7 | 0.631 | 1.77 | 3.74 | -2.28 | -2.65 | -0.05 | +1.23 | +0.27 | -2.7 |
+| 8 | 0.650 | 1.94 | 4.57 | -2.87 | -3.19 | +0.30 | +0.92 | -0.34 | -1.4 |
+| 9 | 0.780 | 2.08 | 4.65 | -3.60 | -3.42 | -0.34 | +0.68 | +0.14 | -0.7 |
+| 10 | 0.713 | 1.86 | 3.93 | -3.36 | -2.99 | -0.09 | +0.48 | +0.42 | -0.6 |
+
+### orange: DI level sweep (integer gains; mean lmESR / tone err dB)
+
+| DI offset dB | new10 | new5 | new3 | g5 |
+|---:|---:|---:|---:|---:|
+| -12 | 0.230 / 1.70 | 0.210 / 1.91 | 0.246 / 1.96 | 0.253 / 2.26 |
+| -6 | 0.136 / 1.30 | 0.133 / 1.67 | 0.187 / 1.63 | 0.287 / 2.09 |
+| +0 | 0.146 / 1.24 | 0.165 / 1.47 | 0.167 / 1.47 | 0.324 / 1.98 |
+| +6 | 0.280 / 1.52 | 0.284 / 1.61 | 0.215 / 1.55 | 0.361 / 1.80 |
+
+### orange: saturation probe (sine THD dB @ 0 dB / compression: out level change for +24 dB in, at 440 Hz)
+
+| Gain | real THD | new10 THD | new5 THD | new3 THD | g5 THD | real dOut | new10 dOut | new5 dOut | new3 dOut | g5 dOut |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | -39.2 | -23.3 | -20.1 | -30.3 | -34.1 | 23.4 | 27.7 | 29.6 | 26.7 | 18.5 |
+| 2 | -29.2 | -30.2 | -17.2 | -25.2 | -28.9 | 18.5 | 23.9 | 26.1 | 24.2 | 15.2 |
+| 3 | -18.6 | -14.8 | -15.8 | -16.9 | -23.8 | 7.9 | 19.8 | 21.2 | 20.6 | 11.9 |
+| 4 | -11.0 | -10.5 | -11.0 | -10.7 | -20.6 | 4.2 | 14.5 | 15.6 | 16.3 | 8.7 |
+| 5 | -7.7 | -7.2 | -7.6 | -7.6 | -14.2 | 2.8 | 5.1 | 3.5 | 10.6 | 5.8 |
+| 6 | -4.6 | -5.2 | -6.4 | -5.8 | -9.4 | 1.6 | 0.8 | 0.3 | 4.5 | 3.6 |
+| 7 | -3.7 | -4.1 | -3.8 | -5.1 | -6.4 | 0.9 | 0.6 | 0.1 | 1.6 | 2.3 |
+| 8 | -3.4 | -3.5 | -3.5 | -5.4 | -4.8 | 0.4 | 0.8 | -0.0 | 0.7 | 1.6 |
+| 9 | -3.1 | -3.1 | -3.4 | -4.8 | -3.9 | -0.3 | 1.3 | 0.6 | 0.8 | 1.0 |
+| 10 | -3.0 | -3.0 | -3.1 | -3.4 | -3.6 | -0.1 | 1.9 | 1.3 | 1.8 | 0.0 |
