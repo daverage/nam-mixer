@@ -2702,6 +2702,7 @@ function renderLocalDownloadResult(designId, validationReport = null, downloadFi
   const finalFilename = embeddedValidated ? embeddedFilename : namFilename;
   completedNamArtifact = { type: "local", designId, downloadUrl: finalDownloadUrl, filename: finalFilename, embeddedArtifact };
   completedValidationReport = validationReport;
+  document.dispatchEvent(new CustomEvent("nam:training-complete", { detail: { designId } }));
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
@@ -2892,6 +2893,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   const finalDownloadUrl = embeddedValidated ? `${downloadUrl}&artifact=embedded` : downloadUrl;
   const finalFilename = embeddedValidated ? embeddedFilename : namFilename;
   completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl: finalDownloadUrl, filename: finalFilename, toolPath: data.output_nam_path || null, embeddedArtifact: data.embedded_artifact || null };
+  document.dispatchEvent(new CustomEvent("nam:training-complete", { detail: { designId } }));
   completedValidationReport = data.local_validation?.validation_report || null;
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
@@ -3418,7 +3420,7 @@ async function persistActiveSession() {
 function sessionSummary(session) {
   const settings = session.settings || {};
   const amps = [settings.ampA?.label, settings.ampB?.label].filter(Boolean).join(" / ") || "No amps selected";
-  const mode = { hybrid: "Dynamic Hybrid", blend: "Parallel Blend", character: "Character Blend" }[settings.mode] || "Unknown mode";
+  const mode = { hybrid: "Dynamic Hybrid", blend: "Parallel Blend", character: "Character Blend", continuous_gain: "Continuous Gain" }[settings.mode] || "Unknown mode";
   return { amps, mode, di: settings.diFile || "No test performance", artifact: session.artifact, validation: session.validationReport || null };
 }
 
@@ -3496,7 +3498,11 @@ async function renderSessions() {
     const date = new Date(session.savedAt);
     saved.dateTime = Number.isNaN(date.valueOf()) ? "" : date.toISOString();
     saved.textContent = Number.isNaN(date.valueOf()) ? "Unknown save time" : date.toLocaleString();
-    heading.append(name, saved);
+    const isContinuousGain = session.settings?.mode === "continuous_gain";
+    const kind = document.createElement("span");            // what this session IS: its workflow (and so which tab Load opens)
+    kind.className = `cost-badge ${isContinuousGain ? "cost-badge-auto" : "cost-badge-instant"} session-kind`;
+    kind.textContent = summary.mode;
+    heading.append(name, kind, saved);
     const actions = document.createElement("div"); actions.className = "session-card-actions";
     const details = document.createElement("div"); details.className = "session-details"; details.hidden = true;
     const settings = session.settings || {};
@@ -3508,12 +3514,22 @@ async function renderSessions() {
     const validationText = summary.validation
       ? ` · Validation: ${summary.validation.state || "unavailable"} — ${summary.validation.summary || "no summary"}`
       : summary.artifact ? " · Validation report unavailable" : "";
+    if (isContinuousGain) {
+      const cg = settings.continuousGain || {};
+      const stage = { captures: "captures added", analysed: "analysed", planned: "training plan ready", files: "training files created", trained: "trained", validated: "trained and validated" }[cg.stage] || cg.stage;
+      details.textContent = `Workflow: Continuous Gain (one amp → one NAM) · Amp: ${[cg.amp, cg.channel].filter(Boolean).join(" ") || "—"} · ${cg.captures ?? 0} captures · Selected: ${cg.selected ? cg.selected.map((g) => "G" + g).join(", ") : "not planned yet"} · Input gain anchors: ${cg.anchors ? cg.anchors.join(", ") + " dB" : "—"} · Stage: ${stage}${cg.backend ? ` · Trained on: ${cg.backend}${cg.epochs ? ` (${cg.epochs} epochs)` : ""}` : ""}${validationText}`;
+    } else
     details.textContent = `Mode: ${summary.mode} · Amps: ${summary.amps} · Test performance: ${summary.di} · Input profile: ${settings.inputProfileId || "—"} · ${shape} · Level match: ${settings.autoLevelMatch ? "on" : "off"} · Cabinet: ${settings.cab?.path ? "selected" : "off"}${summary.artifact ? ` · NAM: ${summary.artifact.filename || "available"}` : " · No completed NAM recorded"}${validationText}`;
     const detailButton = document.createElement("button"); detailButton.type = "button"; detailButton.className = "btn btn-secondary btn-small"; detailButton.textContent = "Details";
     detailButton.addEventListener("click", () => { details.hidden = !details.hidden; detailButton.textContent = details.hidden ? "Details" : "Hide details"; });
     const loadButton = document.createElement("button"); loadButton.type = "button"; loadButton.className = "btn btn-primary btn-small"; loadButton.textContent = "Load";
     loadButton.addEventListener("click", () => {
       try {
+        if (isContinuousGain) {              // a Continuous Gain project opens in its own tab, not in the Builder
+          setSessionsOpen(false);
+          window.namContinuousGain.open(session.id);
+          return;
+        }
         applySessionSettings(session.settings);
         lastDesignId = session.designId || null;
         completedNamArtifact = session.artifact || null;
@@ -4532,3 +4548,52 @@ document.getElementById("btn-tool-metadata").addEventListener("click", async () 
 // previously-saved preference immediately, without requiring a detour
 // through the Settings tab first.
 loadSettings();
+
+// --- Lending the training section to another workflow (Continuous Gain) ------------------------------
+// The Kaggle / local training UI above (settings, connection + environment setup, progress, logs, results) is bound to
+// `lastDesignId`. Rather than re-implementing it, another tab can host THIS section for its own design: attach() moves the
+// section into the given element and points it at that design; detach() puts everything back exactly as the Builder had it.
+// One training at a time, as in the Builder. Completion is announced with the "nam:training-complete" document event.
+const trainingHost = (() => {
+  const section = document.getElementById("a2-training-section");
+  let home = null;
+  let saved = null;
+  let hostedDesign = null;
+  return {
+    attach(hostEl, designId) {
+      if (hostedDesign === designId) {
+        if (section.parentElement !== hostEl) hostEl.appendChild(section);
+        syncTrainingControls();
+        return true;
+      }
+      if (trainingIsActive() && lastDesignId !== designId) return false;
+      if (!hostedDesign) {
+        home = { parent: section.parentElement, next: section.nextSibling };
+        saved = { lastDesignId, completedNamArtifact, completedValidationReport, activeSessionId, activeSessionName, activeSessionGenerated };
+      }
+      hostedDesign = designId;
+      lastDesignId = designId;
+      completedNamArtifact = null;
+      completedValidationReport = null;
+      activeSessionId = null;
+      activeSessionName = null;
+      activeSessionGenerated = false;
+      hostEl.appendChild(section);
+      kaggleResultEl.hidden = true;
+      localResultEl.hidden = true;
+      syncTrainingControls();
+      refreshKaggleStatus();
+      refreshLocalTraining();
+      return true;
+    },
+    detach() {
+      if (!hostedDesign) return;
+      home.parent.insertBefore(section, home.next);
+      ({ lastDesignId, completedNamArtifact, completedValidationReport, activeSessionId, activeSessionName, activeSessionGenerated } = saved);
+      hostedDesign = null;
+      syncTrainingControls();
+      syncComparisonPanel();
+    },
+  };
+})();
+window.namTrainingHost = trainingHost;

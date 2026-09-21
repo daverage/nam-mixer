@@ -5,13 +5,11 @@
   const tab = document.getElementById("tab-cg");
   if (!panel || !tab) return;
   const body = document.getElementById("cg-body");
-  const msg = document.getElementById("cg-message");
-  const picker = document.getElementById("cg-project-select");
 
-  const S = { pollGen: 0, projects: [], id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard" };
+  const S = { id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard" };
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
-  const say = (t, bad) => { msg.textContent = t || ""; msg.classList.toggle("is-error", Boolean(bad)); };
+  const say = (t, bad) => setStatus(t || "", Boolean(bad));       // the app-wide status line (app.js), not a second message area
 
   async function api(path, opts = {}) {
     const init = { method: opts.method || "GET", headers: {} };
@@ -37,23 +35,15 @@
       });
       document.querySelectorAll(".workflow-nav, .layout").forEach((el) => { el.hidden = true; });
       const md = document.getElementById("mode-description"); if (md) md.hidden = true;
-      refreshList();
     }
   }
   tab.addEventListener("click", () => setOpen(true));
+  const closeTab = () => { window.namTrainingHost.detach(); setOpen(false); };
   document.querySelectorAll(".utility-tabs .mode-tab").forEach((b) => {
-    if (b !== tab) b.addEventListener("click", () => { if (!panel.hidden) setOpen(false); }, true);
+    if (b !== tab) b.addEventListener("click", () => { if (!panel.hidden) closeTab(); }, true);
   });
 
-  // ---------- projects
-  async function refreshList(selectId) {
-    const list = await api("/api/cg/projects");
-    if (selectId === undefined && S.id !== null && loadSeq > 0 && document.activeElement === document.getElementById("cg-new-project")) return;
-    S.projects = list;
-    picker.innerHTML = S.projects.length ? S.projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${p.amp ? " · " + esc(p.amp) : ""}</option>`).join("") : `<option value="">No projects yet</option>`;
-    const id = selectId || (S.projects.find((p) => p.id === S.id) ? S.id : (S.projects[0] && S.projects[0].id));
-    if (id) { picker.value = id; await load(id); } else { S.id = null; S.data = null; render(); }
-  }
+  // ---------- projects (listed, loaded, exported and deleted through the Sessions tab; the tab only creates and opens them)
   let loadSeq = 0;
   async function load(id) {
     S.id = id;
@@ -61,18 +51,29 @@
     const data = await api(`/api/cg/projects/${id}`);
     if (mine !== loadSeq) return;            // a newer load (e.g. the project the user just created) superseded this response
     S.data = data;
+    document.getElementById("cg-current-name").textContent = data.project.name;
     render();
   }
-  picker.addEventListener("change", () => load(picker.value));
   document.getElementById("cg-new-project").addEventListener("click", async () => {
     const name = window.prompt("Project name (e.g. the amp and channel)");
     if (!name) return;
-    try { const d = await api("/api/cg/projects", { method: "POST", json: { name } }); await refreshList(d.project.id); S.stage = 1; render(); } catch (e) { say(e.message, true); }
+    try { const d = await api("/api/cg/projects", { method: "POST", json: { name } }); S.stage = 1; await load(d.project.id); } catch (e) { say(e.message, true); }
   });
-  document.getElementById("cg-delete-project").addEventListener("click", async () => {
-    if (!S.id || !(await desktopConfirm("Delete this Continuous Gain project and its uploaded captures? Generated training files stay in the app's work folder."))) return;
-    try { await api(`/api/cg/projects/${S.id}`, { method: "DELETE" }); S.id = null; await refreshList(); } catch (e) { say(e.message, true); }
-  });
+  document.getElementById("cg-open-sessions").addEventListener("click", () => document.getElementById("tab-sessions").click());
+  // Sessions -> Load calls this: switch to this tab and open that project (the session id is the project id).
+  window.namContinuousGain = {
+    async open(projectId) {
+      setOpen(true);
+      try {
+        S.stage = 1;
+        await load(projectId);
+        const st = S.data.project;
+        S.stage = S.data.training && S.data.training.trained ? 4 : S.data.bundle ? 3 : S.data.plan ? 2 : S.data.analysis ? 2 : 1;
+        render();
+        say(`Opened ${st.name}.`);
+      } catch (e) { say(`Could not open this project: ${e.message}. Its working files are not on this computer (a session file carries the trained model, not the captures).`, true); }
+    },
+  };
   document.getElementById("cg-steps").addEventListener("click", (e) => {
     const b = e.target.closest("[data-cg-stage]"); if (!b) return;
     S.stage = Number(b.dataset.cgStage); render();
@@ -100,7 +101,7 @@
       }, 1500);
     } catch (e) { say(e.message, true); }
   }
-  const jobBox = () => S.job ? `<div class="cg-row"><strong id="cg-job-msg">${esc(S.job.message)}</strong></div><pre class="cg-log" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre>` : "";
+  const jobBox = () => S.job ? `<div class="training-activity-card" aria-live="polite"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details" open><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
 
   // ---------- charts (inline SVG, theme variables)
   function chart({ xs, series, xLabel, yLabel, height = 220, width = 460, xTicks, shade = [], points = [] }) {
@@ -125,36 +126,45 @@
     return out + "</svg>";
   }
 
+  // ---------- shared markup helpers (the Builder's own classes: card + h2, cost-badge, coverage-table, btn)
+  const badge = (kind, text) => `<span class="cost-badge cost-badge-${kind} cg-chip">${esc(text)}</span>`;
+  const card = (title, inner, right = "") => `<section class="card"><h2>${title}${right}</h2>${inner}</section>`;
+  const table = (head, rows) => `<div class="table-wrap"><table class="coverage-table cg-wrap">${head.length ? `<thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead>` : ""}<tbody>${rows}</tbody></table></div>`;
+  const cols = (...parts) => parts.join("");          // one centred column of cards, in flow order (the Builder's layout)
+  const HINTS = { 1: "Upload every fixed-gain capture of one amp and channel", 2: "See what each capture adds and how Input gain will map", 3: "Generate the training files and train", 4: "Check the result against your captures and export" };
+
   // ---------- Stage 1
   function stage1() {
     const d = S.data;
-    if (!d) return `<p class="info">Create a project to begin.</p>`;
+    if (!d) return `${card("Add captures", `<p class="info">Use <strong>New project</strong> to begin.</p>`)}`;
     const caps = Object.entries(d.project.captures).sort((a, b) => (a[1].position ?? 1e9) - (b[1].position ?? 1e9));
     const st = (d.analysis && d.analysis.audit) || {};
     const idx = (d.analysis && d.analysis.capture_files) || {};
     const fileStatus = {}; Object.entries(idx).forEach(([p, fn]) => { fileStatus[fn] = st[p]; });
     const rows = caps.map(([fn, c]) => {
       const a = fileStatus[fn];
-      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? ` <span class="cg-warn">suggested from the file name — please confirm</span>` : ""}</td>
-        <td>${a ? `<span class="cg-chip ${a.status === "VALID" || a.status === "CORRECTED" ? "ok" : "bad"}">${esc(a.status)}</span>` : `<span class="cg-warn">not analysed</span>`}</td>
+      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name — please confirm</div>` : ""}</td>
+        <td>${a ? badge(a.status === "VALID" || a.status === "CORRECTED" ? "instant" : "bad", a.status) : `<span class="info">not analysed</span>`}</td>
         <td><button type="button" class="btn btn-secondary btn-small" data-cg-remove="${esc(fn)}">Remove</button></td></tr>`;
     }).join("");
     const issues = d.check.issues.map((i) => `<li>${esc(i.file ? i.file + ": " : "")}${esc(i.message)}</li>`).join("");
-    return `<section><h3>Amplifier</h3><div class="cg-row">
-        <input class="file-input" id="cg-name" placeholder="Project name" value="${esc(d.project.name)}">
-        <input class="file-input" id="cg-amp" placeholder="Amplifier" value="${esc(d.project.amp)}">
-        <input class="file-input" id="cg-channel" placeholder="Channel / cabinet (optional)" value="${esc(d.project.channel)}"></div></section>
-      <section><h3>Fixed-gain captures</h3>
-        <div class="cg-drop" id="cg-drop">Drag <strong>.nam</strong> captures of this one amp/channel here, or <label class="btn btn-secondary btn-small">choose files<input type="file" id="cg-files" accept=".nam" multiple hidden></label>
-          <div class="cg-warn">Any practical number of captures. Uploading all of them gives the fullest picture; it does not mean all are used for training.</div></div>
-        ${caps.length ? `<table class="cg-table"><thead><tr><th>File</th><th>Physical gain position</th><th>Audit</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : ""}
-        <p class="info">${esc(d.check.summary)}</p>${issues ? `<ul class="cg-issues">${issues}</ul>` : ""}
-        <div class="cg-row"><button type="button" class="btn btn-primary" id="cg-analyse" ${d.check.ready && !S.job ? "" : "disabled"}>Analyse captures</button>
-          <span class="cg-warn">Runs each capture through the native renderer (about ${Math.max(1, Math.round(d.check.count * 0.15))} min). Uncertain source material is flagged, never silently fixed.</span></div>${jobBox()}</section>`;
+    const setup = card("Amplifier", `
+        <label class="field-label" for="cg-name">Project name</label><input class="file-input" id="cg-name" value="${esc(d.project.name)}">
+        <label class="field-label" for="cg-amp">Amplifier</label><input class="file-input" id="cg-amp" placeholder="e.g. Marshall JCM800 2203" value="${esc(d.project.amp)}">
+        <label class="field-label" for="cg-channel">Channel / cabinet <span class="hint">(optional)</span></label><input class="file-input" id="cg-channel" value="${esc(d.project.channel)}">`)
+      + card("Add captures", `<div class="cg-drop" id="cg-drop">Drag <strong>.nam</strong> files of this one amp/channel here, or <label class="btn btn-secondary btn-small">choose files<input type="file" id="cg-files" accept=".nam" multiple hidden></label></div>
+        <p class="info">Any practical number of captures. Uploading all of them gives the fullest picture; it does not mean all are used for training.</p>`);
+    const main = card("Fixed-gain captures",
+      (caps.length ? table(["File", "Physical gain position", "Audit", ""], rows) : `<p class="info">No captures yet.</p>`)
+      + `<p class="info">${esc(d.check.summary)}</p>${issues ? `<ul class="cg-issues">${issues}</ul>` : ""}
+        <button type="button" class="btn btn-primary btn-block" id="cg-analyse" ${d.check.ready && !S.job ? "" : "disabled"}>Analyse captures</button>
+        <p class="info">Runs each capture through the native renderer (about ${Math.max(1, Math.round(d.check.count * 0.15))} min). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
+      `<span class="cost-badge cost-badge-expensive">⚡ analysis takes a few minutes</span>`);
+    return cols(setup, main);
   }
   function bindStage1() {
     const d = S.data; if (!d) return;
-    const meta = () => api(`/api/cg/projects/${S.id}`, { method: "PATCH", json: { name: val("cg-name"), amp: val("cg-amp"), channel: val("cg-channel") } }).then(() => refreshListKeep());
+    const meta = () => api(`/api/cg/projects/${S.id}`, { method: "PATCH", json: { name: val("cg-name"), amp: val("cg-amp"), channel: val("cg-channel") } }).then((d) => { S.data = d; document.getElementById("cg-current-name").textContent = d.project.name; });
     ["cg-name", "cg-amp", "cg-channel"].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener("change", meta); });
     const upload = async (files) => {
       const fd = new FormData(); [...files].forEach((f) => fd.append("files", f));
@@ -174,14 +184,13 @@
     if (an) an.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/analyse`, {}, async () => { await api(`/api/cg/projects/${S.id}/plan`, { method: "POST", json: { mode: "automatic", anchors: "fc" } }); await load(S.id); S.stage = 2; render(); }));
   }
   const val = (id) => (document.getElementById(id) || {}).value || "";
-  const refreshListKeep = async () => { S.projects = await api("/api/cg/projects"); const cur = picker.value; picker.innerHTML = S.projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${p.amp ? " · " + esc(p.amp) : ""}</option>`).join(""); picker.value = cur; };
 
   // ---------- Stage 2
   function stage2() {
     const d = S.data;
-    if (!d || !d.analysis) return `<p class="info">Add captures and run <strong>Analyse captures</strong> first.</p>${jobBox()}`;
+    if (!d || !d.analysis) return `${card("Analyse & select", `<p class="info">Add captures and run <strong>Analyse captures</strong> first.</p>${jobBox()}`)}`;
     const a = d.analysis, plan = d.plan;
-    if (!plan) return `<p class="info">No plan yet.</p><button type="button" class="btn btn-primary" id="cg-make-plan">Propose a training plan</button>`;
+    if (!plan) return `${card("Training subset", `<p class="info">No plan yet.</p><button type="button" class="btn btn-primary btn-block" id="cg-make-plan">Propose a training plan</button>`)}`;
     const sel = new Set(plan.selected);
     const cov = plan.coverage;
     const gains = a.profile.gains;
@@ -208,24 +217,27 @@
       points: map.map((m) => ({ x: m.input_gain_db, y: m.position, r: m.kind === "training_anchor" ? 6 : 3.5, fill: m.kind === "training_anchor" ? "var(--accent)" : "var(--panel)", label: m.kind === "training_anchor" ? `G${m.position}` : "", title: `Position ${m.position} → ${fmt(m.input_gain_db)} dB (${m.kind === "training_anchor" ? "training anchor" : "interpolated"})` })),
     });
     const audit = a.audit;
-    const rows = gains.filter((g) => Number.isInteger(g) || !(cov.reasons[String(g)])).filter((g) => cov.reasons[String(g)]).map((g) => {
+    const rows = gains.filter((g) => cov.reasons[String(g)]).map((g) => {
       const r = cov.reasons[String(g)], au = audit[String(g)] || { status: "?" };
-      return `<tr><td>${plan.mode === "custom" ? `<input type="checkbox" data-cg-cust="${g}" ${sel.has(g) ? "checked" : ""}> ` : ""}G${g}</td><td><span class="cg-chip ${r.role}">${esc(r.role.replace("_", " "))}</span></td><td>${esc(au.status)}</td><td>${esc(r.reason)}</td></tr>`;
+      const kind = r.role === "selected" ? "auto" : (r.role === "needs_review" ? "bad" : "instant");
+      return `<tr><td>${plan.mode === "custom" ? `<input type="checkbox" data-cg-cust="${g}" ${sel.has(g) ? "checked" : ""}> ` : ""}G${g}</td><td>${badge(kind, r.role.replace("_", " "))}</td><td>${esc(au.status)}</td><td>${esc(r.reason)}</td></tr>`;
     }).join("");
-    const phys = Object.entries(cov.phys || {}).filter(([, v]) => v.tol !== null).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v.mean, 2)}</td><td>${fmt(v.max, 2)}</td><td>${v.tol}</td><td><span class="cg-chip ${v.max <= v.tol ? "ok" : "bad"}">${v.max <= v.tol ? "within" : "outside"}</span></td></tr>`).join("");
-    const modes = [["automatic", "Automatic"], ["use_all", "Use all"], ["custom", "Custom"]].map(([v, l]) => `<label><input type="radio" name="cg-mode" value="${v}" ${plan.mode === v ? "checked" : ""}> ${l}</label>`).join(" ");
-    return `<section><h3>Training subset</h3>
-        <div class="cg-row">${modes}</div>
-        <p class="info">${d.project.captures ? Object.keys(d.project.captures).length : 0} captures uploaded · <strong>${plan.selected.length} selected</strong> for training (${plan.selected.map((g) => "G" + g).join(", ")}) · ${a.eligible.length} eligible · coverage rule ${a.k_star ? `met at k* = ${a.k_star}` : "<strong>not met by any subset</strong>"}.</p>
-        ${plan.warnings.map((w) => `<p class="cg-warn">${esc(w)}</p>`).join("")}
-        <details id="cg-advanced" ${S.advOpen || plan.anchor_method === "fixed" ? "open" : ""}><summary>Advanced</summary><div class="cg-row"><label>Anchor method <select id="cg-anchors" class="select-input"><option value="fc" ${plan.anchor_method === "fc" ? "selected" : ""}>FC response-distance anchors (default, production recipe)</option><option value="fixed" ${plan.anchor_method === "fixed" ? "selected" : ""}>Fixed 4 dB spacing (v3 alternative)</option></select></label></div></details></section>
-      <section class="cg-two"><div><h3>How the source amp changes</h3><p class="cg-warn">Measured on the fit DIs; dashed line is the interpolation, markers are the captures (filled = selected, red ring = quarantined for this measure).</p>
-          <select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}</div>
-        <div><h3>How the finished NAM will be controlled</h3><p class="cg-warn">The Input-gain mapping used to build the training target. Shaded bands are untested regions between anchors, learned by interpolation. This is a control guide, not a physical-gain parameter.</p>${mapChart}</div></section>
-      <section><h3>Why each capture</h3><table class="cg-table"><thead><tr><th>Capture</th><th>Role</th><th>Audit</th><th>Measured reason</th></tr></thead><tbody>${rows}</tbody></table></section>
-      <section><h3>Measured coverage of the omitted captures</h3><table class="cg-table"><thead><tr><th>Group</th><th>Mean error</th><th>Max error</th><th>Working tolerance</th><th></th></tr></thead><tbody>${phys || `<tr><td colspan="5">Every eligible capture is selected, so nothing is omitted.</td></tr>`}</tbody></table>
-        <p class="cg-warn">Tolerances are working values, not perceptual measurements. Objective J = ${fmt(cov.J, 3)}.</p></section>
-      <div class="cg-row"><button type="button" class="btn btn-primary" id="cg-accept">Review complete — continue to Train</button></div>`;
+    const phys = Object.entries(cov.phys || {}).filter(([, v]) => v.tol !== null).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v.mean, 2)}</td><td>${fmt(v.max, 2)}</td><td>${v.tol}</td><td>${badge(v.max <= v.tol ? "instant" : "bad", v.max <= v.tol ? "within" : "outside")}</td></tr>`).join("");
+    const modes = `<div class="mode-tabs cg-modes" role="group" aria-label="Selection mode">${[["automatic", "Automatic"], ["use_all", "Use all"], ["custom", "Custom"]].map(([v, l]) => `<button type="button" class="mode-tab ${plan.mode === v ? "active" : ""}" data-cg-mode="${v}" aria-pressed="${plan.mode === v}">${l}</button>`).join("")}</div>`;
+    const setup = card("Training subset", `${modes}
+        <p class="info">${Object.keys(d.project.captures).length} captures uploaded · <strong>${plan.selected.length} selected</strong> for training (${plan.selected.map((g) => "G" + g).join(", ")}) · ${a.eligible.length} eligible · coverage rule ${a.k_star ? `met at k* = ${a.k_star}` : "<strong>not met by any subset</strong>"}.</p>
+        ${plan.warnings.map((w) => `<p class="info">${esc(w)}</p>`).join("")}
+        <details id="cg-advanced" ${S.advOpen || plan.anchor_method === "fixed" ? "open" : ""}><summary>Advanced: anchor method</summary>
+          <label class="field-label" for="cg-anchors">Anchor method</label><select id="cg-anchors" class="select-input"><option value="fc" ${plan.anchor_method === "fc" ? "selected" : ""}>FC response-distance anchors (default, production recipe)</option><option value="fixed" ${plan.anchor_method === "fixed" ? "selected" : ""}>Fixed 4 dB spacing (v3 alternative)</option></select></details>
+`);
+    const main = card("How the source amp changes", `<p class="info">Measured on the fit DIs; dashed line is the interpolation, markers are the captures (filled = selected, red ring = quarantined for this measure).</p>
+        <select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}`)
+      + card("How the finished NAM will be controlled", `<p class="info">The Input-gain mapping used to build the training target. Shaded bands are untested regions between anchors, learned by interpolation. This is a control guide, not a physical-gain parameter.</p>${mapChart}`)
+      + card("Why each capture", table(["Capture", "Role", "Audit", "Measured reason"], rows))
+      + card("Measured coverage of the omitted captures", table(["Group", "Mean error", "Max error", "Working tolerance", ""], phys || `<tr><td colspan="5">Every eligible capture is selected, so nothing is omitted.</td></tr>`)
+        + `<p class="info">Tolerances are working values, not perceptual measurements. Objective J = ${fmt(cov.J, 3)}.</p>
+        <button type="button" class="btn btn-primary btn-block" id="cg-accept">Review complete — continue to Train</button>`);
+    return cols(setup, main);
   }
   function bindStage2() {
     const d = S.data; if (!d) return;
@@ -243,7 +255,7 @@
     };
     if (mk) mk.addEventListener("click", () => replan({ mode: "automatic", anchors: "fc" }));
     if (!d.plan) return;
-    body.querySelectorAll("input[name=cg-mode]").forEach((el) => el.addEventListener("change", () => replan({ mode: el.value })));
+    body.querySelectorAll("[data-cg-mode]").forEach((el) => el.addEventListener("click", () => replan({ mode: el.dataset.cgMode })));
     body.querySelectorAll("[data-cg-cust]").forEach((el) => el.addEventListener("change", () => {
       const chosen = [...body.querySelectorAll("[data-cg-cust]")].filter((x) => x.checked).map((x) => Number(x.dataset.cgCust));
       replan({ mode: "custom", custom: chosen });
@@ -257,128 +269,70 @@
   // ---------- Stage 3
   function stage3() {
     const d = S.data;
-    if (!d || !d.plan) return `<p class="info">Review the training plan in stage 2 first.</p>`;
+    if (!d || !d.plan) return `${card("Train", `<p class="info">Review the training plan in stage 2 first.</p>`)}`;
     const p = d.plan, b = d.bundle, t = d.training;
     const stale = b && b.plan && b.plan.planned !== p.planned;
     const range = [Math.min(...p.anchors_input_gain_db), Math.max(...p.anchors_input_gain_db)];
-    const presets = Object.entries(d.epoch_presets).map(([k, v]) => `<option value="${k}" ${k === S.preset ? "selected" : ""}>${k === "standard" ? "Standard (established recipe)" : k === "draft" ? "Draft (quick preview)" : "High definition"} · ${v} epochs</option>`).join("");
-    const trainerBox = `<div id="cg-train-status" class="info"></div>`;
-    return `<section><h3>Training plan</h3>
-        <table class="cg-table"><tbody>
-          <tr><th>Amplifier</th><td>${esc(d.project.amp || "-")} ${esc(d.project.channel)}</td></tr>
-          <tr><th>Captures</th><td>${Object.keys(d.project.captures).length} uploaded · ${p.selected.length} selected for training (${p.selected.map((g) => "G" + g).join(", ")})</td></tr>
-          <tr><th>Input gain range</th><td>${fmt(range[0])} to ${fmt(range[1])} dB (${p.anchor_method === "fc" ? "FC response-distance anchors" : "fixed 4 dB spacing — Advanced"})</td></tr>
-          <tr><th>Output compensation</th><td>${b ? "set after generation (see below)" : "one constant, computed when the training target is built"}</td></tr>
-          <tr><th>Result</th><td>One standard <code>.nam</code>, a manifest and a player guide</td></tr></tbody></table></section>
-      <section><h3>Training settings</h3><div class="cg-row">
-        <input class="file-input" id="cg-model-name" maxlength="100" placeholder="Model name" value="${esc((b && "") || d.project.name)}">
-        <label>Epochs <select id="cg-preset" class="select-input">${presets}</select></label>
-        <label>Backend <select id="cg-backend" class="select-input"><option value="local" ${S.backend === "local" ? "selected" : ""}>This computer</option><option value="kaggle" ${S.backend === "kaggle" ? "selected" : ""}>Kaggle GPU</option></select></label></div>
-        <p class="cg-warn">More epochs do not guarantee a better model. The standard preset is the one the frozen recipe used (60 epochs).</p>
-        <div class="cg-row"><button type="button" class="btn btn-primary" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Regenerate training files" : "Generate training files"}</button>
-          ${stale ? `<span class="cg-warn">The plan changed since these files were generated — regenerate before training.</span>` : ""}</div>${jobBox()}</section>
-      ${b ? `<section><h3>Training files</h3><p class="info">Design <code>${esc(b.design_id)}</code>: ${t && t.core ? `input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code>, target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code>, output scale ${fmt(t.core.output_scale_c, 4)} (set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB).` : ""}</p>
-        <div class="cg-row"><button type="button" class="btn btn-primary" id="cg-train" ${stale || S.job ? "disabled" : ""}>Start training</button>${S.backend === "local" ? `<button type="button" class="btn btn-secondary" id="cg-setup">Set up local training</button><button type="button" class="btn btn-secondary" id="cg-cancel">Cancel</button>` : ""}</div>
-        ${trainerBox}${t && t.trained ? `<p class="info"><span class="cg-chip ok">trained</span> ${esc(t.output_nam_path)} <button type="button" class="btn btn-primary btn-small" id="cg-goto4">Continue to Test &amp; export</button></p>` : ""}</section>` : ""}`;
+    const files = card("Training files", `
+        <label class="field-label" for="cg-model-name">Model name</label><input class="file-input" id="cg-model-name" maxlength="100" value="${esc(d.project.name)}">
+        <button type="button" class="btn btn-primary btn-block" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Recreate training files" : "Create training files"}</button>
+        ${stale ? `<p class="info"><strong>The plan changed since these files were created — recreate them before training.</strong></p>` : ""}${jobBox()}
+        ${b && t && t.core ? `<p class="info">Design <code>${esc(b.design_id)}</code><br>input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code> · target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code><br>output scale ${fmt(t.core.output_scale_c, 4)} — set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB.</p>` : ""}`);
+    const train = b && !stale ? card("Train", `<div id="cg-train-slot"></div>${t && t.trained ? `<p class="info">${badge("instant", "trained")} <code>${esc(t.output_nam_path.split("/").pop())}</code></p><button type="button" class="btn btn-primary btn-block" id="cg-goto4">Continue to Test &amp; export</button>` : ""}`) : "";
+    const plan = card("Training plan", table([], `
+          <tr><td>Amplifier</td><td>${esc(d.project.amp || "-")} ${esc(d.project.channel)}</td></tr>
+          <tr><td>Captures</td><td>${Object.keys(d.project.captures).length} uploaded · ${p.selected.length} selected for training (${p.selected.map((g) => "G" + g).join(", ")})</td></tr>
+          <tr><td>Input gain range</td><td>${fmt(range[0])} to ${fmt(range[1])} dB (${p.anchor_method === "fc" ? "FC response-distance anchors" : "fixed 4 dB spacing — Advanced"})</td></tr>
+          <tr><td>Output compensation</td><td>${b ? "recorded in the training files (below)" : "one constant, computed when the training target is built"}</td></tr>
+          <tr><td>Result</td><td>One standard <code>.nam</code>, a manifest and a player guide</td></tr>`))
+      + card("Anchors", table(["Position", "Input gain", "Kind"], p.mapping.filter((m) => m.kind === "training_anchor").map((m) => `<tr><td>G${m.position}</td><td>${fmt(m.input_gain_db)} dB</td><td>training anchor</td></tr>`).join("")));
+    const setup = plan, main = files + train;
+    return cols(setup, main);
   }
-  // Single-flight trainer poll: at most ONE poller per design, and never two requests in flight. (Each render re-binds stage 3, and
-  // /api/kaggle/jobs/<id> does real work -- download and local validation -- so overlapping polls must never be issued.)
-  async function pollTrainer() {
-    const d0 = S.data;
-    if (!d0 || !d0.bundle || (d0.training && d0.training.trained)) { stopPoll(); return; }
-    const design = d0.bundle.design_id;
-    if (S.pollDesign === design && S.trainTimer) return;            // already watching this design
-    stopPoll();
-    S.pollDesign = design;
-    const gen = ++S.pollGen;
-    let busy = false;
-    const el = () => document.getElementById("cg-train-status");
-    const alive = () => S.pollGen === gen && el() && S.stage === 3 && S.data && S.data.bundle && S.data.bundle.design_id === design;
-    const finish = async () => { stopPoll(); await load(S.id); };
-    const tick = async () => {
-      if (busy) return;
-      if (!alive()) { if (S.pollGen === gen) stopPoll(); return; }
-      busy = true;
-      try {
-        if (S.backend === "local") {
-          const s = await api("/api/local_training/status");
-          const mine = s.design_id === design && (!S.trainStarted || (s.started_at || 0) >= S.trainStarted - 5);
-          if (!alive()) return;
-          if (!mine) { el().textContent = s.state === "not_configured" ? "Local training is not set up yet — click “Set up local training”." : "Local training: not started for these files."; return; }
-          const pr = s.progress ? ` · epoch ${s.progress.epoch}/${s.progress.total_epochs}` : "";
-          el().textContent = `Local training: ${s.state}${pr}${s.latest_line ? " — " + s.latest_line.slice(0, 90) : ""}`;
-          if (s.state === "complete") await finish();
-          else if (s.state === "failed" || s.state === "cancelled") { stopPoll(); say(`Local training ${s.state}.`, true); }
-        } else {
-          if (!S.train || !S.train.job_id || S.train.design !== design) {
-            // After a page reload the job id is unknown: find this design's latest job first.
-            const info = await api(`/api/kaggle/status?design_id=${encodeURIComponent(design)}`);
-            if (!info.job) { if (alive()) el().textContent = "Kaggle: no job started for these files."; return; }
-            S.train = { job_id: info.job.job_id, design };
-          }
-          // GET /api/kaggle/jobs/<id> is the endpoint that REFRESHES the job from Kaggle (the /status endpoint only reads the stored record).
-          const j = await api(`/api/kaggle/jobs/${S.train.job_id}?design_id=${encodeURIComponent(design)}`);
-          if (!alive()) return;
-          const pr = j.progress ? ` · epoch ${j.progress.epoch}/${j.progress.total_epochs}` : "";
-          el().textContent = `Kaggle job ${j.job_id}: ${j.state}${pr}${j.error ? " — " + j.error : ""}`;
-          if (j.state === "complete") await finish();
-          else if (j.state === "failed") { stopPoll(); say(`Kaggle job failed: ${j.error || "see the job log"}`, true); }
-        }
-      } catch (e) { if (alive()) el().textContent = e.message; }
-      finally { busy = false; }
-    };
-    S.trainTimer = setInterval(tick, 4000);
-    setTimeout(() => { if (S.pollGen === gen) tick(); }, 1500);
-  }
-  function stopPoll() { S.pollGen = (S.pollGen || 0) + 1; clearInterval(S.trainTimer); S.trainTimer = null; S.pollDesign = null; }
   function bindStage3() {
     const d = S.data; if (!d || !d.plan) return;
-    const pre = document.getElementById("cg-preset"); if (pre) pre.addEventListener("change", () => { S.preset = pre.value; });
-    const be = document.getElementById("cg-backend"); if (be) be.addEventListener("change", () => { S.backend = be.value; render(); });
     const g = document.getElementById("cg-generate");
-    if (g) g.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/generate`, { model_name: val("cg-model-name") }, async () => { say("Training files generated."); render(); }));
-    const tr = document.getElementById("cg-train");
-    if (tr) tr.addEventListener("click", async () => {
-      try {
-        S.trainStarted = Date.now() / 1000;
-        if (S.backend === "local") { await api("/api/local_training/start", { method: "POST", json: { design_id: d.bundle.design_id, epoch_preset: S.preset } }); }
-        else { const kj = await api("/api/kaggle/train", { method: "POST", json: { design_id: d.bundle.design_id, epoch_preset: S.preset } }); S.train = { job_id: kj.job_id, design: d.bundle.design_id }; }
-        say("Training started."); pollTrainer();
-      } catch (e) { say(e.message, true); }
-    });
-    const su = document.getElementById("cg-setup"); if (su) su.addEventListener("click", async () => { try { await api("/api/local_training/setup", { method: "POST", json: {} }); say("Local training setup started."); pollTrainer(); } catch (e) { say(e.message, true); } });
-    const ca = document.getElementById("cg-cancel"); if (ca) ca.addEventListener("click", async () => { try { await api("/api/local_training/cancel", { method: "POST", json: {} }); } catch (e) { say(e.message, true); } });
+    if (g) g.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/generate`, { model_name: val("cg-model-name") }, async () => { say("Training files created."); render(); }));
     const g4 = document.getElementById("cg-goto4"); if (g4) g4.addEventListener("click", () => { S.stage = 4; render(); });
-    if (d.bundle) pollTrainer();
+    // The Kaggle / local training UI is the Builder's own section (app.js), hosted here for this design.
+    const slot = document.getElementById("cg-train-slot");
+    if (slot && d.bundle) {
+      if (!S.trainHost) { S.trainHost = document.createElement("div"); S.trainHost.className = "cg-train-host"; }
+      slot.replaceWith(S.trainHost);
+      if (!window.namTrainingHost.attach(S.trainHost, d.bundle.design_id)) S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
+    }
   }
+  // The hosted section announces completion; reload so the project shows the trained model.
+  document.addEventListener("nam:training-complete", (e) => {
+    if (S.data && S.data.bundle && S.data.bundle.design_id === e.detail.designId && !(S.data.training && S.data.training.trained)) load(S.id);
+  });
 
   // ---------- Stage 4
   function stage4() {
     const d = S.data;
-    if (!d || !d.training || !d.training.trained) return `<p class="info">Train a model first (stage 3). Testing and export unlock once a trained .nam exists.</p>`;
+    if (!d || !d.training || !d.training.trained) return `${card("Test & export", `<p class="info">Train a model first (stage 3). Testing and export unlock once a trained .nam exists.</p>`)}`;
     const v = d.validation;
-    const exportBtn = `<a class="btn btn-primary" href="/api/cg/projects/${S.id}/export" download>Download export package (.nam + guide)</a>`;
-    let html = `<section><div class="cg-row"><button type="button" class="btn btn-secondary" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>${exportBtn}</div>
-      <p class="cg-warn">Export is never blocked by validation or by listening. Validation reports measurements against your original captures on held-out DIs; it is not a perceptual score.</p>${jobBox()}</section>`;
-    if (!v) return html + `<p class="info">No validation has been run for this model.</p>`;
+    const actions = card("Test & export", `
+        <button type="button" class="btn btn-secondary btn-block" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>
+        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download>Download export package (.nam + guide)</a>
+        <p class="info">Export is never blocked by validation or by listening. Validation reports measurements against your original captures on held-out DIs; it is not a perceptual score.</p>${jobBox()}`);
+    if (!v) return cols(actions, card("Validation", `<p class="info">No validation has been run for this model.</p>`));
     const c = v.compatibility, sf = v.safety, pg = v.progression;
-    const chip = (ok, yes, no) => `<span class="cg-chip ${ok ? "ok" : "bad"}">${ok ? yes : no}</span>`;
-    html += `<section><h3>Standard NAM compatibility</h3><p>${chip(c.standard_nam, "standard .nam", "not verified")} ${chip(c.full.rendered_ok, "Full renders", "Full failed")} ${chip(c.lite && c.lite.rendered_ok, "Lite renders", "Lite failed")} <span class="cg-warn">architecture ${esc(c.architecture)} · sample rate ${esc(c.sample_rate)} · no extra runtime processing required</span></p></section>
-      <section><h3>Output safety</h3><p class="info">Set the player's <strong>Output gain to ${fmt(sf.recommended_output_gain_db, 1)} dB</strong> and leave it. ${sf.scaled_peak_over_0dbfs_at_input_gain_db.length ? `<strong>Peaks above 0 dBFS at Input gain ${sf.scaled_peak_over_0dbfs_at_input_gain_db.join(", ")} dB</strong> with this DI — lower the output or the Input gain there.` : "No peaks above 0 dBFS across the Input-gain range on this DI."}</p></section>
-      <section><h3>Gain progression vs your captures (held-out DIs: ${esc(pg.held_out_dis.join(", "))})</h3>
-        <table class="cg-table"><thead><tr><th>Position</th><th>Input gain</th><th>Role</th><th>Level Δ dB</th><th>HF Δ</th><th>Crest Δ</th><th>Dyn. range Δ</th><th>EQ max Δ</th><th>Level-matched ESR</th></tr></thead><tbody>
-        ${pg.positions.map((r) => `<tr><td>G${r.position}</td><td>${fmt(r.input_gain_db)} dB</td><td><span class="cg-chip ${r.role === "training" ? "selected" : ""}">${r.role}</span></td><td>${fmt(r.level_db, 2)}</td><td>${fmt(r.hf_db, 2)}</td><td>${fmt(r.crest_db, 2)}</td><td>${fmt(r.dyn_range_db, 2)}</td><td>${fmt(r.eq_max_db, 2)}</td><td>${fmt(r.lm_esr, 4)}</td></tr>`).join("")}</tbody></table>
-        <p class="cg-warn">Δ = model minus real capture at the plan's Input gain, one global output scale. “reference” rows were not training anchors, so they are independent evidence for the interpolated positions. ${pg.reversals.length ? `<strong>${pg.reversals.length} direction reversal(s)</strong> versus the real amp: ${pg.reversals.map((r) => `${r.measure} between G${r.between[0]}–G${r.between[1]}`).join("; ")}.` : "No direction reversals versus the real amp's progression (level, HF, crest)."}</p></section>`;
-    const cov = v.coverage;
-    if (cov) html += `<section><h3>Measured coverage of your uploaded captures</h3><p class="info">${cov.selected.length} captures trained; ${cov.all_within_tolerance ? "every omitted capture is within the working tolerances of what the selection predicts" : "some omitted captures fall outside the working tolerances (see stage 2)"}.</p></section>`;
-    const au = v.audition;
-    html += `<section><h3>Audition (optional)</h3>
-        <p class="info">Sweep of the whole Input-gain range on one DI, ${au.sweep.seconds_per_step} s per step from ${au.sweep.input_gains_db[0]} to ${au.sweep.input_gains_db[au.sweep.input_gains_db.length - 1]} dB in 2 dB steps${au.sweep.attenuated_db ? ` (attenuated ${fmt(au.sweep.attenuated_db, 1)} dB as a whole for safe playback)` : ""}.</p>
+    const chip = (ok, yes, no) => badge(ok ? "instant" : "bad", ok ? yes : no);
+    const setup = actions
+      + card("Standard NAM compatibility", `<p>${chip(c.standard_nam, "standard .nam", "not verified")} ${chip(c.full.rendered_ok, "Full renders", "Full failed")} ${chip(c.lite && c.lite.rendered_ok, "Lite renders", "Lite failed")}</p><p class="info">architecture ${esc(c.architecture)} · sample rate ${esc(c.sample_rate)} · no extra runtime processing required</p>`)
+      + card("Output safety", `<p class="info">Set the player's <strong>Output gain to ${fmt(sf.recommended_output_gain_db, 1)} dB</strong> and leave it. ${sf.scaled_peak_over_0dbfs_at_input_gain_db.length ? `<strong>Peaks above 0 dBFS at Input gain ${sf.scaled_peak_over_0dbfs_at_input_gain_db.join(", ")} dB</strong> with this DI — lower the output or the Input gain there.` : "No peaks above 0 dBFS across the Input-gain range on this DI."}</p>`);
+    const au = v.audition, cov = v.coverage;
+    const main = card("Gain progression vs your captures", table(["Position", "Input gain", "Role", "Level Δ dB", "HF Δ", "Crest Δ", "Dyn. range Δ", "EQ max Δ", "Level-matched ESR"],
+          pg.positions.map((r) => `<tr><td>G${r.position}</td><td>${fmt(r.input_gain_db)} dB</td><td>${r.role === "training" ? badge("auto", "training") : `<span class="value-chip">reference</span>`}</td><td>${fmt(r.level_db, 2)}</td><td>${fmt(r.hf_db, 2)}</td><td>${fmt(r.crest_db, 2)}</td><td>${fmt(r.dyn_range_db, 2)}</td><td>${fmt(r.eq_max_db, 2)}</td><td>${fmt(r.lm_esr, 4)}</td></tr>`).join(""))
+        + `<p class="info">Held-out DIs: ${esc(pg.held_out_dis.join(", "))}. Δ = model minus real capture at the plan's Input gain, one global output scale. “reference” rows were not training anchors, so they are independent evidence for the interpolated positions. ${pg.reversals.length ? `<strong>${pg.reversals.length} direction reversal(s)</strong> versus the real amp: ${pg.reversals.map((r) => `${r.measure} between G${r.between[0]}–G${r.between[1]}`).join("; ")}.` : "No direction reversals versus the real amp's progression (level, HF, crest)."}</p>`)
+      + (cov ? card("Measured coverage of your uploaded captures", `<p class="info">${cov.selected.length} captures trained; ${cov.all_within_tolerance ? "every omitted capture is within the working tolerances of what the selection predicts" : "some omitted captures fall outside the working tolerances (see stage 2)"}.</p>`) : "")
+      + card("Audition (optional)", `<p class="info">Sweep of the whole Input-gain range on one DI, ${au.sweep.seconds_per_step} s per step from ${au.sweep.input_gains_db[0]} to ${au.sweep.input_gains_db[au.sweep.input_gains_db.length - 1]} dB in 2 dB steps${au.sweep.attenuated_db ? ` (attenuated ${fmt(au.sweep.attenuated_db, 1)} dB as a whole for safe playback)` : ""}.</p>
         <audio controls preload="none" src="/api/cg/projects/${S.id}/audition/${au.sweep.file}"></audio>
-        <div class="cg-row"><label>Compare at position <select id="cg-cmp" class="select-input">${au.comparisons.map((c, i) => `<option value="${i}">G${c.position} (${fmt(c.input_gain_db)} dB Input gain)</option>`).join("")}</select></label></div>
+        <label class="field-label" for="cg-cmp">Compare at position</label><select id="cg-cmp" class="select-input">${au.comparisons.map((c2, i) => `<option value="${i}">G${c2.position} (${fmt(c2.input_gain_db)} dB Input gain)</option>`).join("")}</select>
         <div class="cg-audio-pair" id="cg-cmp-pair"></div>
-        <p class="cg-warn">The comparison plays the trained model and the real capture on the same DI at the same level. There is no captured sound at an interpolated point, so “reference” positions are the meaningful comparisons.</p></section>`;
-    return html;
+        <p class="info">The comparison plays the trained model and the real capture on the same DI at the same level. There is no captured sound at an interpolated point, so “reference” positions are the meaningful comparisons.</p>`);
+    return cols(setup, main);
   }
   function bindStage4() {
     const d = S.data; if (!d) return;
@@ -393,9 +347,11 @@
 
   // ---------- render
   function render() {
-    if (S.stage !== 3) stopPoll();
-    document.querySelectorAll(".cg-step").forEach((b) => b.classList.toggle("active", Number(b.dataset.cgStage) === S.stage));
-    if (!S.data) { body.innerHTML = `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`; return; }
+    if (S.stage !== 3) window.namTrainingHost.detach();
+    if (S.trainHost) S.trainHost.remove();          // keep the borrowed section alive while the body is rebuilt
+    document.querySelectorAll(".cg-tab").forEach((b) => b.classList.toggle("active", Number(b.dataset.cgStage) === S.stage));
+    const hint = document.getElementById("cg-hint"); if (hint) hint.textContent = HINTS[S.stage] || "";
+    if (!S.data) { body.innerHTML = `${card("Continuous Gain", `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`)}</div>`; return; }
     body.innerHTML = [stage1, stage2, stage3, stage4][S.stage - 1]();
     [bindStage1, bindStage2, bindStage3, bindStage4][S.stage - 1]();
   }

@@ -1,6 +1,8 @@
 """Continuous Gain project workflow and /api/cg routes with the native renderer and NAM loader faked."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import json
 import time
@@ -120,9 +122,13 @@ def test_generate_bundle_writes_a_continuous_gain_a2_bundle(tmp_path, fake_backe
 def client(tmp_path, fake_backend):
     app = Flask(__name__)
     official = tmp_path / "official.wav"; sf.write(official, synth_di("o", 2.0), SR)
-    cg_routes.register_cg_routes(app, cg_dir=tmp_path / "cg", a2_output_dir=tmp_path / "a2", training_input_path=official)
+    records = []
+    cg_routes.register_cg_routes(app, cg_dir=tmp_path / "cg", a2_output_dir=tmp_path / "a2", training_input_path=official,
+                                 store_session=lambda rec: records.append(json.loads(json.dumps(rec))))
     (tmp_path / "a2").mkdir(exist_ok=True)
-    return app.test_client()
+    c = app.test_client()
+    c.session_records = records
+    return c
 
 
 def _wait(c, r):
@@ -159,6 +165,22 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     nam = tmp_path / "trained.nam"; nam.write_bytes(_nam_bytes(0))
     mp = tmp_path / "a2" / did / "training_manifest.json"; m = json.loads(mp.read_text()); m["training"] = {"output_nam_path": str(nam), "epochs": 60, "epoch_preset": "standard"}; mp.write_text(json.dumps(m))
     st = client.get(f"/api/cg/projects/{pid}").get_json(); assert st["training"]["trained"] and st["training"]["backend"] == "local"
+    # ---- the Sessions record: what it is, how far it got, and the finished NAM (+ validation report only if it belongs to that NAM)
+    last = [r for r in client.session_records if r["id"] == pid][-1]
+    assert last["type"] == "nam-mixer-session" and last["version"] == 1 and last["name"] == "Amp X" and last["settings"]["mode"] == "continuous_gain"
+    cgs = last["settings"]["continuousGain"]
+    assert cgs["projectId"] == pid and cgs["captures"] == 6 and cgs["selected"] == [1.0, 3.0, 6.0] and cgs["stage"] == "trained" and cgs["anchorMethod"] == "fc"
+    assert last["designId"] == did and base64.b64decode(last["artifact"]["nam_base64"]) == nam.read_bytes() and "validationReport" not in last
+    stages = [r["settings"]["continuousGain"]["stage"] for r in client.session_records if r["id"] == pid]
+    assert stages[0] == "captures" and stages.index("analysed") < stages.index("planned") < stages.index("files") < stages.index("trained")
+    good = {"model_sha256": hashlib.sha256(nam.read_bytes()).hexdigest(), "state": "ok"}
+    m = json.loads(mp.read_text()); m["training"]["validation_report"] = good; mp.write_text(json.dumps(m))
+    client.get(f"/api/cg/projects/{pid}")
+    assert [r for r in client.session_records if r["id"] == pid][-1]["validationReport"] == good
+    n_before = len(client.session_records); client.get(f"/api/cg/projects/{pid}"); client.get(f"/api/cg/projects/{pid}")
+    assert len(client.session_records) == n_before                    # unchanged state does not rewrite the record
+    m["training"]["validation_report"] = {"model_sha256": "0" * 64}; mp.write_text(json.dumps(m)); client.get(f"/api/cg/projects/{pid}")
+    assert "validationReport" not in [r for r in client.session_records if r["id"] == pid][-1]        # a report for a different NAM is never attached
     z = client.get(f"/api/cg/projects/{pid}/export")                # export is never gated on validation or listening
     assert z.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(z.data)); names = zf.namelist()
@@ -178,4 +200,28 @@ def test_only_one_job_per_project_and_unknown_things_are_404(client):
     pid = client.post("/api/cg/projects", json={"name": "A"}).get_json()["project"]["id"]
     assert client.get(f"/api/cg/projects/{pid}/audition/../../x.wav").status_code == 404
     assert client.post("/api/cg/projects", json={"name": " "}).status_code == 400
-    assert client.delete(f"/api/cg/projects/{pid}").status_code == 200 and client.get(f"/api/cg/projects/{pid}").status_code == 404
+
+
+# ---- Sessions integration (app.py): listed and labelled like every other project, deleted with its working files
+def test_continuous_gain_sessions_are_listed_labelled_and_deleted_with_their_files(tmp_path, monkeypatch):
+    import app as app_module
+    monkeypatch.setattr(app_module, "SESSION_DIR", tmp_path / "sessions"); (tmp_path / "sessions").mkdir()
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", tmp_path / "sessions" / "models"); (tmp_path / "sessions" / "models").mkdir()
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path / "a2")
+    monkeypatch.setattr(app_module, "CG_PROJECT_DIR", tmp_path / "cg")
+    proj = CgProject.create(tmp_path / "cg", "Delete me", "Amp")
+    pid = proj.root.name
+    design = tmp_path / "a2" / f"{pid}-1"; design.mkdir(parents=True)
+    (design / "training_manifest.json").write_text(json.dumps({"mode": "continuous_gain"}))
+    nam = _nam_bytes(1)
+    rec = {"type": "nam-mixer-session", "version": 1, "id": pid, "name": "Delete me", "savedAt": "2026-09-21T00:00:00+00:00",
+           "settings": {"mode": "continuous_gain", "continuousGain": {"projectId": pid, "stage": "trained", "captures": 3}}, "designId": design.name,
+           "artifact": {"filename": "m.nam", "nam_base64": base64.b64encode(nam).decode()}}
+    app_module._store_session_record(rec)
+    c = app_module.app.test_client()
+    listed = [s for s in c.get("/api/sessions").get_json() if s["id"] == pid]
+    assert len(listed) == 1 and listed[0]["settings"]["mode"] == "continuous_gain" and listed[0]["artifact"]["downloadUrl"].endswith("/nam/download")
+    assert c.get(f"/api/sessions/{pid}/nam/download").data == nam                    # the same "Download NAM" the other sessions use
+    assert not [s for s in c.get("/api/sessions").get_json() if s["id"] == design.name]   # the bundle itself is not a second session
+    assert c.delete(f"/api/sessions/{pid}").status_code == 204
+    assert not proj.root.exists() and not design.exists() and not (tmp_path / "sessions" / f"{pid}.nam-mixer.json").exists()

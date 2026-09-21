@@ -6,14 +6,15 @@ existing A2 output directory (mode "continuous_gain"), and the UI then starts it
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import json
-import re
-import shutil
 import threading
 import time
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import jsonify, request, send_file
@@ -40,7 +41,7 @@ KNOWN_LIMITS = [
 ]
 
 
-def _job_start(project_id: str, kind: str, fn) -> dict:
+def _job_start(project_id: str, kind: str, fn, after=None) -> dict:
     with _JOB_LOCK:
         for j in _JOBS.values():
             if j["project_id"] == project_id and j["state"] == "running":
@@ -57,6 +58,8 @@ def _job_start(project_id: str, kind: str, fn) -> dict:
     def run() -> None:
         try:
             job["result"] = fn(note)
+            if after:
+                after()
             job["state"] = "done"
             job["message"] = "done"
         except Exception as exc:  # noqa: BLE001 -- surfaced to the UI verbatim
@@ -68,7 +71,9 @@ def _job_start(project_id: str, kind: str, fn) -> dict:
     return job
 
 
-def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input_path: Path) -> None:
+def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input_path: Path, store_session) -> None:
+    """`store_session(record)` is the app's own session writer (app.py `_store_session_record`): a Continuous Gain project is listed
+    in Sessions like any other project, so the Sessions tab is the one place projects are listed, loaded, exported and deleted."""
     cg_dir.mkdir(parents=True, exist_ok=True)
 
     def project_or_404(pid: str) -> CgProject:
@@ -133,21 +138,63 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
                             "series": {n: {k: prof["series"][n][k] for k in ("dimension", "unit", "values", "reliable")} for n in _PROFILE_SERIES_FOR_UI if n in prof["series"]}},
             }
         val = json.loads(p.validation_file.read_text(encoding="utf-8")) if p.validation_file.is_file() else None
+        sync_session(p)
         return {"project": st, "check": p.check_captures(), "analysis": summary, "plan": st.get("plan"), "bundle": st.get("bundle"),
                 "training": training_record(st), "validation": val, "epoch_presets": A2_EPOCH_PRESETS, "selection_modes": list(SELECTION_MODES),
                 "anchor_methods": list(ANCHOR_METHODS), "held_out_dis": list(HELD_OUT_DIS)}
 
-    @app.get("/api/cg/projects")
-    def api_cg_list():
-        out = []
-        for f in sorted(cg_dir.glob("cg-*/project.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-            try:
-                st = json.loads(f.read_text(encoding="utf-8"))
-                out.append({"id": st["id"], "name": st["name"], "amp": st.get("amp"), "channel": st.get("channel"), "captures": len(st["captures"]),
-                            "updated": st.get("updated"), "analysed": bool(st.get("analysis")), "planned": bool(st.get("plan")), "bundle": bool(st.get("bundle"))})
-            except (OSError, ValueError, KeyError):
-                continue
-        return jsonify(out)
+    STAGES = ["captures", "analysed", "planned", "files", "trained", "validated"]
+    _written: dict[str, tuple] = {}
+
+    def trained_validation_report(m: dict, design_id: str) -> dict | None:
+        """The trainers' own technical validation report for the exported NAM (local: manifest; Kaggle: the job's local re-validation)."""
+        rep = (m.get("training") or {}).get("validation_report")
+        if rep:
+            return rep
+        try:
+            job = find_active_job(a2_output_dir, design_id)
+        except (OSError, ValueError, json.JSONDecodeError):
+            job = None
+        return ((job.local_validation or {}).get("validation_report") if job is not None else None)
+
+    def build_session(p: CgProject) -> tuple[dict, tuple]:
+        """The Sessions record for this project (+ a change key). Captures and analysis stay in the project folder; the record
+        carries what Sessions needs: what this is, how far it got, and the finished NAM with its validation report."""
+        st = p.state()
+        plan, bundle = st.get("plan"), st.get("bundle")
+        tr = training_record(st) if bundle else None
+        val = json.loads(p.validation_file.read_text(encoding="utf-8")) if p.validation_file.is_file() else None
+        stage = "validated" if (tr and tr.get("trained") and val) else "trained" if (tr and tr.get("trained")) else "files" if bundle else "planned" if plan else "analysed" if st.get("analysis") else "captures"
+        positions = sorted(c["position"] for c in st["captures"].values() if c["position"] is not None)
+        cg = {"projectId": st["id"], "amp": st["amp"], "channel": st["channel"], "captures": len(st["captures"]), "positions": positions,
+              "selected": plan["selected"] if plan else None, "anchors": plan["anchors_input_gain_db"] if plan else None,
+              "anchorMethod": plan["anchor_method"] if plan else None, "selectionMode": plan["mode"] if plan else None,
+              "stage": stage, "backend": tr.get("backend") if tr else None, "epochs": tr.get("epochs") if tr else None,
+              "validation": ({"standardNam": val["compatibility"]["standard_nam"], "reversals": len(val["progression"]["reversals"])} if val else None)}
+        session = {"type": "nam-mixer-session", "version": 1, "id": st["id"], "name": st["name"], "savedAt": "",
+                   "settings": {"mode": "continuous_gain", "continuousGain": cg}, "designId": bundle["design_id"] if bundle else None}
+        model_key = None
+        if tr and tr.get("trained"):
+            nam = Path(tr["output_nam_path"])
+            model_key = (str(nam), nam.stat().st_mtime_ns)
+            manifest = json.loads((a2_output_dir / bundle["design_id"] / "training_manifest.json").read_text(encoding="utf-8"))
+            raw = nam.read_bytes()
+            session["artifact"] = {"filename": (manifest.get("artifact_filename") or nam.name), "nam_base64": base64.b64encode(raw).decode("ascii")}
+            rep = trained_validation_report(manifest, bundle["design_id"])
+            if rep and rep.get("model_sha256") == hashlib.sha256(raw).hexdigest():
+                session["validationReport"] = rep            # restored only when it belongs to this exact NAM (the Sessions rule)
+        return session, (json.dumps(session["settings"], sort_keys=True), session["name"], session["designId"], model_key, bool(session.get("validationReport")))
+
+    def sync_session(p: CgProject) -> None:
+        try:
+            session, key = build_session(p)
+            if _written.get(session["id"]) == key:
+                return
+            session["savedAt"] = datetime.now(timezone.utc).isoformat()
+            store_session(session)
+            _written[session["id"]] = key
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:      # the project must keep working if a session write fails
+            app.logger.warning("Could not update the Sessions record for %s: %s", p.root.name, exc)
 
     @app.post("/api/cg/projects")
     def api_cg_create():
@@ -174,18 +221,6 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             return jsonify(public_state(p))
         except CgProjectError as exc:
             return err(exc)
-
-    @app.delete("/api/cg/projects/<pid>")
-    def api_cg_delete(pid):
-        try:
-            p = project_or_404(pid)
-        except CgProjectError as exc:
-            return err(exc)
-        with _JOB_LOCK:
-            if any(j["project_id"] == p.root.name and j["state"] == "running" for j in _JOBS.values()):
-                return jsonify({"error": "a job is still running for this project"}), 409
-        shutil.rmtree(p.root)
-        return jsonify({"deleted": pid})
 
     @app.post("/api/cg/projects/<pid>/captures")
     def api_cg_add_captures(pid):
@@ -229,7 +264,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
     def api_cg_analyse(pid):
         try:
             p = project_or_404(pid)
-            job = _job_start(p.root.name, "analyse", lambda note: p.analyse(progress=note))
+            job = _job_start(p.root.name, "analyse", lambda note: p.analyse(progress=note), lambda: sync_session(p))
         except CgProjectError as exc:
             return err(exc, 409)
         return jsonify({"job_id": job["job_id"]}), 202
@@ -255,7 +290,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             name = str(d.get("model_name") or "").strip() or None
             if name and len(name) > 100:
                 return jsonify({"error": "model name must be 100 characters or fewer"}), 400
-            job = _job_start(p.root.name, "generate", lambda note: p.generate_bundle(a2_output_dir, training_input_path, name, progress=note))
+            job = _job_start(p.root.name, "generate", lambda note: p.generate_bundle(a2_output_dir, training_input_path, name, progress=note), lambda: sync_session(p))
         except CgProjectError as exc:
             return err(exc, 409)
         return jsonify({"job_id": job["job_id"]}), 202
@@ -317,7 +352,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         try:
             p = project_or_404(pid)
             trained_model(p)
-            job = _job_start(p.root.name, "validate", lambda note: run_validation(p, note))
+            job = _job_start(p.root.name, "validate", lambda note: run_validation(p, note), lambda: sync_session(p))
         except (CgProjectError, OSError, json.JSONDecodeError) as exc:
             return err(exc, 409)
         return jsonify({"job_id": job["job_id"]}), 202

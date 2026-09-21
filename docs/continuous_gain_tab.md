@@ -9,8 +9,10 @@ One amp/channel, N fixed-gain captures -> ONE standard `.nam` driven by the play
    `cg_selection` (4D exhaustive subset search, no imposed count, `k*` coverage rule). Modes: **Automatic** (the `k*` set; if no
    subset meets the coverage rule it says so and falls back to all eligible captures, never an invented optimum), **Use all**,
    **Custom**. Two views: measured source response, and the Input-gain mapping used to build the target.
-3. **Train** - `cg_project.generate_bundle` writes an ordinary A2 bundle (`mode: "continuous_gain"`) into `work/a2/<id>/`;
-   the UI starts it through `/api/local_training/*` or `/api/kaggle/*`. Epoch presets are the existing 20/60/120.
+3. **Train** - `cg_project.generate_bundle` writes an ordinary A2 bundle (`mode: "continuous_gain"`) into `work/a2/<id>/`. The tab
+   does not re-implement training: it hosts the Builder's own training section (Kaggle connection/install, local environment setup,
+   epoch presets, progress, logs, downloads) via `window.namTrainingHost` in `static/app.js`, pointed at this design, and reloads on the
+   `nam:training-complete` event.
 4. **Test & export** - `cg_validation`: standard-NAM compatibility (Full/Lite), output safety, per-position comparison with the real
    captures on held-out DIs (training anchors and omitted references), direction reversals, optional sweep/comparison audio.
    Export (`.nam` + JSON + player guide) is never gated on validation or listening.
@@ -36,3 +38,14 @@ carries standard NAM user metadata (name, modeled_by).
 
 ## Where the research scripts went
 The Phase 2-5 research scripts (`p4*`, `fc_*`, `p5_*`, `pl_*`, `tr_*`, v3 `cg_*`, `single_nam_*`, `continuous_gain_*`) were removed from `scripts/` on 2026-09-21. They are in `~/Documents/hybrid-nam-builder-archive/research_scripts_2026-09-21.tar.gz` (extract repo-relative) and in git history. `scripts/` keeps the app infrastructure plus `single_nam_common.py` and `cg_reproduce_fc.py`, which the frozen-configuration reproduction still uses.
+
+## Sessions
+Each project keeps a normal Sessions record (`work/sessions/<project id>.nam-mixer.json`, written by `cg_routes.sync_session` through the
+app's own session writer): kind "Continuous Gain", how far it got, the selection/anchors, and - once trained - the NAM plus the trainers'
+validation report (attached only if it belongs to that exact NAM). Sessions -> Load opens the Continuous Gain tab on that project; Delete
+removes the record, the project folder and the training bundle. The tab has no project list of its own.
+
+## Training material
+The frozen recipe trains on the official NAM input plus three guitar DIs at eight level offsets. `hybrid/cg_excitation.py` generates a
+single deterministic file that covers the same level range in one pass (synthesised guitar-like playing under a slow gain sweep);
+`generate_bundle(recipe=..., load_di=..., official_transform=...)` lets experiments swap the material.

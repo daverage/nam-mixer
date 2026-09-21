@@ -629,21 +629,23 @@
     </div>
   </section>
 
-  <section id="cg-panel" class="cg-panel" hidden aria-labelledby="cg-title">
-    <div class="cg-heading">
-      <div><div class="eyebrow">One amplifier, one NAM</div><h2 id="cg-title">Continuous Gain</h2>
-        <p class="info">Turn several fixed-gain captures of <strong>one amp and channel</strong> into <strong>one standard .nam</strong> whose gain range you explore with an ordinary player's Input gain. It approximates the range; it does not reproduce every knob position exactly.</p></div>
-      <div class="cg-project-picker"><label class="field-label" for="cg-project-select">Project</label><select id="cg-project-select" class="select-input"></select>
-        <button type="button" id="cg-new-project" class="btn btn-secondary btn-small">New project</button><button type="button" id="cg-delete-project" class="btn btn-secondary btn-small">Delete</button></div>
+  <section id="cg-panel" class="cg-panel" hidden aria-label="Continuous Gain">
+    <nav class="cg-nav" id="cg-steps" aria-label="Continuous Gain workflow">
+      <button type="button" class="cg-tab active" data-cg-stage="1"><span>1</span> Add captures</button>
+      <button type="button" class="cg-tab" data-cg-stage="2"><span>2</span> Analyse &amp; select</button>
+      <button type="button" class="cg-tab" data-cg-stage="3"><span>3</span> Train</button>
+      <button type="button" class="cg-tab" data-cg-stage="4"><span>4</span> Test &amp; export</button>
+      <p class="cg-hint" id="cg-hint"></p>
+    </nav>
+    <div class="card cg-intro">
+      <h2 id="cg-title">Continuous Gain <span class="cost-badge cost-badge-auto">one amp · one NAM</span></h2>
+      <p class="info">Turn several fixed-gain captures of <strong>one amp and channel</strong> into <strong>one standard .nam</strong> whose gain range you explore with an ordinary player's Input gain. It approximates the range; it does not reproduce every knob position exactly.</p>
+      <div class="cg-row"><strong id="cg-current-name">No project open</strong>
+        <button type="button" id="cg-new-project" class="btn btn-secondary btn-small">New project</button>
+        <button type="button" id="cg-open-sessions" class="btn btn-secondary btn-small">Open a saved project…</button></div>
+      <p class="info">Projects are listed in <strong>Sessions</strong>, labelled “Continuous Gain”: load one there to come back to it.</p>
     </div>
-    <ol class="cg-steps" id="cg-steps">
-      <li><button type="button" data-cg-stage="1" class="cg-step active">1 · Add captures</button></li>
-      <li><button type="button" data-cg-stage="2" class="cg-step">2 · Analyse &amp; select</button></li>
-      <li><button type="button" data-cg-stage="3" class="cg-step">3 · Train</button></li>
-      <li><button type="button" data-cg-stage="4" class="cg-step">4 · Test &amp; export</button></li>
-    </ol>
-    <div id="cg-message" class="info" aria-live="polite"></div>
-    <div id="cg-body" class="cg-body"></div>
+    <div id="cg-body" class="cg-layout"></div>
   </section>
 
   <footer class="site-footer">

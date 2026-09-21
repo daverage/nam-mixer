@@ -1030,6 +1030,15 @@ def _materialize_session_nam(session_id: str, session: dict) -> None:
     model_path.write_bytes(raw)
 
 
+def _store_session_record(session: dict) -> dict:
+    """Validate and write a plain session record (and its embedded NAM) -- for records the SERVER maintains, e.g. Continuous Gain
+    projects, which are listed, loaded, exported and deleted through the same Sessions tab as everything else."""
+    session_id, session = _session_payload(session)
+    _materialize_session_nam(session_id, session)
+    _session_path(session_id).write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+    return session
+
+
 def _session_for_client(session: dict) -> dict:
     """Add local, non-portable routes without changing the stored JSON."""
     client_session = dict(session)
@@ -1178,6 +1187,11 @@ def api_session_delete(session_id: str):
         shutil.rmtree(bundle_dir)
     else:
         path.unlink()
+    if isinstance(_session, dict) and (_session.get("settings") or {}).get("mode") == "continuous_gain":
+        # A Continuous Gain project owns a working folder (captures, analysis, plan) and, once created, a training bundle.
+        shutil.rmtree(CG_PROJECT_DIR / secure_filename(session_id), ignore_errors=True)
+        if design_id:
+            shutil.rmtree(A2_OUTPUT_DIR / secure_filename(str(design_id)), ignore_errors=True)
     _session_model_path(session_id).unlink(missing_ok=True)
     return "", 204
 
@@ -2982,7 +2996,8 @@ def api_system_usage():
     })
 
 
-register_cg_routes(app, cg_dir=WORK_DIR / "cg_projects", a2_output_dir=A2_OUTPUT_DIR, training_input_path=TRAINING_INPUT_PATH)
+CG_PROJECT_DIR = WORK_DIR / "cg_projects"
+register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, training_input_path=TRAINING_INPUT_PATH, store_session=_store_session_record)
 
 
 if __name__ == "__main__":

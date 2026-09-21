@@ -240,7 +240,10 @@ class CgProject:
 
     # ---- Stage 3: freeze + generate bundle for the existing trainers
     def generate_bundle(self, out_root: Path, official_input_path: Path, model_name: str | None = None,
-                        progress: Callable[[str], None] | None = None) -> dict:
+                        progress: Callable[[str], None] | None = None, *, recipe=None, load_di: Callable[[str], np.ndarray] | None = None,
+                        official_transform: Callable[[np.ndarray], np.ndarray] | None = None, excitation: str = "FC recipe: official input + guitar DIs at level offsets") -> dict:
+        """`recipe` / `load_di` / `official_transform` exist for training-material experiments (e.g. official input only, or one synthetic
+        level-swept excitation); the defaults are the frozen FC recipe."""
         import soundfile as sf
 
         st = self.state()
@@ -260,15 +263,18 @@ class CgProject:
         if sr != SR:
             raise CgProjectError(f"official training input must be {SR} Hz")
         official = official if official.ndim == 1 else official.mean(axis=1)
-        built = build_training_audio(chain, lambda g, x: render(models[g], x, SR), shifts, official, load_reference_di, FC_RECIPE, progress=note)
+        recipe = recipe or FC_RECIPE
+        if official_transform is not None:
+            official = official_transform(official).astype(np.float32)
+        built = build_training_audio(chain, lambda g, x: render(models[g], x, SR), shifts, official, load_di or load_reference_di, recipe, progress=note)
         name = (model_name or st["name"]).strip()
         stem = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "continuous_gain"
         design_id = f"{st['id']}-{int(_now())}"
         out_dir = Path(out_root) / design_id
-        design = frozen_design_record(positions, anchors, FC_RECIPE, plan["anchor_method"],
+        design = frozen_design_record(positions, anchors, recipe, plan["anchor_method"],
                                       {"mode": plan["mode"], "k_star": plan["k_star"], "fallback": plan["fallback"], "coverage": plan["coverage"], "warnings": plan["warnings"]},
                                       plan["mapping"])
-        design.update({"project_id": st["id"], "amp": st["amp"], "channel": st["channel"], "output_gain_recommendation_db": built.reduction_db})
+        design.update({"project_id": st["id"], "amp": st["amp"], "channel": st["channel"], "output_gain_recommendation_db": built.reduction_db, "training_material": excitation})
         srcs = source_records(positions, paths, anchors, chain, an["audit"])
         rf = receptive_field_record(positions, models, bounded_envelope_max_history_samples(SR))
         mp = write_bundle(out_dir, built, chain, anchors, shifts, sources=srcs, model_name=name, artifact_stem=stem, design=design, receptive_field=rf,
