@@ -8,7 +8,7 @@
   const msg = document.getElementById("cg-message");
   const picker = document.getElementById("cg-project-select");
 
-  const S = { projects: [], id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard" };
+  const S = { pollGen: 0, projects: [], id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard" };
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
   const say = (t, bad) => { msg.textContent = t || ""; msg.classList.toggle("is-error", Boolean(bad)); };
@@ -47,14 +47,20 @@
 
   // ---------- projects
   async function refreshList(selectId) {
-    S.projects = await api("/api/cg/projects");
+    const list = await api("/api/cg/projects");
+    if (selectId === undefined && S.id !== null && loadSeq > 0 && document.activeElement === document.getElementById("cg-new-project")) return;
+    S.projects = list;
     picker.innerHTML = S.projects.length ? S.projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${p.amp ? " · " + esc(p.amp) : ""}</option>`).join("") : `<option value="">No projects yet</option>`;
     const id = selectId || (S.projects.find((p) => p.id === S.id) ? S.id : (S.projects[0] && S.projects[0].id));
     if (id) { picker.value = id; await load(id); } else { S.id = null; S.data = null; render(); }
   }
+  let loadSeq = 0;
   async function load(id) {
     S.id = id;
-    S.data = await api(`/api/cg/projects/${id}`);
+    const mine = ++loadSeq;
+    const data = await api(`/api/cg/projects/${id}`);
+    if (mine !== loadSeq) return;            // a newer load (e.g. the project the user just created) superseded this response
+    S.data = data;
     render();
   }
   picker.addEventListener("change", () => load(picker.value));
@@ -212,7 +218,7 @@
         <div class="cg-row">${modes}</div>
         <p class="info">${d.project.captures ? Object.keys(d.project.captures).length : 0} captures uploaded · <strong>${plan.selected.length} selected</strong> for training (${plan.selected.map((g) => "G" + g).join(", ")}) · ${a.eligible.length} eligible · coverage rule ${a.k_star ? `met at k* = ${a.k_star}` : "<strong>not met by any subset</strong>"}.</p>
         ${plan.warnings.map((w) => `<p class="cg-warn">${esc(w)}</p>`).join("")}
-        <details><summary>Advanced</summary><div class="cg-row"><label>Anchor method <select id="cg-anchors" class="select-input"><option value="fc" ${plan.anchor_method === "fc" ? "selected" : ""}>FC response-distance anchors (default, production recipe)</option><option value="fixed" ${plan.anchor_method === "fixed" ? "selected" : ""}>Fixed 4 dB spacing (v3 alternative)</option></select></label></div></details></section>
+        <details id="cg-advanced" ${S.advOpen || plan.anchor_method === "fixed" ? "open" : ""}><summary>Advanced</summary><div class="cg-row"><label>Anchor method <select id="cg-anchors" class="select-input"><option value="fc" ${plan.anchor_method === "fc" ? "selected" : ""}>FC response-distance anchors (default, production recipe)</option><option value="fixed" ${plan.anchor_method === "fixed" ? "selected" : ""}>Fixed 4 dB spacing (v3 alternative)</option></select></label></div></details></section>
       <section class="cg-two"><div><h3>How the source amp changes</h3><p class="cg-warn">Measured on the fit DIs; dashed line is the interpolation, markers are the captures (filled = selected, red ring = quarantined for this measure).</p>
           <select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}</div>
         <div><h3>How the finished NAM will be controlled</h3><p class="cg-warn">The Input-gain mapping used to build the training target. Shaded bands are untested regions between anchors, learned by interpolation. This is a control guide, not a physical-gain parameter.</p>${mapChart}</div></section>
@@ -224,17 +230,28 @@
   function bindStage2() {
     const d = S.data; if (!d) return;
     const mk = document.getElementById("cg-make-plan");
-    const replan = async (mode, custom, anchors) => { try { S.data = await api(`/api/cg/projects/${S.id}/plan`, { method: "POST", json: { mode, custom, anchors } }); render(); } catch (e) { say(e.message, true); } };
-    if (mk) mk.addEventListener("click", () => replan("automatic", null, "fc"));
+    // Plan changes are serialised and always start from the CURRENT plan (never one captured when the handlers were bound),
+    // so a quick second change (e.g. Automatic right after switching the anchor method) cannot silently undo the first.
+    const replan = (o) => {
+      S.planQueue = (S.planQueue || Promise.resolve()).then(async () => {
+        const cur = S.data.plan || {};
+        const mode = o.mode ?? cur.mode ?? "automatic";
+        const anchors = o.anchors ?? cur.anchor_method ?? "fc";
+        const custom = mode === "custom" ? (o.custom ?? cur.selected) : null;
+        try { S.data = await api(`/api/cg/projects/${S.id}/plan`, { method: "POST", json: { mode, custom, anchors } }); render(); } catch (e) { say(e.message, true); }
+      });
+    };
+    if (mk) mk.addEventListener("click", () => replan({ mode: "automatic", anchors: "fc" }));
     if (!d.plan) return;
-    body.querySelectorAll("input[name=cg-mode]").forEach((el) => el.addEventListener("change", () => replan(el.value, el.value === "custom" ? d.plan.selected : null, d.plan.anchor_method)));
+    body.querySelectorAll("input[name=cg-mode]").forEach((el) => el.addEventListener("change", () => replan({ mode: el.value })));
     body.querySelectorAll("[data-cg-cust]").forEach((el) => el.addEventListener("change", () => {
       const chosen = [...body.querySelectorAll("[data-cg-cust]")].filter((x) => x.checked).map((x) => Number(x.dataset.cgCust));
-      replan("custom", chosen, d.plan.anchor_method);
+      replan({ mode: "custom", custom: chosen });
     }));
-    const an = document.getElementById("cg-anchors"); if (an) an.addEventListener("change", () => replan(d.plan.mode, d.plan.mode === "custom" ? d.plan.selected : null, an.value));
+    const adv = document.getElementById("cg-advanced"); if (adv) adv.addEventListener("toggle", () => { S.advOpen = adv.open; });
+    const an = document.getElementById("cg-anchors"); if (an) an.addEventListener("change", () => replan({ anchors: an.value }));
     const se = document.getElementById("cg-series"); if (se) se.addEventListener("change", () => { S.seriesName = se.value; render(); });
-    const ac = document.getElementById("cg-accept"); if (ac) ac.addEventListener("click", () => { S.stage = 3; render(); });
+    const ac = document.getElementById("cg-accept"); if (ac) ac.addEventListener("click", async () => { await (S.planQueue || Promise.resolve()); S.stage = 3; render(); });
   }
 
   // ---------- Stage 3
@@ -264,26 +281,56 @@
         <div class="cg-row"><button type="button" class="btn btn-primary" id="cg-train" ${stale || S.job ? "disabled" : ""}>Start training</button>${S.backend === "local" ? `<button type="button" class="btn btn-secondary" id="cg-setup">Set up local training</button><button type="button" class="btn btn-secondary" id="cg-cancel">Cancel</button>` : ""}</div>
         ${trainerBox}${t && t.trained ? `<p class="info"><span class="cg-chip ok">trained</span> ${esc(t.output_nam_path)} <button type="button" class="btn btn-primary btn-small" id="cg-goto4">Continue to Test &amp; export</button></p>` : ""}</section>` : ""}`;
   }
+  // Single-flight trainer poll: at most ONE poller per design, and never two requests in flight. (Each render re-binds stage 3, and
+  // /api/kaggle/jobs/<id> does real work -- download and local validation -- so overlapping polls must never be issued.)
   async function pollTrainer() {
-    clearInterval(S.trainTimer);
+    const d0 = S.data;
+    if (!d0 || !d0.bundle || (d0.training && d0.training.trained)) { stopPoll(); return; }
+    const design = d0.bundle.design_id;
+    if (S.pollDesign === design && S.trainTimer) return;            // already watching this design
+    stopPoll();
+    S.pollDesign = design;
+    const gen = ++S.pollGen;
+    let busy = false;
     const el = () => document.getElementById("cg-train-status");
+    const alive = () => S.pollGen === gen && el() && S.stage === 3 && S.data && S.data.bundle && S.data.bundle.design_id === design;
+    const finish = async () => { stopPoll(); await load(S.id); };
     const tick = async () => {
-      if (!el() || S.stage !== 3) { clearInterval(S.trainTimer); return; }
+      if (busy) return;
+      if (!alive()) { if (S.pollGen === gen) stopPoll(); return; }
+      busy = true;
       try {
         if (S.backend === "local") {
           const s = await api("/api/local_training/status");
+          const mine = s.design_id === design && (!S.trainStarted || (s.started_at || 0) >= S.trainStarted - 5);
+          if (!alive()) return;
+          if (!mine) { el().textContent = s.state === "not_configured" ? "Local training is not set up yet — click “Set up local training”." : "Local training: not started for these files."; return; }
           const pr = s.progress ? ` · epoch ${s.progress.epoch}/${s.progress.total_epochs}` : "";
-          el().textContent = `Local training: ${s.state}${pr}${s.state === "not_configured" ? " — click “Set up local training” first" : ""}`;
-          if (s.state === "complete") { clearInterval(S.trainTimer); await load(S.id); }
-        } else if (S.train && S.train.job_id) {
-          const s = await api(`/api/kaggle/jobs/${S.train.job_id}?design_id=${encodeURIComponent(S.data.bundle.design_id)}`);
-          el().textContent = `Kaggle: ${s.state}${s.error ? " — " + s.error : ""}`;
-          if (s.state === "complete") { clearInterval(S.trainTimer); await load(S.id); }
+          el().textContent = `Local training: ${s.state}${pr}${s.latest_line ? " — " + s.latest_line.slice(0, 90) : ""}`;
+          if (s.state === "complete") await finish();
+          else if (s.state === "failed" || s.state === "cancelled") { stopPoll(); say(`Local training ${s.state}.`, true); }
+        } else {
+          if (!S.train || !S.train.job_id || S.train.design !== design) {
+            // After a page reload the job id is unknown: find this design's latest job first.
+            const info = await api(`/api/kaggle/status?design_id=${encodeURIComponent(design)}`);
+            if (!info.job) { if (alive()) el().textContent = "Kaggle: no job started for these files."; return; }
+            S.train = { job_id: info.job.job_id, design };
+          }
+          // GET /api/kaggle/jobs/<id> is the endpoint that REFRESHES the job from Kaggle (the /status endpoint only reads the stored record).
+          const j = await api(`/api/kaggle/jobs/${S.train.job_id}?design_id=${encodeURIComponent(design)}`);
+          if (!alive()) return;
+          const pr = j.progress ? ` · epoch ${j.progress.epoch}/${j.progress.total_epochs}` : "";
+          el().textContent = `Kaggle job ${j.job_id}: ${j.state}${pr}${j.error ? " — " + j.error : ""}`;
+          if (j.state === "complete") await finish();
+          else if (j.state === "failed") { stopPoll(); say(`Kaggle job failed: ${j.error || "see the job log"}`, true); }
         }
-      } catch (e) { el().textContent = e.message; }
+      } catch (e) { if (alive()) el().textContent = e.message; }
+      finally { busy = false; }
     };
-    S.trainTimer = setInterval(tick, 4000); tick();
+    S.trainTimer = setInterval(tick, 4000);
+    setTimeout(() => { if (S.pollGen === gen) tick(); }, 1500);
   }
+  function stopPoll() { S.pollGen = (S.pollGen || 0) + 1; clearInterval(S.trainTimer); S.trainTimer = null; S.pollDesign = null; }
   function bindStage3() {
     const d = S.data; if (!d || !d.plan) return;
     const pre = document.getElementById("cg-preset"); if (pre) pre.addEventListener("change", () => { S.preset = pre.value; });
@@ -293,8 +340,9 @@
     const tr = document.getElementById("cg-train");
     if (tr) tr.addEventListener("click", async () => {
       try {
+        S.trainStarted = Date.now() / 1000;
         if (S.backend === "local") { await api("/api/local_training/start", { method: "POST", json: { design_id: d.bundle.design_id, epoch_preset: S.preset } }); }
-        else { S.train = await api("/api/kaggle/train", { method: "POST", json: { design_id: d.bundle.design_id, epoch_preset: S.preset } }); }
+        else { const kj = await api("/api/kaggle/train", { method: "POST", json: { design_id: d.bundle.design_id, epoch_preset: S.preset } }); S.train = { job_id: kj.job_id, design: d.bundle.design_id }; }
         say("Training started."); pollTrainer();
       } catch (e) { say(e.message, true); }
     });
@@ -345,6 +393,7 @@
 
   // ---------- render
   function render() {
+    if (S.stage !== 3) stopPoll();
     document.querySelectorAll(".cg-step").forEach((b) => b.classList.toggle("active", Number(b.dataset.cgStage) === S.stage));
     if (!S.data) { body.innerHTML = `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`; return; }
     body.innerHTML = [stage1, stage2, stage3, stage4][S.stage - 1]();

@@ -105,7 +105,14 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             return {"design_id": b["design_id"], "manifest_missing": True}
         t = m.get("training") or {}
         path, backend = model_path_for(b["design_id"], m)
-        return {"design_id": b["design_id"], "output_nam_path": path, "backend": backend, "epochs": t.get("epochs"), "epoch_preset": t.get("epoch_preset"),
+        epochs, preset = t.get("epochs"), t.get("epoch_preset")
+        if backend == "kaggle":       # the cloud worker records what it actually trained with on the job, not in the manifest
+            try:
+                tr = (find_active_job(a2_output_dir, b["design_id"]).training_result) or {}
+                epochs, preset = tr.get("epochs", epochs), tr.get("epoch_preset", preset)
+            except (AttributeError, OSError, ValueError, json.JSONDecodeError):
+                pass
+        return {"design_id": b["design_id"], "output_nam_path": path, "backend": backend, "epochs": epochs, "epoch_preset": preset,
                 "quick_mode": t.get("quick_mode"), "full_metrics_vs_target": t.get("full_metrics_vs_target"),
                 "trained": path is not None, "core": m.get("core"), "receptive_field_check": m.get("receptive_field_check")}
 
@@ -193,6 +200,8 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
                     problems.append(str(exc))
             st = public_state(p)
             st["added"], st["problems"] = added, problems
+            if not added:
+                st["error"] = "; ".join(problems) or "no files were uploaded"
             return jsonify(st), (201 if added else 400)
         except CgProjectError as exc:
             return err(exc)
@@ -266,7 +275,12 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         manifest = json.loads((a2_output_dir / b["design_id"] / "training_manifest.json").read_text(encoding="utf-8"))
         path, _backend = model_path_for(b["design_id"], manifest)
         if not path:
-            raise CgProjectError("this design has not produced a trained model yet")
+            try:
+                job = find_active_job(a2_output_dir, b["design_id"])
+            except (OSError, ValueError, json.JSONDecodeError):
+                job = None
+            detail = f" (the Kaggle job is '{job.state}': wait until it is complete and its download has been validated)" if job is not None and job.state != "complete" else ""
+            raise CgProjectError("this design has not produced a trained model yet" + detail)
         return st, Path(path), manifest
 
     def run_validation(p: CgProject, note) -> dict:
@@ -329,7 +343,8 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         except (CgProjectError, OSError, json.JSONDecodeError) as exc:
             return err(exc, 409)
         val = json.loads(p.validation_file.read_text(encoding="utf-8")) if p.validation_file.is_file() else None
-        design, core, t = manifest["design"], manifest["core"], manifest.get("training") or {}
+        design, core = manifest["design"], manifest["core"]
+        t = training_record(st) or {}
         mapping = design["input_gain_mapping"]
         rec_out = float(design.get("output_gain_recommendation_db") or 0.0)
         usable = [min(m["input_gain_db"] for m in mapping), max(m["input_gain_db"] for m in mapping)]

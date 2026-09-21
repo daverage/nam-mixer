@@ -170,6 +170,9 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
 
 
 def test_only_one_job_per_project_and_unknown_things_are_404(client):
+    pid0 = client.post("/api/cg/projects", json={"name": "B"}).get_json()["project"]["id"]
+    bad = client.post(f"/api/cg/projects/{pid0}/captures", data={"files": [(io.BytesIO(b"not a nam"), "notes.nam")]}, content_type="multipart/form-data")
+    assert bad.status_code == 400 and "not a readable .nam" in bad.get_json()["error"]          # the UI shows this text
     assert client.get("/api/cg/projects/nope").status_code == 404
     assert client.get("/api/cg/jobs/nope").status_code == 404
     pid = client.post("/api/cg/projects", json={"name": "A"}).get_json()["project"]["id"]
