@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_KEY = ROOT / "work" / "p4e" / "listening_fixed_gain" / "listening_KEY_do_not_open_before_listening.json"
+KEYS = {"fixed": ROOT / "work" / "p4e" / "listening_fixed_gain" / "listening_KEY_do_not_open_before_listening.json", "fc": ROOT / "work" / "p4e" / "final" / "listening" / "listening_KEY_do_not_open_before_listening.json"}
+DEFAULT_KEY = KEYS["fixed"]
 MODEL_NAMES = {"v3_C3": "v3 C3 (old)", "B_s0": "Phase 4E B seed 0", "B_s1": "Phase 4E B seed 1", "FC_s0": "FC seed 0 (new)", "FC_s1": "FC seed 1 (new)", "HIDDEN_REFERENCE": "hidden real amp"}
 
 def load(paths, key, impute=None):
@@ -35,10 +36,14 @@ def analyse(rows):
     for r in rows: items[(r["who"], r["sid"])][r["model"]] = r
     def mean(xs): return float(np.mean(xs)) if xs else float("nan")
     out["n_ratings"] = len(rows); out["n_items"] = len(items)
-    out["mean_by_model"] = {m: mean([r["score"] for r in rows if r["model"] == m]) for m in MODEL_NAMES}
+    present = [m for m in MODEL_NAMES if any(r["model"] == m for r in rows)]; cand = [m for m in present if m != "HIDDEN_REFERENCE"]; out["models"] = present; out["candidates"] = cand
+    out["mean_by_model"] = {m: mean([r["score"] for r in rows if r["model"] == m]) for m in present}
     for dim in ("amp", "pick", "gain"):
-        out[f"mean_by_{dim}"] = {str(v): {m: mean([r["score"] for r in rows if r[dim] == v and r["model"] == m]) for m in MODEL_NAMES} for v in sorted({r[dim] for r in rows}, key=str)}
-    wins = defaultdict(float); n = 0; ref_top = 0.0; ref_n = 0; paired = []
+        out[f"mean_by_{dim}"] = {str(v): {m: mean([r["score"] for r in rows if r[dim] == v and r["model"] == m]) for m in present} for v in sorted({r[dim] for r in rows}, key=str)}
+    wins = defaultdict(float); n = 0; ref_top = 0.0; ref_n = 0; paired = []; pairs = defaultdict(list)
+    def grp(it, ms):
+        v = [it[m]["score"] for m in ms if m in it]; return mean(v) if v else None
+    PAIRS = {"B_minus_C3": (["B_s0", "B_s1"], ["v3_C3"]), "FC_minus_B": (["FC_s0", "FC_s1"], ["B_s0", "B_s1"]), "FC_minus_C3": (["FC_s0", "FC_s1"], ["v3_C3"]), "FC_s0_minus_FC_s1": (["FC_s0"], ["FC_s1"]), "B_s0_minus_B_s1": (["B_s0"], ["B_s1"])}
     for it in items.values():
         cands = {m: v["score"] for m, v in it.items() if m != "HIDDEN_REFERENCE"}
         if cands:
@@ -46,13 +51,14 @@ def analyse(rows):
             for m in w: wins[m] += 1 / len(w)
         if "HIDDEN_REFERENCE" in it and cands:
             ref_n += 1; ref_top += 1.0 if it["HIDDEN_REFERENCE"]["score"] > max(cands.values()) else (0.5 if it["HIDDEN_REFERENCE"]["score"] == max(cands.values()) else 0.0)
-        if "v3_C3" in it and ("B_s0" in it or "B_s1" in it):
-            b = mean([it[m]["score"] for m in ("B_s0", "B_s1") if m in it]); paired.append(b - it["v3_C3"]["score"])
-    out["wins"] = {m: wins[m] for m in ("v3_C3", "B_s0", "B_s1")}; out["n_items_with_candidates"] = n
+        for nm, (x, y) in PAIRS.items():
+            a_, b_ = grp(it, x), grp(it, y)
+            if a_ is not None and b_ is not None: pairs[nm].append(a_ - b_)
+    out["wins"] = {m: wins[m] for m in cand}; out["n_items_with_candidates"] = n
     out["hidden_reference_rated_top_fraction"] = ref_top / ref_n if ref_n else float("nan")
-    out["paired_B_minus_C3"] = {"n": len(paired), "mean": mean(paired), "B_better": int(sum(p > 0 for p in paired)), "C3_better": int(sum(p < 0 for p in paired)), "ties": int(sum(p == 0 for p in paired))}
+    out["paired"] = {nm: {"n": len(v), "mean": mean(v), "first_better": int(sum(p > 0 for p in v)), "second_better": int(sum(p < 0 for p in v)), "ties": int(sum(p == 0 for p in v))} for nm, v in pairs.items() if v}
     pdep = {}
-    for m in ("v3_C3", "B_s0", "B_s1"):
+    for m in cand:
         g = lambda pk: mean([r["score"] for r in rows if r["model"] == m and r["pick"] == pk])
         pdep[m] = {"soft": g("soft"), "normal": g("normal"), "hard": g("hard"), "sequence": g("sequence")}
     out["pick_dependence"] = pdep
@@ -67,16 +73,15 @@ def markdown(a):
     o = ["# Fixed-virtual-gain listening results", "", f"{a['n_ratings']} ratings over {a['n_items']} listener-items. Scores are closeness to the reference (0-100; for sequence items, how well the candidate keeps the reference's character from soft to hard).", "",
          "## Overall mean score by model", "", "| Model | mean |", "|---|---:|"] + [f"| {MODEL_NAMES[m]} | {f(v)} |" for m, v in a["mean_by_model"].items()]
     hr = a["hidden_reference_rated_top_fraction"]
-    o += ["", f"**Attention check:** the hidden real amp was rated best in {hr*100:.0f}% of items (chance is about 25%). If this is low the listening session is not trustworthy.", "",
-          "## Per-item wins (best candidate, excluding the hidden reference; ties split)", "", "| v3 C3 | B seed 0 | B seed 1 | items |", "|---:|---:|---:|---:|", f"| {a['wins']['v3_C3']:.1f} | {a['wins']['B_s0']:.1f} | {a['wins']['B_s1']:.1f} | {a['n_items_with_candidates']} |", "",
-          f"**Paired B (mean of seeds) minus v3 C3 per item:** mean {f(a['paired_B_minus_C3']['mean'])} points over {a['paired_B_minus_C3']['n']} items; B better in {a['paired_B_minus_C3']['B_better']}, C3 better in {a['paired_B_minus_C3']['C3_better']}, ties {a['paired_B_minus_C3']['ties']}.", "",
+    o += ["", f"**Attention check:** the hidden real amp was rated best in {hr*100:.0f}% of items (chance is 20-25%, one in the number of options). If this is low the listening session is not trustworthy.", "",
+          "## Per-item wins (best candidate, excluding the hidden reference; ties split)", "", "| " + " | ".join(MODEL_NAMES[m] for m in a["candidates"]) + " | items |", "|" + "---:|" * (len(a["candidates"]) + 1), "| " + " | ".join(f"{a['wins'][m]:.1f}" for m in a["candidates"]) + f" | {a['n_items_with_candidates']} |", ""] + [f"**Paired {nm.replace('_minus_', ' minus ')} per item:** mean {f(v['mean'])} points over {v['n']} items; first better in {v['first_better']}, second better in {v['second_better']}, ties {v['ties']}." for nm, v in a["paired"].items()] + ["",
           "## By playing intensity (does it still sound like that amp when played softer or harder?)", "", "| Model | soft | normal | hard | soft-to-hard sequence |", "|---|---:|---:|---:|---:|"] + [f"| {MODEL_NAMES[m]} | {f(v['soft'])} | {f(v['normal'])} | {f(v['hard'])} | {f(v['sequence'])} |" for m, v in a["pick_dependence"].items()]
     for dim, title in (("amp", "By amp"), ("gain", "By virtual gain")):
-        o += ["", f"## {title}", "", "| " + dim + " | " + " | ".join(MODEL_NAMES[m] for m in MODEL_NAMES) + " |", "|---|" + "---:|" * len(MODEL_NAMES)] + [f"| {k} | " + " | ".join(f(v[m]) for m in MODEL_NAMES) + " |" for k, v in a[f"mean_by_{dim}"].items()]
+        o += ["", f"## {title}", "", "| " + dim + " | " + " | ".join(MODEL_NAMES[m] for m in a["models"]) + " |", "|---|" + "---:|" * len(a["models"])] + [f"| {k} | " + " | ".join(f(v[m]) for m in a["models"]) + " |" for k, v in a[f"mean_by_{dim}"].items()]
     o += ["", "## Issues ticked (count per model)", ""] + [f"- **{MODEL_NAMES[m]}**: " + (", ".join(f"{t} ({c})" for t, c in sorted(v.items(), key=lambda x: -x[1])) or "none") for m, v in a["issue_tags"].items()]
     return "\n".join(o) + "\n"
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("csv", nargs="+"); ap.add_argument("--key", default=str(DEFAULT_KEY)); ap.add_argument("--out"); ap.add_argument("--impute", type=float, default=50.0, help="score for candidates of visited items with no row (untouched slider = 50); use --impute -1 to leave missing"); a = ap.parse_args()
-    key = json.loads(Path(a.key).read_text()); imp = None if a.impute < 0 else a.impute; md = markdown(analyse(load(a.csv, key, imp))); print(md)
+    ap = argparse.ArgumentParser(); ap.add_argument("csv", nargs="+"); ap.add_argument("--key", default=None); ap.add_argument("--set", choices=list(KEYS), default="fixed", help="which listening set: fixed (v3 C3 vs B) or fc (v3 C3, B s0, FC s0, FC s1)"); ap.add_argument("--out"); ap.add_argument("--impute", type=float, default=50.0, help="score for candidates of visited items with no row (untouched slider = 50); use --impute -1 to leave missing"); a = ap.parse_args()
+    key = json.loads(Path(a.key or KEYS[a.set]).read_text()); imp = None if a.impute < 0 else a.impute; md = markdown(analyse(load(a.csv, key, imp))); print(md)
     if a.out: Path(a.out).write_text(md)
