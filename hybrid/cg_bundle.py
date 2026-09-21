@@ -29,6 +29,7 @@ import numpy as np
 
 from .cg_anchors import REFERENCE_DB
 from .cg_audit import alignment_shift
+from .cg_parallel import pmap
 from .character_analysis import sha256_file      # shared file-hash helper
 from .envelope import bounded_causal_envelope_db
 from .multi_blend import GainChain, multi_blend
@@ -91,8 +92,8 @@ def build_training_audio(chain: GainChain, render_fn: Callable[[float, np.ndarra
 
     def segment(x: np.ndarray) -> np.ndarray:
         env = bounded_causal_envelope_db(x, SR)
-        renders = [_shifted(render_fn(g, (x * _db(chain.input_scale_db(k))).astype(np.float32)), shifts.get(g, 0))
-                   for k, g in enumerate(chain.labels)]
+        renders = pmap(lambda kg: _shifted(render_fn(kg[1], (x * _db(chain.input_scale_db(kg[0]))).astype(np.float32)), shifts.get(kg[1], 0)),
+                       list(enumerate(chain.labels)))      # one independent render per capture; order (and so the blend) unchanged
         return multi_blend(env, renders, chain)
 
     srcs = [("official", 0.0, official_input)] + [(n, o, load_di(n)[: recipe.di_seconds * SR]) for n in recipe.train_dis for o in recipe.train_offsets_db]

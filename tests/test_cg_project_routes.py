@@ -225,3 +225,25 @@ def test_continuous_gain_sessions_are_listed_labelled_and_deleted_with_their_fil
     assert not [s for s in c.get("/api/sessions").get_json() if s["id"] == design.name]   # the bundle itself is not a second session
     assert c.delete(f"/api/sessions/{pid}").status_code == 204
     assert not proj.root.exists() and not design.exists() and not (tmp_path / "sessions" / f"{pid}.nam-mixer.json").exists()
+
+
+def test_analysis_is_identical_serial_or_parallel_and_probes_are_cached_by_file_hash(tmp_path, fake_backend, monkeypatch):
+    calls = []
+    real_probe = cgp.probe_capture
+    monkeypatch.setattr(cgp, "probe_capture", lambda *a, **k: (calls.append(1), real_probe(*a, **k))[1])
+    def analysed(workers):
+        monkeypatch.setenv("NAM_MIXER_CG_WORKERS", str(workers))
+        p = _project(tmp_path / f"w{workers}", ); p.analyse()
+        return p, json.loads(p.analysis_file.read_text())
+    (tmp_path / "w1").mkdir(); (tmp_path / "w4").mkdir()
+    n0 = len(calls); p1, a1 = analysed(1); n1 = len(calls); p4, a4 = analysed(4)
+    assert n1 - n0 == 6 and len(calls) - n1 == 6
+    for k in ("audit", "profile", "selection", "probes"):
+        assert a1[k] == a4[k]                                         # parallel probing changes nothing but the wall time
+    before = len(calls)
+    p4.analyse()                                                      # nothing changed: every probe comes from the cache
+    assert len(calls) == before and json.loads(p4.analysis_file.read_text())["probes"] == a4["probes"]
+    p4.add_capture("amp-G7.nam", _nam_bytes(7)); p4.set_positions({"amp-G7.nam": 7}); p4.analyse()
+    assert len(calls) == before + 1                                   # only the new capture was probed
+    p4.remove_capture("amp-G7.nam"); p4.analyse()
+    assert len(calls) == before + 1                                   # and removing one needs no probe at all

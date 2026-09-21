@@ -21,6 +21,7 @@ from typing import Callable
 import numpy as np
 
 from .cg_audit import alignment_shift
+from .cg_parallel import pmap
 from .cg_probe import SR, features, load_reference_di
 from .nam_loader import load_nam
 from .render import NamRenderError, render
@@ -66,10 +67,11 @@ def check_compatibility(nam_path: Path, validation_input: np.ndarray) -> dict:
 
 
 def check_safety(model, scale_c: float, x: np.ndarray, gains_db=SWEEP_GAINS_DB) -> dict:
-    rows = []
-    for g in gains_db:
+    def one(g):
         y = render(model, (x * _db(g)).astype(np.float32), SR)
-        rows.append({"input_gain_db": g, "raw_peak_dbfs": _peak_db(y), "scaled_peak_dbfs": _peak_db(y / scale_c)})
+        return {"input_gain_db": g, "raw_peak_dbfs": _peak_db(y), "scaled_peak_dbfs": _peak_db(y / scale_c)}
+
+    rows = pmap(one, list(gains_db))
     rec = -20 * np.log10(scale_c) if scale_c > 0 else 0.0
     over = [r["input_gain_db"] for r in rows if r["scaled_peak_dbfs"] > 0.0]
     return {"sweep": rows, "recommended_output_gain_db": float(rec), "finite": all(np.isfinite(r["raw_peak_dbfs"]) for r in rows),
@@ -85,12 +87,14 @@ def _delta(m: dict, r: dict) -> dict:
 def check_progression(model, scale_c: float, capture_models: dict, shifts: dict, mapping: list[dict], training: set,
                       load_di: Callable[[str], np.ndarray] = load_reference_di, progress: Callable[[str], None] | None = None) -> dict:
     note = progress or (lambda _m: None)
-    rows = []
-    for row in sorted(mapping, key=lambda r: r["position"]):
+    ordered = sorted(mapping, key=lambda r: r["position"])
+    dis = {di: load_di(di)[: CLIP_SECONDS * SR] for di in HELD_OUT_DIS}
+
+    def compare(row):                                    # one position: independent renders, so positions run in parallel
         p, T = row["position"], row["input_gain_db"]
         ds, esrs = [], []
         for di in HELD_OUT_DIS:
-            x = load_di(di)[: CLIP_SECONDS * SR]
+            x = dis[di]
             ym = render(model, (x * _db(T)).astype(np.float32), SR) / scale_c
             yr = _shift(render(capture_models[p], x, SR), shifts.get(p, 0))
             ds.append(_delta(features(ym), features(yr)))
@@ -99,14 +103,18 @@ def check_progression(model, scale_c: float, capture_models: dict, shifts: dict,
             cl = c * np.sqrt(np.mean(r ** 2) / max(np.mean(c ** 2), 1e-20))
             esrs.append(float(compute_esr_metrics(cl, r)["raw_esr"]))
         agg = {k: float(np.mean([d[k] for d in ds])) for k in ds[0]}
-        rows.append({"position": p, "input_gain_db": T, "role": "training" if p in training else "reference", **agg, "lm_esr": float(np.mean(esrs))})
         note(f"compared position {p:g}")
+        return {"position": p, "input_gain_db": T, "role": "training" if p in training else "reference", **agg, "lm_esr": float(np.mean(esrs))}
+
+    rows = pmap(compare, ordered)
+    di0 = dis[HELD_OUT_DIS[0]]
+
+    def curve(row):
+        return (features(render(model, (di0 * _db(row["input_gain_db"])).astype(np.float32), SR) / scale_c),
+                features(_shift(render(capture_models[row["position"]], di0, SR), shifts.get(row["position"], 0))))
+
+    fm, fr = zip(*pmap(curve, rows)) if rows else ((), ())
     # direction reversals of the model's progression vs the real amp's (level, HF, crest on the first held-out DI)
-    di0 = load_di(HELD_OUT_DIS[0])[: CLIP_SECONDS * SR]
-    fm, fr = [], []
-    for row in rows:
-        fm.append(features(render(model, (di0 * _db(row["input_gain_db"])).astype(np.float32), SR) / scale_c))
-        fr.append(features(_shift(render(capture_models[row["position"]], di0, SR), shifts.get(row["position"], 0))))
     rev = []
     for key, name in (("rms_db", "level"), ("hf3k_db", "HF"), ("crest_db", "crest")):
         for i in range(len(rows) - 1):
@@ -132,10 +140,7 @@ def write_audition(out_dir: Path, model, scale_c: float, capture_models: dict, s
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     x = load_di(di)[: seconds * SR]
-    files, seg = [], []
-    for g in SWEEP_GAINS_DB:
-        y = render(model, (x * _db(g)).astype(np.float32), SR) / scale_c
-        seg.append(y)
+    seg = pmap(lambda g: render(model, (x * _db(g)).astype(np.float32), SR) / scale_c, list(SWEEP_GAINS_DB))
     sweep = np.concatenate(seg)
     att = 0.0
     pk = _peak_db(sweep)
@@ -144,10 +149,17 @@ def write_audition(out_dir: Path, model, scale_c: float, capture_models: dict, s
         sweep = sweep * _db(-att)
     sf.write(out_dir / "sweep.wav", sweep.astype(np.float32), SR, subtype="PCM_24")
     sweep_info = {"file": "sweep.wav", "di": di, "seconds_per_step": seconds, "input_gains_db": list(SWEEP_GAINS_DB), "attenuated_db": att}
-    for row in sorted(mapping, key=lambda r: r["position"]):
+    ordered = sorted(mapping, key=lambda r: r["position"])
+
+    def clip_pair(row):
         p, T = row["position"], row["input_gain_db"]
         ym = render(model, (x * _db(T)).astype(np.float32), SR) / scale_c
         yr = _shift(render(capture_models[p], x, SR), shifts.get(p, 0))
+        return ym, yr
+
+    files = []
+    for row, (ym, yr) in zip(ordered, pmap(clip_pair, ordered)):
+        p, T = row["position"], row["input_gain_db"]
         a = max(0.0, max(_peak_db(ym), _peak_db(yr)) + 1.0)
         sf.write(out_dir / f"pos_{p:g}_model.wav", (ym * _db(-a)).astype(np.float32), SR, subtype="PCM_24")
         sf.write(out_dir / f"pos_{p:g}_original.wav", (yr * _db(-a)).astype(np.float32), SR, subtype="PCM_24")

@@ -28,7 +28,8 @@ from .cg_anchors import REFERENCE_DB, fixed_ladder_anchors, mapping_table, respo
 from .cg_audit import ELIGIBLE_STATUSES, alignment_shift, audit_captures
 from .cg_bundle import (FC_RECIPE, build_training_audio, frozen_design_record, make_chain, receptive_field_record,
                         source_records, write_bundle)
-from .cg_probe import SR, load_reference_di, probe_capture
+from .cg_parallel import pmap
+from .cg_probe import PROBE_VERSION, SR, load_reference_di, probe_capture
 from .cg_profile import build_profile
 from .cg_selection import resolve_selection, select_captures
 from .envelope import bounded_envelope_max_history_samples
@@ -175,10 +176,23 @@ class CgProject:
         paths = self.capture_paths()
         models = {p: load_nam(f) for p, f in paths.items()}
         renderers = {p: (lambda x, m=m: render(m, x, SR)) for p, m in models.items()}
+        st = self.state()
+        sha = {p: st["captures"][fn]["sha256"] for p, fn in self.ordered()}
+        cache = self._probe_cache()
+        todo = [p for p in sorted(paths) if sha[p] not in cache]
+        note(f"probing {len(todo)} capture(s)" + (f" ({len(paths) - len(todo)} unchanged, reused)" if len(todo) < len(paths) else ""))
+
+        def probe_one(p: float) -> dict:
+            pr = probe_capture(renderers[p], load_reference_di)
+            note(f"probed capture {p:g}")
+            return pr
+
+        for p, pr in zip(todo, pmap(probe_one, todo)):      # independent native renders, in parallel; results in order
+            cache[sha[p]] = pr
+        self._save_probe_cache(cache)
         probes, meta = {}, {}
-        for i, p in enumerate(sorted(paths)):
-            note(f"probing capture {p:g} ({i + 1}/{len(paths)})")
-            probes[p] = probe_capture(renderers[p], load_reference_di, progress=lambda m, p=p: note(f"capture {p:g}: {m}"))
+        for p in sorted(paths):
+            probes[p] = cache[sha[p]]
             md = models[p].raw.get("metadata") or {}
             loud = md.get("loudness")
             meta[p] = {"loudness": loud if isinstance(loud, (int, float)) else None, "gear_make": md.get("gear_make"), "gear_model": md.get("gear_model"),
@@ -198,6 +212,19 @@ class CgProject:
         st["plan"] = None
         self._write(st)
         return st["analysis"]
+
+    def _probe_cache(self) -> dict:
+        """Probes are a pure function of the capture file and the probe bank, so they are kept by file hash: re-analysing after adding or
+        removing a capture only probes what is new."""
+        f = self.root / "probe_cache.json"
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            return d["probes"] if d.get("version") == PROBE_VERSION else {}
+        except (OSError, ValueError, KeyError):
+            return {}
+
+    def _save_probe_cache(self, cache: dict) -> None:
+        (self.root / "probe_cache.json").write_text(json.dumps({"version": PROBE_VERSION, "probes": cache}, default=float), encoding="utf-8")
 
     def analysis(self) -> dict | None:
         return json.loads(self.analysis_file.read_text(encoding="utf-8")) if self.analysis_file.is_file() else None

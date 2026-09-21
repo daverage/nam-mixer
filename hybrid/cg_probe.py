@@ -18,6 +18,7 @@ import numpy as np
 from .envelope import bounded_causal_envelope_db
 
 SR = 48000
+PROBE_VERSION = 1          # bump when the probe bank or its features change: cached probes from another version are ignored
 EQ_BANDS = {"sub": (20, 100), "low": (100, 250), "lowmid": (250, 800), "mid": (800, 2500), "presence": (2500, 6000), "air": (6000, 16000)}
 FIT_DIS = ["clean_smooth", "moderate_hotrod", "high_thrash", "high_metalcore"]
 SECONDS = 15

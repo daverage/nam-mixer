@@ -177,3 +177,18 @@ def test_mapping_marks_anchors_and_interpolates_the_rest():
     ig = [r["input_gain_db"] for r in rows]
     assert ig == sorted(ig) and ig[0] == -20.0 and ig[-1] == 14.0
     assert position_input_gain_db(RC, pos, anc, 4) == anc[1]
+
+
+# ---- parallel rendering + probe cache: outputs identical to the serial computation
+def test_pmap_preserves_order_and_propagates_errors(monkeypatch):
+    from hybrid.cg_parallel import default_workers, pmap
+    import time as _t
+    assert pmap(lambda i: (_t.sleep(0.02 * (5 - i)), i * i)[1], range(6), workers=4) == [0, 1, 4, 9, 16, 25]
+    assert pmap(lambda i: i, [], workers=4) == [] and pmap(lambda i: i + 1, [3], workers=8) == [4]
+    def boom(i):
+        if i == 2: raise ValueError("bad item")
+        return i
+    with pytest.raises(ValueError, match="bad item"):
+        pmap(boom, range(4), workers=3)
+    monkeypatch.setenv("NAM_MIXER_CG_WORKERS", "3"); assert default_workers() == 3
+    monkeypatch.setenv("NAM_MIXER_CG_WORKERS", "junk"); assert 1 <= default_workers() <= 6

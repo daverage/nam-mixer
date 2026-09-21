@@ -49,3 +49,11 @@ removes the record, the project folder and the training bundle. The tab has no p
 The frozen recipe trains on the official NAM input plus three guitar DIs at eight level offsets. `hybrid/cg_excitation.py` generates a
 single deterministic file that covers the same level range in one pass (synthesised guitar-like playing under a slow gain sweep);
 `generate_bundle(recipe=..., load_di=..., official_transform=...)` lets experiments swap the material.
+
+## Speed (no change to any result)
+The slow steps are many independent native renders, so they run in parallel (`hybrid/cg_parallel.pmap`, order-preserving; default half the
+cores capped at 6, override with `NAM_MIXER_CG_WORKERS`): capture probing, the per-capture renders of each training segment, and the stage-4
+comparisons/sweeps. Probes are cached per project by capture file hash (`probe_cache.json`), so adding or removing a capture only probes what is new.
+Measured on the JCM800 set (19 captures): analysis 176 s -> 49 s (8 s when nothing changed); bundle audio (Vibrolux, 6 captures) 116 s -> 25 s;
+stage-4 validation 69 s -> 15 s. Outputs are identical: same probes/audit/profile/selection (and equal to the archived Phase 4 profile), same
+training-audio SHA-256 as the frozen FC bundles, same validation figures and audition files. Training time and the Kaggle upload are unchanged.
