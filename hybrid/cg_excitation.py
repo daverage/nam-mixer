@@ -39,9 +39,10 @@ def _note(rng: np.random.Generator, f0: float, dur: float, kind: str) -> np.ndar
 
 
 def level_swept_excitation(seconds: float = 480.0, *, seed: int = 7, lo_db: float = -32.0, hi_db: float = 20.0,
-                           period_s: float = 80.0, reference_rms: float = 0.04) -> np.ndarray:
+                           period_s: float = 80.0, reference_rms: float = 0.04, top_bias: float = 1.0) -> np.ndarray:
     """Mono float32 at 48 kHz. `reference_rms` is the active-material RMS at 0 dB (use the guitar DIs' RMS); the gain then sweeps
-    triangularly lo_db -> hi_db -> lo_db every `period_s`, with +-3 dB (1 sigma) per-note velocity variation on top."""
+    triangularly lo_db -> hi_db -> lo_db every `period_s`, with +-3 dB (1 sigma) per-note velocity variation on top. `top_bias` < 1 spends
+    more of the time at the loud end (the fraction of the range is raised to that power); 1.0 is the plain triangle."""
     rng = np.random.default_rng(seed)
     n = int(seconds * SR)
     x = np.zeros(n)
@@ -60,7 +61,7 @@ def level_swept_excitation(seconds: float = 480.0, *, seed: int = 7, lo_db: floa
         t += rng.choice([0.18, 0.25, 0.33, 0.5, 0.75]) * (1.0 if kind != "sustain" else 1.8)
     tt = np.arange(n) / SR
     tri = np.abs(((tt / period_s) % 1.0) * 2 - 1)                                             # 0..1..0 triangle
-    sweep_db = lo_db + (hi_db - lo_db) * (1 - tri)
+    sweep_db = lo_db + (hi_db - lo_db) * (1 - tri) ** top_bias
     # calibrate on the un-swept material so that 0 dB really is the reference level, then apply the sweep
     frame = SR // 10
     fr = x[: n // frame * frame].reshape(-1, frame)
