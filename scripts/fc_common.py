@@ -23,3 +23,18 @@ def T_of_position(amp, gains, Tanch, g):
     """Intended Input gain for ANY physical position: linear in the response coordinate between the anchors."""
     ag, arc = response_arc(amp); at = lambda x: float(np.interp(x, ag, arc))
     return float(np.interp(at(g), [at(x) for x in gains], Tanch))
+
+FC_CFG = {"jcm800": ([1.0, 2.0, 4.0, 10.0], [-20.0, -9.2, -1.7, 14.0]), "vibrolux": ([1.0, 2.0, 3.0, 4.0, 7.0, 10.0], [-20.0, -15.6, -7.1, -2.2, 5.7, 14.0])}
+
+def fc_model_path(amp, key):
+    """FC_s0/FC_s1 -> the final-candidate models; anything else -> the Phase 4E / v3 models (unchanged)."""
+    if key.startswith("FC_"):
+        d = FCDIR / amp / "FC_bundle"; s = key.split("_s")[1]
+        return next(d.glob(f"{amp}_FC_s{s}/*.nam")), json.loads((d / "manifest.json").read_text())["output_scale_c"]
+    return model_path(amp, key)
+
+def fc_intended_T(amp, key, gains):
+    """Each model's OWN intended Input gain per physical position: FC mapping for FC models, response-distance B mapping for B, fixed rule for v3 C3."""
+    if key.startswith("FC_"): g_, T_ = FC_CFG[amp]; return [T_of_position(amp, g_, T_, g) for g in gains]
+    if key.startswith("B_"): return intended_T(amp, "B", gains)
+    return [fixed_T(g) for g in gains]
