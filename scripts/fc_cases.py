@@ -6,7 +6,7 @@ from fc_common import *
 from hybrid.validation import compute_esr_metrics
 from single_nam_common import render_file_nam
 amp, g = sys.argv[1], float(sys.argv[2]); gains, Tanch = FC_CFG[amp]; levels = [t + REF for t in Tanch]; Tg = T_of_position(amp, gains, Tanch, g)
-models = {k: fc_model_path(amp, k) for k in ("FC_s0", "FC_s1")}; real = json.loads((P4E / amp / "real_ref.json").read_text())
+models = {k: fc_model_path(amp, k) for k in ("FC_s0", "FC_s1") if list((FCDIR / amp / "FC_bundle").glob(f"{amp}_FC_s{k[-1]}/*.nam"))}; real = json.loads((P4E / amp / "real_ref.json").read_text())
 def esr(a, b, warm=SR // 2):
     n = min(len(a), len(b)); p, q = a[warm:n].astype(np.float64), b[warm:n].astype(np.float64); p = p * np.sqrt(np.mean(q ** 2) / max(np.mean(p ** 2), 1e-20)); return float(compute_esr_metrics(p, q)["raw_esr"])
 res = {"amp": amp, "g": g, "T": Tg, "cases": []}

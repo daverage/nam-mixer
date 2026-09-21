@@ -1,0 +1,509 @@
+{
+ "task": "Continuous Gain expansion: first-pass FC NAM per remaining amp",
+ "frozen_before_training": true,
+ "code_commit_at_freeze": "5b28b4d0daeeb8381de5a6708176455b02a5cec6",
+ "recipe_reference": "docs/final/manifest_frozen.json (FC recipe unchanged: scripts/fc_build.py + scripts/single_nam_train.py, A2, 60 epochs, seed 0 only, official input + 3 guitar DIs at offsets -32..+20 dB, validation high_metalcore)",
+ "training": {
+  "seeds": [
+   0
+  ],
+  "epochs": 60,
+  "second_seed_rule": "only if the first pass shows a reproducibility concern or a candidate is otherwise ready for use"
+ },
+ "build_args": {
+  "offsets": [
+   -32,
+   -24,
+   -16,
+   -8,
+   0,
+   8,
+   14,
+   20
+  ],
+  "val_offsets": [
+   -24,
+   0,
+   8,
+   20
+  ],
+  "di_seconds": 20,
+  "val_seconds": 8
+ },
+ "amps": {
+  "twin": {
+   "name": "Fender 57 Custom Twin",
+   "capture_dir": "/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/FENDER 57 CUSTOM TWIN (MULTI GAIN)",
+   "positions_available": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "statuses": {
+    "1": "VALID",
+    "2": "VALID",
+    "3": "VALID",
+    "4": "VALID",
+    "5": "VALID",
+    "6": "VALID",
+    "7": "VALID",
+    "8": "VALID",
+    "9": "VALID",
+    "10": "VALID"
+   },
+   "selected_positions": [
+    1,
+    2,
+    3,
+    4,
+    9
+   ],
+   "selection_basis": "4D k*=5 best set",
+   "anchors_input_gain_db": [
+    -20.0,
+    -15.9,
+    -8.3,
+    -2.6,
+    14.0
+   ],
+   "captures": {
+    "1": {
+     "file": "57 CUSTOM TWIN -  CH 1 - VOL 1.nam",
+     "sha256": "33e93388fc2d61b708c63c7557f99f3a63fbf9c3e580e6f0ebb47d2ed95d724b",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "2": {
+     "file": "57 CUSTOM TWIN -  CH 1 - VOL 2.nam",
+     "sha256": "9512f85b36106d3a864acfaad1dd5b1e66f42828bc0984ca1807891957a1651b",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "3": {
+     "file": "57 CUSTOM TWIN -  CH 1 - VOL 3.nam",
+     "sha256": "c6564b96fc31c587a3c25c3963416ca199b34ffad6ecb3edf6577b2fec9f386e",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "4": {
+     "file": "57 CUSTOM TWIN -  CH 1 - VOL 4.nam",
+     "sha256": "503e9f6589d811d2573485d98f58ce47273342576a59b7a1c4504c729918e423",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "9": {
+     "file": "57 CUSTOM TWIN -  CH 1 - VOL 9.nam",
+     "sha256": "00554891e569dfd66ef133933d5a876beb7a7191170ab793711e365608c99246",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    }
+   },
+   "response_arc": {
+    "1": 0.0,
+    "2": 0.117,
+    "3": 0.338,
+    "4": 0.502,
+    "5": 0.588,
+    "6": 0.675,
+    "7": 0.8,
+    "8": 0.871,
+    "9": 0.982,
+    "10": 1.0
+   }
+  },
+  "supersonic": {
+   "name": "Fender Super-Sonic Bassman channel",
+   "capture_dir": "/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/[500 Epochs] Fender Super-Sonic 60W Head mk.1 - Flat EQ - Complete Pack",
+   "positions_available": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "statuses": {
+    "1": "CORRECTED",
+    "2": "CORRECTED",
+    "3": "VALID",
+    "4": "SUSPECT",
+    "5": "VALID",
+    "6": "VALID",
+    "7": "SUSPECT",
+    "8": "VALID",
+    "9": "VALID",
+    "10": "SUSPECT"
+   },
+   "selected_positions": [
+    1,
+    2,
+    3,
+    9
+   ],
+   "selection_basis": "4D k*=4 best set (Bassman channel; G4, G7, G10 SUSPECT and excluded)",
+   "anchors_input_gain_db": [
+    -20.0,
+    -11.6,
+    -1.2,
+    14.0
+   ],
+   "captures": {
+    "1": {
+     "file": "Super-Sonic Bassman Ch T5 B5 V1.nam",
+     "sha256": "2f4cbaa4182d3d07da2d9cc1abf049726c70d455b016e0a2f8fce26f2334a40f",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": 20
+    },
+    "2": {
+     "file": "Super-Sonic Bassman Ch T5 B5 V2.nam",
+     "sha256": "b35a0de5579b0692ca81bba00898aeadbfc325842f1b483d5268a836498cc446",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": 10
+    },
+    "3": {
+     "file": "Super-Sonic Bassman Ch T5 B5 V3.nam",
+     "sha256": "ee31139e50c760836c1210e536bb4b4a7d391a47b3645b2a74e55a2ce7fcfa84",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "9": {
+     "file": "Super-Sonic Bassman Ch T5 B5 V9.nam",
+     "sha256": "2ce0ca3b2d8e96ad204a3ca6a71dfbae1cd3be1ffcf02245082f0e1e5af71713",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    }
+   },
+   "response_arc": {
+    "1": 0.0,
+    "2": 0.242,
+    "3": 0.538,
+    "4": 0.682,
+    "5": 0.752,
+    "6": 0.823,
+    "7": 0.885,
+    "8": 0.92,
+    "9": 0.976,
+    "10": 1.0
+   }
+  },
+  "peavey": {
+   "name": "Peavey 5150",
+   "capture_dir": "/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/Peavy 5150 (Head Only)",
+   "positions_available": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "statuses": {
+    "1": "CORRECTED",
+    "2": "CORRECTED",
+    "3": "CORRECTED",
+    "4": "SUSPECT",
+    "5": "VALID",
+    "6": "CORRECTED",
+    "7": "CORRECTED",
+    "8": "CORRECTED",
+    "9": "CORRECTED",
+    "10": "SUSPECT"
+   },
+   "selected_positions": [
+    1,
+    3,
+    6
+   ],
+   "selection_basis": "4D k*=3 best set (G4, G10 SUSPECT and excluded)",
+   "anchors_input_gain_db": [
+    -20.0,
+    2.5,
+    14.0
+   ],
+   "captures": {
+    "1": {
+     "file": "AMP HEAD - 5150 Gain 1.nam",
+     "sha256": "a7b82902b4eb5bb8ef1678d1be7545b86b7cd518567cce474145dd72d0df0ac7",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": 38
+    },
+    "3": {
+     "file": "AMP HEAD - 5150 Gain 3.nam",
+     "sha256": "2155375461df5130bbc7ce7e0497db4035ac6ac41a47bd3438f5744bc5b74bea",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": 52
+    },
+    "6": {
+     "file": "AMP HEAD - 5150 Gain 6.nam",
+     "sha256": "b7f8a55fa6ee8442a31099d15815a0a01a0ad26ed134ed1af87f7c9990c76789",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": -406
+    }
+   },
+   "response_arc": {
+    "1": 0.0,
+    "2": 0.306,
+    "3": 0.452,
+    "4": 0.572,
+    "5": 0.639,
+    "6": 0.684,
+    "7": 0.738,
+    "8": 0.81,
+    "9": 0.934,
+    "10": 1.0
+   }
+  },
+  "peavey6505": {
+   "name": "Peavey 6505+",
+   "capture_dir": "/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/6505+ Gain Range Pack (High Gain)",
+   "positions_available": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "statuses": {
+    "1": "VALID",
+    "2": "VALID",
+    "3": "VALID",
+    "4": "VALID",
+    "5": "VALID",
+    "6": "VALID",
+    "7": "VALID",
+    "8": "VALID",
+    "9": "VALID",
+    "10": "VALID"
+   },
+   "selected_positions": [
+    1,
+    3,
+    5,
+    9
+   ],
+   "selection_basis": "4D k*=4 best set",
+   "anchors_input_gain_db": [
+    -20.0,
+    -8.2,
+    -0.6,
+    14.0
+   ],
+   "captures": {
+    "1": {
+     "file": "APP-6505Plus-Scooped-Gain-01.nam",
+     "sha256": "c194354605cd00a1aa56630ec87e1099569aa5b3c72044c0bf58385c13a4933e",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "3": {
+     "file": "APP-6505Plus-Scooped-Gain-03.nam",
+     "sha256": "69bbf9e8b1316c31298ba07e38441cb2847102d615c64910a8d477c7851933a5",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "5": {
+     "file": "APP-6505Plus-Scooped-Gain-05.nam",
+     "sha256": "f8047cd57139442353e23c2617dfcf073b9426835209fdcb25cef8912c8b5730",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "9": {
+     "file": "APP-6505Plus-Scooped-Gain-09.nam",
+     "sha256": "d593057aa56be73f066c9c48d3fbdd96c8c91fe82d7650b47c7f9576eb858c7c",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    }
+   },
+   "response_arc": {
+    "1": 0.0,
+    "2": 0.22,
+    "3": 0.325,
+    "4": 0.427,
+    "5": 0.532,
+    "6": 0.612,
+    "7": 0.74,
+    "8": 0.837,
+    "9": 0.934,
+    "10": 1.0
+   }
+  },
+  "mesa": {
+   "name": "Mesa Dual Rectifier Rev G (Red Modern)",
+   "capture_dir": "/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/MESA DUAL RECTIFIER (REV G 1998) - FULL GAIN PACK",
+   "positions_available": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "statuses": {
+    "1": "VALID",
+    "2": "VALID",
+    "3": "VALID",
+    "4": "VALID",
+    "5": "VALID",
+    "6": "VALID",
+    "7": "VALID",
+    "8": "VALID",
+    "9": "VALID",
+    "10": "VALID"
+   },
+   "selected_positions": [
+    1,
+    3,
+    9
+   ],
+   "selection_basis": "4D k*=3 best set",
+   "anchors_input_gain_db": [
+    -20.0,
+    -1.2,
+    14.0
+   ],
+   "captures": {
+    "1": {
+     "file": "MESADUAL - RED - MODERN - GAIN 1.nam",
+     "sha256": "eaaa8d3bda463dc6c5b3f69e41cd7ec9cf4ed7f31a1c3e800525981d4e488303",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "3": {
+     "file": "MESADUAL - RED - MODERN - GAIN 3.nam",
+     "sha256": "9cb10bbad5dd64989c09e7bbd49831690573b1809656cd535c4c8019263e2249",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "9": {
+     "file": "MESADUAL - RED - MODERN - GAIN 9.nam",
+     "sha256": "d59ce75263ab094fde6a3c89f333b90224f9b68bbbbcd0065d0098ffa4b51c3c",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    }
+   },
+   "response_arc": {
+    "1": 0.0,
+    "2": 0.399,
+    "3": 0.518,
+    "4": 0.578,
+    "5": 0.639,
+    "6": 0.704,
+    "7": 0.764,
+    "8": 0.839,
+    "9": 0.936,
+    "10": 1.0
+   }
+  },
+  "orange": {
+   "name": "Orange Dual Terror (Fat)",
+   "capture_dir": "/Users/andrzejmarczewski/Documents/Amp Stuff/NAM/Amps/Orange Dual Terror (0.5.2)",
+   "positions_available": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0
+   ],
+   "statuses": {
+    "1": "VALID",
+    "2": "SUSPECT",
+    "3": "VALID",
+    "4": "VALID",
+    "5": "VALID",
+    "6": "VALID",
+    "7": "SUSPECT",
+    "8": "CORRECTED",
+    "9": "CORRECTED",
+    "10": "CORRECTED"
+   },
+   "selected_positions": [
+    1,
+    4,
+    6,
+    8,
+    9
+   ],
+   "selection_basis": "EXCEPTION: 4D found no k* (no set within tolerance at any count); the 4D best 5-set is used as the same-size rule used for the Phase 4E reference set; G2, G7 SUSPECT and excluded",
+   "anchors_input_gain_db": [
+    -20.0,
+    1.5,
+    5.5,
+    10.0,
+    14.0
+   ],
+   "captures": {
+    "1": {
+     "file": "ORANGE - DUAL TERROR - FAT - G1.nam",
+     "sha256": "d73f8dca26ecfdcd16787ddf8a45fc5c9285cad1f208e57304428475f4f885b8",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "4": {
+     "file": "ORANGE - DUAL TERROR - FAT - G4.nam",
+     "sha256": "2a1dcb761d8d762b92293089b22841d27b321aa6df57d59436f7043d94875862",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "6": {
+     "file": "ORANGE - DUAL TERROR - FAT - G6.nam",
+     "sha256": "9bc4ea2920bf0b080ec393cea41a07d17d49a836f949ea244ab60454dd73313b",
+     "audit_status": "VALID",
+     "alignment_shift_samples": 0
+    },
+    "8": {
+     "file": "ORANGE - DUAL TERROR - FAT - G8.nam",
+     "sha256": "b6062be5f6a13921ed8749240d7e506ee8c78a328367400ed1a87f3fcf500065",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": -11
+    },
+    "9": {
+     "file": "ORANGE - DUAL TERROR - FAT - G9.nam",
+     "sha256": "d63c02cef103abf85ec2f415b97fae04a76c5212104eeca1fc0f12aba72511ef",
+     "audit_status": "CORRECTED",
+     "alignment_shift_samples": -17
+    }
+   },
+   "response_arc": {
+    "1": 0.0,
+    "2": 0.261,
+    "3": 0.549,
+    "4": 0.641,
+    "5": 0.687,
+    "6": 0.745,
+    "7": 0.81,
+    "8": 0.892,
+    "9": 0.971,
+    "10": 1.0
+   }
+  }
+ }
+}
