@@ -9,7 +9,7 @@ plugin, blends the results using one of three design modes, and lets you
 train the blend into a brand-new NAM model that stands on its own — no
 switching, no source models required at inference time.
 
-Everything runs locally as a small Flask app run from source: your amp
+Everything runs locally — as the desktop app or a small Flask app run from source: your amp
 captures, DI files, and generated training material never leave your
 computer unless you explicitly send a training job to your own Kaggle
 account for free GPU time.
@@ -21,6 +21,22 @@ generated model before you trust it.**
 ![NAM Mixer's Dynamic Hybrid tab, with the guided Tone Wizard open](assets/screenshot.png)
 
 ## Get NAM Mixer
+
+### Download the desktop app
+
+No Python or renderer setup needed — the desktop app bundles the backend, the web UI and the native `nam_render`.
+Direct downloads (always the latest release; all builds are on the [Releases page](https://github.com/daverage/nam-mixer/releases/latest)):
+
+| Platform | Download | Notes |
+| --- | --- | --- |
+| **macOS** (Apple Silicon) | [`NAM-Mixer-macOS-arm64.dmg`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-macOS-arm64.dmg) | Not notarised: on first launch use **Open** from the Finder context menu (or approve it in Privacy & Security). |
+| **Windows** (x64) | [`NAM-Mixer-Windows-x64-setup.exe`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Windows-x64-setup.exe) · [`.msi`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Windows-x64.msi) | Installer (.exe) or MSI package. |
+| **Linux** (x64) | [`NAM-Mixer-Linux-x64.AppImage`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.AppImage) · [`.deb`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.deb) | Portable AppImage, or a Debian/Ubuntu package. |
+
+Older versions and release notes: [all releases](https://github.com/daverage/nam-mixer/releases). See [Desktop app downloads](#desktop-app-downloads) for
+what the desktop build does and does not include.
+
+### Or run it from source
 
 Clone the repo and run it as a local Flask app with `python3` — see
 [Quick start](#quick-start) below. This gives you the full
@@ -49,6 +65,7 @@ becomes something you can load anywhere a NAM runs.
 | 🧠 **Train a real model** | Generate a proper training bundle from the official NAM training excitation and train a new A2 model on it — locally, or with one click on a private Kaggle GPU. |
 | ✍️ **Optional AI recipes** | A local, Cloudflare Workers AI, or custom OpenAI-compatible model can turn a plain-English tone description into editable blend settings; built-in rules remain available with no AI service. |
 | ✅ **Built-in validation** | Every exported model is re-rendered and compared against its frozen teacher (ESR, RMS, peak, quiet-response) so you know exactly how close the trained model landed, not just that training finished. |
+| 🎛️ **Continuous Gain** | Turn several fixed-gain captures of **one amp** into **one standard `.nam`** you sweep with an ordinary player's Input gain — captures are analysed, a subset is chosen from measurements, and the model is trained locally or on Kaggle. See [Continuous Gain](#continuous-gain-one-amp-one-nam). |
 | 💾 **Sessions library** | Save, reload, import/export, and revisit designs and completed models without losing your place. |
 | 🔒 **Local-first & private** | No cloud dependency, no telemetry, no account required. Kaggle training is fully opt-in and uses your own credentials and quota. |
 | ⚙️ **In-app Settings** | Configure the renderer path, AI provider, and TONE3000 API key from a Settings tab — no shell environment variables required. See [Settings](#settings). |
@@ -67,7 +84,7 @@ teacher. Always listen to and validate exported models.
   [level matching](#why-automatic-level-matching-is-needed),
   [input profile vs. crossover vs. calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
 - [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
-- [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
+- [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Continuous Gain](#continuous-gain-one-amp-one-nam) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
 - [Quick start](#quick-start) (macOS, Linux, Windows) · [Running it](#running-it)
 - [Settings](#settings) — configuring the renderer, AI providers, and TONE3000 from the app itself
 - [Current status and limitations](#current-status-and-limitations)
@@ -144,7 +161,7 @@ different costs:
   different instrument/pickup driving the signal chain *before* it reaches
   either NAM. This changes the actual audio both amps receive, so changing it
   is EXPENSIVE — it requires re-running NAM inference for both amps. See
-  `docs/INPUT_PROFILE_RESEARCH.md` for the research behind the presets and
+  `docs/history/INPUT_PROFILE_RESEARCH.md` for the research behind the presets and
   why active pickups deliberately have no fixed preset.
 - **Crossover / transition width / manual trim** (`build_hybrid()`): changes
   only how the *already-rendered* Amp A/B responses are blended together.
@@ -301,6 +318,36 @@ use **Render Amps** to rebuild the pair and verify that the referenced files
 are still available. Training manifests under `work/a2` are separate from
 sessions and are not interchangeable with session JSON files.
 
+## Continuous Gain: one amp, one NAM
+
+The **Continuous Gain** tab is separate from the Builder's two-amp modes. You give it several fixed-gain captures of **one amp and
+channel** (for example Gain 1 … 10), and it builds **one standard `.nam`** whose whole gain range you explore with an ordinary NAM
+player's **Input gain** — no model switching, no extra runtime processing. It *approximates* the amp's range; it does not reproduce every
+knob position exactly.
+
+It follows the Builder's guided flow — four stages, one centred column of cards:
+
+1. **Add captures** — drag in the `.nam` files and confirm each one's physical gain position (file names only *suggest* it). Missing or
+   duplicate positions, wrong sample rates and too-few captures are flagged before anything runs.
+2. **Analyse & select** — every capture is probed, audited (VALID / CORRECTED / SUSPECT; nothing uncertain is silently fixed) and
+   profiled; a training subset is chosen from those **measurements** (Automatic), or you use all captures or pick your own (Custom). You
+   see why each capture was chosen or omitted, how well the omitted ones are reproduced, the measured response, and the Input-gain
+   mapping that will be used. If no subset meets the coverage rule it says so and falls back to all eligible captures.
+3. **Train** — training files are created and trained with the **same Kaggle / local training section as the Builder** (same setup,
+   presets, progress and logs). The default recipe is the validated one: official NAM input plus real guitar DIs at level offsets,
+   response-distance anchors on −20…+14 dB, one peak-ceiling output scale (shown as the Output gain to set in your player).
+   Fixed 4 dB anchors are available under *Advanced* as an explicit alternative.
+4. **Test & export** — automated checks (standard NAM structure, Full/Lite renders, output safety, per-position measured comparison with
+   your real captures on held-out DIs, direction reversals), an optional Input-gain sweep and A/B clips against the originals, and an
+   export package (`.nam`, JSON metadata, player guide). Export is never blocked by validation or by listening.
+
+Projects appear in **Sessions** labelled *Continuous Gain* (Sessions → **Load** opens this tab on that project; **Delete** removes its
+files). Analysis parallelises the native renders and caches probes per capture, so re-analysing after adding a capture is quick.
+
+What to expect: a 60-epoch model takes roughly half an hour to train; validation figures are *measurements*, not a listening result —
+always listen. The tab's design, the training-material experiments and the frozen configurations it reproduces are documented in
+[`docs/continuous_gain_tab.md`](docs/continuous_gain_tab.md).
+
 ## Design modes and the shared Cabinet stage
 
 The workflow above describes **Dynamic Hybrid** mode, the original/default
@@ -436,14 +483,19 @@ downloaded binary.
 
 ### Desktop app downloads
 
-For the native desktop app, open the project's [GitHub Releases](https://github.com/daverage/nam-mixer/releases) page and choose a version tag such as `v0.2.0`. Each version release contains the installers built by
-`.github/workflows/build-desktop.yml`:
+Installers are built by `.github/workflows/build-desktop.yml` and published on the project's
+[GitHub Releases](https://github.com/daverage/nam-mixer/releases) page for every version tag (`v*`). Each release carries the same five files under fixed names, so
+these links always point at the newest release:
 
-| Platform | Download | What it contains |
+| Platform | Direct download | What it contains |
 | --- | --- | --- |
-| macOS Apple Silicon | `.dmg` | Tauri app for arm64 Macs (`macos-14`) |
-| Linux x64 | `.AppImage` or `.deb` | Portable app or Debian/Ubuntu package |
-| Windows x64 | `.msi` or `.exe` | Windows installer/package |
+| macOS Apple Silicon | [`NAM-Mixer-macOS-arm64.dmg`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-macOS-arm64.dmg) | Tauri app for arm64 Macs |
+| Windows x64 | [`NAM-Mixer-Windows-x64-setup.exe`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Windows-x64-setup.exe) | Windows installer |
+| Windows x64 | [`NAM-Mixer-Windows-x64.msi`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Windows-x64.msi) | Windows MSI package |
+| Linux x64 | [`NAM-Mixer-Linux-x64.AppImage`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.AppImage) | Portable app |
+| Linux x64 | [`NAM-Mixer-Linux-x64.deb`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.deb) | Debian/Ubuntu package |
+
+To get a specific version, open its page under [Releases](https://github.com/daverage/nam-mixer/releases) (for example `https://github.com/daverage/nam-mixer/releases/tag/v0.3.0`) and download from **Assets**.
 
 The desktop release bundles the Flask backend, web UI, training support files,
 and the native `nam_render` executable; users do not need to install Python or
@@ -452,8 +504,8 @@ environment the first time it is used, and Kaggle training still needs Kaggle
 authentication.
 
 Releases are currently unsigned, so macOS may require **Open** from the Finder
-context menu (or an approval in Privacy & Security) on first launch. If no
-`v*` release is available yet, use the standard browser setup below or run the
+context menu (or an approval in Privacy & Security) on first launch. If a download link returns
+"not found", no release has been published yet: use the standard browser setup below or run the
 desktop build locally as documented in [`desktop/README.md`](desktop/README.md).
 
 After first-time setup below, `scripts/run.sh` (macOS/Linux) or
@@ -723,6 +775,7 @@ hybrid-nam-builder/
 │   ├── validation.py        -- frozen-teacher/model rendering and shared metrics
 │   ├── validation_report.py -- versioned Full/Lite/quiet quality reports
 │   ├── kaggle_training.py  -- private Kaggle GPU job and local validation
+│   ├── cg_*.py             -- Continuous Gain: probe, audit, profile, selection, anchors, bundle, project, validation, excitation
 │   ├── nam_tools.py        -- safe output-volume and metadata editing
 │   ├── wizard.py           -- guided setup flow shared by the UI modes
 │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
@@ -732,9 +785,10 @@ hybrid-nam-builder/
 ├── native/nam_render/      -- C++ NAM inference tool (NeuralAmpModelerCore), see its README
 ├── assets/nam_models/      -- user's own .nam amp captures (gitignored)
 ├── assets/di/              -- genre/style DI library + its own README
+├── cg_routes.py            -- /api/cg/* routes for the Continuous Gain tab (static/cg.js)
 ├── templates/, static/     -- minimal HTML/CSS/JS UI (no build step)
 ├── tests/                  -- unit tests for the hybrid/ modules
-├── scripts/analyze_di.py   -- regenerates assets/di/_analysis.json
+├── scripts/                -- run/setup/download helpers, train_a2.py, validate_a2.py, analyze_di.py (regenerates assets/di/_analysis.json)
 └── work/                   -- gitignored scratch output directory
 ```
 

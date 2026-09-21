@@ -95,7 +95,7 @@ pipeline is wired into the Flask routes and browser UI (`/api/render_pair`,
 `/api/preview`, `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
 `/api/profile_coverage`), and `/api/generate` (final A2 training-target
 generation, `hybrid/training_target.py`) is real as of the phase-3 work in
-docs/phase3.md — it freezes the current design (`hybrid/design.py`) and
+docs/history/Continuous Gain/phase3.md — it freezes the current design (`hybrid/design.py`) and
 blends the OFFICIAL NAM training excitation through it (never the preview
 DI, never with the pickup-profile gain applied — see that doc). Actually
 training the resulting bundle into a `.nam` (`scripts/train_a2.py`) requires
@@ -109,7 +109,7 @@ concepts, at two different costs:
 - **Input profile** (`hybrid/input_profiles.py`) simulates a different
   instrument/pickup driving the signal BEFORE either NAM sees it. Changing it
   is EXPENSIVE (`render_pair()` re-runs NAM inference for both amps). See
-  `docs/INPUT_PROFILE_RESEARCH.md`.
+  `docs/history/INPUT_PROFILE_RESEARCH.md`.
 - **NAM input calibration** (`hybrid/calibration.py`) reconciles two `.nam`
   captures' own recording-calibration metadata (`input_level_dbu`) via the
   official NAM plugin's compensation formula, also applied inside
@@ -143,7 +143,7 @@ The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
 `hybrid/blend_training_target.py`, `hybrid/cab_ir.py`, and
 `hybrid/receptive_field.py` against synthetic signals only (the pipeline/
 training-target tests fake out `render()` via monkeypatch; the Kaggle tests
-mock the CLI at the `subprocess` boundary — see docs/kaggle_training.md) —
+mock the CLI at the `subprocess` boundary — see docs/history/kaggle_training.md) —
 no torch, built native tool, or real Kaggle credentials required.
 `tests/test_receptive_field_parity.py` loads BOTH `scripts/train_a2.py` and
 `cloud/kaggle/train_a2_cloud.py` as modules and asserts their
@@ -158,7 +158,7 @@ been built AND a real `.nam` file exists at
 user-provided). `tests/test_receptive_field.py` and part of
 `tests/test_train_a2.py` auto-skip/exercise their "unavailable" path unless a
 training environment (see `requirements-training.txt`) is actually installed
--- see docs/phase3.md for the training-environment split.
+-- see docs/history/Continuous Gain/phase3.md for the training-environment split.
 
 ```bash
 cmake -B native/nam_render/build -S native/nam_render
@@ -209,7 +209,7 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
    given hybrid target was generated (amps used, crossover point, trims, etc.),
    for provenance.
 9. **`input_profiles.py`** defines research-grounded relative-gain presets for
-   guitar/bass pickup families (see docs/INPUT_PROFILE_RESEARCH.md) plus
+   guitar/bass pickup families (see docs/history/INPUT_PROFILE_RESEARCH.md) plus
    `db_to_amplitude`/`resolve_profile_gain_db`. Active/buffered pickups
    deliberately have NO fixed preset (`requires_custom_gain=True`) — manufacturer
    data shows too much spread for a defensible universal number.
@@ -239,7 +239,7 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
     dataset+kernel, polls status without blocking Flask, downloads the
     result, and re-validates it locally via the same NAMCore Full/Lite
     render + ESR comparison `scripts/train_a2.py` uses for its own output —
-    see `docs/kaggle_training.md`. `/api/kaggle/*` in `app.py` is a thin
+    see `docs/history/kaggle_training.md`. `/api/kaggle/*` in `app.py` is a thin
     Flask layer over this module; `cloud/kaggle/train_a2_cloud.py` is the
     self-contained script that actually runs inside the Kaggle kernel.
 15. **`fixed_blend.py`** is the Fixed Blend design mode: `build_fixed_blend`
@@ -337,7 +337,7 @@ project fixtures like `assets/di/*.wav`.
   profiles simulate relative gain around the SELECTED DI treated as a
   reference performance (vintage/PAF humbucker for guitar, standard J/P bass
   for bass) — never a claim about the DI's real recording history. See
-  docs/INPUT_PROFILE_RESEARCH.md.
+  docs/history/INPUT_PROFILE_RESEARCH.md.
 - Guitar volume-knob simulation is deliberately NOT implemented — pot taper,
   loading, and treble-bleed circuits vary too much between instruments to
   responsibly guess fixed dB values yet.

@@ -136,11 +136,13 @@ def probe_capture(render_fn: Callable[[np.ndarray], np.ndarray], load_di: Callab
 
 def load_reference_di(name: str) -> np.ndarray:
     """Bundled preview DI (assets/di/<name>.wav) as mono float32 at 48 kHz."""
+    import sys
     from pathlib import Path
 
     import soundfile as sf
 
-    x, sr = sf.read(Path(__file__).resolve().parent.parent / "assets" / "di" / f"{name}.wav", dtype="float32")
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))       # the packaged desktop app keeps assets/ beside the bundle root
+    x, sr = sf.read(base / "assets" / "di" / f"{name}.wav", dtype="float32")
     if sr != SR:
         raise ValueError(f"DI {name} is {sr} Hz, expected {SR}")
     return x if x.ndim == 1 else x.mean(axis=1)
