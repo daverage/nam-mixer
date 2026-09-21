@@ -231,3 +231,17 @@ Location: `work/tr/audition/<amp>/` (WAV, 24-bit, 48 kHz, 15 s clips; not commit
 4. **The Vibrolux clean-end darkness (G1-G3, seed dependent)** is a real finding for the training side (for example clean-anchor weighting or seed choice), separate from this request and not to be attempted until you decide.
 
 Limitations: one listener, no human listening on the EQ candidates yet, held-out spectra are long-term averages, and the repo IR is not your IR.
+
+## 8. Addendum: EQ probe audition (scope clarified: post-training EQ on the NAM, not CLO)
+
+The CLO/IR stage is out of scope. Because the fitted candidates are inaudibly small for the JCM800 (section 4), the measured spectrum cannot say which EQ direction matches what is heard at G10. `scripts/tr_probe.py` therefore renders FC seed 0 (moderate_brit, normal level) at G1, G5 and G10 through five predefined, deliberately audible post-NAM EQs, next to the real capture and FC with no EQ, all level-matched to the real capture, with and without the repo test IR (`work/tr/probe/`, 42 files, manifest `manifest.json`):
+
+| Probe | Filter |
+|---|---|
+| P1 | high shelf +1.5 dB at 4 kHz |
+| P2 | high shelf +3.0 dB at 4 kHz |
+| P3 | low shelf +1.5 dB at 150 Hz |
+| P4 | P3 + P1 together |
+| P5 | peak +2.0 dB at 400 Hz, Q 0.7 |
+
+Procedure: listen at G10 first; pick the probe (or none) that sounds closest. Then the chosen shape is measured across the whole sweep (G1 and G5 files are included for a first check of side effects) and fitted properly with the same held-out validation as section 5. These probes are listening aids chosen by ear, not measurement-derived candidates, and no audible improvement is claimed.
