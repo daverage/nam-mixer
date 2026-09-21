@@ -449,7 +449,7 @@ def _apply_custom_split_patch(core, train_stop: int) -> None:
     Gain bundle. Only the data split / input-version detection / data checks / latency analysis are patched
     (the official file's fixed segment layout does not apply); architecture, optimiser, checkpointing and
     export stay the stock official path. Identical to the patch the frozen FC models were trained with
-    (scripts/single_nam_train.py) and to cloud/kaggle/train_a2_cloud.py's copy
+    (scripts/single_nam_train.py, now archived) and to cloud/kaggle/train_a2_cloud.py's copy
     (tests/test_a2_training_settings.py asserts they install the same data config)."""
     from nam.train import metadata as md
 

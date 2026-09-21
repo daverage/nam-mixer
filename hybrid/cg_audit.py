@@ -1,6 +1,6 @@
 """Continuous Gain capture audit (Phase 4A): per-capture QA -> VALID / CORRECTED / SUSPECT / INVALID with evidence.
 
-Behaviour-preserving extraction of `scripts/p4_audit.py` (same thresholds, checks and evidence text), so an
+Behaviour-preserving extraction of `scripts/p4_audit.py` (archived; same thresholds, checks and evidence text), so an
 audit built here matches the archived Phase 4 audits. A capture is never invalidated merely for breaking an
 assumed smooth or monotonic curve: curve deviations only ever raise SUSPECT. Nothing is silently fixed: a
 timing correction is only recorded when the click probe and the music cross-correlation agree AND a second DI

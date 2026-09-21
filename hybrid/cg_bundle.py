@@ -1,6 +1,6 @@
 """Continuous Gain FC training bundle: one standard NAM from a chain of fixed-gain captures of ONE amp.
 
-Extracted from the frozen Final-Candidate builder (`scripts/fc_build.py` + `scripts/p4e_build.py`), whose
+Extracted from the frozen Final-Candidate builder (`scripts/fc_build.py` + `scripts/p4e_build.py`, now archived), whose
 Phase 4E arguments it reproduces exactly (audio SHA-256 checked in tests/test_cg_reproduction.py against
 docs/final/manifest_frozen.json). The recipe:
 
@@ -29,6 +29,7 @@ import numpy as np
 
 from .cg_anchors import REFERENCE_DB
 from .cg_audit import alignment_shift
+from .character_analysis import sha256_file      # shared file-hash helper
 from .envelope import bounded_causal_envelope_db
 from .multi_blend import GainChain, multi_blend
 from .safety import apply_peak_ceiling
@@ -126,14 +127,6 @@ def bundle_manifest_core(built: BuiltAudio, chain: GainChain, anchors_db: list[f
             "peak_ceiling_gain_reduction_db": built.reduction_db, "train_seconds": built.train_stop / SR,
             "val_seconds": (total - built.train_stop) / SR, "train_offsets_db": built.train_offsets_db, "val_offsets_db": built.val_offsets_db,
             "target_audio_sha256": sha256_f32(built.target), "input_audio_sha256": sha256_f32(built.input)}
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 def write_bundle(out_dir: Path, built: BuiltAudio, chain: GainChain, anchors_db: list[float], shifts: dict[float, int], *,

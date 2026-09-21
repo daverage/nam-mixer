@@ -1,5 +1,5 @@
 """Continuous Gain response profile (Phase 4B): measured level / tone / saturation / compression / dynamics / noise
-series over the physical gain positions. Behaviour-preserving extraction of `scripts/p4_profile.py` (no plots).
+series over the physical gain positions. Behaviour-preserving extraction of `scripts/p4_profile.py` (archived; no plots).
 
 Dimensions stay separate; nothing here is a perceptual score. Captures flagged for a dimension (level / noise)
 by the audit are quarantined from THAT dimension's interpolation estimate only.

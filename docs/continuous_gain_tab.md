@@ -33,3 +33,6 @@ levels, alignment, input and target audio SHA-256, output scale, split points - 
 captures also reproduces the archived profile/audit/selection exactly. `CG_REPRODUCE_AUDIO=1 pytest tests/test_cg_reproduction.py`.
 Exported structure matches the frozen FC `.nam` (same architecture, layer sizes and weight-array lengths); the new export additionally
 carries standard NAM user metadata (name, modeled_by).
+
+## Where the research scripts went
+The Phase 2-5 research scripts (`p4*`, `fc_*`, `p5_*`, `pl_*`, `tr_*`, v3 `cg_*`, `single_nam_*`, `continuous_gain_*`) were removed from `scripts/` on 2026-09-21. They are in `~/Documents/hybrid-nam-builder-archive/research_scripts_2026-09-21.tar.gz` (extract repo-relative) and in git history. `scripts/` keeps the app infrastructure plus `single_nam_common.py` and `cg_reproduce_fc.py`, which the frozen-configuration reproduction still uses.

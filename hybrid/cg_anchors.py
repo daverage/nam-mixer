@@ -1,12 +1,12 @@
 """Continuous Gain player Input-gain anchors and mapping (the FC production default).
 
-FC anchors ("response-distance" anchors, `scripts/fc_common.py::anchor_levels`): the measured profile's
+FC anchors ("response-distance" anchors, `scripts/fc_common.py::anchor_levels`, archived): the measured profile's
 arc-length coordinate (from `cg_selection.response_coordinate`) of each selected capture is mapped linearly onto
 the plugin-compatible Input-gain range [-20, +14] dB, keeping neighbouring anchors at least 4 dB apart. Anchors
 are rounded to 0.1 dB, exactly as the frozen FC configurations record them. Other physical positions map
 linearly in the response coordinate between the anchors (`position_input_gain_db`).
 
-The fixed-spacing ladder (v3, `scripts/cg_build.py`) is supported ONLY as an explicit Advanced alternative;
+The fixed-spacing ladder (v3, `scripts/cg_build.py`, archived) is supported ONLY as an explicit Advanced alternative;
 it is never a silent substitute for the FC anchors.
 
 Designated Input gain for a capture = anchor; its chain level is `anchor + REFERENCE_DB` (hybrid.multi_blend).

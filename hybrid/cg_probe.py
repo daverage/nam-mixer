@@ -1,6 +1,6 @@
 """Continuous Gain capture probe bank (Phase 4A/4B measurement input).
 
-Extracted unchanged in behaviour from `scripts/p4_common.py` / `scripts/cg_report.py`
+Extracted unchanged in behaviour from `scripts/p4_common.py` / `scripts/cg_report.py` (archived)
 (`probe`, `feats`, `harmonics`, `tone`): the same click/silence/tone/music probes,
 the same features, so a profile built here matches the archived Phase 4 profiles.
 Pure numpy; the caller supplies `render_fn(audio) -> audio` (a real capture's

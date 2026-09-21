@@ -1,6 +1,6 @@
 """Continuous Gain capture selection (Phase 4D): which captures carry distinct information?
 
-Behaviour-preserving extraction of `scripts/p4_select.py` (same groups, tolerances, objective, exhaustive
+Behaviour-preserving extraction of `scripts/p4_select.py` (archived; same groups, tolerances, objective, exhaustive
 search, k* rule, response coordinate). No neural training and no imposed capture count. Question asked of
 every candidate subset S: how well are the OTHER captures reproduced from S? Each omitted position is predicted
 by shape-preserving (PCHIP) interpolation of the selected captures' MEASURED response along the knob axis
