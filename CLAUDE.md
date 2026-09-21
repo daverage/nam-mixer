@@ -66,6 +66,14 @@ Cumulative-energy diagnostics on the prepared IR (`PreparedCabIr.energy_99_
 IR is actually meaningful signal -- purely informational, never used to
 truncate the actual FIR taps.
 
+## Continuous Gain tab
+
+A fourth workflow, separate from the three design modes: one amp, N fixed-gain captures -> one standard `.nam`
+(`hybrid/cg_*.py`, `cg_routes.py`, `static/cg.js`; see docs/continuous_gain_tab.md). The production default reproduces the frozen
+FC recipe (Phase 4D selection, response-distance anchors on [-20, +14] dB, level-driven target, one peak-ceiling scale) and its
+bundle (`mode: "continuous_gain"`, custom input with `training_input.custom_split`) goes to the existing local/Kaggle trainers.
+`tests/test_cg_reproduction.py` / `scripts/cg_reproduce_fc.py` guard the frozen JCM800/Vibrolux configurations.
+
 ## What this is
 
 Hybrid NAM Builder is an experimental proof-of-concept tool for building a dynamic,

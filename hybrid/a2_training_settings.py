@@ -93,6 +93,20 @@ NEURAL_AMP_MODELER_VERSION = "0.13.0"
 OFFICIAL_V3_INPUT_MD5 = "36cd1af62985c2fac3e654333e36431e"
 
 
+def custom_split_train_stop(manifest: dict) -> "int | None":
+    """Train/validation boundary (in samples) for a bundle whose training input is NOT the official NAM
+    file -- the Continuous Gain bundle declares `training_input.custom_split`. None for every other bundle
+    (they use the official input's own layout and are checked against OFFICIAL_V3_INPUT_MD5). Duplicated
+    literally in cloud/kaggle/train_a2_cloud.py (self-contained); parity in tests/test_a2_training_settings.py."""
+    ti = manifest.get("training_input") or {}
+    if not ti.get("custom_split"):
+        return None
+    stop = int(ti.get("train_stop_samples") or 0)
+    if stop <= 0:
+        raise ValueError("training_input.custom_split requires a positive train_stop_samples")
+    return stop
+
+
 def settings_for(quick: bool) -> A2TrainingSettings:
     return A2_QUICK_SETTINGS if quick else A2_TRAINING_SETTINGS
 
@@ -141,6 +155,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
     elif mode == "character":
         name = f"Character Blend {amp_a_name} + {amp_b_name}"
+    elif mode == "continuous_gain":
+        name = "Continuous Gain"
     else:
         name = f"Hybrid {amp_a_name} -> {amp_b_name}"
 
@@ -165,6 +181,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
     elif export_mode == "embedded":
         model_name = base_name
+    elif mode == "continuous_gain":
+        model_name = base_name      # one amp's own gain range: no "[Amp Only]" hybrid/cabinet identity suffix applies
     else:
         model_name = f"{base_name} [Amp Only]"
 

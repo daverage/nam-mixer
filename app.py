@@ -35,6 +35,7 @@ from flask import Flask, Response, g, jsonify, render_template, request, send_fi
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+from cg_routes import register_cg_routes
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.blend_training_target import generate_blend_training_bundle
@@ -878,6 +879,13 @@ def _session_model_path(session_id: str) -> Path:
     return SESSION_MODEL_DIR / f"{session_id}.nam"
 
 
+def _is_continuous_gain_bundle(bundle_dir: Path) -> bool:
+    try:
+        return json.loads((bundle_dir / "training_manifest.json").read_text(encoding="utf-8")).get("mode") == "continuous_gain"
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def _generated_session_path(bundle_dir: Path) -> Path:
     return bundle_dir / "nam-mixer-session.json"
 
@@ -1051,6 +1059,8 @@ def api_sessions():
         except (OSError, ValueError, json.JSONDecodeError):
             logger.warning("Ignoring invalid session file: %s", path.name)
     for bundle_dir in (path.parent for path in A2_OUTPUT_DIR.glob("*/training_manifest.json")):
+        if _is_continuous_gain_bundle(bundle_dir):
+            continue    # Continuous Gain projects have their own tab; they are not Mixer/Builder sessions
         generated_path = _generated_session_path(bundle_dir)
         try:
             if generated_path.is_file():
@@ -1110,6 +1120,8 @@ def _find_session_record(session_id: str) -> tuple[Path, dict, Path | None] | No
         except (OSError, json.JSONDecodeError):
             return None
     for bundle_dir in (p.parent for p in A2_OUTPUT_DIR.glob("*/training_manifest.json")):
+        if _is_continuous_gain_bundle(bundle_dir):
+            continue
         candidate = _generated_session_path(bundle_dir)
         if candidate.is_file():
             try:
@@ -2968,6 +2980,9 @@ def api_system_usage():
         "memory_total_gb": round(mem.total / (1024 ** 3), 1),
         "gpu": gpu,
     })
+
+
+register_cg_routes(app, cg_dir=WORK_DIR / "cg_projects", a2_output_dir=A2_OUTPUT_DIR, training_input_path=TRAINING_INPUT_PATH)
 
 
 if __name__ == "__main__":
