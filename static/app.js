@@ -4216,18 +4216,24 @@ function renderSettings() {
         section.append(setupRow);
       }
       if (field.kind === "secret" && field.name === "NAM_MIXER_AI_API_KEY") {
+        const clearRow = document.createElement("div");
+        clearRow.className = "settings-row settings-download-row";
+        // Provider switching fully re-renders the settings panel (see
+        // settingsGroups's "change" handler below), so this only needs to be
+        // correct at render time -- no separate data-provider-field wiring.
+        clearRow.hidden = !field.has_value || row.hidden;
         const clear = document.createElement("button");
         clear.type = "button";
         clear.className = "btn btn-secondary btn-small";
         clear.textContent = "Clear API token";
-        clear.hidden = !field.has_value || row.hidden;
         clear.addEventListener("click", async () => {
           if (!confirm("Clear the stored API token?")) return;
           const response = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({values: {}, clear_secrets: [field.name]})});
           if (!response.ok) { settingsStatus.textContent = "Could not clear API token."; return; }
           await loadSettings();
         });
-        section.append(clear);
+        clearRow.append(clear);
+        section.append(clearRow);
       }
       if (field.name === "NAM_RENDER_EXE" && !isTauriDesktop) {
         // The desktop build always ships nam_render already bundled inside
