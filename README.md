@@ -650,10 +650,14 @@ it landed for your platform. From here:
 
 The Settings tab (next to Sessions) covers anything that used to only be
 configurable via a shell environment variable or an `.env` file. Its
-**Getting started** section gives an at-a-glance checklist of what's ready
-and what's still optional (renderer, training input, local A2 training
-environment, Kaggle, AI provider) so a fresh checkout doesn't
-require hunting for each setup button individually.
+**Updates** section has a **Check for updates** button — it only ever
+contacts GitHub when you click it (never automatically), and reports either
+"you're up to date" or a direct download link to the newer installer for
+your OS (desktop app), or a link to the release notes plus a `git pull` hint
+(running from source). Its **Getting started** section gives an at-a-glance
+checklist of what's ready and what's still optional (renderer, training
+input, local A2 training environment, Kaggle, AI provider) so a fresh
+checkout doesn't require hunting for each setup button individually.
 
 - **NAM render executable** — normally auto-detected (downloaded via
   `scripts/download_nam_render.*`, or the in-app **Download nam_render
