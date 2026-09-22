@@ -793,6 +793,7 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
   border-radius: 10px;
   padding: 1.1rem 1.25rem;
   background: var(--panel-alt, transparent);
+  margin-bottom:10px;
 }
 .settings-group h3 { margin: 0 0 0.2rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
 
