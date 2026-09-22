@@ -392,11 +392,13 @@ selected, the export choices are:
 
 - **No cabinet**: train/export the conventional head-only A2. A selected IR
   remains a reusable preview/bundle artifact, not part of the target.
-- **Create both** (`embedded`): retain the tested conventional head-only A2
+- **Create both** (`embedded`, advanced): retain the tested conventional head-only A2
   and derive a second NAM containing an explicitly extracted Full WaveNet
   followed by canonical Linear FIR taps in a NAM **Sequential** model. The
   prepared IR WAV is also retained. The two artifacts are offered as clearly
-  separate head-only and `-with-cab.nam` downloads.
+  separate head-only and `-with-cab.nam` downloads. This option is hidden by
+  default; enable *Settings → Advanced → Enable experimental NAM architectures*
+  before selecting it.
 
 Older saved designs that use the legacy `learned` mode remain readable, but
 the current UI no longer applies the cabinet to the training target.
@@ -405,7 +407,9 @@ The cabinet output folds the recorded post-cab safety scalar into the Linear
 weights and is downloadable only after validation using the bundled,
 Sequential-capable renderer. **NAM format validity and NAM A2 compatibility
 are two separate claims**: A2-only players may reject a `Sequential` model.
-Use the separately provided head-only download for broad compatibility.
+Use the separately provided head-only download for broad compatibility. The
+setting is enforced server-side as well as in the UI, so a client cannot
+request the experimental export while it is disabled.
 
 **Receptive-field policy: one hard check, two advisory ones.** Amp A/Amp B
 (+, for Hybrid and Character, the bounded crossover envelope) are the CORE
@@ -659,8 +663,9 @@ checkout doesn't require hunting for each setup button individually.
   `@cf/meta/llama-3.3-70b-instruct-fp8-fast`; the app builds
   `https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1` and sends
   the request to `/chat/completions` for you. A manually created token needs
-  the account-scoped **Workers AI Read** permission (the dashboard's template
-  is the easiest route). Cloudflare quota, capacity limits, and billing may
+  account-scoped **Workers AI Read** and **Workers AI Edit** permissions (the
+  dashboard's “Create a Workers AI API Token” template is the easiest route).
+  Cloudflare quota, capacity limits, and billing may
   apply. **Test connection** performs a small real JSON-mode inference request,
   so it may consume quota.
 - **Automation boundary** — NAM Mixer automates endpoint construction,
@@ -677,6 +682,10 @@ checkout doesn't require hunting for each setup button individually.
 - **TONE3000 API key** — enables the TONE3000 tab's capture search. Get a
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
+- **Advanced → Enable experimental NAM architectures** — off by default.
+  Turning it on reveals **Create both**, which exports the tested head-only
+  NAM plus an exact Sequential Embedded cabinet derivative. Leave it off for
+  ordinary use unless you specifically need the advanced export.
 Settings are saved to the source checkout's own `.env` file — never uploaded
 anywhere.
 

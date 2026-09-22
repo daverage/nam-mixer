@@ -415,7 +415,7 @@ cabFileInput.addEventListener("change", async () => {
     cabServerPath = data.path;
     cabPreviewEnabled.disabled = false;
     cabExportMode.disabled = false;
-    cabExportMode.value = "embedded";
+    cabExportMode.value = experimentalArchitecturesEnabled() ? "embedded" : "none";
     const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
     const preparedMs = data.prepared_duration_ms !== undefined ? data.prepared_duration_ms.toFixed(1) : null;
     const energy999Ms = data.energy_999_ms !== undefined ? data.energy_999_ms.toFixed(1) : null;
@@ -4032,10 +4032,19 @@ function renderSetupChecklist(items) {
 }
 
 function settingValidationMessage(field, value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed || !field.required_prefix) return "";
-  if (trimmed.startsWith(field.required_prefix) && trimmed.length > field.required_prefix.length) return "";
-  return field.validation_message || `${field.label} must start with ${field.required_prefix}.`;
+  const trimmed = String(value == null ? "" : value).trim();
+  if (field.required_prefix) {
+    if (trimmed && !(trimmed.startsWith(field.required_prefix) && trimmed.length > field.required_prefix.length)) {
+      return field.validation_message || `${field.label} must start with ${field.required_prefix}.`;
+    }
+  }
+  if (field.kind === "number" && trimmed !== "") {
+    const number = Number(trimmed);
+    if (!Number.isFinite(number)) return `${field.label} must be a number.`;
+    if (field.min !== undefined && number < field.min) return `${field.label} must be at least ${field.min}.`;
+    if (field.max !== undefined && number > field.max) return `${field.label} must be at most ${field.max}.`;
+  }
+  return "";
 }
 
 function renderSettings() {
@@ -4059,7 +4068,31 @@ function renderSettings() {
       section.append(heading);
     }
     const provider = (settingsFields.find((field) => field.name === "NAM_MIXER_AI_PROVIDER") || {}).value || "local";
+    // Fields without a subgroup render first, then each subgroup in
+    // first-seen order under its own sub-heading (see SettingField.subgroup
+    // in hybrid/settings.py) -- keeps long groups like AI Assistant scannable.
+    const subgroupFields = new Map();
+    const directFields = [];
     for (const field of fields) {
+      if (field.subgroup) {
+        if (!subgroupFields.has(field.subgroup)) subgroupFields.set(field.subgroup, []);
+        subgroupFields.get(field.subgroup).push(field);
+      } else {
+        directFields.push(field);
+      }
+    }
+    const orderedFields = [...directFields];
+    for (const [subgroupName, subgroupGroup] of subgroupFields) {
+      orderedFields.push({__subgroupHeading: subgroupName}, ...subgroupGroup);
+    }
+    for (const field of orderedFields) {
+      if (field.__subgroupHeading) {
+        const subheading = document.createElement("h4");
+        subheading.className = "settings-subgroup";
+        subheading.textContent = field.__subgroupHeading;
+        section.append(subheading);
+        continue;
+      }
       const row = document.createElement("label");
       row.className = field.kind === "checkbox" ? "settings-row settings-row-checkbox" : "settings-row";
       if (field.kind === "number") row.classList.add("settings-row-narrow");
@@ -4074,6 +4107,11 @@ function renderSettings() {
       if (field.kind !== "checkbox") input.className = "select-input";
       if (field.kind === "checkbox") input.type = "checkbox";
       else if (field.kind !== "select") input.type = field.kind === "number" ? "number" : field.kind === "secret" ? "password" : "text";
+      if (field.kind === "number") {
+        if (field.min !== undefined) input.min = String(field.min);
+        if (field.max !== undefined) input.max = String(field.max);
+        if (field.step !== undefined) input.step = String(field.step);
+      }
       input.dataset.settingName = field.name;
       let suggestionsList = null;
       if (field.suggestions?.length) {
@@ -4122,7 +4160,7 @@ function renderSettings() {
         }
         desc.textContent = field.description;
       }
-      if (field.required_prefix) {
+      if (field.required_prefix || field.kind === "number") {
         const updateValidation = () => {
           const message = settingValidationMessage(field, input.value);
           input.setCustomValidity(message);
@@ -4192,11 +4230,20 @@ function renderSettings() {
 // the separately labelled exact head+cab download.
 const cabExportOptionEmbedded = document.getElementById("cab-export-option-embedded");
 const cabExportCompatibilityHint = document.getElementById("cab-export-compatibility-hint");
+const cabExportExperimentalHint = document.getElementById("cab-export-experimental-hint");
 let sequentialEmbeddedWarningAcknowledged = false;
 
 function applyCabDerivativeVisibility() {
-  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = false;
-  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = false;
+  const enabled = settingsFields.some((field) =>
+    field.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES" && field.value
+  );
+  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = !enabled;
+  if (cabExportExperimentalHint) cabExportExperimentalHint.hidden = enabled;
+  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = !enabled;
+  if (!enabled && cabExportMode.value === "embedded") {
+    cabExportMode.value = "none";
+    updateCabStatus();
+  }
 }
 
 function renderTone3000ApiKeyLinkRow() {
@@ -4436,8 +4483,12 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "save failed");
-    settingsStatus.textContent = `Saved (${data.saved.length} setting${data.saved.length === 1 ? "" : "s"}).`;
+    // loadSettings() clears settingsStatus while reloading, so the
+    // confirmation (and any restart warning) must be written after it.
     await loadSettings();
+    let statusMessage = `Saved (${data.saved.length} setting${data.saved.length === 1 ? "" : "s"}).`;
+    if (data.warnings?.length) statusMessage += " " + data.warnings.join(" ");
+    settingsStatus.textContent = statusMessage;
     // Re-check anything the just-saved values could have changed the
     // availability of, so the AI Assistant/TONE3000 tabs reflect reality
     // immediately rather than only after a page reload.

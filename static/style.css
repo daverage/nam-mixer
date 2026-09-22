@@ -823,6 +823,18 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
 .settings-row-checkbox input[type="checkbox"] { grid-row: 1; grid-column: 1; margin: 0; }
 .settings-row-checkbox .settings-row-label { grid-row: 1; grid-column: 2; }
 .settings-row-checkbox .info { grid-row: 2; grid-column: 2; }
+.settings-subgroup {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1.15rem 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.settings-subgroup::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .settings-panel-footer { display: flex; gap: 0.6rem; margin-top: 1.25rem; }
 .setup-checklist { display: flex; flex-direction: column; gap: 0.5rem; }
 .setup-checklist-item { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt, transparent); }

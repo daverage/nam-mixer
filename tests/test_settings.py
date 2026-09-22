@@ -85,6 +85,39 @@ def test_get_settings_lists_all_registered_fields(isolated_env_file):
     )
 
 
+def test_experimental_architectures_default_off(isolated_env_file):
+    assert settings.experimental_architectures_enabled() is False
+    field = {field["name"]: field for field in settings.get_settings()}[
+        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"
+    ]
+    assert field["kind"] == "checkbox"
+    assert field["value"] is False
+
+
+def test_ai_response_token_limit_is_an_advanced_bounded_number_setting(isolated_env_file):
+    field = {field["name"]: field for field in settings.get_settings()}["NAM_MIXER_AI_MAX_TOKENS"]
+    assert field["group"] == "Advanced"
+    assert field["kind"] == "number"
+    assert field["min"] == 256
+    assert field["max"] == 4096
+    assert field["step"] == 1
+
+    settings.save_settings({"NAM_MIXER_AI_MAX_TOKENS": "2048"})
+    assert {field["name"]: field for field in settings.get_settings()}["NAM_MIXER_AI_MAX_TOKENS"]["value"] == "2048"
+
+
+def test_experimental_architectures_checkbox_round_trips(isolated_env_file):
+    settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": True})
+    assert settings.experimental_architectures_enabled() is True
+    field = {field["name"]: field for field in settings.get_settings()}[
+        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"
+    ]
+    assert field["value"] is True
+
+    settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": False})
+    assert settings.experimental_architectures_enabled() is False
+
+
 def test_save_settings_ignores_unknown_names(isolated_env_file):
     result = settings.save_settings({"NAM_RENDER_EXE": "/opt/nam_render", "NOT_A_REAL_SETTING": "x"})
     assert result["saved"] == ["NAM_RENDER_EXE"]
@@ -223,3 +256,39 @@ def test_tone3000_saved_invalid_key_is_reported_without_exposing_it(isolated_env
     assert field["is_valid"] is False
     assert field["value"] == ""
     assert "legacy-invalid-value" not in str(field)
+
+
+def test_get_settings_exposes_subgroups_for_ui_grouping(isolated_env_file):
+    fields = {field["name"]: field for field in settings.get_settings()}
+    assert fields["NAM_MIXER_AI_TEMPERATURE"]["subgroup"] == "Tuning"
+    assert fields["NAM_MIXER_AI_TIMEOUT_SECONDS"]["subgroup"] == "Tuning"
+    assert fields["NAM_MIXER_AI_PROVIDER"]["subgroup"] is None
+
+
+def test_number_settings_reject_out_of_range_values(isolated_env_file):
+    with pytest.raises(settings.SettingsValidationError, match="at most 2"):
+        settings.save_settings({"NAM_MIXER_AI_TEMPERATURE": "3.5"})
+    with pytest.raises(settings.SettingsValidationError, match="at least 0"):
+        settings.save_settings({"NAM_MIXER_AI_TEMPERATURE": "-1"})
+    with pytest.raises(settings.SettingsValidationError, match="at least 1"):
+        settings.save_settings({"PORT": "0"})
+    assert not isolated_env_file.exists()
+
+    settings.save_settings({"NAM_MIXER_AI_TEMPERATURE": "0.7"})
+    assert env_file.read_env_value("NAM_MIXER_AI_TEMPERATURE") == "0.7"
+
+
+def test_blank_number_setting_means_use_default_and_skips_range_check(isolated_env_file):
+    settings.save_settings({"NAM_MIXER_AI_TEMPERATURE": ""})
+    assert env_file.read_env_value("NAM_MIXER_AI_TEMPERATURE") == ""
+
+
+def test_save_warns_only_when_a_restart_required_value_changes(isolated_env_file):
+    first = settings.save_settings({"PORT": "6001"})
+    assert any("restart" in warning.lower() for warning in first["warnings"])
+
+    second = settings.save_settings({"PORT": "6001"})
+    assert second["warnings"] == []
+
+    unrelated = settings.save_settings({"NAM_RENDER_EXE": "/opt/nam_render"})
+    assert unrelated["warnings"] == []

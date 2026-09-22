@@ -48,7 +48,12 @@ from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
 from hybrid.design import freeze_design
 from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
-from hybrid.settings import SettingsValidationError, get_settings as get_app_settings, save_settings as save_app_settings
+from hybrid.settings import (
+    SettingsValidationError,
+    experimental_architectures_enabled,
+    get_settings as get_app_settings,
+    save_settings as save_app_settings,
+)
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
@@ -64,7 +69,7 @@ from hybrid.kaggle_training import (
 )
 from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
-from hybrid.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, status as local_llm_status, test_connection as test_ai_connection
+from hybrid.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, prompt_requests_recipe, status as local_llm_status, test_connection as test_ai_connection
 from hybrid.ollama_pull import (
     OllamaPullError,
     get_pull_status as get_ollama_pull_status,
@@ -469,6 +474,7 @@ def api_local_llm_recipe():
                 request_tone3000_queries=request_queries,
                 known_source_plan=known_plan,
                 debug_trace=call_debug,
+                require_recipe=prompt_requests_recipe(ai_prompt or prompt.strip()),
             )
         finally:
             if debug_trace is not None and call_debug is not None:
@@ -1664,6 +1670,11 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     export_mode = data.get("cab_export_mode") or "none"
     if export_mode not in ("none", "learned", "embedded"):
         raise ValueError("cab_export_mode must be 'none', 'learned', or 'embedded'")
+    if export_mode == "embedded" and not experimental_architectures_enabled():
+        raise ValueError(
+            "Create both is an experimental NAM architecture and is disabled. "
+            "Enable 'Enable experimental NAM architectures' under Settings > Advanced to use it."
+        )
     # Preview is intentionally independent of final export: a user may
     # audition cabless while training a learned target or package an exact
     # embedded FIR. A non-none mode still requires the selected cab path

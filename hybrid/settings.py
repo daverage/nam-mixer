@@ -14,6 +14,7 @@ read only once at process startup, e.g. the server PORT).
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from hybrid.env_file import read_saved_env_values, write_env_values
@@ -34,6 +35,10 @@ class SettingField:
     suggestions: tuple[str, ...] = ()
     required_prefix: str = ""
     validation_message: str = ""
+    min_value: int | float | None = None
+    max_value: int | float | None = None
+    step: int | float | None = None
+    subgroup: str | None = None
 
 
 class SettingsValidationError(ValueError):
@@ -66,6 +71,9 @@ SETTINGS: tuple[SettingField, ...] = (
         kind="number",
         placeholder="5001",
         restart_required=True,
+        min_value=1,
+        max_value=65535,
+        step=1,
     ),
     SettingField(
         name="NAM_MIXER_AI_PROVIDER",
@@ -110,7 +118,7 @@ SETTINGS: tuple[SettingField, ...] = (
     SettingField(
         name="NAM_MIXER_AI_API_KEY",
         label="API token",
-        description="Create it from Workers AI → Use REST API (or grant a manual token Account > Workers AI > Read). Stored server-side only; tests and requests can consume quota or incur billing.",
+        description="Create it from Workers AI → Use REST API. If creating a token manually, grant account-scoped Workers AI Read and Workers AI Edit permissions. Stored server-side only; tests and requests can consume quota or incur billing.",
         group="AI Assistant", kind="secret", placeholder="Bearer token", providers=("cloudflare", "custom"),
     ),
     SettingField(
@@ -120,6 +128,10 @@ SETTINGS: tuple[SettingField, ...] = (
         group="AI Assistant",
         kind="number",
         placeholder="0.2",
+        min_value=0,
+        max_value=2,
+        step=0.1,
+        subgroup="Tuning",
     ),
     SettingField(
         name="NAM_MIXER_AI_TIMEOUT_SECONDS",
@@ -128,17 +140,33 @@ SETTINGS: tuple[SettingField, ...] = (
         group="AI Assistant",
         kind="number",
         placeholder="60",
+        min_value=1,
+        max_value=600,
+        step=1,
+        subgroup="Tuning",
     ),
     SettingField(
         name="NAM_MIXER_AI_MAX_TOKENS",
         label="AI response token limit",
-        description="Max tokens the AI provider may generate per reply. Raise this if replies with "
+        description="Max tokens (256-4096) the AI provider may generate per reply. Raise this if replies with "
                      "research notes attached fail with \"the local model could not incorporate it\" -- "
                      "that usually means the response was cut off before valid JSON completed. "
                      "Leave blank to use the automatic default.",
         group="Advanced",
         kind="number",
         placeholder="3000",
+        min_value=256,
+        max_value=4096,
+        step=1,
+    ),
+    SettingField(
+        name="NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES",
+        label="Enable experimental NAM architectures",
+        description="Shows Create both (Sequential Embedded): a valid NAM Sequential model with a separate "
+                     "Linear/FIR cabinet stage. A2-only players may reject it. Off by default; the tested "
+                     "head-only NAM remains available without this setting.",
+        group="Advanced",
+        kind="checkbox",
     ),
     SettingField(
         name="TONE3000_API_KEY",
@@ -285,7 +313,14 @@ def get_settings() -> list[dict]:
             "suggestions": list(suggestions),
             "required_prefix": field.required_prefix,
             "validation_message": field.validation_message,
+            "subgroup": field.subgroup,
         }
+        if field.min_value is not None:
+            entry["min"] = field.min_value
+        if field.max_value is not None:
+            entry["max"] = field.max_value
+        if field.step is not None:
+            entry["step"] = field.step
         if field.kind == "secret":
             entry["value"] = ""
             entry["has_value"] = bool(raw_value)
@@ -312,6 +347,7 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
         raise SettingsValidationError("AI provider must be Local, Cloudflare Workers AI, or Custom OpenAI-compatible")
 
     filtered: dict[str, str] = {}
+    warnings: list[str] = []
 
     # On the first save after upgrading, preserve the old shared connection
     # values in the provider that owned them before changing provider.
@@ -341,19 +377,48 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
             "NAM_MIXER_AI_MODEL", "NAM_MIXER_AI_API_KEY",
         } and name not in _PROVIDER_STORAGE[requested_provider]:
             continue
+        # A restart-required setting that actually CHANGED gets flagged so the
+        # UI can say so in the save confirmation -- warning on every save
+        # (even unchanged values) would train users to ignore it.
+        if field.restart_required:
+            previous = os.environ.get(name, saved_values.get(name, ""))
+            if field.kind == "checkbox":
+                previous = "true" if previous.strip().lower() in ("1", "true", "yes", "on") else "false"
+            if value != previous:
+                warnings.append(f"{field.label} takes effect after the app restarts.")
         filtered[storage_name] = value
     for name in clear_secrets or []:
         field = _FIELDS_BY_NAME.get(str(name))
         if field and field.kind == "secret":
             filtered[_PROVIDER_STORAGE.get(requested_provider, {}).get(field.name, field.name)] = ""
     env_file = write_env_values(filtered)
-    return {"saved": sorted(filtered), "env_file": str(env_file)}
+    return {"saved": sorted(filtered), "env_file": str(env_file), "warnings": warnings}
+
+
+def experimental_architectures_enabled() -> bool:
+    """Whether advanced Sequential Embedded cabinet exports are enabled."""
+    from hybrid.env_file import read_env_values
+
+    raw = read_env_values({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"}).get(
+        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", ""
+    )
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _validation_error(field: SettingField, value: str) -> str | None:
     value = str(value).strip()
-    if not value or not field.required_prefix:
+    if not value:
         return None
-    if value.startswith(field.required_prefix) and len(value) > len(field.required_prefix):
-        return None
-    return field.validation_message or f"{field.label} must start with {field.required_prefix}."
+    if field.required_prefix:
+        if not (value.startswith(field.required_prefix) and len(value) > len(field.required_prefix)):
+            return field.validation_message or f"{field.label} must start with {field.required_prefix}."
+    if field.kind == "number":
+        try:
+            number = float(value)
+        except ValueError:
+            return f"{field.label} must be a number."
+        if field.min_value is not None and number < field.min_value:
+            return f"{field.label} must be at least {field.min_value:g}."
+        if field.max_value is not None and number > field.max_value:
+            return f"{field.label} must be at most {field.max_value:g}."
+    return None

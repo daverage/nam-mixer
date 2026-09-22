@@ -1584,7 +1584,7 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
 
 
 def test_generate_embedded_cab_keeps_the_training_target_head_only(
-    client, isolated_training_paths, tmp_path
+    client, isolated_training_paths, tmp_path, monkeypatch
 ):
     """An exact cabinet derivative never changes what the A2 trains/tests."""
     import soundfile as sf
@@ -1600,6 +1600,8 @@ def test_generate_embedded_cab_keeps_the_training_target_head_only(
     ir_data[0] = 0.6
     sf.write(ir_path, ir_data, 48000, subtype="FLOAT")
 
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true")
+
     resp = client.post("/api/generate", json={
         "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_export_mode": "embedded",
@@ -1610,6 +1612,19 @@ def test_generate_embedded_cab_keeps_the_training_target_head_only(
     assert manifest["cab"]["export_mode"] == "embedded"
     assert manifest["cab"]["baked"] is False
     assert manifest["output_gain"]["embedded_final"]["final_linear_scalar"] > 0
+
+
+def test_generate_embedded_cab_requires_advanced_setting(client, tmp_path, monkeypatch):
+    ir_path = tmp_path / "ir.wav"
+    sf.write(ir_path, np.array([0.6, 0.0], dtype=np.float32), 48000, subtype="FLOAT")
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
+    monkeypatch.delenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", raising=False)
+
+    with pytest.raises(ValueError, match="experimental NAM architecture"):
+        app_module._resolve_cab_design({
+            "cab_path": str(ir_path),
+            "cab_export_mode": "embedded",
+        }, 48000)
 
 
 def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):

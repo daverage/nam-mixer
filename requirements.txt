@@ -5,6 +5,7 @@ scipy
 soundfile
 psutil
 pytest
+pydantic>=2.10,<3
 
 # Kaggle GPU training backend (hybrid/kaggle_training.py) -- lightweight,
 # no torch, safe in the normal torch-free runtime environment. Only the
