@@ -276,7 +276,7 @@ def test_converse_retries_once_after_invalid_json(monkeypatch):
     result = local_llm.converse("make a blend", opener=fake_open)
     assert result.reply == "corrected"
     assert len(bodies) == 2
-    assert "failed local validation" in bodies[1]["messages"][-1]["content"]
+    assert "complete JSON object" in bodies[1]["messages"][-1]["content"]
 
 
 def test_incomplete_json_is_classified_and_retried_once(monkeypatch):
