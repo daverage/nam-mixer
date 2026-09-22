@@ -624,6 +624,53 @@ def _format_capability_key(config: AiConfig) -> tuple[str, str, str]:
     return config.provider, config.base_url, config.model
 
 
+def _check_switch_knob_narrative(value: float, explanation: str) -> None:
+    """Catch a hybrid-mode switchKnob description that has its direction backwards.
+
+    0 means the transition starts at the SOFTEST playing (changes early); 10
+    means it only starts at the LOUDEST playing (changes late) -- see
+    dbFromKnob() in static/app.js, which maps 0/10 to the calibrated
+    min/max crossover dB. A model can get this backwards even while getting
+    the Amp A/B percentage convention right, since it's a second, unrelated
+    direction convention; only reject a line that explicitly names the
+    control, states the actual value, and pairs it with an unambiguous
+    wrong-direction phrase, for the same reason the Amp A/B check above is
+    narrow -- this supplements the prompt, it doesn't replace it or judge
+    taste.
+    """
+    label = CONTROL_LABELS["switchKnob"]
+    # switchKnob is stored as a float (e.g. 10.0), but the model's prose
+    # always writes the plain integer ("10"); match either spelling instead
+    # of only the exact str(value), which would silently never match.
+    value_spellings = {str(value)}
+    if float(value).is_integer():
+        value_spellings.add(str(int(value)))
+    value_pattern = "|".join(re.escape(spelling) for spelling in value_spellings)
+    for line in explanation.splitlines():
+        if label.casefold() not in line.casefold() and "switch knob" not in line.casefold():
+            continue
+        if not re.search(rf"(?<!\d)(?:{value_pattern})(?!\d)", line):
+            continue
+        if value >= 7 and re.search(
+            r"\b(?:begins?|starts?|triggers?|kicks?\s*in|appears?)\b[^\n]{0,60}"
+            r"\b(?:early|soft(?:ly)?|moderate(?:ly)?|quiet(?:ly)?)\b",
+            line, re.IGNORECASE,
+        ):
+            raise LocalLlmError(
+                f"AI provider incorrectly described {label}={value} as an early/moderate-volume "
+                "transition; 0 changes early (softest playing) and 10 changes late (loudest playing)"
+            )
+        if value <= 3 and re.search(
+            r"\b(?:begins?|starts?|triggers?|kicks?\s*in|appears?)\b[^\n]{0,60}"
+            r"\b(?:late|loud(?:ly|est)?|hard(?:est)?|maximum|only\s+when\s+you\s+(?:push|dig|play\s+hard))\b",
+            line, re.IGNORECASE,
+        ):
+            raise LocalLlmError(
+                f"AI provider incorrectly described {label}={value} as a late/loud-only "
+                "transition; 0 changes early (softest playing) and 10 changes late (loudest playing)"
+            )
+
+
 def _check_recipe_narrative(reply: LocalConversationReply, *, known_source_plan: dict[str, str] | None = None) -> None:
     """Reject only *clear* factual contradictions about the mixer's controls.
 
@@ -647,6 +694,8 @@ def _check_recipe_narrative(reply: LocalConversationReply, *, known_source_plan:
                 "specify distinct capture/channel/gain roles or use source_plan:null "
                 "when the exact sources are not known"
             )
+    if recipe.mode == "hybrid" and recipe.switchKnob is not None:
+        _check_switch_knob_narrative(recipe.switchKnob, recipe.explanation)
     if recipe.mode != "character":
         return
     for field_name, label in (("tone", CONTROL_LABELS["tone"]),
@@ -964,6 +1013,11 @@ MODES — choose by requested signal behaviour, not genre/artist keywords:
   Label these controls '{CONTROL_LABELS['switchKnob']}' and
   '{CONTROL_LABELS['width']}'. Guitar-volume numbers are playing targets, not
   calibrated physical thresholds; suggest adjusting by audition.
+  SWITCHKNOB DIRECTION (check this like the Amp A/B percentages above):
+  0 = the transition starts at the SOFTEST playing (changes EARLY, easy to
+  reach B at moderate volume); 10 = the transition only starts at the
+  LOUDEST playing (changes LATE, B only appears when you dig in hard).
+  A high switchKnob is a LATE/hard-to-trigger transition, never an early one.
 - character ('{CONTROL_LABELS['mode_character']}'): stable broad tone/feel with
   a separate input-level-dependent drive morph. Use only if the user wants that
   specific split of responsibilities. Required fields: mode='character', tone,

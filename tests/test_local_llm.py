@@ -684,3 +684,52 @@ def test_legacy_settings_remain_usable_when_new_names_are_absent(monkeypatch):
     monkeypatch.delenv("NAM_MIXER_AI_PROVIDER", raising=False)
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "legacy-model")
     assert local_llm._config().model == "legacy-model"
+
+
+def test_switch_knob_narrative_check_catches_backwards_direction():
+    # Regression test for a real observed model output: switchKnob=10 (which
+    # only starts the transition at the LOUDEST playing -- see dbFromKnob()
+    # in static/app.js) described as beginning "relatively early... at
+    # moderate playing volumes", which is exactly backwards.
+    backwards = (
+        "Setting the switch knob to 10 means the transition will begin relatively "
+        "early, allowing you to hit the distortion at moderate playing volumes."
+    )
+    with pytest.raises(local_llm.LocalLlmError, match="incorrectly described"):
+        local_llm._check_switch_knob_narrative(10, backwards)
+
+
+def test_switch_knob_narrative_check_allows_correct_direction():
+    low_knob_early = (
+        "Where does it start to change? Set this low (e.g., 4). This ensures that "
+        "even when playing softly, the tone remains firmly in the clean range of Amp A."
+    )
+    local_llm._check_switch_knob_narrative(4, low_knob_early)
+
+    high_knob_late = (
+        "Setting the switch knob to 9 means the transition only begins once you "
+        "play at the loudest, most aggressive dynamics."
+    )
+    local_llm._check_switch_knob_narrative(9, high_knob_late)
+
+
+def test_converse_rejects_recipe_with_backwards_switch_knob_narrative(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "test-model")
+    bad_payload = json.dumps({
+        "reply": "Use hybrid mode.",
+        "intent": "recipe",
+        "recipe": {
+            "mode": "hybrid", "switchKnob": 10, "width": 12,
+            "explanation": (
+                "Setting the switch knob to 10 means the transition will begin "
+                "relatively early, allowing you to hit the distortion at moderate "
+                "playing volumes."
+            ),
+        },
+    })
+
+    def fake_open(request, timeout):
+        return _Response({"choices": [{"message": {"content": bad_payload}}]})
+
+    with pytest.raises(local_llm.LocalLlmError, match="incorrectly described"):
+        local_llm.converse("make a punk tone", opener=fake_open, require_recipe=True)
