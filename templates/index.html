@@ -643,6 +643,11 @@
       <div class="cg-row"><strong id="cg-current-name">No project open</strong>
         <button type="button" id="cg-new-project" class="btn btn-secondary btn-small">New project</button>
         <button type="button" id="cg-open-sessions" class="btn btn-secondary btn-small">Open a saved project…</button></div>
+      <div class="cg-row" id="cg-new-project-form" hidden>
+        <input type="text" id="cg-new-project-name" class="file-input" placeholder="Project name (e.g. the amp and channel)" maxlength="100">
+        <button type="button" id="cg-new-project-create" class="btn btn-primary btn-small">Create</button>
+        <button type="button" id="cg-new-project-cancel" class="btn btn-secondary btn-small">Cancel</button>
+      </div>
       <p class="info">Projects are listed in <strong>Sessions</strong>, labelled “Continuous Gain”: load one there to come back to it.</p>
     </div>
     <div id="cg-body" class="cg-layout"></div>

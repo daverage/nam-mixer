@@ -54,10 +54,30 @@
     document.getElementById("cg-current-name").textContent = data.project.name;
     render();
   }
-  document.getElementById("cg-new-project").addEventListener("click", async () => {
-    const name = window.prompt("Project name (e.g. the amp and channel)");
-    if (!name) return;
-    try { const d = await api("/api/cg/projects", { method: "POST", json: { name } }); S.stage = 1; await load(d.project.id); } catch (e) { say(e.message, true); }
+  // An inline field, not window.prompt(): packaged desktop WebViews (WKWebView/WebView2) commonly implement
+  // window.confirm() but not window.prompt() at all, silently doing nothing on click -- see desktopConfirm's
+  // comment in app.js for the same WKWebView-delegate distinction. This also matches how every other name entry
+  // in the app (session name, model name) already works.
+  const newProjectForm = document.getElementById("cg-new-project-form");
+  const newProjectNameInput = document.getElementById("cg-new-project-name");
+  const openNewProjectForm = () => { newProjectForm.hidden = false; newProjectNameInput.value = ""; newProjectNameInput.focus(); };
+  const closeNewProjectForm = () => { newProjectForm.hidden = true; };
+  document.getElementById("cg-new-project").addEventListener("click", openNewProjectForm);
+  document.getElementById("cg-new-project-cancel").addEventListener("click", closeNewProjectForm);
+  const createNewProject = async () => {
+    const name = newProjectNameInput.value.trim();
+    if (!name) { newProjectNameInput.focus(); return; }
+    try {
+      const d = await api("/api/cg/projects", { method: "POST", json: { name } });
+      closeNewProjectForm();
+      S.stage = 1;
+      await load(d.project.id);
+    } catch (e) { say(e.message, true); }
+  };
+  document.getElementById("cg-new-project-create").addEventListener("click", createNewProject);
+  newProjectNameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); createNewProject(); }
+    else if (e.key === "Escape") { e.preventDefault(); closeNewProjectForm(); }
   });
   document.getElementById("cg-open-sessions").addEventListener("click", () => document.getElementById("tab-sessions").click());
   // Sessions -> Load calls this: switch to this tab and open that project (the session id is the project id).
