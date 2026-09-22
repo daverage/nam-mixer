@@ -8,6 +8,14 @@ import pytest
 from hybrid import local_llm
 
 
+@pytest.fixture(autouse=True)
+def isolated_env_file(tmp_path, monkeypatch):
+    """These tests exercise NAM_MIXER_AI_*/NAM_MIXER_LOCAL_LLM_* purely via monkeypatched os.environ, so a real .env on the
+    developer's machine (hybrid/env_file.py's fallback, used deliberately in production) must never leak in -- point it at a
+    file that doesn't exist. Tests that want the .env fallback itself set NAM_MIXER_ENV_FILE to a real tmp_path file explicitly."""
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
+
+
 class _Response:
     def __init__(self, payload):
         self.payload = payload
@@ -146,7 +154,13 @@ def test_local_llm_compacts_prose_but_preserves_a_structured_source_plan(monkeyp
     assert len(messages) == 8  # system, six compact history turns, user
     assert all(len(message["content"]) <= 900 for message in messages[1:-1])
     assert len(messages[-1]["content"]) <= len("Which file should I use?") + 5_200
-    assert seen["body"]["max_tokens"] == 1400
+    # Computed from the real formula (hybrid.local_llm._default_max_tokens applied to the actual char-limit constants) rather
+    # than a hardcoded number: a hardcoded 1400 here silently went stale after the char limits changed and only "passed" by
+    # coincidence on machines whose .env happened to pin NAM_MIXER_AI_MAX_TOKENS/NAM_MIXER_LOCAL_LLM_MAX_TOKENS to 1400.
+    expected_max_tokens = local_llm._default_max_tokens(
+        local_llm.MAX_LOCAL_RECIPE_EXPLANATION_LENGTH, local_llm.MAX_LOCAL_CONVERSATION_REPLY_LENGTH
+    )
+    assert seen["body"]["max_tokens"] == expected_max_tokens
     assert reply.source_plan == {"ampA": "Fender Deluxe Reverb", "ampB": "Marshall JCM800"}
 
 

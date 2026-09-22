@@ -79,7 +79,9 @@ def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client
     assert "Cloudflare Workers AI" in llm_item["detail"]
 
 
-def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch):
+def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch, tmp_path):
+    # Isolate from a real .env on this machine (hybrid/env_file.py's deliberate fallback), same as tests/test_local_llm.py.
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
     assert client.get("/api/local_llm/status").get_json()["enabled"] is False
     response = client.post("/api/local_llm/recipe", json={"prompt": "a clean crunch blend"})
