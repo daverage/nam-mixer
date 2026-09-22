@@ -106,6 +106,32 @@ def test_ai_response_token_limit_is_an_advanced_bounded_number_setting(isolated_
     assert {field["name"]: field for field in settings.get_settings()}["NAM_MIXER_AI_MAX_TOKENS"]["value"] == "2048"
 
 
+@pytest.mark.parametrize(
+    "name,expected_min,expected_max",
+    [
+        ("NAM_MIXER_AI_HISTORY_MESSAGES", 2, 8),
+        ("NAM_MIXER_AI_HISTORY_MESSAGE_CHARS", 300, 1800),
+        ("NAM_MIXER_AI_RESEARCH_CHARS", 800, 8000),
+    ],
+)
+def test_advanced_ai_tuning_settings_are_bounded_number_fields(isolated_env_file, name, expected_min, expected_max):
+    field = {field["name"]: field for field in settings.get_settings()}[name]
+    assert field["group"] == "Advanced"
+    assert field["kind"] == "number"
+    assert field["min"] == expected_min
+    assert field["max"] == expected_max
+
+
+@pytest.mark.parametrize("name", ["NAM_MIXER_AI_MAX_EXPLANATION_CHARS", "NAM_MIXER_AI_MAX_REPLY_CHARS"])
+def test_advanced_reply_length_caps_are_number_fields_and_round_trip(isolated_env_file, name):
+    field = {field["name"]: field for field in settings.get_settings()}[name]
+    assert field["group"] == "Advanced"
+    assert field["kind"] == "number"
+
+    settings.save_settings({name: "1200"})
+    assert {field["name"]: field for field in settings.get_settings()}[name]["value"] == "1200"
+
+
 def test_experimental_architectures_checkbox_round_trips(isolated_env_file):
     settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": True})
     assert settings.experimental_architectures_enabled() is True

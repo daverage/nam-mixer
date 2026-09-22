@@ -373,6 +373,39 @@ def test_local_llm_keeps_a_detailed_but_bounded_explanation(monkeypatch):
     assert len(recipe.explanation) == local_llm.MAX_LOCAL_RECIPE_EXPLANATION_LENGTH
 
 
+def test_canonical_explanation_and_reply_char_caps_are_actually_read(monkeypatch):
+    # Regression test: these two caps used to be looked up by their legacy
+    # NAM_MIXER_LOCAL_LLM_* name directly, so the canonical NAM_MIXER_AI_*
+    # setting the Settings page now exposes (see hybrid/settings.py) was
+    # silently ignored. Confirm the canonical name actually wins.
+    monkeypatch.setenv("NAM_MIXER_AI_MAX_EXPLANATION_CHARS", "12")
+    monkeypatch.setenv("NAM_MIXER_AI_MAX_REPLY_CHARS", "9")
+
+    recipe = local_llm._recipe_from_json({"mode": "blend", "mixB": 50, "explanation": "x" * 200})
+    assert len(recipe.explanation) == 12
+
+    reply = local_llm._conversation_reply_from_json({"reply": "y" * 200, "recipe": None})
+    assert len(reply.reply) == 9
+
+
+def test_canonical_history_message_count_is_actually_read(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "test-model")
+    monkeypatch.setenv("NAM_MIXER_AI_HISTORY_MESSAGES", "2")
+    history = [
+        {"role": "user", "content": "turn one"}, {"role": "assistant", "content": "reply one"},
+        {"role": "user", "content": "turn two"}, {"role": "assistant", "content": "reply two"},
+    ]
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen["messages"] = json.loads(request.data.decode())["messages"]
+        return _Response({"choices": [{"message": {"content": '{"reply":"ok","recipe":null}'}}]})
+
+    local_llm.converse("hello", history=history, opener=fake_open)
+    # 1 system message + only the last 2 history turns (canonical cap honored) + current user turn.
+    assert len(seen["messages"]) == 4
+
+
 def test_cloudflare_constructs_fixed_url_and_sends_bearer_token(monkeypatch):
     monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
     monkeypatch.setenv("NAM_MIXER_AI_ACCOUNT_ID", "a" * 32)

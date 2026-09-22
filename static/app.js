@@ -3965,7 +3965,17 @@ document.getElementById("btn-close-tone3000").addEventListener("click", () => se
 // hybrid/settings.py), with a place to change them without a shell. ----
 const settingsGroups = document.getElementById("settings-groups");
 const settingsStatus = document.getElementById("settings-status");
+const btnDiscardSettings = document.getElementById("btn-reload-settings");
 let settingsFields = [];
+// Tracks whether the draft has unsaved edits, so "Discard changes" only
+// offers to do something when there is actually something to discard (see
+// docs/settings_ux_refactor_plan.md's single-save-action goal).
+let settingsDirty = false;
+
+function setSettingsDirty(dirty) {
+  settingsDirty = dirty;
+  if (btnDiscardSettings) btnDiscardSettings.disabled = !dirty;
+}
 
 async function loadSettings() {
   settingsStatus.textContent = "Loading…";
@@ -3975,6 +3985,7 @@ async function loadSettings() {
     if (!response.ok) throw new Error(data.error || "failed to load settings");
     settingsFields = data.settings || [];
     renderSettings();
+    setSettingsDirty(false);
     settingsStatus.textContent = "";
   } catch (err) {
     settingsStatus.textContent = "Load failed: " + err;
@@ -4047,6 +4058,12 @@ function settingValidationMessage(field, value) {
   return "";
 }
 
+// Preserves the Advanced section's open/closed <details> state across
+// renderSettings() re-renders (e.g. after every save) -- without this, a
+// collapsed-by-default Advanced section would snap shut on every save even
+// while a validation error inside it is still being fixed.
+let advancedSectionOpen = false;
+
 function renderSettings() {
   settingsGroups.replaceChildren();
   const groups = new Map();
@@ -4059,6 +4076,8 @@ function renderSettings() {
     const section = document.createElement(isAdvanced ? "details" : "div");
     section.className = isAdvanced ? "settings-group settings-group-advanced" : "settings-group";
     if (isAdvanced) {
+      section.open = advancedSectionOpen;
+      section.addEventListener("toggle", () => { advancedSectionOpen = section.open; });
       const summary = document.createElement("summary");
       summary.textContent = groupName;
       section.append(summary);
@@ -4068,6 +4087,11 @@ function renderSettings() {
       section.append(heading);
     }
     const provider = (settingsFields.find((field) => field.name === "NAM_MIXER_AI_PROVIDER") || {}).value || "local";
+    // Collected while walking the fields below and appended once at the very
+    // end of the group -- the AI Assistant "Test connection" action must come
+    // after every field it depends on (provider, endpoint, model, credentials,
+    // timeout) is visible, not immediately after the model field.
+    let deferredStatusRow = null;
     // Fields without a subgroup render first, then each subgroup in
     // first-seen order under its own sub-heading (see SettingField.subgroup
     // in hybrid/settings.py) -- keeps long groups like AI Assistant scannable.
@@ -4213,13 +4237,14 @@ function renderSettings() {
         section.append(renderNamRenderDownloadRow());
       }
       if (field.name === "NAM_MIXER_AI_MODEL") {
-        section.append(renderLocalLlmStatusRow());
+        deferredStatusRow = renderLocalLlmStatusRow();
         section.append(renderAiModelDiscoveryRow(input, suggestionsList));
       }
       if (field.name === "TONE3000_API_KEY") {
         section.append(renderTone3000ApiKeyLinkRow());
       }
     }
+    if (deferredStatusRow) section.append(deferredStatusRow);
     settingsGroups.append(section);
   }
   applyCabDerivativeVisibility();
@@ -4528,7 +4553,12 @@ settingsGroups.addEventListener("change", async (event) => {
     settingsStatus.textContent = "Provider save failed: " + err;
   }
 });
-document.getElementById("btn-reload-settings").addEventListener("click", () => loadSettings());
+settingsGroups.addEventListener("input", (event) => {
+  if (event.target.dataset?.settingName) setSettingsDirty(true);
+});
+btnDiscardSettings.addEventListener("click", () => {
+  if (!settingsDirty || confirm("Discard your unsaved settings changes?")) loadSettings();
+});
 settingsTab.addEventListener("click", () => setSettingsOpen(true));
 document.getElementById("btn-close-settings").addEventListener("click", () => setSettingsOpen(false));
 const tone3000Query = document.getElementById("tone3000-query");

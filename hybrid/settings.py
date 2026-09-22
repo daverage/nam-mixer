@@ -160,6 +160,63 @@ SETTINGS: tuple[SettingField, ...] = (
         step=1,
     ),
     SettingField(
+        name="NAM_MIXER_AI_HISTORY_MESSAGES",
+        label="Conversation history length (messages)",
+        description="How many recent chat turns are sent back to the AI provider as context. Higher values give "
+                     "the model more memory of the conversation but use more of its context window and can "
+                     "increase latency. Leave blank to use the automatic default.",
+        group="Advanced",
+        kind="number",
+        placeholder="6",
+        min_value=2,
+        max_value=8,
+        step=1,
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_HISTORY_MESSAGE_CHARS",
+        label="Conversation history length (characters per message)",
+        description="How many characters of each retained history message are kept. Raising this preserves more "
+                     "detail from earlier turns at the cost of prompt size. Leave blank to use the automatic "
+                     "default.",
+        group="Advanced",
+        kind="number",
+        placeholder="900",
+        min_value=300,
+        max_value=1800,
+        step=1,
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_RESEARCH_CHARS",
+        label="Research notes character cap",
+        description="How many characters of fetched web/TONE3000 research notes are included in the prompt. "
+                     "Raising this gives the model more evidence to work from but increases latency and the "
+                     "chance of truncation. Leave blank to use the automatic default.",
+        group="Advanced",
+        kind="number",
+        placeholder="5000",
+        min_value=800,
+        max_value=8000,
+        step=1,
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_MAX_EXPLANATION_CHARS",
+        label="Maximum recipe explanation length (characters)",
+        description="Caps how long the detailed recipe explanation shown in the AI Assistant chat can be. Leave "
+                     "blank to use the automatic default.",
+        group="Advanced",
+        kind="number",
+        placeholder="1800",
+    ),
+    SettingField(
+        name="NAM_MIXER_AI_MAX_REPLY_CHARS",
+        label="Maximum reply length (characters)",
+        description="Caps how long the AI Assistant's conversational reply text can be. Leave blank to use the "
+                     "automatic default.",
+        group="Advanced",
+        kind="number",
+        placeholder="1800",
+    ),
+    SettingField(
         name="NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES",
         label="Enable experimental NAM architectures",
         description="Shows Create both (Sequential Embedded): a valid NAM Sequential model with a separate "
