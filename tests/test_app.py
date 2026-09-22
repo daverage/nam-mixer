@@ -634,6 +634,46 @@ def test_deleting_a_session_sweeps_its_orphaned_uploads_but_keeps_shared_and_rec
     assert not shared.exists(), "the last session referencing it is gone -> swept"
 
 
+def test_render_sources_sweep_keeps_only_folders_a_remaining_bundle_references(tmp_path, monkeypatch):
+    """work/render_sources holds a copy per render/preview -- most never become a saved bundle, so this is swept both at app
+    startup and after a session delete, not tied to any single session's own lifecycle the way uploads are."""
+    a2_dir = tmp_path / "a2"; design_dir = a2_dir / "design-1"; design_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path)
+    rs = tmp_path / "render_sources"; rs.mkdir()
+    used = rs / "aaa111" / "amp-a.nam"; used.parent.mkdir(); used.write_text("{}")
+    di_only = rs / "bbb222" / "some-di.wav"; di_only.parent.mkdir(); di_only.write_text("RIFF")  # DI copies are never persisted
+    for f in (used, di_only):
+        _age(f.parent, 4000); _age(f, 4000)
+    (design_dir / "training_manifest.json").write_text(jsonlib.dumps(
+        {"amp_a": {"path": str(used)}, "amp_b": {"path": ""}}))
+    removed = app_module._sweep_orphaned_render_sources()
+    assert used.parent.exists() and used.exists()
+    assert not di_only.parent.exists()
+    assert str(di_only.parent) in removed
+
+
+def test_deleting_a_session_also_sweeps_render_sources_its_bundle_owned(tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"; model_dir = session_dir / "models"; a2_dir = tmp_path / "a2"
+    model_dir.mkdir(parents=True); a2_dir.mkdir()
+    design_dir = a2_dir / "design-1"; design_dir.mkdir()
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path)
+    _isolate_uploads(tmp_path, monkeypatch)
+    rs = tmp_path / "render_sources"; rs.mkdir()
+    owned = rs / "ccc333" / "amp.nam"; owned.parent.mkdir(); owned.write_text("{}")
+    _age(owned.parent, 4000); _age(owned, 4000)
+    (design_dir / "training_manifest.json").write_text(jsonlib.dumps({"amp_a": {"path": str(owned)}, "amp_b": {"path": ""}}))
+    session = {"type": "nam-mixer-session", "version": 1, "id": "design-1", "name": "Gen", "savedAt": "2026-09-22T00:00:00Z",
+               "settings": {"mode": "hybrid"}, "designId": "design-1"}
+    (design_dir / "nam-mixer-session.json").write_text(jsonlib.dumps(session))
+    c = app_module.app.test_client()
+    assert c.delete("/api/sessions/design-1").status_code == 204
+    assert not owned.parent.exists(), "the owning bundle is gone -> its render source is swept too"
+
+
 def test_upload_sweep_also_checks_generated_sessions(tmp_path, monkeypatch):
     session_dir = tmp_path / "sessions"; a2_dir = tmp_path / "a2"; design_dir = a2_dir / "design-1"
     session_dir.mkdir(); design_dir.mkdir(parents=True)

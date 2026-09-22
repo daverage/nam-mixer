@@ -1180,30 +1180,78 @@ def _referenced_upload_paths() -> set[Path]:
     return refs
 
 
+def _referenced_render_sources() -> set[Path]:
+    """Every work/render_sources file a REMAINING training bundle's manifest still points at (amp_a.path / amp_b.path -- the
+    only fields _retain_render_source's output is ever persisted into; see hybrid/training_target.py and its Blend/Character
+    counterparts). The DI copy retained for the same render is never written into a manifest (only its filename, for
+    provenance), so a render_sources DI copy is never "referenced" once the render/preview that made it is over -- it is
+    always safe to sweep. Continuous Gain bundles render straight from the project's own captures/ and never touch this
+    directory at all."""
+    refs: set[Path] = set()
+    for manifest_path in A2_OUTPUT_DIR.glob("*/training_manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        for key in ("amp_a", "amp_b"):
+            p = (manifest.get(key) or {}).get("path")
+            if isinstance(p, str) and p:
+                refs.add(Path(p).resolve())
+    return refs
+
+
+def _sweep_directory(directory: Path, referenced: set[Path], *, grace_seconds: float, files_only: bool = True) -> list[str]:
+    """Delete direct children of `directory` that are not in `referenced` and older than `grace_seconds`. Files newer than the
+    grace period are left alone even if unreferenced -- something just uploaded/rendered in an editing session that hasn't
+    been Saved (or a bundle not yet written) must never be pulled out from under an in-progress action."""
+    removed: list[str] = []
+    now = time.time()
+    if not directory.is_dir():
+        return removed
+    for candidate in directory.iterdir():
+        if files_only and not candidate.is_file():
+            continue
+        try:
+            if candidate.resolve() in referenced:
+                continue
+            if now - candidate.stat().st_mtime < grace_seconds:
+                continue
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+            else:
+                candidate.unlink()
+            removed.append(str(candidate))
+        except OSError:
+            continue
+    return removed
+
+
 def _sweep_orphaned_uploads(*, grace_seconds: float = 1800.0) -> list[str]:
     """Remove work/uploaded_nam and work/uploaded_cab files no remaining session points at (see _referenced_upload_paths).
 
     Called right after a session is deleted, so this is the "removal through the session manager" the upload docstrings always
-    promised but never delivered -- deleting the last session that used a file now actually frees the disk space. Files newer
-    than `grace_seconds` are left alone even if unreferenced: an upload just made in an editing session that hasn't been Saved
-    yet has no session pointing at it either, and must not be deleted out from under an in-progress edit.
+    promised but never delivered -- deleting the last session that used a file now actually frees the disk space.
     """
     referenced = _referenced_upload_paths()
-    removed: list[str] = []
-    now = time.time()
-    for upload_dir in (NAM_UPLOAD_DIR, CAB_UPLOAD_DIR):
-        for candidate in upload_dir.iterdir():
-            if not candidate.is_file():
-                continue
-            try:
-                if candidate.resolve() in referenced:
-                    continue
-                if now - candidate.stat().st_mtime < grace_seconds:
-                    continue
-                candidate.unlink()
-                removed.append(str(candidate))
-            except OSError:
-                continue
+    return _sweep_directory(NAM_UPLOAD_DIR, referenced, grace_seconds=grace_seconds) + \
+        _sweep_directory(CAB_UPLOAD_DIR, referenced, grace_seconds=grace_seconds)
+
+
+def _sweep_orphaned_render_sources(*, grace_seconds: float = 1800.0) -> list[str]:
+    """Remove work/render_sources/<hash>/ folders no remaining training bundle references (see _referenced_render_sources).
+    Unlike uploads, most of these are never "released" by any user action (a render/preview that's never generated into a
+    bundle has nothing to delete) -- run once at app startup as well as after every session delete, see app.py's module body.
+    """
+    referenced_files = _referenced_render_sources()
+    root = WORK_DIR / "render_sources"
+    if not root.is_dir():
+        return []
+    # Each render source lives at render_sources/<sha256>/<original filename> -- a whole hash folder is orphaned exactly
+    # when none of its files are referenced (in practice each folder holds one file).
+    referenced_folders = {p.parent.resolve() for p in referenced_files}
+    return _sweep_directory(root, referenced_folders, grace_seconds=grace_seconds, files_only=False)
     return removed
 
 
@@ -1259,6 +1307,7 @@ def api_session_delete(session_id: str):
             shutil.rmtree(A2_OUTPUT_DIR / secure_filename(str(design_id)), ignore_errors=True)
     _session_model_path(session_id).unlink(missing_ok=True)
     _sweep_orphaned_uploads()
+    _sweep_orphaned_render_sources()
     return "", 204
 
 
@@ -3067,6 +3116,11 @@ register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, trai
 
 
 if __name__ == "__main__":
+    # One-time startup housekeeping: work/render_sources accumulates a copy for every render/preview, most of which never
+    # become part of a saved bundle and so are never released by any user action (see _sweep_orphaned_render_sources's
+    # docstring) -- sweep the backlog once per launch. Deliberately NOT at module import time: tests import this module
+    # directly against the real work/ directory and must never trigger a real filesystem sweep as a side effect of that.
+    _sweep_orphaned_render_sources()
     # Keep the local tool safe and single-process by default.  Opt into the
     # Flask debugger/reloader explicitly while developing.
     app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5001")), debug=os.environ.get("FLASK_DEBUG") == "1")
