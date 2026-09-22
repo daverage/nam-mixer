@@ -1,13 +1,15 @@
 # NAM Mixer
 
-**Blend two [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) captures into one new amp — playable live, and trainable into a single standalone `.nam` model.**
+**Turn your [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) captures into one new, trainable `.nam` model — either by blending two amps into one playable hybrid, or by sweeping several fixed-gain captures of one amp into a single Input-gain-driven model.**
 
 Ever wanted a clean Fender that opens up into a Marshall crunch the harder you
-dig in, without switching presets? NAM Mixer renders two of your own `.nam`
-captures through the same real NAMCore inference engine used by the official
-plugin, blends the results using one of three design modes, and lets you
-train the blend into a brand-new NAM model that stands on its own — no
-switching, no source models required at inference time.
+dig in, without switching presets? Or a Gain-1-to-10 amp pack collapsed into
+one NAM you sweep with the ordinary Input knob instead of ten separate files?
+NAM Mixer renders your own `.nam` captures through the same real NAMCore
+inference engine used by the official plugin, combines them with one of three
+**Builder** design modes (or, for one amp, the **Continuous Gain** workflow),
+and trains the result into a brand-new standalone NAM model — no switching, no
+source models required at inference time.
 
 Everything runs locally — as the desktop app or a small Flask app run from source: your amp
 captures, DI files, and generated training material never leave your
@@ -94,13 +96,21 @@ teacher. Always listen to and validate exported models.
 
 ## What this is
 
-NAM Mixer is a small local tool for building a **dynamic transition,
-parallel blend, or deterministic character blend** from two existing
-[Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) (NAM)
-amp captures — for example, moving from a Fender clean model toward a Marshall
-crunch model as you play harder. It generates a trainable target, then can
-train and validate a single resulting NAM A2 model that reproduces the chosen
-design without requiring the two source models at inference time.
+NAM Mixer is a small local tool with two ways to build a new, trainable NAM
+model from captures you already have:
+
+- **Builder** (the Dynamic Hybrid/Parallel Blend/Character Blend tab) combines
+  **two** existing [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler)
+  (NAM) amp captures — for example, moving from a Fender clean model toward a
+  Marshall crunch model as you play harder.
+- **[Continuous Gain](#continuous-gain-one-amp-one-nam)** takes several
+  fixed-gain captures of **one** amp and channel (Gain 1 … 10, say) and builds
+  one standard `.nam` you sweep with an ordinary player's Input gain instead
+  of switching between capture files.
+
+Both generate a trainable target, then train and validate a single resulting
+NAM A2 model that reproduces the chosen design without requiring the source
+models at inference time.
 
 ## This is NOT model-weight merging
 
@@ -740,6 +750,17 @@ anywhere.
 - Local A2 training needs the separate environment described in
   `requirements-training.txt`. Kaggle training needs a configured Kaggle
   account and network access; neither is required to run the preview UI.
+- **Continuous Gain** reproduces its frozen reference configurations
+  bit-for-bit and has been exercised end to end (local and Kaggle GPU
+  training, in-browser) — see
+  [`docs/continuous_gain_tab.md`](docs/continuous_gain_tab.md). Not yet
+  established: model quality at the full 60-epoch preset by listening (only
+  measurements so far), and the packaged desktop build's Continuous Gain tab
+  on Windows/Linux.
+- Uploaded amp/cab files and internal render-source copies are only freed
+  when the session(s) that used them are deleted (a startup sweep also clears
+  render copies that never became a saved session) — see `app.py`'s
+  `_sweep_orphaned_uploads`/`_sweep_orphaned_render_sources`.
 
 ## Safety: training target vs. live preview
 
