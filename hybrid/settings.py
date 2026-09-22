@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hybrid.env_file import read_env_values, write_env_values
+from hybrid.env_file import read_saved_env_values, read_env_values, write_env_values
 
 
 @dataclass(frozen=True)
@@ -157,8 +157,13 @@ def get_settings() -> list[dict]:
     A `kind="secret"` field's real value is never returned -- only whether
     one is currently set (`has_value`) -- so an already-saved API key never
     round-trips back out over the API or onto a screen someone might share.
+
+    Uses read_saved_env_values() instead of read_env_values() so that Settings
+    page shows only what the user explicitly saved to .env, not stale values
+    that might be inherited from the shell environment (e.g., a stale
+    TONE3000_API_KEY exported before a correct one was saved to .env).
     """
-    values = read_env_values(_KNOWN_NAMES | set(_LEGACY_ALIASES.values()))
+    values = read_saved_env_values(_KNOWN_NAMES | set(_LEGACY_ALIASES.values()))
     result = []
     for field in SETTINGS:
         raw_value = values.get(field.name, "") or values.get(_LEGACY_ALIASES.get(field.name, ""), "")

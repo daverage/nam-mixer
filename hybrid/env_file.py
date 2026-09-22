@@ -42,6 +42,27 @@ def read_env_value(name: str) -> str:
     return ""
 
 
+def read_saved_env_value(name: str) -> str:
+    """Return `name` from .env only, ignoring the inherited process environment.
+
+    Unlike read_env_value(), this never checks os.environ, making it suitable
+    for credentials where we want only what the user explicitly saved to .env,
+    not potentially-stale values from the deployment/development shell.
+    """
+    env_file = _env_file()
+    if not env_file.is_file():
+        return ""
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, raw_value = stripped.partition("=")
+        key = key.strip()
+        if key == name:
+            return raw_value.strip().strip('"').strip("'")
+    return ""
+
+
 def read_env_values(names: "set[str]") -> "dict[str, str]":
     """Batch form of read_env_value, reading the .env file only once."""
     result = {name: os.environ.get(name, "").strip() for name in names}
