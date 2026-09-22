@@ -143,12 +143,6 @@ SETTINGS: tuple[SettingField, ...] = (
 
 _KNOWN_NAMES = {field.name for field in SETTINGS}
 _FIELDS_BY_NAME = {field.name: field for field in SETTINGS}
-_LEGACY_ALIASES = {
-    "NAM_MIXER_AI_BASE_URL": "NAM_MIXER_LOCAL_LLM_BASE_URL",
-    "NAM_MIXER_AI_MODEL": "NAM_MIXER_LOCAL_LLM_MODEL",
-    "NAM_MIXER_AI_TEMPERATURE": "NAM_MIXER_LOCAL_LLM_TEMPERATURE",
-    "NAM_MIXER_AI_TIMEOUT_SECONDS": "NAM_MIXER_LOCAL_LLM_TIMEOUT_SECONDS",
-}
 
 
 def get_settings() -> list[dict]:
@@ -163,10 +157,10 @@ def get_settings() -> list[dict]:
     that might be inherited from the shell environment (e.g., a stale
     TONE3000_API_KEY exported before a correct one was saved to .env).
     """
-    values = read_saved_env_values(_KNOWN_NAMES | set(_LEGACY_ALIASES.values()))
+    values = read_saved_env_values(_KNOWN_NAMES)
     result = []
     for field in SETTINGS:
-        raw_value = values.get(field.name, "") or values.get(_LEGACY_ALIASES.get(field.name, ""), "")
+        raw_value = values.get(field.name, "")
         entry = {
             "name": field.name,
             "label": field.label,
