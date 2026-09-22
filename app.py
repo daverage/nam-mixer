@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from functools import wraps
 from datetime import datetime, timezone
@@ -1142,6 +1143,70 @@ def _find_session_record(session_id: str) -> tuple[Path, dict, Path | None] | No
     return None
 
 
+def _referenced_upload_paths() -> set[Path]:
+    """Every work/uploaded_nam and work/uploaded_cab file any REMAINING session (Builder-mode: plain or generated; Continuous
+    Gain keeps its own captures/ directory and never touches these) still points at, by resolved absolute path."""
+    refs: set[Path] = set()
+    for path in SESSION_DIR.glob("*.nam-mixer.json"):
+        try:
+            session = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        settings = session.get("settings") if isinstance(session, dict) else None
+        if not isinstance(settings, dict):
+            continue
+        for key in ("ampA", "ampB"):
+            p = (settings.get(key) or {}).get("path")
+            if isinstance(p, str) and p:
+                refs.add(Path(p).resolve())
+        cab_path = (settings.get("cab") or {}).get("path")
+        if isinstance(cab_path, str) and cab_path:
+            refs.add(Path(cab_path).resolve())
+    for bundle_dir in (p.parent for p in A2_OUTPUT_DIR.glob("*/nam-mixer-session.json")):
+        try:
+            session = json.loads((bundle_dir / "nam-mixer-session.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        settings = session.get("settings") if isinstance(session, dict) else None
+        if not isinstance(settings, dict):
+            continue
+        for key in ("ampA", "ampB"):
+            p = (settings.get(key) or {}).get("path")
+            if isinstance(p, str) and p:
+                refs.add(Path(p).resolve())
+        cab_path = (settings.get("cab") or {}).get("path")
+        if isinstance(cab_path, str) and cab_path:
+            refs.add(Path(cab_path).resolve())
+    return refs
+
+
+def _sweep_orphaned_uploads(*, grace_seconds: float = 1800.0) -> list[str]:
+    """Remove work/uploaded_nam and work/uploaded_cab files no remaining session points at (see _referenced_upload_paths).
+
+    Called right after a session is deleted, so this is the "removal through the session manager" the upload docstrings always
+    promised but never delivered -- deleting the last session that used a file now actually frees the disk space. Files newer
+    than `grace_seconds` are left alone even if unreferenced: an upload just made in an editing session that hasn't been Saved
+    yet has no session pointing at it either, and must not be deleted out from under an in-progress edit.
+    """
+    referenced = _referenced_upload_paths()
+    removed: list[str] = []
+    now = time.time()
+    for upload_dir in (NAM_UPLOAD_DIR, CAB_UPLOAD_DIR):
+        for candidate in upload_dir.iterdir():
+            if not candidate.is_file():
+                continue
+            try:
+                if candidate.resolve() in referenced:
+                    continue
+                if now - candidate.stat().st_mtime < grace_seconds:
+                    continue
+                candidate.unlink()
+                removed.append(str(candidate))
+            except OSError:
+                continue
+    return removed
+
+
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
 def api_session_delete(session_id: str):
     """Deleting a session whose training is still active does not just
@@ -1193,6 +1258,7 @@ def api_session_delete(session_id: str):
         if design_id:
             shutil.rmtree(A2_OUTPUT_DIR / secure_filename(str(design_id)), ignore_errors=True)
     _session_model_path(session_id).unlink(missing_ok=True)
+    _sweep_orphaned_uploads()
     return "", 204
 
 

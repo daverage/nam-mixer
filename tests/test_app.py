@@ -583,6 +583,72 @@ def test_session_validation_report_must_match_embedded_nam(client, tmp_path, mon
     assert restored["validationReport"]["model_sha256"] == sha256
 
 
+def _isolate_uploads(tmp_path, monkeypatch):
+    nam_dir, cab_dir = tmp_path / "uploaded_nam", tmp_path / "uploaded_cab"
+    nam_dir.mkdir(); cab_dir.mkdir()
+    monkeypatch.setattr(app_module, "NAM_UPLOAD_DIR", nam_dir)
+    monkeypatch.setattr(app_module, "CAB_UPLOAD_DIR", cab_dir)
+    return nam_dir, cab_dir
+
+
+def _age(path: Path, seconds: float) -> None:
+    import os
+    now = __import__("time").time()
+    os.utime(path, (now - seconds, now - seconds))
+
+
+def test_deleting_a_session_sweeps_its_orphaned_uploads_but_keeps_shared_and_recent_ones(client, tmp_path, monkeypatch):
+    """The exact bug this guards: work/uploaded_nam and work/uploaded_cab accumulate forever because nothing ever ties them
+    to session lifecycle. Deleting the last session pointing at a file must now free it -- but never a file another surviving
+    session still uses, and never one uploaded too recently to have been saved into a session yet."""
+    session_dir = tmp_path / "sessions"; model_dir = session_dir / "models"; a2_dir = tmp_path / "a2"
+    model_dir.mkdir(parents=True); a2_dir.mkdir()
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    nam_dir, cab_dir = _isolate_uploads(tmp_path, monkeypatch)
+
+    only_a = nam_dir / "only-used-by-a.nam"; only_a.write_text("{}")
+    shared = nam_dir / "shared-by-a-and-b.nam"; shared.write_text("{}")
+    cab = cab_dir / "cab-used-by-a.wav"; cab.write_text("RIFF")
+    recent_orphan = nam_dir / "just-uploaded-not-saved-yet.nam"; recent_orphan.write_text("{}")
+    for f in (only_a, shared, cab, recent_orphan):
+        _age(f, 4000)  # old enough to sweep, except recent_orphan which we re-age below
+    _age(recent_orphan, 5)  # uploaded 5s ago: must survive even though no session references it yet
+
+    session_a = {"type": "nam-mixer-session", "version": 1, "id": "a", "name": "A", "savedAt": "2026-09-22T00:00:00Z",
+                 "settings": {"mode": "hybrid", "ampA": {"path": str(only_a)}, "ampB": {"path": str(shared)},
+                             "cab": {"path": str(cab)}}}
+    session_b = {"type": "nam-mixer-session", "version": 1, "id": "b", "name": "B", "savedAt": "2026-09-22T00:00:00Z",
+                 "settings": {"mode": "hybrid", "ampA": {"path": str(shared)}, "ampB": {"path": ""}}}
+    assert client.post("/api/sessions", json=session_a).status_code == 201
+    assert client.post("/api/sessions", json=session_b).status_code == 201
+
+    assert client.delete("/api/sessions/a").status_code == 204
+    assert not only_a.exists(), "no remaining session references it -> swept"
+    assert not cab.exists(), "no remaining session references the cab either -> swept"
+    assert shared.exists(), "session b still references it -> kept"
+    assert recent_orphan.exists(), "uploaded moments ago, unreferenced by design -> kept (grace period)"
+
+    assert client.delete("/api/sessions/b").status_code == 204
+    assert not shared.exists(), "the last session referencing it is gone -> swept"
+
+
+def test_upload_sweep_also_checks_generated_sessions(tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"; a2_dir = tmp_path / "a2"; design_dir = a2_dir / "design-1"
+    session_dir.mkdir(); design_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    nam_dir, _cab_dir = _isolate_uploads(tmp_path, monkeypatch)
+    used = nam_dir / "used-by-generated-session.nam"; used.write_text("{}"); _age(used, 4000)
+    unused = nam_dir / "unused.nam"; unused.write_text("{}"); _age(unused, 4000)
+    (design_dir / "nam-mixer-session.json").write_text(jsonlib.dumps(
+        {"settings": {"mode": "hybrid", "ampA": {"path": str(used)}, "ampB": {"path": ""}}}))
+    removed = app_module._sweep_orphaned_uploads()
+    assert str(used) not in removed and used.exists()
+    assert str(unused) in removed and not unused.exists()
+
+
 def test_session_rejects_declared_artifact_hash_mismatch(client, tmp_path, monkeypatch):
     session_dir = tmp_path / "sessions"
     model_dir = session_dir / "models"
