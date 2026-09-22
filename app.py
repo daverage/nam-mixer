@@ -575,10 +575,28 @@ def api_local_llm_recipe():
                 # evidence notes before it proposes catalogue terms.
                 queries = [prompt.strip()]
                 warnings.append("The AI did not provide TONE3000 search terms, so the app searched your exact description.")
+            # Rank catalogue results against vocabulary the model itself
+            # already distilled (its own tone3000_queries/source_plan), not
+            # the user's raw, conversational sentence. The deterministic
+            # word-overlap scorer in tone3000_search stays exactly that --
+            # deterministic, so the model still can't invent a match score --
+            # but its input is now curated by the model's own read of what's
+            # tonally relevant instead of guessed at with a hand-maintained
+            # stopword blacklist. Falls back to the raw prompt only when the
+            # model provided neither (the `queries == [prompt.strip()]` case
+            # above), where there is nothing richer to rank against anyway.
+            rank_terms = list(dict.fromkeys(proposed_queries))
+            if proposed_plan:
+                rank_terms.extend(
+                    str(proposed_plan.get(role, "")).strip()
+                    for role in ("ampA", "ampB")
+                    if str(proposed_plan.get(role, "")).strip()
+                )
+            rank_query = " ".join(rank_terms).strip() or prompt.strip()
             for query in queries:
                 per_family = 0
                 try:
-                    for match in tone3000_search(query, rig_scope=rig_scope, author=author, rank_query=prompt.strip()):
+                    for match in tone3000_search(query, rig_scope=rig_scope, author=author, rank_query=rank_query):
                         key = str(match.get("id") or f"{match.get('title')}|{match.get('creator')}")
                         if key not in seen:
                             seen.add(key)

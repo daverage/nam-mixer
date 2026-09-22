@@ -15,9 +15,30 @@ from hybrid.env_file import read_saved_env_value as _env
 TONE3000_BASE = "https://www.tone3000.com/api/v1"
 
 _METADATA_STOPWORDS = frozenset({
-    "amp", "and", "are", "for", "from", "guitar", "have", "into", "its",
-    "model", "need", "over", "pack", "sound", "that", "the", "this", "tone",
-    "with", "your",
+    # Domain filler: generic enough to appear in almost any amp listing or
+    # any user request, so matching on them tells you nothing about fit.
+    "amp", "amps", "guitar", "model", "pack", "sound", "tone", "capture",
+    "captures",
+    # General English function/filler words. `rank_query` is often the
+    # user's full, conversational request (see tone3000_search's docstring),
+    # not a curated search term -- without a broad stopword list, words like
+    # "would"/"like"/"way" from ordinary sentences were being counted as
+    # genuine metadata matches, drowning out the few words that actually
+    # distinguish one capture from another (see
+    # test_tone3000_metadata_score_ignores_generic_query_words).
+    "and", "are", "for", "from", "have", "into", "its", "need", "over",
+    "that", "the", "this", "with", "your", "you", "about", "after", "all",
+    "also", "any", "because", "been", "being", "but", "can", "cant",
+    "could", "did", "does", "doing", "dont", "down", "each", "get", "gets",
+    "getting", "going", "had", "has", "her", "here", "him", "his", "how",
+    "ive", "just", "know", "like", "likes", "make", "makes", "many", "may",
+    "might", "more", "most", "much", "must", "myself", "not", "now", "off",
+    "one", "only", "other", "our", "out", "really", "same", "should",
+    "some", "still", "such", "than", "there", "these", "they", "think",
+    "those", "through", "too", "try", "trying", "use", "used", "using",
+    "very", "want", "wanted", "wants", "was", "way", "well", "were",
+    "what", "when", "where", "which", "while", "who", "why", "will",
+    "would",
 })
 
 
@@ -174,9 +195,14 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
     `query` is the narrow amp-family term sent to the catalogue API, which
     already filters for relevance -- scoring every result against that same
     short term is nearly always 100% and tells the user nothing. `rank_query`
-    (typically the user's full, richer request) is used for match scoring
-    instead so results are actually differentiated; it defaults to `query`
-    when the caller has nothing richer to offer.
+    is used for match scoring instead so results are actually differentiated;
+    it defaults to `query` when the caller has nothing richer to offer.
+    Callers should prefer passing model-curated vocabulary here (e.g. the
+    assistant's own proposed search terms/source-plan roles) over the user's
+    raw conversational sentence -- the scorer is a plain deterministic
+    word-overlap match, not a semantic one, so it can't tell a genuinely
+    distinguishing word from incidental filler on its own; see
+    `_METADATA_STOPWORDS` and app.py's callsite for the reasoning.
     """
     api_key = _require_tone3000_api_key(for_action="search")
     params = {"query": query, "page": 1, "page_size": 20, "sort": "best-match", "format": "nam", "architecture": "2"}
