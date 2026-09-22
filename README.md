@@ -505,7 +505,7 @@ these links always point at the newest release:
 | Linux x64 | [`NAM-Mixer-Linux-x64.AppImage`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.AppImage) | Portable app |
 | Linux x64 | [`NAM-Mixer-Linux-x64.deb`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.deb) | Debian/Ubuntu package |
 
-To get a specific version, open its page under [Releases](https://github.com/daverage/nam-mixer/releases) (for example `https://github.com/daverage/nam-mixer/releases/tag/v0.3.0`) and download from **Assets**.
+To get a specific version, open its page under [Releases](https://github.com/daverage/nam-mixer/releases) (for example `https://github.com/daverage/nam-mixer/releases/tag/v0.3.1`) and download from **Assets**.
 
 The desktop release bundles the Flask backend, web UI, training support files,
 and the native `nam_render` executable; users do not need to install Python or
