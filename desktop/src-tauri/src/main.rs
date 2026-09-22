@@ -224,6 +224,7 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
     command
         .env("PORT", port.to_string())
         .env("NAM_MIXER_DATA_DIR", data_dir)
+        .env("NAM_MIXER_ENV_FILE", data_dir.join(".env"))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()

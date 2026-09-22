@@ -1,4 +1,28 @@
-from hybrid.research import _rank_tone3000_metadata
+import pytest
+
+from hybrid.research import _rank_tone3000_metadata, _require_tone3000_api_key
+
+
+def test_tone3000_credential_uses_saved_value_over_stale_shell(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    env_path.write_text("TONE3000_API_KEY=t3k_cs_saved\n", encoding="utf-8")
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env_path))
+    monkeypatch.setenv("TONE3000_API_KEY", "stale-shell-value")
+
+    assert _require_tone3000_api_key(for_action="search") == "t3k_cs_saved"
+
+
+def test_tone3000_invalid_saved_credential_points_to_settings_not_shell(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    env_path.write_text("TONE3000_API_KEY=invalid-saved-value\n", encoding="utf-8")
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env_path))
+    monkeypatch.setenv("TONE3000_API_KEY", "t3k_cs_valid_but_ignored_shell_value")
+
+    with pytest.raises(RuntimeError) as error:
+        _require_tone3000_api_key(for_action="search")
+
+    assert "Replace or clear the saved key in Settings" in str(error.value)
+    assert "stale" not in str(error.value).lower()
 
 
 def test_tone3000_metadata_score_prioritizes_title_matches():

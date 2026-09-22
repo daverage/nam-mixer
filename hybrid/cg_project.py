@@ -32,9 +32,11 @@ from .cg_parallel import pmap
 from .cg_probe import PROBE_VERSION, SR, load_reference_di, probe_capture
 from .cg_profile import build_profile
 from .cg_selection import resolve_selection, select_captures
+from .cab_ir import CabDesign
 from .envelope import bounded_envelope_max_history_samples
 from .nam_loader import load_nam
 from .render import render
+from .training_target import embedded_final_scalar
 
 ANCHOR_METHODS = ("fc", "fixed")           # "fc" = production default (frozen FC recipe); "fixed" = Advanced v3 ladder
 SELECTION_MODES = ("automatic", "use_all", "custom")
@@ -268,7 +270,9 @@ class CgProject:
     # ---- Stage 3: freeze + generate bundle for the existing trainers
     def generate_bundle(self, out_root: Path, official_input_path: Path, model_name: str | None = None,
                         progress: Callable[[str], None] | None = None, *, recipe=None, load_di: Callable[[str], np.ndarray] | None = None,
-                        official_transform: Callable[[np.ndarray], np.ndarray] | None = None, excitation: str = "FC recipe: official input + guitar DIs at level offsets") -> dict:
+                        official_transform: Callable[[np.ndarray], np.ndarray] | None = None,
+                        excitation: str = "FC recipe: official input + guitar DIs at level offsets",
+                        cab: CabDesign | None = None) -> dict:
         """`recipe` / `load_di` / `official_transform` exist for training-material experiments (e.g. official input only, or one synthetic
         level-swept excitation); the defaults are the frozen FC recipe."""
         import soundfile as sf
@@ -303,11 +307,16 @@ class CgProject:
                                       plan["mapping"])
         design.update({"project_id": st["id"], "amp": st["amp"], "channel": st["channel"], "output_gain_recommendation_db": built.reduction_db, "training_material": excitation})
         srcs = source_records(positions, paths, anchors, chain, an["audit"])
-        rf = receptive_field_record(positions, models, bounded_envelope_max_history_samples(SR))
+        rf = receptive_field_record(positions, models, bounded_envelope_max_history_samples(SR), cab=cab)
+        output_gain = {"mode": "continuous_gain_scale", "applied_gain_db": -built.reduction_db}
+        if cab is not None:
+            _, output_gain["embedded_final"] = embedded_final_scalar(built.target, cab, SR, recipe.ceiling_dbfs)
         mp = write_bundle(out_dir, built, chain, anchors, shifts, sources=srcs, model_name=name, artifact_stem=stem, design=design, receptive_field=rf,
+                          cab=cab, output_gain=output_gain,
                           extra={"project": {"id": st["id"], "name": st["name"]},
                                  "capture_audit": {k: {"status": v["status"], "correction": v["correction"]} for k, v in an["audit"]["captures"].items()}})
         st = self.state()
-        st["bundle"] = {"design_id": design_id, "manifest": str(mp), "made": _now(), "plan": plan}
+        st["bundle"] = {"design_id": design_id, "manifest": str(mp), "made": _now(), "plan": plan,
+                        "cab": cab.to_dict() if cab else None}
         self._write(st)
         return st["bundle"]

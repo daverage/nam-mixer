@@ -14,6 +14,8 @@ def isolated_env_file(tmp_path, monkeypatch):
     developer's machine (hybrid/env_file.py's fallback, used deliberately in production) must never leak in -- point it at a
     file that doesn't exist. Tests that want the .env fallback itself set NAM_MIXER_ENV_FILE to a real tmp_path file explicitly."""
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
+    for name in local_llm.PROVIDER_AI_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
 
 
 class _Response:
@@ -59,6 +61,56 @@ def test_status_reports_unreachable_when_host_does_not_respond(monkeypatch):
     status = local_llm.status()
     assert status["enabled"] is True
     assert status["reachable"] is False
+
+
+def test_provider_scoped_config_does_not_mix_hosts(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_LOCAL_MODEL", "gemma4:e4b")
+    monkeypatch.setenv("NAM_MIXER_AI_LOCAL_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("NAM_MIXER_AI_CUSTOM_MODEL", "remote-chat")
+    monkeypatch.setenv("NAM_MIXER_AI_CUSTOM_BASE_URL", "https://models.example.com/v1")
+    monkeypatch.setenv("NAM_MIXER_AI_CUSTOM_API_KEY", "remote-secret")
+    monkeypatch.setattr(local_llm.socket, "getaddrinfo", lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
+
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "local")
+    assert local_llm._config() == local_llm.AiConfig(
+        "local", "http://localhost:11434/v1", "gemma4:e4b", None,
+    )
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "custom")
+    assert local_llm._config() == local_llm.AiConfig(
+        "custom", "https://models.example.com/v1", "remote-chat", "remote-secret",
+    )
+
+
+def test_available_models_uses_openai_compatible_models_endpoint(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "local")
+    monkeypatch.setenv("NAM_MIXER_AI_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1")
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen.update(url=request.full_url, timeout=timeout)
+        return _Response({"data": [{"id": "qwen3:8b"}, {"id": "gemma4:e4b"}]})
+
+    result = local_llm.available_models(opener=fake_open)
+
+    assert result == {"ok": True, "provider": "local", "models": ["gemma4:e4b", "qwen3:8b"]}
+    assert seen == {"url": "http://127.0.0.1:11434/v1/models", "timeout": 10}
+
+
+def test_available_models_uses_cloudflare_model_search(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    monkeypatch.setenv("NAM_MIXER_AI_CLOUDFLARE_ACCOUNT_ID", "a" * 32)
+    monkeypatch.setenv("NAM_MIXER_AI_CLOUDFLARE_API_KEY", "cloudflare-secret")
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen.update(url=request.full_url, authorization=request.headers.get("Authorization"))
+        return _Response({"result": [{"name": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"}]})
+
+    result = local_llm.available_models(opener=fake_open)
+
+    assert result["models"] == ["@cf/meta/llama-3.3-70b-instruct-fp8-fast"]
+    assert "/ai/models/search?" in seen["url"]
+    assert seen["authorization"] == "Bearer cloudflare-secret"
 
 
 def test_local_llm_accepts_only_a_schema_valid_recipe(monkeypatch):
@@ -199,6 +251,32 @@ def test_cloudflare_constructs_fixed_url_and_sends_bearer_token(monkeypatch):
         "url": "https://api.cloudflare.com/client/v4/accounts/" + "a" * 32 + "/ai/v1/chat/completions",
         "authorization": "Bearer secret-token",
     }
+
+
+def test_conversation_debug_records_exact_messages_without_credentials(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    monkeypatch.setenv("NAM_MIXER_AI_ACCOUNT_ID", "b" * 32)
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "super-secret-token")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+    debug = {}
+
+    def fake_open(_request, timeout):
+        return _Response({"choices": [{"message": {"content": '{"reply":"Use the researched source.","recipe":null}'}}]})
+
+    local_llm.converse(
+        "Find a clean source.",
+        history=[{"role": "assistant", "content": "Which era?"}],
+        research_notes="Web research:\n- Example evidence",
+        debug_trace=debug,
+        opener=fake_open,
+    )
+
+    assert debug["provider"] == "cloudflare"
+    assert debug["model"] == "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    assert debug["messages"][-2] == {"role": "assistant", "content": "Which era?"}
+    assert "<research_notes>" in debug["messages"][-1]["content"]
+    assert debug["parsed_response"]["reply"] == "Use the researched source."
+    assert "super-secret-token" not in __import__("json").dumps(debug)
 
 
 def test_cloudflare_and_local_receive_the_same_conversation_payload(monkeypatch):

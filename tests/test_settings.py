@@ -15,6 +15,8 @@ def isolated_env_file(tmp_path, monkeypatch):
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env_path))
     for field in settings.SETTINGS:
         monkeypatch.delenv(field.name, raising=False)
+    for name in settings._PROVIDER_STORAGE_NAMES:
+        monkeypatch.delenv(name, raising=False)
     yield env_path
     # write_env_values() sets os.environ directly (by design -- so a saved
     # setting takes effect immediately, see hybrid/env_file.py), which
@@ -22,6 +24,8 @@ def isolated_env_file(tmp_path, monkeypatch):
     # clean up explicitly so a value saved in one test can't leak into others.
     for field in settings.SETTINGS:
         os.environ.pop(field.name, None)
+    for name in settings._PROVIDER_STORAGE_NAMES:
+        os.environ.pop(name, None)
 
 
 def test_write_then_read_round_trip(isolated_env_file):
@@ -111,13 +115,69 @@ def test_blank_secret_on_save_means_unchanged_not_cleared(isolated_env_file):
 
 
 def test_ai_api_token_is_secret_and_can_be_explicitly_cleared(isolated_env_file):
-    settings.save_settings({"NAM_MIXER_AI_API_KEY": "cloudflare-secret"})
+    settings.save_settings({
+        "NAM_MIXER_AI_PROVIDER": "cloudflare",
+        "NAM_MIXER_AI_API_KEY": "cloudflare-secret",
+    })
     field = {field["name"]: field for field in settings.get_settings()}["NAM_MIXER_AI_API_KEY"]
     assert field["value"] == ""
     assert field["has_value"] is True
     settings.save_settings({}, clear_secrets=["NAM_MIXER_AI_API_KEY"])
-    assert env_file.read_env_value("NAM_MIXER_AI_API_KEY") == ""
-    assert "NAM_MIXER_AI_API_KEY" not in os.environ
+    assert env_file.read_env_value("NAM_MIXER_AI_CLOUDFLARE_API_KEY") == ""
+    assert "NAM_MIXER_AI_CLOUDFLARE_API_KEY" not in os.environ
+
+
+def test_ai_connection_settings_are_kept_separately_per_provider(isolated_env_file):
+    settings.save_settings({
+        "NAM_MIXER_AI_PROVIDER": "cloudflare",
+        "NAM_MIXER_AI_ACCOUNT_ID": "a" * 32,
+        "NAM_MIXER_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "NAM_MIXER_AI_API_KEY": "cloudflare-secret",
+    })
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "local"})
+    settings.save_settings({
+        "NAM_MIXER_AI_MODEL": "gemma4:e4b",
+        "NAM_MIXER_AI_BASE_URL": "http://127.0.0.1:11434/v1",
+    })
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "custom"})
+    settings.save_settings({
+        "NAM_MIXER_AI_MODEL": "custom-chat",
+        "NAM_MIXER_AI_BASE_URL": "https://models.example.com/v1",
+        "NAM_MIXER_AI_API_KEY": "custom-secret",
+    })
+
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "cloudflare"})
+    cloudflare = {field["name"]: field for field in settings.get_settings()}
+    assert cloudflare["NAM_MIXER_AI_MODEL"]["value"] == "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    assert cloudflare["NAM_MIXER_AI_ACCOUNT_ID"]["value"] == "a" * 32
+    assert cloudflare["NAM_MIXER_AI_API_KEY"]["has_value"] is True
+
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "local"})
+    local = {field["name"]: field for field in settings.get_settings()}
+    assert local["NAM_MIXER_AI_MODEL"]["value"] == "gemma4:e4b"
+    assert local["NAM_MIXER_AI_BASE_URL"]["value"] == "http://127.0.0.1:11434/v1"
+    assert local["NAM_MIXER_AI_API_KEY"]["has_value"] is False
+
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "custom"})
+    custom = {field["name"]: field for field in settings.get_settings()}
+    assert custom["NAM_MIXER_AI_MODEL"]["value"] == "custom-chat"
+    assert custom["NAM_MIXER_AI_BASE_URL"]["value"] == "https://models.example.com/v1"
+    assert custom["NAM_MIXER_AI_API_KEY"]["has_value"] is True
+
+
+def test_switching_provider_migrates_legacy_shared_values_to_their_owner(isolated_env_file):
+    env_file.write_env_values({
+        "NAM_MIXER_AI_PROVIDER": "local",
+        "NAM_MIXER_AI_MODEL": "legacy-local-model",
+        "NAM_MIXER_AI_BASE_URL": "http://localhost:9999/v1",
+    })
+
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "cloudflare"})
+
+    assert env_file.read_env_value("NAM_MIXER_AI_LOCAL_MODEL") == "legacy-local-model"
+    assert env_file.read_env_value("NAM_MIXER_AI_LOCAL_BASE_URL") == "http://localhost:9999/v1"
+    current = {field["name"]: field for field in settings.get_settings()}
+    assert current["NAM_MIXER_AI_MODEL"]["value"] == ""
 
 
 def test_secret_field_not_set_reports_no_value(isolated_env_file):
@@ -126,22 +186,19 @@ def test_secret_field_not_set_reports_no_value(isolated_env_file):
     assert result["TONE3000_API_KEY"]["value"] == ""
 
 
-def test_experimental_architectures_default_off(isolated_env_file):
-    assert settings.experimental_architectures_enabled() is False
-    field = {field["name"]: field for field in settings.get_settings()}[
-        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"
-    ]
-    assert field["kind"] == "checkbox"
-    assert field["value"] is False
+def test_tone3000_secret_key_rejects_publishable_key_without_saving(isolated_env_file):
+    with pytest.raises(settings.SettingsValidationError, match="t3k_cs_"):
+        settings.save_settings({"TONE3000_API_KEY": "t3k_pub_not-a-secret"})
+
+    assert not isolated_env_file.exists()
 
 
-def test_experimental_architectures_checkbox_round_trips(isolated_env_file):
-    settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": True})
-    assert settings.experimental_architectures_enabled() is True
-    field = {field["name"]: field for field in settings.get_settings()}[
-        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"
-    ]
-    assert field["value"] is True
+def test_tone3000_saved_invalid_key_is_reported_without_exposing_it(isolated_env_file):
+    env_file.write_env_values({"TONE3000_API_KEY": "legacy-invalid-value"})
 
-    settings.save_settings({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES": False})
-    assert settings.experimental_architectures_enabled() is False
+    field = {field["name"]: field for field in settings.get_settings()}["TONE3000_API_KEY"]
+
+    assert field["has_value"] is True
+    assert field["is_valid"] is False
+    assert field["value"] == ""
+    assert "legacy-invalid-value" not in str(field)

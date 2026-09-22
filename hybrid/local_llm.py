@@ -13,7 +13,7 @@ import re
 import socket
 from dataclasses import asdict, dataclass
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from hybrid.env_file import read_env_value as _read_env_value
@@ -61,6 +61,12 @@ AI_ENV_NAMES = {
     "NAM_MIXER_AI_ACCOUNT_ID", "NAM_MIXER_AI_TIMEOUT_SECONDS", "NAM_MIXER_AI_TEMPERATURE",
     "NAM_MIXER_AI_MAX_TOKENS", "NAM_MIXER_AI_HISTORY_MESSAGES", "NAM_MIXER_AI_HISTORY_MESSAGE_CHARS",
     "NAM_MIXER_AI_RESEARCH_CHARS",
+}
+PROVIDER_AI_ENV_NAMES = {
+    "NAM_MIXER_AI_LOCAL_BASE_URL", "NAM_MIXER_AI_LOCAL_MODEL",
+    "NAM_MIXER_AI_CLOUDFLARE_ACCOUNT_ID", "NAM_MIXER_AI_CLOUDFLARE_MODEL",
+    "NAM_MIXER_AI_CLOUDFLARE_API_KEY", "NAM_MIXER_AI_CUSTOM_BASE_URL",
+    "NAM_MIXER_AI_CUSTOM_MODEL", "NAM_MIXER_AI_CUSTOM_API_KEY",
 }
 
 # Single source of truth for the Builder screen's on-screen control/mode
@@ -179,6 +185,24 @@ def _setting(name: str, default: str = "", legacy: str | None = None) -> str:
     return default
 
 
+def _provider_setting(provider: str, name: str, default: str = "", legacy: str | None = None) -> str:
+    """Read the selected provider's slot without leaking another host's value."""
+    suffix = name.removeprefix("NAM_MIXER_AI_")
+    scoped_name = f"NAM_MIXER_AI_{provider.upper()}_{suffix}"
+    scoped_value = _setting(scoped_name)
+    if scoped_value:
+        return scoped_value
+    if legacy:
+        legacy_value = _setting(legacy)
+        if legacy_value:
+            return legacy_value
+    # A shared value belongs to the old storage layout. It is safe to use only
+    # until provider-scoped storage has been created by the Settings page.
+    if not any(_setting(candidate) for candidate in PROVIDER_AI_ENV_NAMES):
+        return _setting(name, default)
+    return default
+
+
 def _integer_setting(name: str, default: int) -> int:
     try:
         if name.startswith("NAM_MIXER_LOCAL_LLM_"):
@@ -215,8 +239,13 @@ def _default_max_tokens(explanation_chars: int, reply_chars: int) -> int:
     were raised without a matching token increase. This is only the
     *default* fed into _bounded_integer_setting -- an explicit
     NAM_MIXER_AI_MAX_TOKENS setting still overrides it exactly as before.
+
+    Doubled from the original 700-2048 range: truncated mid-JSON responses
+    (especially with research notes attached, which push the prompt near
+    the old ceiling on faster/smaller hosted models like Cloudflare Workers
+    AI) were surfacing as "the local model could not incorporate it".
     """
-    return min(2048, max(700, (explanation_chars + reply_chars) // 3 + 300))
+    return min(4096, max(1400, ((explanation_chars + reply_chars) // 3 + 300) * 2))
 
 
 def _validate_remote_url(base_url: str) -> None:
@@ -242,23 +271,26 @@ def _safe_open(request: Request, timeout: float):
     return build_opener(_ValidatedRedirectHandler()).open(request, timeout=timeout)
 
 
-def _config() -> AiConfig | None:
+def _config(*, require_model: bool = True) -> AiConfig | None:
     _load_local_llm_env()
     provider = (_setting("NAM_MIXER_AI_PROVIDER") or "local").lower()
     if provider not in {"local", "cloudflare", "custom"}:
         raise LocalLlmError("AI provider must be Local, Cloudflare Workers AI, or Custom OpenAI-compatible")
-    model = _setting("NAM_MIXER_AI_MODEL", "", "NAM_MIXER_LOCAL_LLM_MODEL")
-    api_key = _setting("NAM_MIXER_AI_API_KEY") or None
-    if not model:
+    legacy_model = "NAM_MIXER_LOCAL_LLM_MODEL" if provider == "local" else None
+    model = _provider_setting(provider, "NAM_MIXER_AI_MODEL", legacy=legacy_model)
+    api_key = _provider_setting(provider, "NAM_MIXER_AI_API_KEY") or None
+    if require_model and not model:
         return None
     if provider == "cloudflare":
-        account_id = _setting("NAM_MIXER_AI_ACCOUNT_ID")
+        account_id = _provider_setting(provider, "NAM_MIXER_AI_ACCOUNT_ID")
         if not re.fullmatch(r"[A-Fa-f0-9]{32}", account_id):
             raise LocalLlmError("Cloudflare Account ID must be 32 hexadecimal characters")
         if not api_key:
             raise LocalLlmError("Cloudflare API token is not configured")
         return AiConfig(provider, f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1", model, api_key)
-    base_url = (_setting("NAM_MIXER_AI_BASE_URL", "", "NAM_MIXER_LOCAL_LLM_BASE_URL") or "http://127.0.0.1:11434/v1").rstrip("/")
+    legacy_base_url = "NAM_MIXER_LOCAL_LLM_BASE_URL" if provider == "local" else None
+    base_url = (_provider_setting(provider, "NAM_MIXER_AI_BASE_URL", legacy=legacy_base_url)
+                or "http://127.0.0.1:11434/v1").rstrip("/")
     parsed = urlparse(base_url)
     if provider == "local":
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
@@ -303,6 +335,60 @@ def status() -> dict:
     if config.provider == "local":
         result["base_url"] = config.base_url
     return result
+
+
+def available_models(opener=urlopen) -> dict:
+    """Return provider-advertised chat model IDs without exposing credentials.
+
+    Local and custom OpenAI-compatible hosts use GET /models. Cloudflare has
+    a separate authenticated model-search API, so use that fixed endpoint and
+    request text-generation models only.
+    """
+    try:
+        config = _config(require_model=False)
+        if config is None:  # Kept for type-checkers; require_model=False always builds one.
+            return {"ok": False, "models": [], "error": "AI provider is not configured"}
+        if config.provider == "cloudflare":
+            account_id = _provider_setting("cloudflare", "NAM_MIXER_AI_ACCOUNT_ID")
+            query = urlencode({"task": "Text Generation", "hide_experimental": "true", "per_page": 100})
+            url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/models/search?{query}"
+            open_request = _safe_open if opener is urlopen else opener
+        else:
+            url = f"{config.base_url}/models"
+            open_request = _safe_open if config.provider == "custom" and opener is urlopen else opener
+        headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
+        with open_request(Request(url, headers=headers), timeout=10) as response:
+            try:
+                raw = response.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+            except TypeError:  # Existing test/third-party openers may expose read() without a size argument.
+                raw = response.read()
+        if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+            raise LocalLlmError("AI provider model list was too large")
+        payload = json.loads(raw.decode("utf-8"))
+        items = payload.get("result" if config.provider == "cloudflare" else "data", [])
+        if not isinstance(items, list):
+            raise ValueError("model list was not an array")
+        models = []
+        for item in items:
+            if isinstance(item, str):
+                model_id = item
+            elif isinstance(item, dict):
+                model_id = item.get("name") if config.provider == "cloudflare" else item.get("id")
+                model_id = model_id or item.get("id") or item.get("name")
+            else:
+                model_id = None
+            if isinstance(model_id, str) and model_id.strip():
+                models.append(model_id.strip())
+        return {"ok": True, "provider": config.provider, "models": sorted(set(models), key=str.casefold)}
+    except LocalLlmError as exc:
+        return {"ok": False, "models": [], "error": str(exc)}
+    except HTTPError as exc:
+        messages = {401: "invalid API token", 403: "model listing permission was denied", 404: "this provider does not expose a model list"}
+        return {"ok": False, "models": [], "error": messages.get(exc.code, "could not load models from the AI provider")}
+    except TimeoutError:
+        return {"ok": False, "models": [], "error": "AI provider model listing timed out"}
+    except (URLError, OSError, ValueError, KeyError, TypeError):
+        return {"ok": False, "models": [], "error": "AI provider did not return a usable model list"}
 
 
 def _number(data: dict, key: str, low: float, high: float, *, integer: bool = False) -> int | float:
@@ -484,6 +570,7 @@ def converse(
     *,
     request_tone3000_queries: bool = False,
     known_source_plan: dict[str, str] | None = None,
+    debug_trace: dict[str, object] | None = None,
     opener=urlopen,
 ) -> LocalConversationReply:
     """Continue a local, bounded recipe conversation without retaining server state."""
@@ -627,22 +714,52 @@ def converse(
     explanation_chars = _integer_setting("NAM_MIXER_LOCAL_LLM_MAX_EXPLANATION_CHARS", MAX_LOCAL_RECIPE_EXPLANATION_LENGTH)
     reply_chars = _integer_setting("NAM_MIXER_LOCAL_LLM_MAX_REPLY_CHARS", MAX_LOCAL_CONVERSATION_REPLY_LENGTH)
     max_tokens = _bounded_integer_setting(
-        "NAM_MIXER_AI_MAX_TOKENS", _default_max_tokens(explanation_chars, reply_chars), 256, 2_048
+        "NAM_MIXER_AI_MAX_TOKENS", _default_max_tokens(explanation_chars, reply_chars), 256, 4_096
     )
     timeout = _integer_setting("NAM_MIXER_LOCAL_LLM_TIMEOUT_SECONDS", LOCAL_LLM_REQUEST_TIMEOUT_SECONDS)
+    temperature = _temperature_setting()
+    if debug_trace is not None:
+        # Deliberately construct this allow-list rather than serializing
+        # AiConfig or the HTTP request: API keys and Authorization headers
+        # must never enter a browser response or exported debug file.
+        debug_trace.update({
+            "provider": config.provider,
+            "model": config.model,
+            "messages": messages,
+            "request_options": {
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "timeout_seconds": timeout,
+            },
+        })
     try:
         content = _post_chat_completion(
-            config, messages, max_tokens=max_tokens, temperature=_temperature_setting(), timeout=timeout, opener=opener,
+            config, messages, max_tokens=max_tokens, temperature=temperature, timeout=timeout, opener=opener,
         )
-        return _conversation_reply_from_json(_decode_json_content(content))
+        decoded = _decode_json_content(content)
+        reply = _conversation_reply_from_json(decoded)
+        if debug_trace is not None:
+            debug_trace["provider_response_content"] = content
+            debug_trace["parsed_response"] = reply.to_dict()
+        return reply
     except HTTPError as exc:
         messages_by_code = {401: "invalid API token", 403: "AI provider permission was denied", 404: "AI provider account or model is unavailable", 429: "AI provider quota or rate limit was reached"}
-        raise LocalLlmError(messages_by_code.get(exc.code, "AI provider request failed")) from exc
+        message = messages_by_code.get(exc.code, "AI provider request failed")
+        if debug_trace is not None:
+            debug_trace["error"] = message
+        raise LocalLlmError(message) from exc
     except TimeoutError as exc:
+        if debug_trace is not None:
+            debug_trace["error"] = "AI provider connection timed out"
         raise LocalLlmError("AI provider connection timed out") from exc
-    except LocalLlmError:
+    except LocalLlmError as exc:
+        if debug_trace is not None:
+            debug_trace["error"] = str(exc)
         raise
     except (URLError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+        if debug_trace is not None:
+            debug_trace["error"] = "AI provider did not return a valid recipe"
+            debug_trace["error_type"] = type(exc).__name__
         raise LocalLlmError("AI provider did not return a valid recipe") from exc
 
 

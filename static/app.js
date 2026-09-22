@@ -163,17 +163,27 @@ setInterval(refreshSystemUsage, 3000);
 // private window/cleared site data -- acceptable here since it's purely a
 // convenience prompt, never state anything else depends on) then available
 // again any time from Settings > Getting started.
+const WELCOME_VERSION = "1";
 const WELCOME_SEEN_KEY = "nam-mixer-welcome-seen";
+const WELCOME_COOKIE_NAME = "nam-mixer-welcome-version";
 const welcomeOverlay = document.getElementById("welcome-overlay");
 function showWelcome() { welcomeOverlay.hidden = false; }
 function hideWelcome() {
   welcomeOverlay.hidden = true;
-  try { localStorage.setItem(WELCOME_SEEN_KEY, "1"); } catch { /* private window etc. -- just re-show next time */ }
+  try { localStorage.setItem(WELCOME_SEEN_KEY, WELCOME_VERSION); } catch { /* private window etc. */ }
+  // The desktop backend uses a different random port on every launch.
+  // localStorage is port-scoped, but cookies are not, so this marker survives
+  // those launches while remaining local to the loopback host.
+  try { document.cookie = `${WELCOME_COOKIE_NAME}=${WELCOME_VERSION}; Max-Age=315360000; Path=/; SameSite=Strict`; } catch { /* unavailable cookie store */ }
+}
+function welcomeCookieHasVersion(cookieText, version = WELCOME_VERSION) {
+  return String(cookieText || "").split(";").some((part) => part.trim() === `${WELCOME_COOKIE_NAME}=${version}`);
 }
 document.getElementById("btn-welcome-dismiss").addEventListener("click", hideWelcome);
 document.getElementById("btn-show-welcome").addEventListener("click", showWelcome);
 let welcomeAlreadySeen = false;
-try { welcomeAlreadySeen = localStorage.getItem(WELCOME_SEEN_KEY) === "1"; } catch { /* default to showing it */ }
+try { welcomeAlreadySeen = localStorage.getItem(WELCOME_SEEN_KEY) === WELCOME_VERSION; } catch { /* try the cookie below */ }
+try { welcomeAlreadySeen ||= welcomeCookieHasVersion(document.cookie); } catch { /* default to showing it */ }
 if (!welcomeAlreadySeen) showWelcome();
 
 // ---- Design mode tabs (Dynamic Hybrid / Parallel Blend / Character Blend) ----
@@ -368,7 +378,7 @@ function updateCabStatus() {
   if (!cabServerPath) {
     cabStatusEl.textContent = "Cab: off";
   } else if (cabExportMode.value === "embedded") {
-    cabStatusEl.textContent = "Cab: Sequential Embedded (Experimental) -- exact IR in a separate Linear/FIR stage";
+    cabStatusEl.textContent = "Cab: two downloads -- tested head-only NAM plus exact embedded-cab NAM";
   } else if (cabExportMode.value === "learned") {
     cabStatusEl.textContent = "Cab: Baked In -- trained into the A2 model";
   } else if (cabPreviewEnabled.checked) {
@@ -405,6 +415,7 @@ cabFileInput.addEventListener("change", async () => {
     cabServerPath = data.path;
     cabPreviewEnabled.disabled = false;
     cabExportMode.disabled = false;
+    cabExportMode.value = "embedded";
     const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
     const preparedMs = data.prepared_duration_ms !== undefined ? data.prepared_duration_ms.toFixed(1) : null;
     const energy999Ms = data.energy_999_ms !== undefined ? data.energy_999_ms.toFixed(1) : null;
@@ -439,11 +450,11 @@ cabExportMode.addEventListener("change", () => {
       "Experimental compatibility\n\n" +
       "This export uses NAM's Sequential architecture to place the trained amp model before " +
       "an embedded Linear/FIR cabinet stage. Although this is a valid NAM model structure, " +
-      "some NAM players only accept A2 architectures and may reject this file. Use Baked In " +
-      "for broader compatibility."
+      "some NAM players only accept A2 architectures and may reject the cabinet version. " +
+      "The tested head-only A2 will also be available as a separate download."
     );
     if (!proceed) {
-      cabExportMode.value = "learned";
+      cabExportMode.value = "none";
       updateCabStatus();
       return;
     }
@@ -809,6 +820,8 @@ const wizardCharacterQuestion = document.getElementById("wizard-character-questi
 const wizardToneSource = document.getElementById("wizard-tone-source");
 const wizardDriveSource = document.getElementById("wizard-drive-source");
 const wizardResult = document.getElementById("wizard-result");
+const wizardResultMessage = document.getElementById("wizard-result-message");
+const wizardNextStepButton = document.getElementById("btn-wizard-next-step");
 const wizardAnalyseButton = document.getElementById("btn-wizard-analyse");
 const recipePromptInput = document.getElementById("recipe-prompt-input");
 const recipePromptApplyButton = document.getElementById("btn-recipe-prompt-apply");
@@ -852,8 +865,19 @@ const recipeSaveMarkdownButton = document.getElementById("btn-recipe-save-markdo
   recipePromptContainer.append(element);
   return element;
 })();
+const recipeSaveDebugOption = document.getElementById("recipe-save-debug-option") || (() => {
+  const label = document.createElement("label");
+  label.id = "recipe-save-debug-option";
+  label.className = "checkbox-row recipe-save-debug-option";
+  label.hidden = true;
+  label.innerHTML = '<input type="checkbox" id="recipe-save-debug"> Include AI/research debug';
+  recipeSaveMarkdownButton.after(label);
+  return label;
+})();
+const recipeSaveDebug = document.getElementById("recipe-save-debug");
 let localRecipeAiAvailable = false;
 let recipeConversationHistory = [];
+let recipeDebugTrace = [];
 let recipeSourcePlan = null;
 let selectedTone3000Capture = null;
 const aiTone3000Context = document.getElementById("ai-tone3000-context");
@@ -887,6 +911,12 @@ loadLocalRecipeAiStatus();
 
 function selectedWizardBehaviour() {
   return document.querySelector('input[name="wizard-behaviour"]:checked').value;
+}
+function showWizardResult(message, nextStepLabel = "") {
+  wizardResult.hidden = false;
+  wizardResultMessage.textContent = message;
+  wizardNextStepButton.hidden = !nextStepLabel;
+  wizardNextStepButton.textContent = nextStepLabel;
 }
 function populateWizardProfiles({ preserveCurrent = true } = {}) {
   const profiles = profilesData[wizardInstrument.value] || [];
@@ -977,16 +1007,25 @@ function applyWizardSettings() {
   }
   scheduleUpdate();
   scheduleAuditionRefresh();
-  wizardResult.hidden = false;
   const recipe = behaviour === "character"
     ? `Character recipe applied: tone from Amp ${wizardToneSource.value.toUpperCase()}, feel and drive from Amp ${wizardDriveSource.value.toUpperCase()}.`
     : "Starting point applied.";
-  wizardResult.textContent = havePair
-    ? `${recipe} Re-render the amps now so the selected instrument profile drives both NAMs.`
-    : `${recipe} Upload both NAMs and render the amps to calibrate the guitar-volume switch point.`;
+  showWizardResult(
+    havePair
+      ? `${recipe} Re-render the amps now so the selected instrument profile drives both NAMs.`
+      : `${recipe} Upload both NAMs and render the amps to calibrate the guitar-volume switch point.`,
+    havePair ? "Next: prepare amps for comparison" : "Next: upload Amp A and Amp B NAMs"
+  );
   setWorkflowStage("configure");
 }
 document.getElementById("btn-wizard-apply").addEventListener("click", applyWizardSettings);
+wizardNextStepButton.addEventListener("click", () => {
+  setWizardOpen(false);
+  setWorkflowStage("configure");
+  const nextControl = havePair ? renderPairBtn : document.getElementById("amp-a-file");
+  nextControl.focus({ preventScroll: true });
+  nextControl.scrollIntoView({ behavior: "smooth", block: "center" });
+});
 
 // A deliberately local, explainable first pass at natural-language recipes.
 // It identifies the common "keep one amp's tone/feel, but let gain progress
@@ -1103,6 +1142,7 @@ function addRecipeConversationMessage(role, text) {
   recipeResult.hidden = false;
   recipeConversationResetButton.hidden = false;
   recipeSaveMarkdownButton.hidden = false;
+  recipeSaveDebugOption.hidden = false;
   const message = document.createElement("article");
   message.className = `recipe-message recipe-message-${role}`;
   message.dataset.markdown = text;
@@ -1203,8 +1243,9 @@ async function applyRecipeFromPrompt() {
           ...(selectedTone3000Capture.sourceRole ? { source_role: selectedTone3000Capture.sourceRole } : {}),
         }
         : null;
-      const response = await fetch("/api/local_llm/recipe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tone3000_context: tone3000Context, source_plan: recipeSourcePlan, history: recipeConversationHistory, research }) });
+      const response = await fetch("/api/local_llm/recipe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tone3000_context: tone3000Context, source_plan: recipeSourcePlan, history: recipeConversationHistory, research, include_debug: true }) });
       const data = await response.json();
+      if (data.debug) recipeDebugTrace.push(data.debug);
       if (!response.ok) throw new Error(data.error || "AI provider is unavailable");
       if (data.source_plan) recipeSourcePlan = data.source_plan;
       if (selectedTone3000Capture && data.selected_source_role) {
@@ -1250,11 +1291,14 @@ recipePromptInput.addEventListener("keydown", (event) => {
 });
 recipeConversationResetButton.addEventListener("click", () => {
   recipeConversationHistory = [];
+  recipeDebugTrace = [];
   recipeSourcePlan = null;
   recipeResult.replaceChildren();
   recipeResult.hidden = true;
   recipeConversationResetButton.hidden = true;
   recipeSaveMarkdownButton.hidden = true;
+  recipeSaveDebugOption.hidden = true;
+  recipeSaveDebug.checked = false;
   recipePromptInput.focus();
 });
 async function saveBlobAsFile(filename, blob) {
@@ -1293,33 +1337,57 @@ async function triggerFileDownload(url, filename) {
   return filename;
 }
 
-recipeSaveMarkdownButton.addEventListener("click", () => {
-  const messages = [...recipeResult.querySelectorAll(".recipe-message")].reverse();
-  const markdown = [
+function buildRecipeConversationMarkdown(messages, { includeDebug = false, debugTrace = [] } = {}) {
+  const markdownParts = [
     "# NAM Mixer AI Assistant conversation",
     "",
     ...messages.flatMap((message) => [
-      `## ${message.classList.contains("recipe-message-user") ? "You" : "AI Assistant"}`,
+      `## ${message.role === "user" ? "You" : "AI Assistant"}`,
       "",
-      message.dataset.markdown.trim(),
+      String(message.text || "").trim(),
       "",
     ]),
-  ].join("\n");
-  saveBlobAsFile("nam-mixer-ai-conversation.md", new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+  ];
+  if (includeDebug) {
+    const debugJson = JSON.stringify({
+      format: "nam-mixer-ai-debug-v1",
+      notice: "API keys and Authorization headers are excluded. Conversation and fetched research text are included.",
+      turns: debugTrace,
+    }, null, 2);
+    markdownParts.push(
+      "# AI and research debug",
+      "",
+      "This section records the exact bounded messages sent to the configured model, research activity, and parsed responses. It intentionally excludes credentials and HTTP Authorization headers.",
+      "",
+      ...(debugJson || "{}").split("\n").map((line) => `    ${line}`),
+      "",
+    );
+  }
+  return markdownParts.join("\n");
+}
+
+recipeSaveMarkdownButton.addEventListener("click", () => {
+  const messages = [...recipeResult.querySelectorAll(".recipe-message")].reverse().map((message) => ({
+    role: message.classList.contains("recipe-message-user") ? "user" : "assistant",
+    text: message.dataset.markdown,
+  }));
+  const includeDebug = recipeSaveDebug.checked;
+  const markdown = buildRecipeConversationMarkdown(messages, { includeDebug, debugTrace: recipeDebugTrace });
+  const filename = includeDebug ? "nam-mixer-ai-conversation-with-debug.md" : "nam-mixer-ai-conversation.md";
+  saveBlobAsFile(filename, new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
 });
 
 wizardAnalyseButton.addEventListener("click", async () => {
-  wizardResult.hidden = false;
-  wizardResult.textContent = "Listening to the rendered pair…";
+  showWizardResult("Listening to the rendered pair…");
   wizardAnalyseButton.disabled = true;
   const stopActivity = beginActivity("Analysing the rendered amps…");
   try {
     const resp = await fetch("/api/wizard/insight", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ render_id: activeRenderId }) });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "Could not analyse the rendered amps.");
-    wizardResult.textContent = `${data.level_text} ${data.tone_text} ${data.feel_text}`;
+    showWizardResult(`${data.level_text} ${data.tone_text} ${data.feel_text}`);
   } catch (err) {
-    wizardResult.textContent = `Analysis unavailable: ${err.message}`;
+    showWizardResult(`Analysis unavailable: ${err.message}`);
   } finally {
     stopActivity();
     wizardAnalyseButton.disabled = !havePair;
@@ -2595,7 +2663,7 @@ let comparisonData = null;
 function stopModelComparison(invalidateRequest = false) {
   if (invalidateRequest) {
     comparisonRequestGeneration += 1;
-    comparisonBuildBtn.disabled = completedNamArtifact?.embeddedArtifact?.state === "validated";
+    comparisonBuildBtn.disabled = false;
   }
   if (comparisonPlayback) {
     try { comparisonPlayback.source.stop(); } catch (_) { /* already stopped */ }
@@ -2614,22 +2682,11 @@ function invalidateModelComparison(message = "") {
 
 function syncComparisonPanel() {
   comparisonPanel.hidden = !(completedNamArtifact && lastDesignId);
-  // The comparison only ever renders/evaluates the reusable head model
-  // (see buildModelComparison's body.model_path = completedNamArtifact.toolPath,
-  // which is always the head's output_nam_path, never a packaged Sequential
-  // embedded-cab file). For a Sequential Embedded design that means the
-  // comparison would silently compare the amp-only head against the
-  // teacher while the actual deliverable is amp+cab -- misleading rather
-  // than useful, so disable it with an explanation until it can evaluate
-  // the real embedded package too.
-  const embeddedValidated = completedNamArtifact?.embeddedArtifact?.state === "validated";
-  if (comparisonBuildBtn) comparisonBuildBtn.disabled = embeddedValidated;
-  if (comparisonUnavailableNote) {
-    comparisonUnavailableNote.hidden = !embeddedValidated;
-    if (embeddedValidated) {
-      comparisonUnavailableNote.textContent = "Unavailable for this design: this comparison only evaluates the reusable head model, not the amp+cab Sequential package you'd actually export. Use the downloaded model in a NAM player to audition it instead.";
-    }
-  }
+  // Training and validation always belong to the head-only A2. A selected
+  // cabinet produces an additional exact derivative, so this comparison
+  // remains both available and unambiguous.
+  if (comparisonBuildBtn) comparisonBuildBtn.disabled = false;
+  if (comparisonUnavailableNote) comparisonUnavailableNote.hidden = true;
 }
 
 function selectComparisonSource(id) {
@@ -2727,23 +2784,17 @@ function renderLocalDownloadResult(designId, validationReport = null, downloadFi
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
   const namFilename = downloadFilename || "model.nam";
   const embeddedValidated = embeddedArtifact?.state === "validated";
-  const embeddedFilename = namFilename.replace(/\.nam$/, "-embedded-experimental-full.nam");
-  const finalDownloadUrl = embeddedValidated ? `${downloadUrl}&artifact=embedded` : downloadUrl;
-  const finalFilename = embeddedValidated ? embeddedFilename : namFilename;
-  completedNamArtifact = { type: "local", designId, downloadUrl: finalDownloadUrl, filename: finalFilename, embeddedArtifact };
+  const embeddedFilename = namFilename.replace(/\.nam$/, "-with-cab.nam");
+  completedNamArtifact = { type: "local", designId, downloadUrl, filename: namFilename, embeddedArtifact };
   completedValidationReport = validationReport;
   document.dispatchEvent(new CustomEvent("nam:training-complete", { detail: { designId } }));
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
   localResultEl.hidden = false;
-  // Embedded selection makes the validated Sequential package the final
-  // deliverable. Keep the conventional head available only as an explicit
-  // secondary download so the primary action cannot silently omit the cab.
-  const headHtml = embeddedValidated
-    ? `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-secondary btn-block btn-download-artifact">${desktopSaveLabel("Download reusable head-only A2")}</a>`
+  const cabHtml = embeddedValidated
+    ? `<a href="${downloadUrl}&artifact=embedded" download="${escapeHtml(embeddedFilename)}" class="btn btn-secondary btn-block btn-download-artifact">${desktopSaveLabel("Download NAM with embedded cabinet")}</a>`
     : "";
-  const finalLabel = embeddedValidated ? "Download final Sequential (amp + embedded cab)" : `Download ${namFilename}`;
-  localResultEl.innerHTML = `<a href="${finalDownloadUrl}" download="${escapeHtml(finalFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel(finalLabel)}</a><div class="hint">Saved as <code>${escapeHtml(finalFilename)}</code>${embeddedValidated ? " (validated Sequential amp + embedded cab)" : ""}</div>${headHtml}${validationSummaryHtml(validationReport)}`;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel("Download tested head-only NAM")}</a>${cabHtml}<div class="hint">The validation below belongs to <code>${escapeHtml(namFilename)}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ""}</div>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -2919,26 +2970,20 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
   const embeddedValidated = data.embedded_artifact?.state === "validated";
-  const embeddedFilename = namFilename.replace(/\.nam$/, "-embedded-experimental-full.nam");
-  const finalDownloadUrl = embeddedValidated ? `${downloadUrl}&artifact=embedded` : downloadUrl;
-  const finalFilename = embeddedValidated ? embeddedFilename : namFilename;
-  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl: finalDownloadUrl, filename: finalFilename, toolPath: data.output_nam_path || null, embeddedArtifact: data.embedded_artifact || null };
+  const embeddedFilename = namFilename.replace(/\.nam$/, "-with-cab.nam");
+  completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename, toolPath: data.output_nam_path || null, embeddedArtifact: data.embedded_artifact || null };
   document.dispatchEvent(new CustomEvent("nam:training-complete", { detail: { designId } }));
   completedValidationReport = data.local_validation?.validation_report || null;
   syncComparisonPanel();
   persistActiveSession().catch((err) => console.warn("Could not update completed session:", err));
-  // Embedded selection makes the validated Sequential package the final
-  // deliverable. Keep the conventional head available only as an explicit
-  // secondary download so the primary action cannot silently omit the cab.
-  const headHtml = embeddedValidated
-    ? `<a href="${downloadUrl}" download="${namFilename}" class="btn btn-secondary btn-block">${desktopSaveLabel("Download reusable head-only A2")}</a>`
+  const cabHtml = embeddedValidated
+    ? `<a href="${downloadUrl}&artifact=embedded" download="${embeddedFilename}" class="btn btn-secondary btn-block">${desktopSaveLabel("Download NAM with embedded cabinet")}</a>`
     : "";
-  const finalLabel = embeddedValidated ? "Download final Sequential (amp + embedded cab)" : `Download ${namFilename}`;
   kaggleResultEl.innerHTML = `
-    <a href="${finalDownloadUrl}" download="${finalFilename}" class="btn btn-primary btn-block">${desktopSaveLabel(finalLabel)}</a>
-    <div class="hint" title="${data.output_nam_path || ""}">Final artifact: <code>${finalFilename}</code>${embeddedValidated ? " (validated Sequential amp + embedded cab)" : ` Full path: <code>${data.output_nam_path || "(unknown)"}</code>`}</div>
+    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel("Download tested head-only NAM")}</a>
+    ${cabHtml}
+    <div class="hint" title="${data.output_nam_path || ""}">Validated head artifact: <code>${namFilename}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ` Full path: <code>${data.output_nam_path || "(unknown)"}</code>`}</div>
     <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
-    ${headHtml}
     ${validationSummaryHtml(completedValidationReport)}
   `;
 }
@@ -3360,7 +3405,7 @@ function applySessionSettings(s) {
   cabExportMode.disabled = !s.cab.path;
   cabPreviewEnabled.checked = s.cab.previewEnabled;
   cabExportMode.value = s.cab.exportMode || (s.cab.baked ? "learned" : "none");
-  applyExperimentalArchitecturesVisibility();
+  applyCabDerivativeVisibility();
   updateCabStatus();
 
   outputGainAutoCheckbox.checked = s.outputGainAuto;
@@ -3986,6 +4031,13 @@ function renderSetupChecklist(items) {
   }
 }
 
+function settingValidationMessage(field, value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed || !field.required_prefix) return "";
+  if (trimmed.startsWith(field.required_prefix) && trimmed.length > field.required_prefix.length) return "";
+  return field.validation_message || `${field.label} must start with ${field.required_prefix}.`;
+}
+
 function renderSettings() {
   settingsGroups.replaceChildren();
   const groups = new Map();
@@ -4046,26 +4098,42 @@ function renderSettings() {
       }
       const desc = document.createElement("span");
       desc.className = "info";
+      const validation = document.createElement("span");
+      validation.className = "settings-validation-error";
+      validation.setAttribute("role", "alert");
       if (field.kind === "secret") {
         // The real value never comes back from the server (see
         // hybrid/settings.py's get_settings); leaving this blank on save
         // means "unchanged", not "clear it".
         input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
         input.value = "";
-        desc.textContent = field.description + (field.has_value ? " (a key is currently saved)" : "");
+        desc.textContent = field.description + (field.has_value ? (field.is_valid === false ? " (the saved key is invalid and needs replacing)" : " (a key is currently saved)") : "");
       } else if (field.kind === "checkbox") {
         input.checked = !!field.value;
         desc.textContent = field.description;
       } else {
         input.placeholder = field.placeholder || "";
         input.value = field.value || "";
-        if (field.name === "NAM_MIXER_AI_MODEL" && provider === "cloudflare" && input.value === "@cf/openai/gpt-oss-20b") {
-          input.value = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+        if (field.name === "NAM_MIXER_AI_MODEL" && field.suggestions?.length && !input.value) {
+          // Recommended model differs per provider (see hybrid/settings.py's
+          // _MODEL_FIELD_TEXT, which get_settings() picks by current provider) --
+          // suggestions[0] is always that provider's recommendation.
+          input.value = field.suggestions[0];
         }
         desc.textContent = field.description;
       }
+      if (field.required_prefix) {
+        const updateValidation = () => {
+          const message = settingValidationMessage(field, input.value);
+          input.setCustomValidity(message);
+          input.setAttribute("aria-invalid", message ? "true" : "false");
+          validation.textContent = message || (field.has_value && field.is_valid === false ? field.validation_message : "");
+        };
+        input.addEventListener("input", updateValidation);
+        updateValidation();
+      }
       if (field.kind === "checkbox") row.append(input, labelText, desc);
-      else row.append(labelText, input, desc);
+      else row.append(labelText, input, desc, validation);
       section.append(row);
       if (suggestionsList) section.append(suggestionsList);
       if (field.name === "NAM_MIXER_AI_PROVIDER") {
@@ -4108,6 +4176,7 @@ function renderSettings() {
       }
       if (field.name === "NAM_MIXER_AI_MODEL") {
         section.append(renderLocalLlmStatusRow());
+        section.append(renderAiModelDiscoveryRow(input, suggestionsList));
       }
       if (field.name === "TONE3000_API_KEY") {
         section.append(renderTone3000ApiKeyLinkRow());
@@ -4115,31 +4184,19 @@ function renderSettings() {
     }
     settingsGroups.append(section);
   }
-  applyExperimentalArchitecturesVisibility();
+  applyCabDerivativeVisibility();
 }
 
-// ---- Experimental NAM architectures gate (Sequential Embedded) ----
-// Off by default; see hybrid/settings.py's
-// NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES and app.py's server-side
-// enforcement in _resolve_cab_design -- this UI-side hide is a convenience,
-// not the real gate.
+// ---- Exact cabinet derivative availability -------------------------------
+// The tested A2 remains the primary artifact. Sequential is used only for
+// the separately labelled exact head+cab download.
 const cabExportOptionEmbedded = document.getElementById("cab-export-option-embedded");
-const cabExportExperimentalHint = document.getElementById("cab-export-experimental-hint");
+const cabExportCompatibilityHint = document.getElementById("cab-export-compatibility-hint");
 let sequentialEmbeddedWarningAcknowledged = false;
 
-function experimentalArchitecturesEnabled() {
-  const field = settingsFields.find((f) => f.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES");
-  return !!field?.value;
-}
-
-function applyExperimentalArchitecturesVisibility() {
-  const enabled = experimentalArchitecturesEnabled();
-  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = !enabled;
-  if (cabExportExperimentalHint) cabExportExperimentalHint.hidden = enabled;
-  if (!enabled && cabExportMode.value === "embedded") {
-    cabExportMode.value = "learned";
-    updateCabStatus();
-  }
+function applyCabDerivativeVisibility() {
+  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = false;
+  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = false;
 }
 
 function renderTone3000ApiKeyLinkRow() {
@@ -4221,9 +4278,8 @@ function renderLocalLlmStatusRow() {
           : `Custom AI is not ready: ${data.error || "check the provider fields above."}`;
         pullButton.hidden = true;
       } else if (!data.enabled) {
-        status.textContent = "Not configured -- set a model name above to enable the AI Assistant tab. "
-          + "Any OpenAI-compatible local host works (Ollama, LM Studio, etc.); we recommend Ollama + gemma4:e4b "
-          + "if you don't already have one running.";
+        status.textContent = "Local AI is selected, but no model is saved yet. Choose an installed model above "
+          + "or pull gemma4:e4b with Ollama, then save Settings.";
         pullButton.hidden = false;
       } else if (data.provider !== "local") {
         status.textContent = `Configured for ${data.provider === "cloudflare" ? "Cloudflare Workers AI" : "a custom AI provider"} (model: ${data.model}). Testing sends a small real request that may count against quota or billing.`;
@@ -4259,7 +4315,7 @@ function renderLocalLlmStatusRow() {
       else pullActivityStop.update(`Pulling ${data.model} via Ollama…`);
       setTimeout(pollPullStatus, 1500);
     } else if (data.status === "done") {
-      status.textContent = `Pulled ${data.model}. Set "Local AI assistant: model name" above to ${data.model} and save.`;
+      status.textContent = `Pulled ${data.model}. Choose it in Model (or type its name), then save Settings.`;
       pullButton.disabled = false;
       if (pullActivityStop) { pullActivityStop(); pullActivityStop = null; }
     } else if (data.status === "error") {
@@ -4311,11 +4367,66 @@ function renderLocalLlmStatusRow() {
   return row;
 }
 
+function renderAiModelDiscoveryRow(modelInput, suggestionsList) {
+  const row = document.createElement("div");
+  row.className = "settings-row settings-download-row settings-model-discovery";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-secondary btn-small";
+  button.textContent = "Refresh available models";
+  const status = document.createElement("span");
+  status.className = "info";
+  status.setAttribute("aria-live", "polite");
+  const suggestedModels = Array.from(suggestionsList?.options || [], (option) => option.value);
+
+  async function refreshModels() {
+    button.disabled = true;
+    status.textContent = "Checking the selected provider for available models…";
+    try {
+      const response = await fetch("/api/local_llm/models");
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "model discovery is unavailable");
+      const models = [...new Set([...suggestedModels, ...(data.models || [])])];
+      let list = suggestionsList;
+      if (!list) {
+        list = document.createElement("datalist");
+        list.id = "setting-suggestions-NAM_MIXER_AI_MODEL";
+        modelInput.setAttribute("list", list.id);
+        row.append(list);
+      }
+      list.replaceChildren(...models.map((model) => {
+        const option = document.createElement("option");
+        option.value = model;
+        return option;
+      }));
+      status.textContent = data.models.length
+        ? `${data.models.length} available model${data.models.length === 1 ? "" : "s"} loaded. Type in Model to search the list.`
+        : "The provider returned no models. You can still type a model name.";
+    } catch (err) {
+      status.textContent = `Could not load a model list (${err.message || err}). You can still type a model name.`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  button.addEventListener("click", refreshModels);
+  row.append(button, status);
+  refreshModels();
+  return row;
+}
+
 document.getElementById("btn-save-settings").addEventListener("click", async () => {
   const values = {};
+  let firstInvalidInput = null;
   settingsGroups.querySelectorAll("[data-setting-name]").forEach((input) => {
     values[input.dataset.settingName] = input.type === "checkbox" ? input.checked : input.value;
+    if (!input.checkValidity() && !firstInvalidInput) firstInvalidInput = input;
   });
+  if (firstInvalidInput) {
+    settingsStatus.textContent = firstInvalidInput.validationMessage;
+    firstInvalidInput.focus();
+    return;
+  }
   settingsStatus.textContent = "Saving…";
   try {
     const response = await fetch("/api/settings", {
@@ -4339,35 +4450,29 @@ settingsGroups.addEventListener("change", async (event) => {
   if (event.target.dataset.settingName !== "NAM_MIXER_AI_PROVIDER") return;
   const provider = event.target.value;
   settingsGroups.querySelectorAll("[data-cloudflare-setup]").forEach((row) => { row.hidden = provider !== "cloudflare"; });
-  if (provider === "cloudflare") {
-    const modelInput = settingsGroups.querySelector('[data-setting-name="NAM_MIXER_AI_MODEL"]');
-    if (modelInput && (!modelInput.value || modelInput.value === "@cf/openai/gpt-oss-20b")) {
-      modelInput.value = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-    }
-  }
+  // The recommended default model, its description, and its suggestions all
+  // depend on the provider (see hybrid/settings.py's _MODEL_FIELD_TEXT) -- the
+  // reload below re-fetches them instead of guessing a provider's default here.
   settingsGroups.querySelector("[data-ai-status-row]")?.refreshAiStatus?.();
   settingsGroups.querySelectorAll("[data-provider-field]").forEach((row) => {
     const fieldName = row.querySelector("[data-setting-name]")?.dataset.settingName;
     const field = settingsFields.find((candidate) => candidate.name === fieldName);
     row.hidden = Boolean(field?.providers?.length && !field.providers.includes(provider));
   });
-  // Persist the provider immediately. This is intentionally a narrow save so
-  // changing provider cannot be lost because another settings control is
-  // blank/hidden; the full Save button still persists the remaining fields.
-  const providerValues = { NAM_MIXER_AI_PROVIDER: provider };
-  const modelInput = settingsGroups.querySelector('[data-setting-name="NAM_MIXER_AI_MODEL"]');
-  if (modelInput?.value) providerValues.NAM_MIXER_AI_MODEL = modelInput.value;
-  settingsStatus.textContent = "Saving provider…";
+  // Persist only the provider selection. Its model, URL, account and token
+  // live in separate provider-scoped slots on the server; carrying the model
+  // input across here was the source of unreliable host switching.
+  settingsStatus.textContent = "Switching provider…";
   try {
     const response = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ values: providerValues }),
+      body: JSON.stringify({ values: { NAM_MIXER_AI_PROVIDER: provider } }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "provider save failed");
     await loadSettings();
-    settingsStatus.textContent = "Provider saved.";
+    settingsStatus.textContent = "Provider switched. Its saved connection settings are shown above.";
   } catch (err) {
     settingsStatus.textContent = "Provider save failed: " + err;
   }
@@ -4612,10 +4717,8 @@ if (checkUpdateBtn) {
   });
 }
 
-// Load settings eagerly (not just when the Settings tab opens) so the
-// experimental-architectures gate on cab-export-mode reflects a
-// previously-saved preference immediately, without requiring a detour
-// through the Settings tab first.
+// Load settings eagerly so saved preferences are reflected immediately,
+// without requiring a detour through the Settings tab first.
 loadSettings();
 
 // --- Lending the training section to another workflow (Continuous Gain) ------------------------------

@@ -18,6 +18,7 @@ from flask import Flask
 import cg_routes
 import hybrid.cg_project as cgp
 from hybrid.cg_project import CgProject, CgProjectError, suggest_position
+from hybrid.cab_ir import cab_design_from_prepared, get_prepared_cab_ir
 from tests.cg_synth import SR, amp_render, synth_di
 
 
@@ -33,7 +34,7 @@ def fake_backend(monkeypatch):
     monkeypatch.setattr(cgp, "load_nam", fake_load)
     monkeypatch.setattr(cgp, "render", lambda m, x, sr, **k: amp_render(m.raw["metadata"]["gain_param"] * 1.5)(x))
     monkeypatch.setattr(cgp, "load_reference_di", lambda name: synth_di(name, 3.0))
-    monkeypatch.setattr(cgp, "receptive_field_record", lambda positions, models, env=None: {"branch_samples": {f"G{p:g}": 100 for p in positions}, "cab": {"baked": False}})
+    monkeypatch.setattr(cgp, "receptive_field_record", lambda positions, models, env=None, cab=None: {"branch_samples": {f"G{p:g}": 100 for p in positions}, "cab": {"baked": False}})
     monkeypatch.setattr(cgp, "FC_RECIPE", cgp.FC_RECIPE.__class__(**{**cgp.FC_RECIPE.__dict__, "di_seconds": 2, "val_seconds": 2, "train_offsets_db": (-6.0, 6.0), "val_offsets_db": (0.0,)}))
 
 
@@ -115,6 +116,25 @@ def test_generate_bundle_writes_a_continuous_gain_a2_bundle(tmp_path, fake_backe
     assert m["receptive_field"]["branch_samples"]["G1"] == 100 and m["training_input"]["custom_split"]
     assert (Path(b["manifest"]).parent / "input.wav").is_file() and (Path(b["manifest"]).parent / "hybrid_target.wav").is_file()
     assert p.state()["bundle"]["design_id"] == b["design_id"]
+
+
+def test_continuous_gain_cab_is_a_second_artifact_not_part_of_training_target(tmp_path, fake_backend):
+    p = _project(tmp_path); p.analyse(); p.plan("use_all", None, "fc")
+    official = tmp_path / "official.wav"; sf.write(official, synth_di("o", 2.0), SR)
+    plain = p.generate_bundle(tmp_path / "a2", official, "Plain")
+    plain_target, _ = sf.read(Path(plain["manifest"]).parent / "hybrid_target.wav", dtype="float32")
+
+    ir_path = tmp_path / "cab.wav"
+    sf.write(ir_path, np.array([1.0, 0.5, -0.25], dtype=np.float32), SR, subtype="FLOAT")
+    prepared = get_prepared_cab_ir(ir_path, SR)
+    cab = cab_design_from_prepared(prepared, ir_path.name, preview_enabled=False, export_mode="embedded", display_name="Test Cab")
+    with_cab = p.generate_bundle(tmp_path / "a2", official, "With Cab", cab=cab)
+    cab_target, _ = sf.read(Path(with_cab["manifest"]).parent / "hybrid_target.wav", dtype="float32")
+    manifest = json.loads(Path(with_cab["manifest"]).read_text())
+
+    assert np.array_equal(cab_target, plain_target)
+    assert manifest["cab"]["export_mode"] == "embedded" and manifest["cab"]["baked"] is False
+    assert manifest["output_gain"]["embedded_final"]["final_linear_scalar"] > 0
 
 
 # ---- routes

@@ -153,10 +153,8 @@ def web_notes(query: str) -> str:
 def _require_tone3000_api_key(*, for_action: str) -> str:
     """Return a validated TONE3000_API_KEY, never logging its value.
 
-    Distinguishes "not set anywhere" from "set but wrong prefix" -- the
-    latter usually means a stale TONE3000_API_KEY exported in the shell that
-    started the server is shadowing a correctly edited .env, since an
-    already-set environment variable always wins over .env (see env_file.py).
+    TONE3000 credentials deliberately come from the app's saved settings,
+    ignoring inherited shell values that may be stale (see env_file.py).
     """
     api_key = _env("TONE3000_API_KEY")
     if not api_key:
@@ -164,8 +162,8 @@ def _require_tone3000_api_key(*, for_action: str) -> str:
     if not api_key.startswith("t3k_cs_"):
         raise RuntimeError(
             f"TONE3000 {for_action} found a TONE3000_API_KEY, but it does not start with the expected "
-            "'t3k_cs_' secret-key prefix. If .env has a correct key, check for a stale TONE3000_API_KEY "
-            "exported in the shell/environment that started the server -- that always overrides .env."
+            "'t3k_cs_' secret-key prefix. Replace or clear the saved key in Settings → TONE3000; "
+            "inherited shell values do not override the app's saved credential."
         )
     return api_key
 

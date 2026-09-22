@@ -24,6 +24,7 @@ from hybrid.a2_training_settings import A2_EPOCH_PRESETS
 from hybrid.cg_project import ANCHOR_METHODS, SELECTION_MODES, CgProject, CgProjectError
 from hybrid.cg_validation import (HELD_OUT_DIS, SWEEP_GAINS_DB, check_compatibility, check_progression, check_safety, write_audition)
 from hybrid.cg_audit import alignment_shift
+from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.kaggle_training import find_active_job
 from hybrid.cg_probe import SR, load_reference_di
 from hybrid.nam_loader import load_nam
@@ -71,7 +72,8 @@ def _job_start(project_id: str, kind: str, fn, after=None) -> dict:
     return job
 
 
-def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input_path: Path, store_session) -> None:
+def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input_path: Path,
+                       store_session, cab_upload_dir: Path | None = None) -> None:
     """`store_session(record)` is the app's own session writer (app.py `_store_session_record`): a Continuous Gain project is listed
     in Sessions like any other project, so the Sessions tab is the one place projects are listed, loaded, exported and deleted."""
     cg_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +87,25 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
 
     def err(exc: Exception, code: int = 400):
         return jsonify({"error": str(exc)}), (404 if str(exc) == "project not found" else code)
+
+    def resolve_embedded_cab(data: dict):
+        cab_path = str(data.get("cab_path") or "").strip()
+        if not cab_path:
+            return None
+        if cab_upload_dir is None:
+            raise CgProjectError("cabinet uploads are not configured")
+        root = Path(cab_upload_dir).resolve()
+        candidate = Path(cab_path).resolve()
+        if not candidate.is_relative_to(root) or not candidate.is_file():
+            raise CgProjectError("cabinet IR must be a current NAM Mixer upload")
+        prepared = get_prepared_cab_ir(candidate, SR)
+        return cab_design_from_prepared(
+            prepared,
+            original_filename=candidate.name,
+            preview_enabled=False,
+            export_mode="embedded",
+            display_name=str(data.get("cab_display_name") or "").strip() or None,
+        )
 
     def model_path_for(design_id: str, manifest: dict) -> tuple[str | None, str | None]:
         """The trained model of a design: the local trainer records it in the manifest, the Kaggle backend on its job."""
@@ -111,15 +132,19 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         t = m.get("training") or {}
         path, backend = model_path_for(b["design_id"], m)
         epochs, preset = t.get("epochs"), t.get("epoch_preset")
+        embedded_artifact = t.get("embedded_artifact")
         if backend == "kaggle":       # the cloud worker records what it actually trained with on the job, not in the manifest
             try:
-                tr = (find_active_job(a2_output_dir, b["design_id"]).training_result) or {}
+                active_job = find_active_job(a2_output_dir, b["design_id"])
+                tr = (active_job.training_result) or {}
                 epochs, preset = tr.get("epochs", epochs), tr.get("epoch_preset", preset)
+                embedded_artifact = active_job.embedded_artifact
             except (AttributeError, OSError, ValueError, json.JSONDecodeError):
                 pass
         return {"design_id": b["design_id"], "output_nam_path": path, "backend": backend, "epochs": epochs, "epoch_preset": preset,
                 "quick_mode": t.get("quick_mode"), "full_metrics_vs_target": t.get("full_metrics_vs_target"),
-                "trained": path is not None, "core": m.get("core"), "receptive_field_check": m.get("receptive_field_check")}
+                "trained": path is not None, "core": m.get("core"), "receptive_field_check": m.get("receptive_field_check"),
+                "embedded_artifact": embedded_artifact}
 
     def public_state(p: CgProject) -> dict:
         st = p.state()
@@ -170,6 +195,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
               "selected": plan["selected"] if plan else None, "anchors": plan["anchors_input_gain_db"] if plan else None,
               "anchorMethod": plan["anchor_method"] if plan else None, "selectionMode": plan["mode"] if plan else None,
               "stage": stage, "backend": tr.get("backend") if tr else None, "epochs": tr.get("epochs") if tr else None,
+              "cab": ((bundle or {}).get("cab") or {}).get("display_name") if bundle else None,
               "validation": ({"standardNam": val["compatibility"]["standard_nam"], "reversals": len(val["progression"]["reversals"])} if val else None)}
         session = {"type": "nam-mixer-session", "version": 1, "id": st["id"], "name": st["name"], "savedAt": "",
                    "settings": {"mode": "continuous_gain", "continuousGain": cg}, "designId": bundle["design_id"] if bundle else None}
@@ -290,8 +316,14 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             name = str(d.get("model_name") or "").strip() or None
             if name and len(name) > 100:
                 return jsonify({"error": "model name must be 100 characters or fewer"}), 400
-            job = _job_start(p.root.name, "generate", lambda note: p.generate_bundle(a2_output_dir, training_input_path, name, progress=note), lambda: sync_session(p))
-        except CgProjectError as exc:
+            cab = resolve_embedded_cab(d)
+            job = _job_start(
+                p.root.name,
+                "generate",
+                lambda note: p.generate_bundle(a2_output_dir, training_input_path, name, progress=note, cab=cab),
+                lambda: sync_session(p),
+            )
+        except (CgProjectError, CabIrError, OSError) as exc:
             return err(exc, 409)
         return jsonify({"job_id": job["job_id"]}), 202
 
@@ -408,3 +440,29 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             z.writestr("training_manifest.json", json.dumps({k: v for k, v in manifest.items() if k != "segments"}, indent=2, default=float))
         buf.seek(0)
         return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=f"{stem}-continuous-gain.zip")
+
+    @app.get("/api/cg/projects/<pid>/nam/download")
+    def api_cg_download_nam(pid):
+        """Download the independently tested head NAM or its exact head+cab derivative."""
+        try:
+            p = project_or_404(pid)
+            st, head_path, manifest = trained_model(p)
+        except (CgProjectError, OSError, json.JSONDecodeError) as exc:
+            return err(exc, 409)
+        artifact = request.args.get("artifact", "head")
+        stem = manifest.get("artifact_stem") or "continuous_gain"
+        if artifact == "head":
+            path = head_path
+            filename = f"{stem}.nam"
+        elif artifact == "cab":
+            embedded = (training_record(st) or {}).get("embedded_artifact") or {}
+            path_value = (embedded.get("artifacts") or {}).get("sequential_nam_path")
+            if embedded.get("state") != "validated" or not path_value:
+                return jsonify({"error": "the cabinet NAM is not validated and is unavailable"}), 409
+            path = Path(path_value)
+            filename = f"{stem}-with-cab.nam"
+        else:
+            return jsonify({"error": "artifact must be 'head' or 'cab'"}), 400
+        if not path.is_file():
+            return jsonify({"error": "the requested NAM file is no longer available"}), 404
+        return send_file(path, as_attachment=True, download_name=filename)

@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hybrid.env_file import read_saved_env_values, read_env_values, write_env_values
+from hybrid.env_file import read_saved_env_values, write_env_values
+from hybrid.local_llm import RECOMMENDED_LOCAL_MODEL
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ class SettingField:
     options: tuple[tuple[str, str], ...] = ()
     providers: tuple[str, ...] = ()
     suggestions: tuple[str, ...] = ()
+    required_prefix: str = ""
+    validation_message: str = ""
+
+
+class SettingsValidationError(ValueError):
+    """A submitted setting is syntactically invalid and must not be saved."""
 
 
 SETTINGS: tuple[SettingField, ...] = (
@@ -85,7 +92,11 @@ SETTINGS: tuple[SettingField, ...] = (
     SettingField(
         name="NAM_MIXER_AI_MODEL",
         label="Model",
-        description="Model name exposed by your selected provider. For Cloudflare JSON recipes, start with Llama 3.3 70B for general quality or DeepSeek R1 Distill Qwen 32B for stronger reasoning; all suggestions support Workers AI JSON Mode. Leave blank to disable the AI Assistant.",
+        # Overridden per-provider by _MODEL_FIELD_TEXT in get_settings() below --
+        # this is only the fallback before a provider has ever been selected.
+        description="Model name exposed by your selected provider. If replies with research notes attached fail "
+                     "to come back, raise the AI response token limit under Advanced. Leave blank to disable the "
+                     "AI Assistant.",
         group="AI Assistant", placeholder="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         suggestions=(
             "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
@@ -119,6 +130,17 @@ SETTINGS: tuple[SettingField, ...] = (
         placeholder="60",
     ),
     SettingField(
+        name="NAM_MIXER_AI_MAX_TOKENS",
+        label="AI response token limit",
+        description="Max tokens the AI provider may generate per reply. Raise this if replies with "
+                     "research notes attached fail with \"the local model could not incorporate it\" -- "
+                     "that usually means the response was cut off before valid JSON completed. "
+                     "Leave blank to use the automatic default.",
+        group="Advanced",
+        kind="number",
+        placeholder="3000",
+    ),
+    SettingField(
         name="TONE3000_API_KEY",
         label="TONE3000 API key",
         description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
@@ -127,22 +149,96 @@ SETTINGS: tuple[SettingField, ...] = (
         group="TONE3000",
         kind="secret",
         placeholder="t3k_cs_...",
-    ),
-    SettingField(
-        name="NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES",
-        label="Enable experimental NAM architectures",
-        description="Shows Sequential Embedded (a valid NAM Sequential model: trained amp "
-                     "followed by a separate Linear/FIR cabinet stage) as a cabinet export "
-                     "choice. This is a real, valid NAM structure, but A2-only players may "
-                     "reject it -- see README.md. Off by default; Baked In remains the "
-                     "standard, broadly compatible way to include a cabinet.",
-        group="Advanced",
-        kind="checkbox",
+        required_prefix="t3k_cs_",
+        validation_message="Use the TONE3000 Secret Key beginning t3k_cs_. The t3k_pub_ key is for OAuth and cannot be used for direct API access.",
     ),
 )
 
 _KNOWN_NAMES = {field.name for field in SETTINGS}
 _FIELDS_BY_NAME = {field.name: field for field in SETTINGS}
+
+# Connection details belong to one provider, even though the browser uses the
+# same small set of field names for whichever provider is selected.  Keeping
+# the storage keys separate prevents (for example) an Ollama model name and a
+# Cloudflare token from being carried into a custom endpoint when switching.
+_PROVIDER_STORAGE: dict[str, dict[str, str]] = {
+    "local": {
+        "NAM_MIXER_AI_BASE_URL": "NAM_MIXER_AI_LOCAL_BASE_URL",
+        "NAM_MIXER_AI_MODEL": "NAM_MIXER_AI_LOCAL_MODEL",
+    },
+    "cloudflare": {
+        "NAM_MIXER_AI_ACCOUNT_ID": "NAM_MIXER_AI_CLOUDFLARE_ACCOUNT_ID",
+        "NAM_MIXER_AI_MODEL": "NAM_MIXER_AI_CLOUDFLARE_MODEL",
+        "NAM_MIXER_AI_API_KEY": "NAM_MIXER_AI_CLOUDFLARE_API_KEY",
+    },
+    "custom": {
+        "NAM_MIXER_AI_BASE_URL": "NAM_MIXER_AI_CUSTOM_BASE_URL",
+        "NAM_MIXER_AI_MODEL": "NAM_MIXER_AI_CUSTOM_MODEL",
+        "NAM_MIXER_AI_API_KEY": "NAM_MIXER_AI_CUSTOM_API_KEY",
+    },
+}
+_PROVIDER_STORAGE_NAMES = {
+    storage_name
+    for provider_fields in _PROVIDER_STORAGE.values()
+    for storage_name in provider_fields.values()
+}
+_ALL_STORAGE_NAMES = _KNOWN_NAMES | _PROVIDER_STORAGE_NAMES
+
+_TOKEN_LIMIT_HINT = (
+    "If replies with research notes attached fail to come back, raise the AI response token limit under Advanced."
+)
+
+# NAM_MIXER_AI_MODEL's description/suggestions depend on which provider is
+# currently selected, so this is applied in get_settings() rather than baked
+# into the static SettingField above (the field list itself is provider-agnostic).
+_MODEL_FIELD_TEXT: dict[str, dict[str, object]] = {
+    "local": {
+        "description": f"Model name exposed by your local OpenAI-compatible host (e.g. Ollama). We recommend "
+                        f"{RECOMMENDED_LOCAL_MODEL} -- see the \"Pull {RECOMMENDED_LOCAL_MODEL}\" button below. "
+                        f"Installed models are loaded from the host when it supports model discovery. "
+                        f"{_TOKEN_LIMIT_HINT} Leave blank to disable the AI Assistant.",
+        "suggestions": (RECOMMENDED_LOCAL_MODEL, "qwen3:8b", "llama3.1:8b", "gemma3:4b"),
+        "placeholder": RECOMMENDED_LOCAL_MODEL,
+    },
+    "cloudflare": {
+        "description": f"Model name exposed by Cloudflare Workers AI. For Cloudflare JSON recipes, start with "
+                        f"Llama 3.3 70B for general quality or DeepSeek R1 Distill Qwen 32B for stronger "
+                        f"reasoning; all suggestions support Workers AI JSON Mode. {_TOKEN_LIMIT_HINT} Leave "
+                        f"blank to disable the AI Assistant.",
+        "suggestions": (
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+            "@hf/nousresearch/hermes-2-pro-mistral-7b",
+            "@cf/meta/llama-3-8b-instruct",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "@hf/thebloke/deepseek-coder-6.7b-instruct-awq",
+        ),
+        "placeholder": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    },
+    "custom": {
+        "description": f"Model name exposed by your custom OpenAI-compatible endpoint. If the endpoint supports "
+                        f"GET /models, its models are loaded into the searchable list. {_TOKEN_LIMIT_HINT} Leave "
+                        f"blank to disable the AI Assistant.",
+        "suggestions": (),
+        "placeholder": "",
+    },
+}
+
+
+def _saved_provider_value(values: dict[str, str], provider: str, name: str) -> str:
+    """Return a provider slot, falling back to the pre-slot shared key.
+
+    The fallback makes existing .env files upgrade in place.  The next save
+    copies the legacy value into the active provider's dedicated slot.
+    """
+    storage_name = _PROVIDER_STORAGE.get(provider, {}).get(name)
+    if storage_name and values.get(storage_name):
+        return values[storage_name]
+    # Shared keys are a legacy layout. Once any scoped slot exists, an empty
+    # slot means this provider genuinely has no saved value.
+    if any(values.get(candidate) for candidate in _PROVIDER_STORAGE_NAMES):
+        return ""
+    return values.get(name, "")
 
 
 def get_settings() -> list[dict]:
@@ -157,25 +253,33 @@ def get_settings() -> list[dict]:
     that might be inherited from the shell environment (e.g., a stale
     TONE3000_API_KEY exported before a correct one was saved to .env).
     """
-    values = read_saved_env_values(_KNOWN_NAMES)
+    values = read_saved_env_values(_ALL_STORAGE_NAMES)
+    provider = values.get("NAM_MIXER_AI_PROVIDER", "").strip() or "local"
     result = []
     for field in SETTINGS:
-        raw_value = values.get(field.name, "")
+        raw_value = _saved_provider_value(values, provider, field.name)
+        description, suggestions, placeholder = field.description, field.suggestions, field.placeholder
+        if field.name == "NAM_MIXER_AI_MODEL":
+            model_text = _MODEL_FIELD_TEXT.get(provider, _MODEL_FIELD_TEXT["local"])
+            description, suggestions, placeholder = model_text["description"], model_text["suggestions"], model_text["placeholder"]
         entry = {
             "name": field.name,
             "label": field.label,
-            "description": field.description,
+            "description": description,
             "group": field.group,
             "kind": field.kind,
-            "placeholder": field.placeholder,
+            "placeholder": placeholder,
             "restart_required": field.restart_required,
             "options": [{"value": value, "label": label} for value, label in field.options],
             "providers": list(field.providers),
-            "suggestions": list(field.suggestions),
+            "suggestions": list(suggestions),
+            "required_prefix": field.required_prefix,
+            "validation_message": field.validation_message,
         }
         if field.kind == "secret":
             entry["value"] = ""
             entry["has_value"] = bool(raw_value)
+            entry["is_valid"] = not raw_value or _validation_error(field, raw_value) is None
         elif field.kind == "checkbox":
             entry["value"] = raw_value.strip().lower() in ("1", "true", "yes", "on")
         else:
@@ -189,9 +293,23 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
 
     A blank submitted value for a `kind="secret"` field means "leave it
     unchanged" (the UI never shows the real value to re-submit) rather than
-    "clear it" -- clearing a secret requires editing the .env file directly.
+    "clear it" -- clearing is an explicit `clear_secrets` operation.
     """
-    filtered = {}
+    saved_values = read_saved_env_values(_ALL_STORAGE_NAMES)
+    previous_provider = saved_values.get("NAM_MIXER_AI_PROVIDER", "").strip() or "local"
+    requested_provider = str(values.get("NAM_MIXER_AI_PROVIDER", previous_provider)).strip().lower()
+    if requested_provider not in _PROVIDER_STORAGE:
+        raise SettingsValidationError("AI provider must be Local, Cloudflare Workers AI, or Custom OpenAI-compatible")
+
+    filtered: dict[str, str] = {}
+
+    # On the first save after upgrading, preserve the old shared connection
+    # values in the provider that owned them before changing provider.
+    for generic_name, storage_name in _PROVIDER_STORAGE[previous_provider].items():
+        legacy_value = saved_values.get(generic_name, "")
+        if legacy_value and not saved_values.get(storage_name):
+            filtered[storage_name] = legacy_value
+
     for name, value in values.items():
         field = _FIELDS_BY_NAME.get(name)
         if field is None:
@@ -202,22 +320,30 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
             value = str(value)
         if field.kind == "secret" and not value.strip():
             continue
-        filtered[name] = value
+        validation_error = _validation_error(field, value)
+        if validation_error:
+            raise SettingsValidationError(validation_error)
+        storage_name = _PROVIDER_STORAGE.get(requested_provider, {}).get(name, name)
+        # Provider-specific fields that do not apply to the selected provider
+        # can still be present in a browser form while hidden. Ignore them.
+        if name.startswith("NAM_MIXER_AI_") and name in {
+            "NAM_MIXER_AI_BASE_URL", "NAM_MIXER_AI_ACCOUNT_ID",
+            "NAM_MIXER_AI_MODEL", "NAM_MIXER_AI_API_KEY",
+        } and name not in _PROVIDER_STORAGE[requested_provider]:
+            continue
+        filtered[storage_name] = value
     for name in clear_secrets or []:
         field = _FIELDS_BY_NAME.get(str(name))
         if field and field.kind == "secret":
-            filtered[field.name] = ""
+            filtered[_PROVIDER_STORAGE.get(requested_provider, {}).get(field.name, field.name)] = ""
     env_file = write_env_values(filtered)
     return {"saved": sorted(filtered), "env_file": str(env_file)}
 
 
-def experimental_architectures_enabled() -> bool:
-    """Whether Sequential Embedded (and any future experimental NAM
-    architecture) may be selected. Off by default -- see the
-    NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES SettingField above. Callers
-    that produce or serve a Sequential-embedded artifact MUST check this
-    server-side; the UI hiding the option is not itself the gate."""
-    raw = read_env_values({"NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES"}).get(
-        "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", ""
-    )
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+def _validation_error(field: SettingField, value: str) -> str | None:
+    value = str(value).strip()
+    if not value or not field.required_prefix:
+        return None
+    if value.startswith(field.required_prefix) and len(value) > len(field.required_prefix):
+        return None
+    return field.validation_message or f"{field.label} must start with {field.required_prefix}."

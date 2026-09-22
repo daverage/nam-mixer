@@ -27,6 +27,7 @@ from typing import Callable
 
 import numpy as np
 
+from .cab_ir import CabDesign, get_frozen_prepared_cab_ir
 from .cg_anchors import REFERENCE_DB
 from .cg_audit import alignment_shift
 from .cg_parallel import pmap
@@ -132,6 +133,7 @@ def bundle_manifest_core(built: BuiltAudio, chain: GainChain, anchors_db: list[f
 
 def write_bundle(out_dir: Path, built: BuiltAudio, chain: GainChain, anchors_db: list[float], shifts: dict[float, int], *,
                  sources: list[dict], model_name: str, artifact_stem: str, design: dict, receptive_field: dict,
+                 cab: CabDesign | None = None, output_gain: dict | None = None,
                  extra: dict | None = None) -> Path:
     """Write input.wav / hybrid_target.wav / training_manifest.json (the shape every A2 trainer consumes)."""
     import soundfile as sf
@@ -150,7 +152,9 @@ def write_bundle(out_dir: Path, built: BuiltAudio, chain: GainChain, anchors_db:
         "target": {"final_sha256": sha256_file(out_dir / "hybrid_target.wav"), "output_scale_c": built.output_scale_c,
                    "peak_ceiling_gain_reduction_db": built.reduction_db, "ceiling_dbfs": CEILING_DBFS,
                    "combination": "level-driven chain blend of the real captures (hybrid.multi_blend), one fixed peak-ceiling gain, no limiter"},
-        "design": design, "sources": sources, "receptive_field": receptive_field, "cab": {"baked": False, "export_mode": "none"},
+        "design": design, "sources": sources, "receptive_field": receptive_field,
+        "cab": cab.to_dict() if cab else {"selected": False, "baked": False, "export_mode": "none"},
+        "output_gain": output_gain or {"mode": "continuous_gain_scale", "applied_gain_db": -built.reduction_db},
         "segments": built.segments, "core": core,
         **(extra or {}),
     }
@@ -176,14 +180,25 @@ class ReceptiveFieldRecord:
         return {"branch_samples": self.branch_samples, "cab": {"baked": False}, "note": "core dependency = max over the source captures; the chain blend adds no temporal dependency beyond the bounded causal envelope"}
 
 
-def receptive_field_record(positions: list[float], loaded_models: dict, envelope_max_history_samples: int | None = None) -> dict:
+def receptive_field_record(positions: list[float], loaded_models: dict, envelope_max_history_samples: int | None = None,
+                           cab: CabDesign | None = None) -> dict:
     """Core RF per source capture (hard gate) plus the bounded causal envelope's history."""
     from .receptive_field import compute_source_nam_receptive_field
 
     bs = {f"G{p:g}": int(compute_source_nam_receptive_field(loaded_models[p])) for p in positions}
     if envelope_max_history_samples is not None:
         bs["envelope"] = int(envelope_max_history_samples)
-    return ReceptiveFieldRecord(bs).as_dict()
+    record = ReceptiveFieldRecord(bs).as_dict()
+    if cab is not None:
+        prepared = get_frozen_prepared_cab_ir(cab, SR)
+        record["cab"] = {
+            "export_mode": cab.export_mode,
+            "baked": False,
+            "fir_length_samples": prepared.prepared_frame_count,
+            "fir_history_samples": max(0, prepared.prepared_frame_count - 1),
+            "sha256": cab.sha256,
+        }
+    return record
 
 
 def frozen_design_record(positions, anchors_db, recipe: FcRecipe, mode: str, selection: dict | None, mapping: list[dict]) -> dict:

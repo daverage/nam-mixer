@@ -161,6 +161,110 @@ def test_local_llm_uses_ai_amp_queries_for_tone3000_research(client, monkeypatch
     assert [result["query"] for result in data["tone3000_results"]] == ["Vox AC30", "Marshall JCM800"]
 
 
+def test_local_llm_debug_trace_includes_ai_context_and_research_without_secrets(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {
+        "enabled": True, "provider": "cloudflare", "model": "test-model",
+    })
+    calls = 0
+
+    def fake_converse(prompt, history, research_notes="", debug_trace=None, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if debug_trace is not None:
+            debug_trace.update({
+                "provider": "cloudflare",
+                "model": "test-model",
+                "messages": [{"role": "user", "content": prompt + "\n" + research_notes}],
+            })
+        if calls == 1:
+            return SimpleNamespace(
+                tone3000_queries=["Vox AC30"], source_plan=None,
+                to_dict=lambda: {"reply": "Searching."},
+            )
+        return SimpleNamespace(
+            tone3000_queries=None, source_plan=None,
+            to_dict=lambda: {"reply": "Use the catalogue match."},
+        )
+
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    monkeypatch.setattr(app_module, "tone3000_search", lambda *_args, **_kwargs: [{
+        "id": 7, "title": "Vox AC30 Clean", "creator": "tester", "description": "Clean head",
+        "match_score": 90, "match_reason": "Metadata match.",
+    }])
+
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Find a clean Vox source",
+        "history": [{"role": "assistant", "content": "Previous context"}],
+        "research": {"tone3000": True, "web": False, "rig_scope": "heads", "author": ""},
+        "include_debug": True,
+    })
+
+    assert response.status_code == 200
+    debug = response.get_json()["debug"]
+    assert [call["stage"] for call in debug["ai_calls"]] == ["initial", "final_with_tone3000_matches"]
+    assert debug["request"]["history_received"] == [{"role": "assistant", "content": "Previous context"}]
+    assert debug["research"]["tone3000_queries"] == ["Vox AC30"]
+    assert debug["research"]["tone3000_results"][0]["title"] == "Vox AC30 Clean"
+    serialized = jsonlib.dumps(debug)
+    assert '"api_key"' not in serialized.lower()
+    assert "Bearer " not in serialized
+
+
+def test_local_llm_runs_focused_amp_discovery_when_first_pass_finds_no_amps(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True, "provider": "local"})
+    web_queries = []
+    catalogue_queries = []
+    ai_prompts = []
+
+    def fake_web_notes(query):
+        web_queries.append(query)
+        return "Blink-182 rig evidence: Mesa/Boogie Triple Rectifier and Marshall JCM900."
+
+    def fake_converse(prompt, _history, _research_notes="", **_kwargs):
+        ai_prompts.append(prompt)
+        if prompt.startswith("Identify concrete amp-family search terms"):
+            return SimpleNamespace(
+                tone3000_queries=["Mesa/Boogie Triple Rectifier", "Marshall JCM900"],
+                source_plan={"ampA": "Marshall JCM900 clean", "ampB": "Mesa/Boogie Triple Rectifier driven"},
+                to_dict=lambda: {"reply": "Found the amp families."},
+            )
+        if len(ai_prompts) == 1:
+            return SimpleNamespace(
+                tone3000_queries=[], source_plan=None,
+                to_dict=lambda: {"reply": "Which captures do you want?"},
+            )
+        return SimpleNamespace(
+            tone3000_queries=None,
+            source_plan={"ampA": "Marshall JCM900 clean", "ampB": "Mesa/Boogie Triple Rectifier driven"},
+            to_dict=lambda: {"reply": "Use the researched captures."},
+        )
+
+    def fake_search(query, **_kwargs):
+        catalogue_queries.append(query)
+        return [{
+            "id": len(catalogue_queries), "title": query + " capture", "creator": "tester",
+            "description": "head", "match_score": 90, "match_reason": "Metadata match.",
+        }]
+
+    monkeypatch.setattr(app_module, "web_notes", fake_web_notes)
+    monkeypatch.setattr(app_module, "converse_with_local_llm", fake_converse)
+    monkeypatch.setattr(app_module, "tone3000_search", fake_search)
+
+    response = client.post("/api/local_llm/recipe", json={
+        "prompt": "Clean Blink-182 All the Small Things into boosted distortion",
+        "research": {"tone3000": True, "web": True, "rig_scope": "heads", "author": ""},
+        "include_debug": True,
+    })
+
+    assert response.status_code == 200
+    assert len(web_queries) == 2
+    assert web_queries[1].startswith("Which specific guitar amplifier makes and models")
+    assert catalogue_queries == ["Mesa/Boogie Triple Rectifier", "Marshall JCM900"]
+    data = response.get_json()
+    assert data["source_plan"]["ampB"] == "Mesa/Boogie Triple Rectifier driven"
+    assert data["debug"]["research"]["focused_amp_discovery"]["queries_returned"] == catalogue_queries
+
+
 def test_local_llm_uses_the_players_description_when_no_catalogue_term_is_proposed(client, monkeypatch):
     monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
     searched = []
@@ -1479,18 +1583,13 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
-def test_generate_embedded_cab_rejected_when_experimental_architectures_disabled(
-    client, isolated_training_paths, tmp_path, monkeypatch
+def test_generate_embedded_cab_keeps_the_training_target_head_only(
+    client, isolated_training_paths, tmp_path
 ):
-    """Sequential Embedded is an advanced/experimental NAM architecture, off
-    by default -- see hybrid/settings.py's
-    NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES. The UI hides the choice,
-    but the server must reject it regardless of what the client sends."""
+    """An exact cabinet derivative never changes what the A2 trains/tests."""
     import soundfile as sf
     training_path, a2_dir = isolated_training_paths
     _write_training_wav(training_path)
-    monkeypatch.delenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", raising=False)
-
     amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
     _write_fake_nam(amp_a)
     _write_fake_nam(amp_b)
@@ -1505,8 +1604,12 @@ def test_generate_embedded_cab_rejected_when_experimental_architectures_disabled
         "render_id": _current_render_id(), "crossover_dbfs": -20.0, "transition_width_db": 8.0,
         "cab_path": str(ir_path), "cab_preview_enabled": True, "cab_export_mode": "embedded",
     })
-    assert resp.status_code == 400
-    assert "experimental" in resp.get_json()["error"].lower()
+    assert resp.status_code == 200
+    with open(resp.get_json()["manifest_path"]) as f:
+        manifest = jsonlib.load(f)
+    assert manifest["cab"]["export_mode"] == "embedded"
+    assert manifest["cab"]["baked"] is False
+    assert manifest["output_gain"]["embedded_final"]["final_linear_scalar"] > 0
 
 
 def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
@@ -1535,6 +1638,17 @@ def test_settings_get_and_save_round_trip(client, tmp_path, monkeypatch):
     _os.environ.pop("NAM_RENDER_EXE", None)
 
 
+def test_settings_api_rejects_tone3000_publishable_key(client, tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env_path))
+
+    resp = client.post("/api/settings", json={"values": {"TONE3000_API_KEY": "t3k_pub_wrong-kind"}})
+
+    assert resp.status_code == 400
+    assert "t3k_cs_" in resp.get_json()["error"]
+    assert not env_path.exists()
+
+
 def test_local_llm_pull_route_reports_backend_error_as_json(client, monkeypatch):
     from hybrid.ollama_pull import OllamaPullError
 
@@ -1547,6 +1661,17 @@ def test_local_llm_pull_route_reports_backend_error_as_json(client, monkeypatch)
     data = resp.get_json()
     assert data["ok"] is False
     assert "ollama not found" in data["error"]
+
+
+def test_local_llm_models_route_returns_provider_models(client, monkeypatch):
+    monkeypatch.setattr(app_module, "available_ai_models", lambda: {
+        "ok": True, "provider": "local", "models": ["gemma4:e4b", "qwen3:8b"],
+    })
+
+    response = client.get("/api/local_llm/models")
+
+    assert response.status_code == 200
+    assert response.get_json()["models"] == ["gemma4:e4b", "qwen3:8b"]
 
 
 def test_local_llm_pull_status_route_returns_current_state(client, monkeypatch):

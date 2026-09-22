@@ -48,7 +48,7 @@ from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
 from hybrid.design import freeze_design
 from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
-from hybrid.settings import experimental_architectures_enabled, get_settings as get_app_settings, save_settings as save_app_settings
+from hybrid.settings import SettingsValidationError, get_settings as get_app_settings, save_settings as save_app_settings
 from hybrid.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
@@ -64,7 +64,7 @@ from hybrid.kaggle_training import (
 )
 from hybrid.metadata import suggested_nam_filename
 from hybrid.local_training import LocalTrainingManager
-from hybrid.local_llm import LocalConversationReply, LocalLlmError, converse as converse_with_local_llm, status as local_llm_status, test_connection as test_ai_connection
+from hybrid.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, status as local_llm_status, test_connection as test_ai_connection
 from hybrid.ollama_pull import (
     OllamaPullError,
     get_pull_status as get_ollama_pull_status,
@@ -334,7 +334,10 @@ def api_settings_save():
     clear_secrets = payload.get("clear_secrets", [])
     if not isinstance(clear_secrets, list) or not all(isinstance(name, str) for name in clear_secrets):
         return jsonify({"error": "clear_secrets must be a list of setting names"}), 400
-    result = save_app_settings({str(k): v for k, v in values.items()}, clear_secrets=clear_secrets)
+    try:
+        result = save_app_settings({str(k): v for k, v in values.items()}, clear_secrets=clear_secrets)
+    except SettingsValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify(result)
 
 
@@ -342,6 +345,13 @@ def api_settings_save():
 def api_local_llm_status():
     """Expose configuration only; browser input can never choose the URL."""
     return jsonify(local_llm_status())
+
+
+@app.get("/api/local_llm/models")
+def api_local_llm_models():
+    """Discover models from the selected provider's saved connection."""
+    result = available_ai_models()
+    return jsonify(result), (200 if result.get("ok") else 502)
 
 
 @app.post("/api/local_llm/test")
@@ -374,6 +384,9 @@ def api_local_llm_pull_status():
 @app.post("/api/local_llm/recipe")
 def api_local_llm_recipe():
     data = request.get_json(silent=True) or {}
+    include_debug = data.get("include_debug", False)
+    if not isinstance(include_debug, bool):
+        return jsonify({"error": "include_debug must be a boolean"}), 400
     prompt = data.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return jsonify({"error": "a tone description is required"}), 400
@@ -422,9 +435,47 @@ def api_local_llm_recipe():
         return jsonify({"error": "research settings are invalid"}), 400
     if not local_llm_status().get("enabled"):
         return jsonify({"error": "local LLM is not configured"}), 503
+    notes: list[str] = []
+    warnings: list[str] = []
+    matches: list[dict] = []
+    queries: list[str] = []
+    web_research_notes = None
+    debug_trace = ({
+        "version": 1,
+        "notice": "Secrets and HTTP Authorization headers are excluded. User conversation and fetched research text are included.",
+        "request": {
+            "prompt": prompt.strip(),
+            "history_received": history,
+            "research_options": {
+                "web": use_web,
+                "tone3000": use_tone3000,
+                "rig_scope": rig_scope,
+                "author": author,
+            },
+            "selected_tone3000_context": tone3000_context,
+            "source_plan": source_plan,
+        },
+        "ai_calls": [],
+        "research": {},
+    } if include_debug else None)
+
+    def _run_ai(stage: str, research_notes: str, *, request_queries: bool, known_plan, ai_prompt: str | None = None):
+        call_debug: dict[str, object] | None = {} if debug_trace is not None else None
+        try:
+            return converse_with_local_llm(
+                ai_prompt or prompt.strip(),
+                history,
+                research_notes,
+                request_tone3000_queries=request_queries,
+                known_source_plan=known_plan,
+                debug_trace=call_debug,
+            )
+        finally:
+            if debug_trace is not None and call_debug is not None:
+                call_debug["stage"] = stage
+                debug_trace["ai_calls"].append(call_debug)
+
     try:
-        notes, warnings = [], []
-        web_research_notes = None
         if use_web:
             try:
                 web_research_notes = web_notes(prompt.strip())
@@ -441,20 +492,60 @@ def api_local_llm_recipe():
         if source_plan:
             notes.append(f"Durable source plan (do not swap these roles): Amp A = {source_plan['ampA']}; Amp B = {source_plan['ampB']}.")
         try:
-            conversation = converse_with_local_llm(
-                prompt.strip(),
-                history,
+            conversation = _run_ai(
+                "initial",
                 "\n\n".join(notes),
-                request_tone3000_queries=use_tone3000,
-                known_source_plan=source_plan,
+                request_queries=use_tone3000,
+                known_plan=source_plan,
             )
         except LocalLlmError:
             fallback_notes = [note for note in notes if note.startswith("Selected TONE3000 pack")]
             warnings.append("Research was found, but the local model could not incorporate it; the answer uses local knowledge instead.")
-            conversation = converse_with_local_llm(
-                prompt.strip(), history, "\n\n".join(fallback_notes), request_tone3000_queries=False,
-                known_source_plan=source_plan,
+            conversation = _run_ai(
+                "fallback_without_research", "\n\n".join(fallback_notes), request_queries=False,
+                known_plan=source_plan,
             )
+
+        # A broad tone-design request can leave a small/local model trying to
+        # solve too many things at once. If it produced neither catalogue
+        # terms nor an amp source plan, make one focused research pass before
+        # falling back to searching TONE3000 with the entire original prose.
+        # This mirrors the effective human follow-up: "what amps did this
+        # artist use?", while remaining grounded in web evidence.
+        proposed_queries = list(dict.fromkeys(conversation.tone3000_queries or []))[:3]
+        proposed_plan = getattr(conversation, "source_plan", None) or source_plan
+        if use_web and not tone3000_context and not proposed_queries and not proposed_plan:
+            focused_query = (
+                "Which specific guitar amplifier makes and models did the artist use for the song or era "
+                f"described in this request? {prompt.strip()}"
+            )
+            focused_notes = None
+            try:
+                focused_notes = web_notes(focused_query)
+                notes.append("Focused amp-discovery research:\n" + focused_notes[:1_200])
+                conversation = _run_ai(
+                    "focused_amp_discovery",
+                    "\n\n".join(notes),
+                    request_queries=use_tone3000,
+                    known_plan=None,
+                    ai_prompt=(
+                        "Identify concrete amp-family search terms for the original tone request using the research "
+                        "notes. Return a source plan when the evidence supports clean and driven roles. Original "
+                        f"request: {prompt.strip()}"
+                    ),
+                )
+                proposed_queries = list(dict.fromkeys(conversation.tone3000_queries or []))[:3]
+                proposed_plan = getattr(conversation, "source_plan", None)
+            except (RuntimeError, LocalLlmError) as exc:
+                warnings.append(f"Focused amp discovery could not complete: {exc}")
+            if debug_trace is not None:
+                debug_trace["research"]["focused_amp_discovery"] = {
+                    "query": focused_query,
+                    "notes": focused_notes,
+                    "queries_returned": proposed_queries,
+                    "source_plan_returned": proposed_plan,
+                }
+        source_plan = proposed_plan or source_plan
 
         # The model only proposes TONE3000 search terms in the call above -- the
         # actual catalog search runs afterwards, so its first answer can never
@@ -462,9 +553,15 @@ def api_local_llm_recipe():
         # ask again with the real titles/descriptions as research notes so the
         # FINAL answer the user sees can recommend specific, real captures
         # instead of a generic "tell me your amps" reply.
-        matches, seen = [], set()
+        seen = set()
         if use_tone3000 and not tone3000_context:
-            queries = list(dict.fromkeys(conversation.tone3000_queries or []))[:3]
+            queries = proposed_queries
+            if not queries and proposed_plan:
+                queries = list(dict.fromkeys([
+                    proposed_plan.get("ampA", "").strip(),
+                    proposed_plan.get("ampB", "").strip(),
+                ]))[:3]
+                queries = [query for query in queries if query]
             if not queries:
                 # Preserve the player's actual request as the neutral fallback
                 # instead of smuggling a fixed list of amp families into the
@@ -499,12 +596,11 @@ def api_local_llm_recipe():
                 f"- {match['title']} by {match['creator']} ({match.get('match_score', '—')}% metadata fit): {match['description']}"[:360] for match in matches
             )
             try:
-                conversation = converse_with_local_llm(
-                    prompt.strip(),
-                    history,
+                conversation = _run_ai(
+                    "final_with_tone3000_matches",
                     "\n\n".join(notes + [catalog_notes]),
-                    request_tone3000_queries=False,
-                    known_source_plan=getattr(conversation, "source_plan", None) or source_plan,
+                    request_queries=False,
+                    known_plan=getattr(conversation, "source_plan", None) or source_plan,
                 )
             except LocalLlmError:
                 provider_name = local_llm_status().get("provider", "AI provider")
@@ -613,10 +709,30 @@ def api_local_llm_recipe():
             response["tone3000_results"] = matches
         if warnings:
             response["research_warnings"] = list(dict.fromkeys(warnings))
+        if debug_trace is not None:
+            debug_trace["research"].update({
+                "notes_collected_before_catalog_search": notes,
+                "web_notes": web_research_notes,
+                "tone3000_queries": queries,
+                "tone3000_results": matches,
+                "warnings": list(dict.fromkeys(warnings)),
+            })
+            debug_trace["final_response"] = response.copy()
+            response["debug"] = debug_trace
         return jsonify(response)
     except LocalLlmError as exc:
         logger.info("Local recipe assistant unavailable: %s", exc)
-        return jsonify({"error": str(exc)}), 502
+        response = {"error": str(exc)}
+        if debug_trace is not None:
+            debug_trace["research"].update({
+                "notes_collected_before_catalog_search": notes,
+                "web_notes": web_research_notes,
+                "tone3000_queries": queries,
+                "tone3000_results": matches,
+                "warnings": list(dict.fromkeys(warnings)),
+            })
+            response["debug"] = debug_trace
+        return jsonify(response), 502
 
 
 @app.post("/api/tone3000/search")
@@ -1548,17 +1664,6 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     export_mode = data.get("cab_export_mode") or "none"
     if export_mode not in ("none", "learned", "embedded"):
         raise ValueError("cab_export_mode must be 'none', 'learned', or 'embedded'")
-    if export_mode == "embedded" and not experimental_architectures_enabled():
-        # Sequential Embedded is an advanced/experimental NAM architecture --
-        # a valid NAM Sequential model, but not guaranteed to be accepted by
-        # A2-only players. Hidden by default; see hybrid/settings.py's
-        # NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES and README.md. The UI
-        # hides this choice unless the setting is on, but this is the real
-        # gate -- never trust the client to have enforced it.
-        raise ValueError(
-            "Sequential Embedded is an experimental NAM architecture and is disabled. "
-            "Enable 'Enable experimental NAM architectures' under Settings > Advanced to use it."
-        )
     # Preview is intentionally independent of final export: a user may
     # audition cabless while training a learned target or package an exact
     # embedded FIR. A non-none mode still requires the selected cab path
@@ -2577,7 +2682,7 @@ def api_local_training_download():
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
     download_name = (_suggested_nam_filename(design_id) if requested_artifact == "head"
-                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-embedded-experimental-full.nam")
+                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-with-cab.nam")
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 
@@ -2993,7 +3098,7 @@ def api_kaggle_job_download(job_id: str):
         return jsonify({"error": f"recorded model file no longer exists on disk: {nam_path}"}), 404
 
     download_name = (_suggested_nam_filename(design_id) if artifact == "head"
-                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-embedded-experimental-full.nam")
+                     else f"{_suggested_nam_filename(design_id).removesuffix('.nam')}-with-cab.nam")
     return send_file(nam_path, as_attachment=True, download_name=download_name)
 
 
@@ -3136,7 +3241,8 @@ def api_system_usage():
 
 
 CG_PROJECT_DIR = WORK_DIR / "cg_projects"
-register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, training_input_path=TRAINING_INPUT_PATH, store_session=_store_session_record)
+register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, training_input_path=TRAINING_INPUT_PATH,
+                   cab_upload_dir=CAB_UPLOAD_DIR, store_session=_store_session_record)
 
 
 if __name__ == "__main__":

@@ -386,45 +386,26 @@ inference; the already-rendered `RenderedPair` (`hybrid/pipeline.py`) is
 reused by whichever mode you're auditioning.
 
 A third, mode-independent stage — **Cabinet IR** (`hybrid/cab_ir.py`) — sits
-AFTER the amp combination in any mode. Preview is independent of final export:
-you can audition an exact prepared causal FIR while selecting one of these
-final-model modes:
+AFTER the amp combination in any mode. Preview is independent of training:
+all A2 training and validation uses the head-only target. When an IR is
+selected, the export choices are:
 
 - **No cabinet**: train/export the conventional head-only A2. A selected IR
   remains a reusable preview/bundle artifact, not part of the target.
-- **Baked In** (`learned`, the standard, recommended choice): preserve the
-  legacy baked-cab path. The exact FIR is applied to the teacher and the
-  conventional A2 learns an approximation; it is not an exact stored
-  cabinet, but it is a normal NAM A2 file, which is what broad player/host
-  compatibility depends on.
-- **Sequential Embedded (Experimental)** (`embedded`): train the head
-  without cabinet convolution, retain its normal Full/Lite A2 artifact, and
-  package an explicitly extracted Full WaveNet followed by canonical Linear
-  FIR taps in a NAM **Sequential** model. The unscaled prepared IR WAV is
-  also retained. This is a genuinely valid NAM structure — but valid NAM
-  does not imply NAM A2 support: an A2-only host may simply reject a
-  `Sequential` file. **This option is hidden by default.** Turn on
-  *Settings → Advanced → "Enable experimental NAM architectures"* to reveal
-  it; selecting it shows a one-time warning per session, and the exported
-  file is always named with an unmistakable `-embedded-experimental` (or
-  `-embedded-experimental-full`) suffix so it can never be confused with a
-  standard head/A2 export. The choice is enforced server-side
-  (`hybrid/settings.py`'s `experimental_architectures_enabled`,
-  checked in `app.py`'s `_resolve_cab_design`) — hiding it in the UI is a
-  convenience, not the actual gate.
+- **Create both** (`embedded`): retain the tested conventional head-only A2
+  and derive a second NAM containing an explicitly extracted Full WaveNet
+  followed by canonical Linear FIR taps in a NAM **Sequential** model. The
+  prepared IR WAV is also retained. The two artifacts are offered as clearly
+  separate head-only and `-with-cab.nam` downloads.
 
-Embedded output folds the recorded post-cab safety scalar into the Linear
+Older saved designs that use the legacy `learned` mode remain readable, but
+the current UI no longer applies the cabinet to the training target.
+
+The cabinet output folds the recorded post-cab safety scalar into the Linear
 weights and is downloadable only after validation using the bundled,
 Sequential-capable renderer. **NAM format validity and NAM A2 compatibility
-are two separate claims** — a model can be valid NAM (parses correctly,
-uses supported NAM child architectures, comes from A2-trained weights)
-without an A2-only player accepting it. This repo does not infer A2
-compatibility from any of those signals; until Sequential Embedded's
-compatibility is verified against real hosts (official NAM Core/plugin,
-NAM standalone, TONE3000, other significant hosts, relevant hardware — each
-recorded as Supported / Unsupported / Untested, never inferred), treat it as
-a research/advanced feature and use Baked In whenever broad compatibility
-matters.
+are two separate claims**: A2-only players may reject a `Sequential` model.
+Use the separately provided head-only download for broad compatibility.
 
 **Receptive-field policy: one hard check, two advisory ones.** Amp A/Amp B
 (+, for Hybrid and Character, the bounded crossover envelope) are the CORE
@@ -667,6 +648,10 @@ checkout doesn't require hunting for each setup button individually.
   OpenAI-compatible**. Local uses a localhost `/v1` endpoint and needs only a
   model name. Custom remote endpoints must use HTTPS; their hostname is
   resolved and private/loopback/link-local/reserved addresses are rejected.
+  Conversation Markdown exports can optionally include a structured debug
+  appendix containing the exact bounded model messages, research queries and
+  results, warnings, and parsed responses. API keys and authorization headers
+  are never included.
 - **Cloudflare Workers AI** — in the Cloudflare dashboard, open **Workers AI →
   Use REST API → Create a Workers AI API Token**, then copy the token and the
   account ID. In NAM Mixer choose Cloudflare, enter the 32-character Account
@@ -692,13 +677,6 @@ checkout doesn't require hunting for each setup button individually.
 - **TONE3000 API key** — enables the TONE3000 tab's capture search. Get a
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
-- **Advanced → Enable experimental NAM architectures** — off by default.
-  Turning it on reveals **Sequential Embedded (Experimental)** as a cabinet
-  export choice (see [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)).
-  Leave it off unless you specifically want that export; ordinary users
-  should keep using **Baked In**. This is a real feature flag enforced on
-  the server, not just a UI hide.
-
 Settings are saved to the source checkout's own `.env` file — never uploaded
 anywhere.
 

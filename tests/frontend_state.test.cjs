@@ -15,6 +15,52 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('TONE3000 settings validation distinguishes secret and publishable keys', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function settingValidationMessage(', 'function renderSettings()'), sandbox);
+  const field = {
+    label: 'TONE3000 API key', required_prefix: 't3k_cs_',
+    validation_message: 'Use the TONE3000 Secret Key beginning t3k_cs_.',
+  };
+  assert.equal(sandbox.settingValidationMessage(field, 't3k_cs_actual-secret'), '');
+  assert.match(sandbox.settingValidationMessage(field, 't3k_pub_publishable'), /t3k_cs_/);
+  assert.match(sandbox.settingValidationMessage(field, 't3k_cs_'), /t3k_cs_/);
+  assert.equal(sandbox.settingValidationMessage(field, ''), '');
+});
+
+test('welcome cookie is versioned and independent of the backend port', () => {
+  const sandbox = { WELCOME_COOKIE_NAME: 'nam-mixer-welcome-version' };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function welcomeCookieHasVersion(', 'document.getElementById("btn-welcome-dismiss")'), sandbox);
+  assert.equal(sandbox.welcomeCookieHasVersion('other=x; nam-mixer-welcome-version=1', '1'), true);
+  assert.equal(sandbox.welcomeCookieHasVersion('nam-mixer-welcome-version=1', '2'), false);
+});
+
+test('conversation export includes optional structured AI and research debug', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function buildRecipeConversationMarkdown(', 'recipeSaveMarkdownButton.addEventListener'), sandbox);
+  const messages = [
+    { role: 'user', text: 'Find a clean tone.' },
+    { role: 'assistant', text: 'Try this source.' },
+  ];
+  const debugTrace = [{
+    ai_calls: [{ messages: [{ role: 'user', content: 'exact bounded prompt' }] }],
+    research: { tone3000_queries: ['Vox AC30'] },
+  }];
+
+  const ordinary = sandbox.buildRecipeConversationMarkdown(messages);
+  const debug = sandbox.buildRecipeConversationMarkdown(messages, { includeDebug: true, debugTrace });
+
+  assert.match(ordinary, /## You\n\nFind a clean tone\./);
+  assert.doesNotMatch(ordinary, /AI and research debug/);
+  assert.match(debug, /# AI and research debug/);
+  assert.match(debug, /exact bounded prompt/);
+  assert.match(debug, /Vox AC30/);
+  assert.match(debug, /Authorization headers are excluded/);
+});
+
 test('cancelled comparison permits a retry and old completion cannot unlock the new request', async () => {
   const requests = [];
   const sandbox = {
@@ -62,7 +108,7 @@ test('wizard applies instrument, pickup, blend choice and protects them from DI 
     selectedWizardBehaviour: () => 'fixed', setModeFromWizard(mode) { this.currentMode = mode; },
     mixSlider: {}, wizardMoreB: { value: '70' }, updateMixValueLabel() {},
     scheduleUpdate() {}, scheduleAuditionRefresh() {}, wizardResult: {}, havePair: false,
-    setWorkflowStage() {}, diSelector: { value: 'guitar_clean.wav' },
+    showWizardResult() {}, setWorkflowStage() {}, diSelector: { value: 'guitar_clean.wav' },
   };
   // Functions used as globals are deliberately independent of a JS receiver.
   sandbox.populateProfileSelect = () => { sandbox.profileSelect.value = 'passive_bass'; };
