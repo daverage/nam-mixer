@@ -86,6 +86,41 @@ TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
 QUICK_SETTINGS = {**_BASE_SETTINGS, "epochs": 1, "fast_dev_run": True}
 
 
+def custom_split_train_stop(manifest: dict):
+    """Duplicated literally from hybrid/a2_training_settings.py (this module is self-contained);
+    parity is asserted in tests/test_a2_training_settings.py."""
+    ti = manifest.get("training_input") or {}
+    if not ti.get("custom_split"):
+        return None
+    stop = int(ti.get("train_stop_samples") or 0)
+    if stop <= 0:
+        raise ValueError("training_input.custom_split requires a positive train_stop_samples")
+    return stop
+
+
+def apply_custom_split_patch(core, train_stop: int) -> None:
+    """Duplicated from scripts/train_a2.py's _apply_custom_split_patch (see there for the rationale)."""
+    from nam.train import metadata as md
+
+    def data_config(input_version, input_path, output_path, ny, latency):
+        return {
+            "train": {"ny": ny, "stop_samples": train_stop},
+            "validation": {"ny": None, "start_samples": train_stop},
+            "common": {"x_path": input_path, "y_path": output_path, "delay": latency, "allow_unequal_lengths": True},
+            "joint": [],
+        }
+
+    core._detect_input_version = lambda p: (core._Version(4, 0, 0), False)
+    core._get_data_config = data_config
+    core._check_data = lambda *a, **k: md.DataChecks(version=1, passed=True)
+    core._analyze_latency = lambda user_latency, *a, **k: md.Latency(
+        manual=user_latency,
+        calibration=md.LatencyCalibration(
+            algorithm_version=0, delays=[], safety_factor=0, recommended=None,
+            warnings=md.LatencyCalibrationWarnings(matches_lookahead=False, disagreement_too_high=False, not_detected=True)))
+    core._get_final_latency = lambda la: la.manual
+
+
 def _find_input_dir() -> Path:
     """Locate the attached dataset directory robustly -- Kaggle mounts
     dataset sources under /kaggle/input/<dataset-slug>/, but we don't
@@ -166,7 +201,15 @@ def validate_inputs(bundle_dir: Path) -> dict:
     target_path = bundle_dir / "hybrid_target.wav"
 
     md5 = _md5_file(input_path)
-    if md5 != OFFICIAL_V3_INPUT_MD5:
+    manifest_path = bundle_dir / "training_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+    if custom_split_train_stop(manifest) is not None:
+        # Continuous Gain bundle: the input is the official NAM file PLUS DI segments (declared in the manifest
+        # with an explicit train/validation boundary), so it is checked by its recorded SHA-256 instead.
+        expected = (manifest.get("training_input") or {}).get("sha256")
+        if not expected or _sha256_file(input_path) != expected:
+            raise CloudTrainingError("input.wav does not match the SHA-256 recorded in training_manifest.json")
+    elif md5 != OFFICIAL_V3_INPUT_MD5:
         raise CloudTrainingError(
             f"input.wav does not match official NAM V3 (expected md5 {OFFICIAL_V3_INPUT_MD5}, got {md5})"
         )
@@ -399,6 +442,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
     elif mode == "character":
         name = f"Character Blend {amp_a_name} + {amp_b_name}"
+    elif mode == "continuous_gain":
+        name = "Continuous Gain"
     else:
         name = f"Hybrid {amp_a_name} -> {amp_b_name}"
 
@@ -410,6 +455,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         cabinet_name = str(cab.get("display_name") or cab.get("original_filename") or "Cabinet").strip()
         model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
     elif export_mode == "embedded":
+        model_name = base_name
+    elif mode == "continuous_gain":
         model_name = base_name
     else:
         model_name = f"{base_name} [Amp Only]"
@@ -442,6 +489,9 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
     rf_check = check_receptive_field(manifest, REQUIRED_SAMPLE_RATE)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    custom_train_stop = custom_split_train_stop(manifest)
+    if custom_train_stop is not None:
+        apply_custom_split_patch(core, custom_train_stop)
 
     start = time.time()
     result = core.train(

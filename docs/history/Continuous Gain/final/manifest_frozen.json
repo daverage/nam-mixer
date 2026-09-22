@@ -1,0 +1,199 @@
+{
+ "task": "Continuous Gain: best practical single NAM per amp (final candidates)",
+ "frozen_before_training": true,
+ "code_commit_at_freeze": "5fb32ad002f7b671f53cddca70ea87bfa9dd38f1",
+ "note": "The commit adding this file is the freeze commit; code_commit_at_freeze is its parent.",
+ "basis": "Phase 4E configuration B capture sets (unchanged), plus two targeted changes: (1) plugin-compatible anchor mapping (lowest anchor -20 dB), (2) guitar training material covering the whole playback level range",
+ "evidence_for_changes": {
+  "mapping": "docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md section 5 (teacher-only: -20..+14 dB is at least as good as -22..+14, and better on the Vibrolux; +20 top is worse)",
+  "coverage": "student departure from its own teacher rises steeply once total level exceeds about +8 dB on both amps (ESR 0.006 at -8..+8, 0.013 at +8..+14, 0.022-0.026 at +14..+20, 0.049-0.056 above +20); guitar training audio has 3% of active audio at -16..-10 dBFS and none above -10, while playback at G10 sits at -14.8 (normal) and -8.8 dBFS (hard)"
+ },
+ "no_capture_set_change": "no evidence that G5, G6, G7 or G8 adds a missing sound (teacher-only comparison, docs section 5); capture sets stay as B",
+ "amps": {
+  "jcm800": {
+   "captures": {
+    "G1": {
+     "file": "jcm800-high-g1.0-11.4dBu.nam",
+     "sha256": "819aa9478785443e9c1bf8607e16d102bc6030fdcebbfb5b7cb3b7f4f6609662",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G2": {
+     "file": "jcm800-high-g2.0-11.4dBu.nam",
+     "sha256": "eff64b0d7ee0f020595a2a298ea56ca20f5c6d40113cb025736ceb7420244f14",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G4": {
+     "file": "jcm800-high-g4.0-11.4dBu.nam",
+     "sha256": "1a07a2ff4ffa171d043b5d5d04c675f42b586d0fffe6b5a98a9e5e9f7a9e6d0f",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G10": {
+     "file": "jcm800-high-ga10-11.4dBu.nam",
+     "sha256": "1e9108ef5f4fa696caf8449393297930b268804fa79bb2da9009016e9ef93925",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    }
+   },
+   "anchors_designated_input_gain_db": {
+    "G1": -20.0,
+    "G2": -9.2,
+    "G4": -1.7,
+    "G10": 14.0
+   },
+   "mapping_rule": "response-distance anchors on [-20, +14] dB (arc length of the measured profile, >= 4 dB apart); other positions linear in the response coordinate between anchors",
+   "b_baseline_anchors_db": {
+    "G1": -22.0,
+    "G2": -10.5,
+    "G4": -2.6,
+    "G10": 14.0
+   }
+  },
+  "vibrolux": {
+   "captures": {
+    "G1": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V1.nam",
+     "sha256": "93ff61d99a81ab1244ce435a2878a7314434cde10bfe74b65cbed21e076ee74b",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G2": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V2.nam",
+     "sha256": "aee22def2433a4da3caa701cb60cd721b248b7e14674a00b9409df097773b685",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G3": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V3.nam",
+     "sha256": "8e80ecbee0e4194509765e058ae923297a30ed55f52bb4045c1b4b07ed49b520",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G4": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V4.nam",
+     "sha256": "5d88ae6dfbb6ac2c781630de0a9e88b8a6eabd9de9eb9386b8c2ae5fa89039d2",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G7": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V7.nam",
+     "sha256": "3fbc4ea0817bd5844f7e7715a798ff44942f2093557b3d50d6d7b4e735f2b4f4",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    },
+    "G10": {
+     "file": "Super-Sonic Vibrolux Ch T5 B5 V10.nam",
+     "sha256": "2bc96f0c23de3898d80f0e689ae8f816000427cc8f276c5a3803d102d7afed16",
+     "qa_status": "VALID",
+     "alignment_correction_samples": 0
+    }
+   },
+   "anchors_designated_input_gain_db": {
+    "G1": -20.0,
+    "G2": -15.6,
+    "G3": -7.1,
+    "G4": -2.2,
+    "G7": 5.7,
+    "G10": 14.0
+   },
+   "mapping_rule": "response-distance anchors on [-20, +14] dB (arc length of the measured profile, >= 4 dB apart); other positions linear in the response coordinate between anchors",
+   "b_baseline_anchors_db": {
+    "G1": -22.0,
+    "G2": -17.4,
+    "G3": -8.4,
+    "G4": -3.1,
+    "G7": 5.3,
+    "G10": 14.0
+   }
+  }
+ },
+ "training": {
+  "architecture": "standard NAM A2 (PackedWaveNet), 22,783 parameters, official trainer via scripts/single_nam_train.py (unchanged from Phase 4E)",
+  "trainer_script_sha256": "9e920a998d0f69576938c1453490d27d641677a2d0f393b5143e9369c486ec6b",
+  "epochs": 60,
+  "batch_size": 16,
+  "ny": 8192,
+  "optimiser": "Adam lr 0.004, exponential decay 0.994 per epoch (official default, unchanged)",
+  "seeds": [
+   0,
+   1
+  ],
+  "checkpoint_selection": "stock best-validation checkpoint",
+  "expected_updates": "about 14,600 (data is 1.42x longer than Phase 4E's 467 s; disclosed confound: more updates than B)",
+  "concurrency": "4 models concurrently on one machine (MPS)"
+ },
+ "data": {
+  "builder": "scripts/fc_build.py (reproduces the frozen Phase 4E B bundle exactly when given B's arguments: both audio hashes identical, checked for the Vibrolux)",
+  "builder_sha256": "80972d3c54bcc526549876daf05067858f505e9ab044ed5d5b3ad083d18d6764",
+  "recipe": "official NAM input (190 s) + clean_smooth/moderate_hotrod/high_thrash 20 s each at offsets -32,-24,-16,-8,0,+8,+14,+20 dB; validation high_metalcore 8 s at -24,0,+8,+20; teacher = envelope-driven blend of the selected real captures (hybrid.multi_blend), one -0.2 dBFS peak ceiling, no per-capture level matching, no alignment corrections needed",
+  "bundles": {
+   "jcm800": {
+    "path": "work/p4e/final/jcm800/FC_bundle",
+    "train_seconds": 664.494,
+    "val_seconds": 34.0,
+    "levels_db": [
+     -50.0,
+     -39.2,
+     -31.7,
+     -16.0
+    ],
+    "output_scale_c": 0.721919611701367,
+    "target_audio_sha256": "2630aa6af58092180334a65de5a539f1d0001f1d9c18dd178b8a5c771a3c277e",
+    "input_audio_sha256": "593594dd47de9ceca7804fa1be107f20bba78b7006db613bd7298b3eddae676d"
+   },
+   "vibrolux": {
+    "path": "work/p4e/final/vibrolux/FC_bundle",
+    "train_seconds": 664.494,
+    "val_seconds": 34.0,
+    "levels_db": [
+     -50.0,
+     -45.6,
+     -37.1,
+     -32.2,
+     -24.3,
+     -16.0
+    ],
+    "output_scale_c": 1.0,
+    "target_audio_sha256": "64794846a0bafb0155732bbde98c9b51c85bb7289ddbe6dbaae21f0e42d320ef",
+    "input_audio_sha256": "593594dd47de9ceca7804fa1be107f20bba78b7006db613bd7298b3eddae676d"
+   }
+  }
+ },
+ "evaluation": {
+  "held_out_dis": [
+   "moderate_brit",
+   "clean_mayer",
+   "bass_rollin"
+  ],
+  "di_offsets_db": [
+   -12,
+   -6,
+   0,
+   6
+  ],
+  "positions": "all real integer captures (JCM800 also the nine genuine half-steps as independent check)",
+  "models": "v3 C3 (its fixed-rule mapping), Phase 4E B seeds 0/1 (frozen B mapping), FC seeds 0/1 (FC mapping); each at its OWN intended Input gain; one global output constant per model (the training scale), no per-gain or per-level correction",
+  "measures": "level, EQ bands, HF, crest, dynamic range, transient, sine THD/IO slope as before; student-vs-teacher ESR by total level; flagged-combination counts with the working flags (level 1.0, HF 1.0, crest 1.0, dyn 1.5 dB); continuous Input-gain sweep -20..+20; extremes of the practical range",
+  "listening": "pending; a listening set for the new candidate will be generated; no perceptual claim is made without it"
+ },
+ "criteria": {
+  "C1_targeted_weakness": "student-vs-teacher level-matched ESR over cases whose total level (Input gain + playing offset) is at or above +8 dB is at least 40% lower than the mean of the two B seeds, for EACH FC seed",
+  "C2_no_native_level_regression": "over all positions at DI offset 0, mean |error| vs the real capture for level, HF, crest, EQ is not worse than the B seed mean by more than 0.3 dB (dynamic range 0.5 dB), and worst-position level error <= 1.5 dB, for EACH FC seed",
+  "C3_fixed_setting_playability": "flagged amp/position/measure combinations in the soft-to-hard test (working flags) not more than the B seed mean + 2, for EACH FC seed",
+  "C4_reproducibility": "difference between the two FC seeds in each C2 measure is not larger than the larger of 0.3 dB and the two B seeds' difference",
+  "C5_range_and_format": "all anchors within [-20, +14] dB; ordinary .nam structure identical to a stock export; finite output over -20..+20 dB Input gain; raw peaks reported",
+  "C6_sweep": "no step of the continuous Input-gain sweep turns the opposite way to the real amp's progression; largest step ratio (max/median) not more than 1.5x B's",
+  "interpretation": "criteria are working thresholds, not perceptual measures; they are not revised after results. A pass means 'not demonstrably worse and specifically better where targeted'; audible quality still needs listening."
+ },
+ "selection_rule": {
+  "recommended": "per amp, if C1-C6 all pass for both FC seeds: the FC seed with the lower mean level-matched ESR to the real captures over all evaluation cases (a supporting measure used only to break the tie between seeds); otherwise the B seed with the lower value of the same measure; v3 C3 is reported as a documented alternative (its listening result on the Vibrolux is noted) and is not selected by this rule unless both FC and B fail C5 (range/format) in a way C3 does not",
+  "not_allowed": "averaging models, runtime blending, different models for different gain regions"
+ },
+ "outputs": {
+  "models": "work/p4e/final/<amp>/FC_bundle/<amp>_FC_s<seed>/*.nam",
+  "deliverables": "deliverables/<amp>/ (chosen .nam, guide, mapping)",
+  "report": "docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md"
+ }
+}

@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from functools import wraps
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from flask import Flask, Response, g, jsonify, render_template, request, send_fi
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
+from cg_routes import register_cg_routes
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.blend_training_target import generate_blend_training_bundle
@@ -94,7 +96,7 @@ DI_DIR = BASE_DIR / "assets" / "di"
 _data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
 WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
-APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.2.1")
+APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.3.0")
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
@@ -878,6 +880,13 @@ def _session_model_path(session_id: str) -> Path:
     return SESSION_MODEL_DIR / f"{session_id}.nam"
 
 
+def _is_continuous_gain_bundle(bundle_dir: Path) -> bool:
+    try:
+        return json.loads((bundle_dir / "training_manifest.json").read_text(encoding="utf-8")).get("mode") == "continuous_gain"
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def _generated_session_path(bundle_dir: Path) -> Path:
     return bundle_dir / "nam-mixer-session.json"
 
@@ -1022,6 +1031,15 @@ def _materialize_session_nam(session_id: str, session: dict) -> None:
     model_path.write_bytes(raw)
 
 
+def _store_session_record(session: dict) -> dict:
+    """Validate and write a plain session record (and its embedded NAM) -- for records the SERVER maintains, e.g. Continuous Gain
+    projects, which are listed, loaded, exported and deleted through the same Sessions tab as everything else."""
+    session_id, session = _session_payload(session)
+    _materialize_session_nam(session_id, session)
+    _session_path(session_id).write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+    return session
+
+
 def _session_for_client(session: dict) -> dict:
     """Add local, non-portable routes without changing the stored JSON."""
     client_session = dict(session)
@@ -1051,6 +1069,8 @@ def api_sessions():
         except (OSError, ValueError, json.JSONDecodeError):
             logger.warning("Ignoring invalid session file: %s", path.name)
     for bundle_dir in (path.parent for path in A2_OUTPUT_DIR.glob("*/training_manifest.json")):
+        if _is_continuous_gain_bundle(bundle_dir):
+            continue    # Continuous Gain projects have their own tab; they are not Mixer/Builder sessions
         generated_path = _generated_session_path(bundle_dir)
         try:
             if generated_path.is_file():
@@ -1110,6 +1130,8 @@ def _find_session_record(session_id: str) -> tuple[Path, dict, Path | None] | No
         except (OSError, json.JSONDecodeError):
             return None
     for bundle_dir in (p.parent for p in A2_OUTPUT_DIR.glob("*/training_manifest.json")):
+        if _is_continuous_gain_bundle(bundle_dir):
+            continue
         candidate = _generated_session_path(bundle_dir)
         if candidate.is_file():
             try:
@@ -1119,6 +1141,118 @@ def _find_session_record(session_id: str) -> tuple[Path, dict, Path | None] | No
             except (OSError, json.JSONDecodeError):
                 continue
     return None
+
+
+def _referenced_upload_paths() -> set[Path]:
+    """Every work/uploaded_nam and work/uploaded_cab file any REMAINING session (Builder-mode: plain or generated; Continuous
+    Gain keeps its own captures/ directory and never touches these) still points at, by resolved absolute path."""
+    refs: set[Path] = set()
+    for path in SESSION_DIR.glob("*.nam-mixer.json"):
+        try:
+            session = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        settings = session.get("settings") if isinstance(session, dict) else None
+        if not isinstance(settings, dict):
+            continue
+        for key in ("ampA", "ampB"):
+            p = (settings.get(key) or {}).get("path")
+            if isinstance(p, str) and p:
+                refs.add(Path(p).resolve())
+        cab_path = (settings.get("cab") or {}).get("path")
+        if isinstance(cab_path, str) and cab_path:
+            refs.add(Path(cab_path).resolve())
+    for bundle_dir in (p.parent for p in A2_OUTPUT_DIR.glob("*/nam-mixer-session.json")):
+        try:
+            session = json.loads((bundle_dir / "nam-mixer-session.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        settings = session.get("settings") if isinstance(session, dict) else None
+        if not isinstance(settings, dict):
+            continue
+        for key in ("ampA", "ampB"):
+            p = (settings.get(key) or {}).get("path")
+            if isinstance(p, str) and p:
+                refs.add(Path(p).resolve())
+        cab_path = (settings.get("cab") or {}).get("path")
+        if isinstance(cab_path, str) and cab_path:
+            refs.add(Path(cab_path).resolve())
+    return refs
+
+
+def _referenced_render_sources() -> set[Path]:
+    """Every work/render_sources file a REMAINING training bundle's manifest still points at (amp_a.path / amp_b.path -- the
+    only fields _retain_render_source's output is ever persisted into; see hybrid/training_target.py and its Blend/Character
+    counterparts). The DI copy retained for the same render is never written into a manifest (only its filename, for
+    provenance), so a render_sources DI copy is never "referenced" once the render/preview that made it is over -- it is
+    always safe to sweep. Continuous Gain bundles render straight from the project's own captures/ and never touch this
+    directory at all."""
+    refs: set[Path] = set()
+    for manifest_path in A2_OUTPUT_DIR.glob("*/training_manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        for key in ("amp_a", "amp_b"):
+            p = (manifest.get(key) or {}).get("path")
+            if isinstance(p, str) and p:
+                refs.add(Path(p).resolve())
+    return refs
+
+
+def _sweep_directory(directory: Path, referenced: set[Path], *, grace_seconds: float, files_only: bool = True) -> list[str]:
+    """Delete direct children of `directory` that are not in `referenced` and older than `grace_seconds`. Files newer than the
+    grace period are left alone even if unreferenced -- something just uploaded/rendered in an editing session that hasn't
+    been Saved (or a bundle not yet written) must never be pulled out from under an in-progress action."""
+    removed: list[str] = []
+    now = time.time()
+    if not directory.is_dir():
+        return removed
+    for candidate in directory.iterdir():
+        if files_only and not candidate.is_file():
+            continue
+        try:
+            if candidate.resolve() in referenced:
+                continue
+            if now - candidate.stat().st_mtime < grace_seconds:
+                continue
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+            else:
+                candidate.unlink()
+            removed.append(str(candidate))
+        except OSError:
+            continue
+    return removed
+
+
+def _sweep_orphaned_uploads(*, grace_seconds: float = 1800.0) -> list[str]:
+    """Remove work/uploaded_nam and work/uploaded_cab files no remaining session points at (see _referenced_upload_paths).
+
+    Called right after a session is deleted, so this is the "removal through the session manager" the upload docstrings always
+    promised but never delivered -- deleting the last session that used a file now actually frees the disk space.
+    """
+    referenced = _referenced_upload_paths()
+    return _sweep_directory(NAM_UPLOAD_DIR, referenced, grace_seconds=grace_seconds) + \
+        _sweep_directory(CAB_UPLOAD_DIR, referenced, grace_seconds=grace_seconds)
+
+
+def _sweep_orphaned_render_sources(*, grace_seconds: float = 1800.0) -> list[str]:
+    """Remove work/render_sources/<hash>/ folders no remaining training bundle references (see _referenced_render_sources).
+    Unlike uploads, most of these are never "released" by any user action (a render/preview that's never generated into a
+    bundle has nothing to delete) -- run once at app startup as well as after every session delete, see app.py's module body.
+    """
+    referenced_files = _referenced_render_sources()
+    root = WORK_DIR / "render_sources"
+    if not root.is_dir():
+        return []
+    # Each render source lives at render_sources/<sha256>/<original filename> -- a whole hash folder is orphaned exactly
+    # when none of its files are referenced (in practice each folder holds one file).
+    referenced_folders = {p.parent.resolve() for p in referenced_files}
+    return _sweep_directory(root, referenced_folders, grace_seconds=grace_seconds, files_only=False)
+    return removed
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
@@ -1166,7 +1300,14 @@ def api_session_delete(session_id: str):
         shutil.rmtree(bundle_dir)
     else:
         path.unlink()
+    if isinstance(_session, dict) and (_session.get("settings") or {}).get("mode") == "continuous_gain":
+        # A Continuous Gain project owns a working folder (captures, analysis, plan) and, once created, a training bundle.
+        shutil.rmtree(CG_PROJECT_DIR / secure_filename(session_id), ignore_errors=True)
+        if design_id:
+            shutil.rmtree(A2_OUTPUT_DIR / secure_filename(str(design_id)), ignore_errors=True)
     _session_model_path(session_id).unlink(missing_ok=True)
+    _sweep_orphaned_uploads()
+    _sweep_orphaned_render_sources()
     return "", 204
 
 
@@ -2970,7 +3111,16 @@ def api_system_usage():
     })
 
 
+CG_PROJECT_DIR = WORK_DIR / "cg_projects"
+register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, training_input_path=TRAINING_INPUT_PATH, store_session=_store_session_record)
+
+
 if __name__ == "__main__":
+    # One-time startup housekeeping: work/render_sources accumulates a copy for every render/preview, most of which never
+    # become part of a saved bundle and so are never released by any user action (see _sweep_orphaned_render_sources's
+    # docstring) -- sweep the backlog once per launch. Deliberately NOT at module import time: tests import this module
+    # directly against the real work/ directory and must never trigger a real filesystem sweep as a side effect of that.
+    _sweep_orphaned_render_sources()
     # Keep the local tool safe and single-process by default.  Opt into the
     # Flask debugger/reloader explicitly while developing.
     app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5001")), debug=os.environ.get("FLASK_DEBUG") == "1")

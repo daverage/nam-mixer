@@ -93,7 +93,7 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
   border-bottom-color: var(--accent);
 }
 .mode-tab:hover:not(.active) { color: var(--text); }
-.mode-tab:focus-visible, .workflow-tab:focus-visible, .btn:focus-visible,
+.mode-tab:focus-visible, .workflow-tab:focus-visible, .cg-tab:focus-visible, .btn:focus-visible,
 .preset-btn:focus-visible, .link-btn:focus-visible, summary:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -689,7 +689,8 @@ details.advanced summary:hover { color: var(--text); }
 
 /* Guided workspace: controls stay available, but only the current decision is
    foregrounded. This keeps the three design modes on one consistent journey. */
-.workflow-nav {
+.workflow-nav,
+.cg-nav {
   max-width: 1100px;
   margin: 0 auto 1.25rem;
   display: flex;
@@ -701,7 +702,8 @@ details.advanced summary:hover { color: var(--text); }
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
-.workflow-tab {
+.workflow-tab,
+.cg-tab {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
@@ -717,7 +719,8 @@ details.advanced summary:hover { color: var(--text); }
   white-space: nowrap;
   cursor: pointer;
 }
-.workflow-tab span {
+.workflow-tab span,
+.cg-tab span {
   display: inline-grid;
   place-items: center;
   width: 1.25rem;
@@ -726,10 +729,11 @@ details.advanced summary:hover { color: var(--text); }
   background: var(--track);
   font-size: 0.68rem;
 }
-.workflow-tab:hover { color: var(--text); background: var(--bg); }
-.workflow-tab.active { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.workflow-tab.active span { background: var(--accent); color: var(--accent-text); }
-.workflow-hint {
+.workflow-tab:hover, .cg-tab:hover { color: var(--text); background: var(--bg); }
+.workflow-tab.active, .cg-tab.active { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.workflow-tab.active span, .cg-tab.active span { background: var(--accent); color: var(--accent-text); }
+.workflow-hint,
+.cg-hint {
   margin: 0 0 0 auto;
   color: var(--text-muted);
   font-size: 0.78rem;
@@ -919,3 +923,31 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
 .welcome-steps { margin: 1rem 0; padding-left: 1.4rem; }
 .welcome-steps li { margin-bottom: 0.6rem; line-height: 1.4; }
 .welcome-card .btn { margin-top: 0.75rem; }
+
+/* ---- Continuous Gain tab: shares the Builder's look (cards, workflow bar, two-column layout); only what is new lives here ---- */
+.cg-panel > .cg-nav { max-width: 1100px; margin-left: auto; margin-right: auto; }
+.cg-intro { max-width: 820px; margin: 0 auto 1.25rem; }
+.cg-intro .info { margin: 0 0 0.6rem; }
+.cg-intro .field-label { margin: 0; }
+/* Like the Builder's create/compare stages: ONE centred column of cards, at most 820px wide, one stage at a time. */
+.cg-layout { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 820px); justify-content: center; gap: 1.25rem; align-items: start; }
+.cg-train-host #model-comparison-panel { display: none !important; }   /* the Builder's held-out comparison is for Builder designs */
+.cg-train-host > #a2-training-section { margin: 0; }
+.cg-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0; }
+.cg-row .file-input, .cg-row .select-input { flex: 1 1 10rem; width: auto; }
+.cg-drop { border: 2px dashed var(--border); border-radius: 10px; padding: 0.9rem; text-align: center; color: var(--text-muted); font-size: 0.8rem; }
+.cg-drop.over { border-color: var(--accent); background: var(--panel-alt); }
+.cg-wrap td, .cg-wrap th { white-space: normal; vertical-align: top; }
+.cg-wrap input[type=number] { width: 5.5rem; }
+.cg-chip { margin-left: 0; }
+.cost-badge-bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.cg-modes { margin: 0 0 0.6rem; max-width: none; }
+.cg-issues { color: var(--danger); margin: 0.4rem 0; padding-left: 1.1rem; font-size: 0.8rem; }
+.cg-chart { width: 100%; height: auto; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; margin-top: 0.5rem; }
+.cg-chart text { fill: var(--text-muted); font-size: 11px; }
+.cg-audio-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem; }
+.cg-audio-pair audio, #cg-body audio { width: 100%; margin-top: 0.4rem; }
+.cg-body-note { color: var(--text-muted); font-size: 0.75rem; margin: 0.4rem 0 0; line-height: 1.4; }
+@media (max-width: 820px) { .cg-audio-pair { grid-template-columns: 1fr; } }
+
+.session-kind { margin-left: 0.5rem; }

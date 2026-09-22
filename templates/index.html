@@ -37,6 +37,7 @@
 
   <nav class="mode-tabs utility-tabs" aria-label="Utilities">
     <button type="button" class="mode-tab active" id="tab-builder" aria-pressed="true">Builder</button>
+    <button type="button" class="mode-tab" id="tab-cg" aria-pressed="false" aria-controls="cg-panel">Continuous Gain</button>
     <button type="button" class="mode-tab" id="tab-wizard" aria-pressed="false" aria-controls="wizard-panel">Wizard</button>
 <button type="button" class="mode-tab" id="tab-ai-assistant" aria-pressed="false" aria-controls="ai-assistant-panel">AI Assistant</button>
     <button type="button" class="mode-tab" id="tab-tone3000" aria-pressed="false" aria-controls="tone3000-panel">TONE3000</button>
@@ -628,6 +629,25 @@
     </div>
   </section>
 
+  <section id="cg-panel" class="cg-panel" hidden aria-label="Continuous Gain">
+    <nav class="cg-nav" id="cg-steps" aria-label="Continuous Gain workflow">
+      <button type="button" class="cg-tab active" data-cg-stage="1"><span>1</span> Add captures</button>
+      <button type="button" class="cg-tab" data-cg-stage="2"><span>2</span> Analyse &amp; select</button>
+      <button type="button" class="cg-tab" data-cg-stage="3"><span>3</span> Train</button>
+      <button type="button" class="cg-tab" data-cg-stage="4"><span>4</span> Test &amp; export</button>
+      <p class="cg-hint" id="cg-hint"></p>
+    </nav>
+    <div class="card cg-intro">
+      <h2 id="cg-title">Continuous Gain <span class="cost-badge cost-badge-auto">one amp · one NAM</span></h2>
+      <p class="info">Turn several fixed-gain captures of <strong>one amp and channel</strong> into <strong>one standard .nam</strong> whose gain range you explore with an ordinary player's Input gain. It approximates the range; it does not reproduce every knob position exactly.</p>
+      <div class="cg-row"><strong id="cg-current-name">No project open</strong>
+        <button type="button" id="cg-new-project" class="btn btn-secondary btn-small">New project</button>
+        <button type="button" id="cg-open-sessions" class="btn btn-secondary btn-small">Open a saved project…</button></div>
+      <p class="info">Projects are listed in <strong>Sessions</strong>, labelled “Continuous Gain”: load one there to come back to it.</p>
+    </div>
+    <div id="cg-body" class="cg-layout"></div>
+  </section>
+
   <footer class="site-footer">
     <span>Created by Andrzej Marczewski · © 2026</span>
     <span>Version {{ app_version }}</span>
@@ -636,5 +656,6 @@
   </footer>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='cg.js') }}"></script>
 </body>
 </html>

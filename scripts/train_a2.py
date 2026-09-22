@@ -59,6 +59,7 @@ from hybrid.a2_training_settings import (  # noqa: E402
     A2_EPOCH_PRESETS,
     A2_QUICK_SETTINGS,
     DEFAULT_EPOCH_PRESET,
+    custom_split_train_stop,
     settings_for_preset,
     user_metadata_kwargs,
 )
@@ -238,14 +239,19 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     mode = manifest.get("mode", "hybrid")
 
     branch_samples = {}
-    if mode in ("hybrid", "character"):
+    if mode == "continuous_gain":
+        # One amp, N captures: the per-capture RFs (and the bounded envelope) were computed at bundle
+        # generation and recorded in the manifest -- the same record the Kaggle worker reads, so local
+        # and cloud reach the same conclusion (tests/test_receptive_field_parity.py).
+        branch_samples = {k: int(v) for k, v in ((manifest.get("receptive_field") or {}).get("branch_samples") or {}).items() if v is not None}
+    elif mode in ("hybrid", "character"):
         max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
         if max_history_ms is None:
             print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
             return {}
         branch_samples["envelope"] = int(round(max_history_ms / 1000.0 * sample_rate))
 
-    for label, key in (("Amp A", "amp_a"), ("Amp B", "amp_b")):
+    for label, key in (("Amp A", "amp_a"), ("Amp B", "amp_b")) if mode != "continuous_gain" else ():
         amp_path = manifest.get(key, {}).get("path")
         if not amp_path:
             print(f"WARNING: manifest has no {key}.path -- skipping {label}'s receptive-field check.")
@@ -438,6 +444,34 @@ def _build_user_metadata(manifest: dict):
     )
 
 
+def _apply_custom_split_patch(core, train_stop: int) -> None:
+    """Custom (non-official) training input with an explicit train/validation boundary -- the Continuous
+    Gain bundle. Only the data split / input-version detection / data checks / latency analysis are patched
+    (the official file's fixed segment layout does not apply); architecture, optimiser, checkpointing and
+    export stay the stock official path. Identical to the patch the frozen FC models were trained with
+    (scripts/single_nam_train.py, now archived) and to cloud/kaggle/train_a2_cloud.py's copy
+    (tests/test_a2_training_settings.py asserts they install the same data config)."""
+    from nam.train import metadata as md
+
+    def data_config(input_version, input_path, output_path, ny, latency):
+        return {
+            "train": {"ny": ny, "stop_samples": train_stop},
+            "validation": {"ny": None, "start_samples": train_stop},
+            "common": {"x_path": input_path, "y_path": output_path, "delay": latency, "allow_unequal_lengths": True},
+            "joint": [],
+        }
+
+    core._detect_input_version = lambda p: (core._Version(4, 0, 0), False)
+    core._get_data_config = data_config
+    core._check_data = lambda *a, **k: md.DataChecks(version=1, passed=True)
+    core._analyze_latency = lambda user_latency, *a, **k: md.Latency(
+        manual=user_latency,
+        calibration=md.LatencyCalibration(
+            algorithm_version=0, delays=[], safety_factor=0, recommended=None,
+            warnings=md.LatencyCalibrationWarnings(matches_lookahead=False, disagreement_too_high=False, not_detected=True)))
+    core._get_final_latency = lambda la: la.manual
+
+
 def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path, settings, device: str, manifest: dict) -> Path:
     """Call the official current neural-amp-modeler simplified A2 trainer:
     `nam.train.core.train()`.
@@ -477,6 +511,9 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
               "override -- it selects CUDA/MPS/CPU automatically. Continuing with automatic selection.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    custom_train_stop = custom_split_train_stop(manifest)
+    if custom_train_stop is not None:
+        _apply_custom_split_patch(core, custom_train_stop)
     # `settings` (an A2TrainingSettings -- either A2_QUICK_SETTINGS or
     # settings_for_preset(<draft|standard|high_def>)) is shared with
     # cloud/kaggle/train_a2_cloud.py -- see hybrid/a2_training_settings.py.

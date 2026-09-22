@@ -79,7 +79,9 @@ def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client
     assert "Cloudflare Workers AI" in llm_item["detail"]
 
 
-def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch):
+def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch, tmp_path):
+    # Isolate from a real .env on this machine (hybrid/env_file.py's deliberate fallback), same as tests/test_local_llm.py.
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
     assert client.get("/api/local_llm/status").get_json()["enabled"] is False
     response = client.post("/api/local_llm/recipe", json={"prompt": "a clean crunch blend"})
@@ -579,6 +581,112 @@ def test_session_validation_report_must_match_embedded_nam(client, tmp_path, mon
     restored = client.get("/api/sessions").get_json()[0]
     assert restored["artifact"]["sha256"] == sha256
     assert restored["validationReport"]["model_sha256"] == sha256
+
+
+def _isolate_uploads(tmp_path, monkeypatch):
+    nam_dir, cab_dir = tmp_path / "uploaded_nam", tmp_path / "uploaded_cab"
+    nam_dir.mkdir(); cab_dir.mkdir()
+    monkeypatch.setattr(app_module, "NAM_UPLOAD_DIR", nam_dir)
+    monkeypatch.setattr(app_module, "CAB_UPLOAD_DIR", cab_dir)
+    return nam_dir, cab_dir
+
+
+def _age(path: Path, seconds: float) -> None:
+    import os
+    now = __import__("time").time()
+    os.utime(path, (now - seconds, now - seconds))
+
+
+def test_deleting_a_session_sweeps_its_orphaned_uploads_but_keeps_shared_and_recent_ones(client, tmp_path, monkeypatch):
+    """The exact bug this guards: work/uploaded_nam and work/uploaded_cab accumulate forever because nothing ever ties them
+    to session lifecycle. Deleting the last session pointing at a file must now free it -- but never a file another surviving
+    session still uses, and never one uploaded too recently to have been saved into a session yet."""
+    session_dir = tmp_path / "sessions"; model_dir = session_dir / "models"; a2_dir = tmp_path / "a2"
+    model_dir.mkdir(parents=True); a2_dir.mkdir()
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    nam_dir, cab_dir = _isolate_uploads(tmp_path, monkeypatch)
+
+    only_a = nam_dir / "only-used-by-a.nam"; only_a.write_text("{}")
+    shared = nam_dir / "shared-by-a-and-b.nam"; shared.write_text("{}")
+    cab = cab_dir / "cab-used-by-a.wav"; cab.write_text("RIFF")
+    recent_orphan = nam_dir / "just-uploaded-not-saved-yet.nam"; recent_orphan.write_text("{}")
+    for f in (only_a, shared, cab, recent_orphan):
+        _age(f, 4000)  # old enough to sweep, except recent_orphan which we re-age below
+    _age(recent_orphan, 5)  # uploaded 5s ago: must survive even though no session references it yet
+
+    session_a = {"type": "nam-mixer-session", "version": 1, "id": "a", "name": "A", "savedAt": "2026-09-22T00:00:00Z",
+                 "settings": {"mode": "hybrid", "ampA": {"path": str(only_a)}, "ampB": {"path": str(shared)},
+                             "cab": {"path": str(cab)}}}
+    session_b = {"type": "nam-mixer-session", "version": 1, "id": "b", "name": "B", "savedAt": "2026-09-22T00:00:00Z",
+                 "settings": {"mode": "hybrid", "ampA": {"path": str(shared)}, "ampB": {"path": ""}}}
+    assert client.post("/api/sessions", json=session_a).status_code == 201
+    assert client.post("/api/sessions", json=session_b).status_code == 201
+
+    assert client.delete("/api/sessions/a").status_code == 204
+    assert not only_a.exists(), "no remaining session references it -> swept"
+    assert not cab.exists(), "no remaining session references the cab either -> swept"
+    assert shared.exists(), "session b still references it -> kept"
+    assert recent_orphan.exists(), "uploaded moments ago, unreferenced by design -> kept (grace period)"
+
+    assert client.delete("/api/sessions/b").status_code == 204
+    assert not shared.exists(), "the last session referencing it is gone -> swept"
+
+
+def test_render_sources_sweep_keeps_only_folders_a_remaining_bundle_references(tmp_path, monkeypatch):
+    """work/render_sources holds a copy per render/preview -- most never become a saved bundle, so this is swept both at app
+    startup and after a session delete, not tied to any single session's own lifecycle the way uploads are."""
+    a2_dir = tmp_path / "a2"; design_dir = a2_dir / "design-1"; design_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path)
+    rs = tmp_path / "render_sources"; rs.mkdir()
+    used = rs / "aaa111" / "amp-a.nam"; used.parent.mkdir(); used.write_text("{}")
+    di_only = rs / "bbb222" / "some-di.wav"; di_only.parent.mkdir(); di_only.write_text("RIFF")  # DI copies are never persisted
+    for f in (used, di_only):
+        _age(f.parent, 4000); _age(f, 4000)
+    (design_dir / "training_manifest.json").write_text(jsonlib.dumps(
+        {"amp_a": {"path": str(used)}, "amp_b": {"path": ""}}))
+    removed = app_module._sweep_orphaned_render_sources()
+    assert used.parent.exists() and used.exists()
+    assert not di_only.parent.exists()
+    assert str(di_only.parent) in removed
+
+
+def test_deleting_a_session_also_sweeps_render_sources_its_bundle_owned(tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"; model_dir = session_dir / "models"; a2_dir = tmp_path / "a2"
+    model_dir.mkdir(parents=True); a2_dir.mkdir()
+    design_dir = a2_dir / "design-1"; design_dir.mkdir()
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", model_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path)
+    _isolate_uploads(tmp_path, monkeypatch)
+    rs = tmp_path / "render_sources"; rs.mkdir()
+    owned = rs / "ccc333" / "amp.nam"; owned.parent.mkdir(); owned.write_text("{}")
+    _age(owned.parent, 4000); _age(owned, 4000)
+    (design_dir / "training_manifest.json").write_text(jsonlib.dumps({"amp_a": {"path": str(owned)}, "amp_b": {"path": ""}}))
+    session = {"type": "nam-mixer-session", "version": 1, "id": "design-1", "name": "Gen", "savedAt": "2026-09-22T00:00:00Z",
+               "settings": {"mode": "hybrid"}, "designId": "design-1"}
+    (design_dir / "nam-mixer-session.json").write_text(jsonlib.dumps(session))
+    c = app_module.app.test_client()
+    assert c.delete("/api/sessions/design-1").status_code == 204
+    assert not owned.parent.exists(), "the owning bundle is gone -> its render source is swept too"
+
+
+def test_upload_sweep_also_checks_generated_sessions(tmp_path, monkeypatch):
+    session_dir = tmp_path / "sessions"; a2_dir = tmp_path / "a2"; design_dir = a2_dir / "design-1"
+    session_dir.mkdir(); design_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    nam_dir, _cab_dir = _isolate_uploads(tmp_path, monkeypatch)
+    used = nam_dir / "used-by-generated-session.nam"; used.write_text("{}"); _age(used, 4000)
+    unused = nam_dir / "unused.nam"; unused.write_text("{}"); _age(unused, 4000)
+    (design_dir / "nam-mixer-session.json").write_text(jsonlib.dumps(
+        {"settings": {"mode": "hybrid", "ampA": {"path": str(used)}, "ampB": {"path": ""}}}))
+    removed = app_module._sweep_orphaned_uploads()
+    assert str(used) not in removed and used.exists()
+    assert str(unused) in removed and not unused.exists()
 
 
 def test_session_rejects_declared_artifact_hash_mismatch(client, tmp_path, monkeypatch):

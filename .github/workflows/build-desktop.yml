@@ -672,9 +672,29 @@ jobs:
             -type f \
             -print
 
+      # Tauri names installers after the version and architecture. Publish them under fixed names as well, so the README's
+      # https://github.com/<repo>/releases/latest/download/<name> links keep working for every release.
+      - name: Give the installers stable names
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-final
+          place() {
+            src="$(find release-assets -type f -iname "$1" | head -n 1)"
+            if [ -z "$src" ]; then echo "No installer matching $1" >&2; exit 1; fi
+            cp "$src" "release-final/$2"
+            echo "$src -> release-final/$2"
+          }
+          place '*.dmg'      NAM-Mixer-macOS-arm64.dmg
+          place '*.AppImage' NAM-Mixer-Linux-x64.AppImage
+          place '*.deb'      NAM-Mixer-Linux-x64.deb
+          place '*.msi'      NAM-Mixer-Windows-x64.msi
+          place '*.exe'      NAM-Mixer-Windows-x64-setup.exe
+          ls -l release-final
+
       - name: Attach installers to release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: release-assets/**
+          files: release-final/*
