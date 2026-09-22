@@ -256,6 +256,7 @@
         </details>
 
         <button id="btn-render-pair" class="btn btn-primary btn-block">Prepare amps for comparison</button>
+        <p class="info">Usually a few seconds to under a minute -- real NAM inference on both amps, scales with the DI's length.</p>
         <div class="status-row">
           <div id="render-status" class="info" aria-live="polite"></div>
           <button id="btn-renderer-retry" type="button" class="link-btn" hidden>Check again</button>
@@ -513,6 +514,7 @@
         <div class="hint">Optional. Leave this blank to use the two amp names.</div>
 
         <button id="btn-generate" class="btn btn-primary btn-block">Create training files</button>
+        <p class="info">Usually under a minute or two -- renders the full official training excitation through both amps.</p>
         <div id="generate-status" class="info" aria-live="polite"></div>
         <div id="generate-result" class="generate-result" hidden aria-live="polite"></div>
 
@@ -529,6 +531,7 @@
             <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Use a cloud GPU <span class="hint">(Kaggle, recommended)</span></label>
             <label><input type="radio" name="a2-backend" id="a2-backend-local" value="local"> Use this computer</label>
           </div>
+          <p class="info" id="training-time-estimate"></p>
 
           <div id="kaggle-panel">
             <div class="status-row">

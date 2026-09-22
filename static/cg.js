@@ -9,6 +9,10 @@
   const S = { id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard" };
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
+  // Rough elapsed-time estimates -- real measurements from this project's own end-to-end runs (parallel capture
+  // rendering + a per-capture probe cache, see hybrid/cg_parallel.py), not a guarantee: "usually", not exact.
+  const estimateSeconds = (count) => 20 + count * 2.6;      // ~20s fixed (timing/dither audit) + ~2.6s/capture, measured on 19 captures
+  const formatDuration = (seconds) => seconds < 90 ? `about ${Math.max(10, Math.round(seconds / 10) * 10)} seconds` : `about ${Math.round(seconds / 60)} minutes`;
   const say = (t, bad) => setStatus(t || "", Boolean(bad));       // the app-wide status line (app.js), not a second message area
 
   async function api(path, opts = {}) {
@@ -178,8 +182,8 @@
       (caps.length ? table(["File", "Physical gain position", "Audit", ""], rows) : `<p class="info">No captures yet.</p>`)
       + `<p class="info">${esc(d.check.summary)}</p>${issues ? `<ul class="cg-issues">${issues}</ul>` : ""}
         <button type="button" class="btn btn-primary btn-block" id="cg-analyse" ${d.check.ready && !S.job ? "" : "disabled"}>Analyse captures</button>
-        <p class="info">Runs each capture through the native renderer (about ${Math.max(1, Math.round(d.check.count * 0.15))} min). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
-      `<span class="cost-badge cost-badge-expensive">⚡ analysis takes a few minutes</span>`);
+        <p class="info">Runs each capture through the native renderer, in parallel (usually ${formatDuration(estimateSeconds(d.check.count))} for ${d.check.count} captures on this computer). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
+      `<span class="cost-badge cost-badge-expensive">⚡ ${formatDuration(estimateSeconds(d.check.count))}</span>`);
     return cols(setup, main);
   }
   function bindStage1() {
@@ -296,6 +300,7 @@
     const files = card("Training files", `
         <label class="field-label" for="cg-model-name">Model name</label><input class="file-input" id="cg-model-name" maxlength="100" value="${esc(d.project.name)}">
         <button type="button" class="btn btn-primary btn-block" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Recreate training files" : "Create training files"}</button>
+        <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(20 + p.selected.length * 4)}.</p>
         ${stale ? `<p class="info"><strong>The plan changed since these files were created — recreate them before training.</strong></p>` : ""}${jobBox()}
         ${b && t && t.core ? `<p class="info">Design <code>${esc(b.design_id)}</code><br>input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code> · target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code><br>output scale ${fmt(t.core.output_scale_c, 4)} — set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB.</p>` : ""}`);
     const train = b && !stale ? card("Train", `<div id="cg-train-slot"></div>${t && t.trained ? `<p class="info">${badge("instant", "trained")} <code>${esc(t.output_nam_path.split("/").pop())}</code></p><button type="button" class="btn btn-primary btn-block" id="cg-goto4">Continue to Test &amp; export</button>` : ""}`) : "";
@@ -334,6 +339,7 @@
     const v = d.validation;
     const actions = card("Test & export", `
         <button type="button" class="btn btn-secondary btn-block" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>
+        <p class="info">Usually ${formatDuration(15 + (d.plan ? d.plan.selected.length * 3 : 12))} -- renders comparisons and the audition sweep, in parallel.</p>
         <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download>Download export package (.nam + guide)</a>
         <p class="info">Export is never blocked by validation or by listening. Validation reports measurements against your original captures on held-out DIs; it is not a perceptual score.</p>${jobBox()}`);
     if (!v) return cols(actions, card("Validation", `<p class="info">No validation has been run for this model.</p>`));

@@ -2530,6 +2530,36 @@ function selectedEpochPreset() {
   return checked ? checked.value : "standard";
 }
 
+// --- Rough elapsed-time estimate for the chosen preset/backend, shown next to the choice so nobody wonders
+// whether a stuck-looking progress bar just needs more time. This section is shared between the Builder and the
+// Continuous Gain tab (see window.namTrainingHost below), so fixing/improving it here updates both at once.
+// Both rates below are real measurements from this project's own end-to-end test runs, not vendor claims --
+// see docs/continuous_gain_tab.md and the training-material experiment notes in work/ (now archived). They will
+// be wrong on a much faster/slower machine or a busy Kaggle queue; the wording says "usually", not a guarantee.
+const EPOCHS_BY_PRESET = { draft: 20, standard: 60, high_def: 120 };
+const LOCAL_SECONDS_PER_EPOCH = 28; // measured: a 20-epoch local run took ~560-620s solo on this size of model/bundle
+const KAGGLE_SECONDS_PER_EPOCH = 29; // measured: a 20-epoch Kaggle T4 job's own training step took ~574s
+const KAGGLE_OVERHEAD_MINUTES = 8; // measured: upload + queue + kernel start + download + re-validation, on top of training itself
+function formatMinutes(totalSeconds) {
+  const minutes = Math.max(1, Math.round(totalSeconds / 60));
+  return minutes === 1 ? "about 1 minute" : `about ${minutes} minutes`;
+}
+function updateTrainingTimeEstimate() {
+  const el = document.getElementById("training-time-estimate");
+  if (!el) return;
+  const epochs = EPOCHS_BY_PRESET[selectedEpochPreset()] ?? 60;
+  const backend = document.getElementById("a2-backend-local")?.checked ? "local" : "kaggle";
+  if (backend === "local") {
+    el.textContent = `Training usually takes ${formatMinutes(epochs * LOCAL_SECONDS_PER_EPOCH)} on this computer for ${epochs} epochs (longer if anything else is using the CPU/GPU at the same time).`;
+  } else {
+    el.textContent = `Training usually takes ${formatMinutes(epochs * KAGGLE_SECONDS_PER_EPOCH + KAGGLE_OVERHEAD_MINUTES * 60)} in total for ${epochs} epochs, including upload, queueing, and downloading the result -- actual queue time varies.`;
+  }
+}
+document.querySelectorAll('input[name="a2-epoch-preset"], input[name="a2-backend"]').forEach((input) => {
+  input.addEventListener("change", updateTrainingTimeEstimate);
+});
+updateTrainingTimeEstimate();
+
 const localTrainingStatus = document.getElementById("local-training-status");
 const localTrainingMeta = document.getElementById("local-training-meta");
 const localTrainingProgressTrack = document.getElementById("local-training-progress-track");
