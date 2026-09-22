@@ -76,6 +76,7 @@ from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_
 from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
 from hybrid.render import NamRenderError, find_nam_render_exe, render
 from hybrid.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
+from hybrid.update_check import UpdateCheckError, check_for_update
 from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
 from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
 from hybrid.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
@@ -686,6 +687,29 @@ def api_renderer_download():
     except NamRenderDownloadError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 200
     return jsonify({"ok": True, "path": str(dest)})
+
+
+@app.get("/api/update/check")
+def api_update_check():
+    """Manual-only "is a newer version available?" check for the Settings page -- see hybrid/update_check.py.
+
+    Never called automatically: this is the app's one deliberate exception to "no network unless the user asks
+    for it" (README's "Local-first & private"), and it stays that way by only ever running in response to this
+    button. Reports safely-worded errors (network unreachable, no release found) rather than a stack trace.
+    """
+    try:
+        result = check_for_update(APP_VERSION)
+    except UpdateCheckError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 200
+    return jsonify({
+        "ok": True,
+        "current_version": result.current_version,
+        "latest_version": result.latest_version,
+        "update_available": result.update_available,
+        "release_url": result.release_url,
+        "asset_url": result.asset_url,
+        "is_packaged": bool(getattr(sys, "frozen", False)),
+    })
 
 
 @app.get("/api/setup/status")

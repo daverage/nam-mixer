@@ -13,6 +13,7 @@ import base64
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -687,6 +688,41 @@ def test_upload_sweep_also_checks_generated_sessions(tmp_path, monkeypatch):
     removed = app_module._sweep_orphaned_uploads()
     assert str(used) not in removed and used.exists()
     assert str(unused) in removed and not unused.exists()
+
+
+def test_update_check_route_reports_an_available_update(client, monkeypatch):
+    from hybrid.update_check import UpdateCheckResult
+    monkeypatch.setattr(app_module, "check_for_update", lambda current: UpdateCheckResult(
+        current_version=current, latest_version="v9.9.9", update_available=True,
+        release_url="https://github.com/daverage/nam-mixer/releases/tag/v9.9.9", asset_url="https://example.invalid/asset.dmg"))
+    data = client.get("/api/update/check").get_json()
+    assert data == {"ok": True, "current_version": app_module.APP_VERSION, "latest_version": "v9.9.9", "update_available": True,
+                    "release_url": "https://github.com/daverage/nam-mixer/releases/tag/v9.9.9",
+                    "asset_url": "https://example.invalid/asset.dmg", "is_packaged": False}
+
+
+def test_update_check_route_reports_a_ui_safe_error_without_raising(client, monkeypatch):
+    from hybrid.update_check import UpdateCheckError
+    def boom(current):
+        raise UpdateCheckError("Could not reach GitHub to check for updates: no route to host")
+    monkeypatch.setattr(app_module, "check_for_update", boom)
+    response = client.get("/api/update/check")
+    assert response.status_code == 200  # never a 500 -- the frontend shows response.error directly
+    assert response.get_json() == {"ok": False, "error": "Could not reach GitHub to check for updates: no route to host"}
+
+
+def test_update_check_route_never_hits_the_real_network(client):
+    """Guards against a future edit accidentally removing the monkeypatch seam: this route is the app's one
+    deliberate exception to "no network unless the user asks", so it must go through urlopen exactly once per
+    call, never as a side effect of import/app-startup/collection -- proven here by having urlopen itself fail
+    and confirming the route still only reports a UI-safe error, rather than the test suite having quietly made
+    a real network call before this point."""
+    import hybrid.update_check as update_check_module
+    with patch.object(update_check_module, "urlopen", side_effect=OSError("must not hit the real network")) as mock_urlopen:
+        response = client.get("/api/update/check")
+    assert mock_urlopen.call_count == 1
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": False, "error": "Could not reach GitHub to check for updates: must not hit the real network"}
 
 
 def test_session_rejects_declared_artifact_hash_mismatch(client, tmp_path, monkeypatch):

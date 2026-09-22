@@ -617,6 +617,12 @@
     <div class="session-manager-heading"><div><div class="eyebrow">App configuration</div><h2 id="settings-panel-title">Settings</h2><span id="settings-status" class="info" aria-live="polite"></span></div><button type="button" id="btn-close-settings" class="btn btn-secondary btn-small">Back to builder</button></div>
     <p class="info">These settings are the same environment variables the app has always read (e.g. <code>NAM_RENDER_EXE</code>); this page just gives you a place to change them without a shell. Values are stored locally, never uploaded anywhere. Settings marked "restart required" only take effect the next time the app starts.</p>
     <div class="settings-group">
+      <h3>Updates</h3>
+      <p class="info">Checks GitHub for a newer release. Only runs when you click the button -- nothing is checked automatically or reported anywhere.</p>
+      <div class="status-row"><span id="update-check-status" class="info" aria-live="polite">Not checked yet.</span><button type="button" id="btn-check-update" class="btn btn-secondary btn-small">Check for updates</button></div>
+      <div id="update-check-result" class="info" aria-live="polite"></div>
+    </div>
+    <div class="settings-group">
       <h3>Getting started</h3>
       <p class="info">What's set up and what's optional, all in one place -- each item still has its own controls below/in its own tab.</p>
       <button type="button" id="btn-show-welcome" class="btn btn-secondary btn-small">Show the welcome guide again</button>

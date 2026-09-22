@@ -4543,6 +4543,45 @@ document.getElementById("btn-tool-metadata").addEventListener("click", async () 
   showToolResult(data);
 });
 
+// --- "Check for updates" (Settings) -- manual only, never automatic (see /api/update/check's docstring). ---
+const checkUpdateBtn = document.getElementById("btn-check-update");
+const updateCheckStatus = document.getElementById("update-check-status");
+const updateCheckResult = document.getElementById("update-check-result");
+if (checkUpdateBtn) {
+  checkUpdateBtn.addEventListener("click", async () => {
+    checkUpdateBtn.disabled = true;
+    updateCheckStatus.textContent = "Checking…";
+    updateCheckResult.innerHTML = "";
+    try {
+      const response = await fetch("/api/update/check");
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "check failed");
+      if (data.update_available) {
+        updateCheckStatus.textContent = `A new version is available: ${data.latest_version} (you have ${data.current_version}).`;
+        const link = document.createElement("a");
+        link.href = data.is_packaged && data.asset_url ? data.asset_url : data.release_url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.className = "btn btn-primary btn-small";
+        link.textContent = data.is_packaged && data.asset_url ? `Download ${data.latest_version}` : "View release notes";
+        updateCheckResult.append(link);
+        if (!data.is_packaged) {
+          const hint = document.createElement("p");
+          hint.className = "info";
+          hint.textContent = "Running from source: pull the latest code (git pull) and restart, or download an installer from the release page above.";
+          updateCheckResult.append(hint);
+        }
+      } else {
+        updateCheckStatus.textContent = `You're up to date (${data.current_version}).`;
+      }
+    } catch (err) {
+      updateCheckStatus.textContent = "Could not check for updates: " + err;
+    } finally {
+      checkUpdateBtn.disabled = false;
+    }
+  });
+}
+
 // Load settings eagerly (not just when the Settings tab opens) so the
 // experimental-architectures gate on cab-export-mode reflects a
 // previously-saved preference immediately, without requiring a detour
