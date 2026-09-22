@@ -230,9 +230,19 @@ def _saved_provider_value(values: dict[str, str], provider: str, name: str) -> s
 
     The fallback makes existing .env files upgrade in place.  The next save
     copies the legacy value into the active provider's dedicated slot.
+
+    Only the four connection fields actually named in `_PROVIDER_STORAGE`
+    (base URL/model/account ID/API key) have a scoped slot at all. Every
+    other setting -- including NAM_MIXER_AI_PROVIDER itself, PORT, etc. --
+    must read straight from `values`; running them through the legacy-slot
+    game blanked them out the moment ANY provider gained a scoped slot
+    (i.e. after the very first save), which is what made the provider
+    selector and other fields appear to "forget" themselves on reload.
     """
     storage_name = _PROVIDER_STORAGE.get(provider, {}).get(name)
-    if storage_name and values.get(storage_name):
+    if storage_name is None:
+        return values.get(name, "")
+    if values.get(storage_name):
         return values[storage_name]
     # Shared keys are a legacy layout. Once any scoped slot exists, an empty
     # slot means this provider genuinely has no saved value.

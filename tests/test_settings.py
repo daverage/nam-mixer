@@ -180,6 +180,27 @@ def test_switching_provider_migrates_legacy_shared_values_to_their_owner(isolate
     assert current["NAM_MIXER_AI_MODEL"]["value"] == ""
 
 
+def test_provider_and_unrelated_fields_survive_once_any_provider_slot_exists(isolated_env_file):
+    """Regression test: once ANY provider gains a scoped connection slot (i.e.
+    after the very first provider-aware save), fields that are NOT
+    provider-scoped -- NAM_MIXER_AI_PROVIDER itself, PORT, etc. -- must keep
+    reporting their real saved value, not silently go blank. A blank
+    NAM_MIXER_AI_PROVIDER makes the Settings page's provider selector appear
+    to forget the user's choice on every reload."""
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "local", "NAM_MIXER_AI_MODEL": "gemma4:e4b", "PORT": "5001"})
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "cloudflare"})
+
+    current = {field["name"]: field for field in settings.get_settings()}
+    assert current["NAM_MIXER_AI_PROVIDER"]["value"] == "cloudflare"
+    assert current["PORT"]["value"] == "5001"
+
+    settings.save_settings({"NAM_MIXER_AI_PROVIDER": "local"})
+    current = {field["name"]: field for field in settings.get_settings()}
+    assert current["NAM_MIXER_AI_PROVIDER"]["value"] == "local"
+    assert current["PORT"]["value"] == "5001"
+    assert current["NAM_MIXER_AI_MODEL"]["value"] == "gemma4:e4b"
+
+
 def test_secret_field_not_set_reports_no_value(isolated_env_file):
     result = {field["name"]: field for field in settings.get_settings()}
     assert result["TONE3000_API_KEY"]["has_value"] is False
