@@ -219,7 +219,7 @@ def build_hybrid(
     auto_trim_db = 0.0
     if auto_level:
         level_match_result = compute_crossover_trim(
-            envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
+            pair.envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
         )
         auto_trim_db = level_match_result.suggested_b_trim_db
 
