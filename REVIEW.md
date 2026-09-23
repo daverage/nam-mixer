@@ -104,10 +104,12 @@ surrounding code is being read anyway. Don't bulk-delete them here.
 
 | Item | Evidence | Rec. | Decision |
 |------|----------|------|----------|
-| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | **delete the docs/history copies**, point history docs at `deliverables/` | |
-| D2 `deliverables/` (8 trained `.nam`s in git) | release artifacts | ? keep in repo vs. move to a GitHub Release | |
-| D3 `deliverables/README.md` links `docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md` | file is now under `docs/history/Continuous Gain/` | **fix link** | |
-| D4 `desktop/src-tauri/icons/Square*Logo.png`, `StoreLogo.png` (11 files) | Windows Store/MSIX icons; not in `tauri.conf.json`, CI builds macOS `app` only | ? delete, unless a Windows MSIX build is planned | |
+| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | now both copies are under `docs/history/Continuous Gain/` (`deliverables/` + `phase4e/models/`); delete the `deliverables/` copies? | ? (archive only so far) |
+| D2 `deliverables/` (8 trained `.nam`s in git) | release artifacts | archive | **archived** → `docs/history/Continuous Gain/deliverables/` (67fab8c) |
+| D3 `deliverables/README.md` links `docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md` | file is now under `docs/history/Continuous Gain/` | **fix link** | **fixed** (67fab8c) |
+| D4 `desktop/src-tauri/icons/Square*Logo.png`, `StoreLogo.png` (11 files) | Windows Store/MSIX icons; not in `tauri.conf.json`, CI builds macOS `app` only | ? delete, unless a Windows MSIX build is planned | **keep** (user) |
+
+| D5 `assets/di/peaks/moderate_brit.wav.reapeaks` | REAPER waveform-peak cache, referenced nowhere | **delete** (+ ignore `*.reapeaks`) | |
 
 Verified keep: `work/.gitkeep` (keeps the ignored dir), `.codebase-memory/.gitattributes`
 (indexer merge rule; graph files are ignored), `packaging/backend/dist/` (ignored).
@@ -116,9 +118,9 @@ Verified keep: `work/.gitkeep` (keeps the ignored dir), `.codebase-memory/.gitat
 
 | Item | Evidence | Rec. | Decision |
 |------|----------|------|----------|
-| E1 `docs/Continuous Gain/continuous_gain_ui_package/` (proposal + 5 SVGs) | the CG tab is implemented (`docs/continuous_gain_tab.md` is the live doc) | **move to docs/history** | |
-| E2 `docs/Continuous Gain/AMP_CONTROL_RESEARCH.md` | research background | ? keep as live doc or move to history | |
-| E3 `docs/settings_ux_refactor_plan.md` | plan doc, no status marker (last touched 2026-09-22) | ? move to history if implemented | |
+| E1 `docs/Continuous Gain/continuous_gain_ui_package/` (proposal + 5 SVGs) | the CG tab is implemented (`docs/continuous_gain_tab.md` is the live doc) | **move to docs/history** | **archived** (c4aaa29) |
+| E2 `docs/Continuous Gain/AMP_CONTROL_RESEARCH.md` | research background | ? keep as live doc or move to history | **archived** (c4aaa29) |
+| E3 `docs/settings_ux_refactor_plan.md` | plan doc, no status marker (last touched 2026-09-22) | ? move to history if implemented | **archived**: implemented in 6ee39c7/08701be (c4aaa29) |
 | E4 `docs/history/Continuous Gain/phase3.md` + `phase3_progress.md` | about the Hybrid A2 training target, not Continuous Gain; misfiled | **move to `docs/history/`** (Phase 2) | |
 | E5 ~9.6 MB of PNG/.nam under `docs/history/` | history plots/models | ? keep (only D1 dupes removed) | |
 
@@ -184,3 +186,8 @@ separate commit.
   baseline 673/1/16 (1 failure already on master, see Baseline).
 - 2026-09-23: Phase 1 candidate list written (A–F). Waiting for the user's
   decisions before deleting anything.
+- 2026-09-23: User decisions: archive the CG test leftovers and docs that are no
+  longer in use; keep the Windows Store icons. Done: `deliverables/` →
+  `docs/history/Continuous Gain/deliverables/` (67fab8c); settings UX plan, CG UI
+  proposal, and amp-control research → `docs/history/` (c4aaa29). Tests unchanged
+  (673/1/16). Still to confirm: A, C1, D1 (duplicate .nam), D5.
