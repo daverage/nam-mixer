@@ -205,6 +205,45 @@ def _interp(levels: np.ndarray, values: np.ndarray, envelope: np.ndarray) -> np.
     return np.interp(envelope, levels, values, left=values[0], right=values[-1])
 
 
+def _adjacent_level_indices(levels: np.ndarray, envelope: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per sample: (lower level index, upper level index, weight of the upper
+    level). The lower level's weight is ``1 - frac``. See
+    _adjacent_level_weights for the clamping rules."""
+    n_levels = len(levels)
+    lower_idx = np.clip(np.searchsorted(levels, envelope, side="right") - 1, 0, n_levels - 2)
+    upper_idx = lower_idx + 1
+    lo, hi = levels[lower_idx], levels[upper_idx]
+    frac = np.clip((envelope - lo) / np.maximum(hi - lo, _EPS), 0.0, 1.0)
+    below, above = envelope <= levels[0], envelope >= levels[-1]
+    frac = np.where(below, 0.0, np.where(above, 1.0, frac))
+    return lower_idx, upper_idx, frac
+
+
+def _mix_adjacent_filtered_levels(signal: np.ndarray, firs: list[np.ndarray], levels: np.ndarray,
+                                  envelope: np.ndarray) -> np.ndarray:
+    """Filter `signal` with each level's correction FIR and blend the results
+    with the _adjacent_level_weights interpolation.
+
+    Equivalent to ``sum_i weights[i] * filter_i(signal)``, but a sample only
+    ever uses its two neighbouring levels, so each filtered path is added to
+    the samples that use it and then dropped, instead of holding every path,
+    a stacked copy and a dense (n_levels, n) weight matrix at once. Each
+    sample gets its lower-level term first, then its upper-level term, the
+    same order as the dense sum.
+    """
+    n = len(signal)
+    lower_idx, upper_idx, frac = _adjacent_level_indices(levels, envelope)
+    out = np.zeros(n, dtype=np.float64)
+    for i, fir in enumerate(firs):
+        use_lower, use_upper = lower_idx == i, upper_idx == i
+        if not (use_lower.any() or use_upper.any()):
+            continue
+        filtered = fftconvolve(signal, fir, mode="full")[:n]
+        out[use_lower] += (1.0 - frac[use_lower]) * filtered[use_lower]
+        out[use_upper] += frac[use_upper] * filtered[use_upper]
+    return out
+
+
 def _adjacent_level_weights(levels: np.ndarray, envelope: np.ndarray) -> np.ndarray:
     """Per-sample weights (n_levels, n_samples) over the analysis grid.
 
@@ -217,12 +256,7 @@ def _adjacent_level_weights(levels: np.ndarray, envelope: np.ndarray) -> np.ndar
     this replaces).
     """
     n_levels = len(levels)
-    lower_idx = np.clip(np.searchsorted(levels, envelope, side="right") - 1, 0, n_levels - 2)
-    upper_idx = lower_idx + 1
-    lo, hi = levels[lower_idx], levels[upper_idx]
-    frac = np.clip((envelope - lo) / np.maximum(hi - lo, _EPS), 0.0, 1.0)
-    below, above = envelope <= levels[0], envelope >= levels[-1]
-    frac = np.where(below, 0.0, np.where(above, 1.0, frac))
+    lower_idx, upper_idx, frac = _adjacent_level_indices(levels, envelope)
     weights = np.zeros((n_levels, len(envelope)), dtype=np.float64)
     sample_idx = np.arange(len(envelope))
     weights[lower_idx, sample_idx] += 1.0 - frac
@@ -406,7 +440,7 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     freqs = np.array(analysis_a.frequencies_hz)
     # Filter each measured-level correction and interpolate filtered donor
     # paths. This avoids zipper noise without changing a filter per sample.
-    filtered = []
+    firs = []
     for i, level in enumerate(levels):
         eq_a = np.array(analysis_a.levels[i].spectrum_db); eq_b = np.array(analysis_b.levels[i].spectrum_db)
         target = eq_a * (1 - _clamp(design.tone_mix_b)) + eq_b * _clamp(design.tone_mix_b)
@@ -417,9 +451,8 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
         else:
             donor_eq = eq_b if level_drive >= .5 else eq_a
         correction = np.clip(target - donor_eq, -abs(design.eq_correction_limit_db), abs(design.eq_correction_limit_db))
-        filtered.append(fftconvolve(corrected, _minimum_phase_correction(freqs, correction, pair.sample_rate), mode="full")[:n])
-    weights = _adjacent_level_weights(levels, envelope)
-    output = np.sum(np.vstack(filtered) * weights, axis=0).astype(np.float32)
+        firs.append(_minimum_phase_correction(freqs, correction, pair.sample_rate))
+    output = _mix_adjacent_filtered_levels(corrected, firs, levels, envelope).astype(np.float32)
     return CharacterBlendResult(output, envelope, donor_weight_b, analysis_a, analysis_b)
 
 

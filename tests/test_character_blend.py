@@ -392,3 +392,44 @@ def test_legacy_frozen_design_without_level_window_keeps_its_behaviour():
     assert CharacterAnalysisConfig(**legacy_design.analysis_config).level_window_db == 3.0
     assert np.array_equal(build_character_blend(pair, legacy_design).blend,
                           build_character_blend(pair, CharacterBlendDesign(**current)).blend)
+
+
+def _dense_reference_mix(signal, firs, levels, envelope):
+    """The per-level mix build_character_blend used before streaming: every
+    filtered path stacked and summed against the dense weight matrix."""
+    from scipy.signal import fftconvolve
+
+    n = len(signal)
+    filtered = [fftconvolve(signal, fir, mode="full")[:n] for fir in firs]
+    return np.sum(np.vstack(filtered) * _adjacent_level_weights(levels, envelope), axis=0)
+
+
+def _level_firs(n_levels, sample_rate=48000):
+    from hybrid.modes.character_blend import _minimum_phase_correction
+
+    freqs = np.geomspace(80.0, 10_000.0, 24)
+    rng = np.random.default_rng(7)
+    return [_minimum_phase_correction(freqs, rng.uniform(-4, 4, len(freqs)), sample_rate) for _ in range(n_levels)]
+
+
+@pytest.mark.parametrize("case", ["sweep", "on_grid_points", "below_and_above_grid", "constant_inside", "tiny"])
+def test_streamed_level_mix_is_bit_identical_to_the_dense_sum(case):
+    from hybrid.modes.character_blend import _mix_adjacent_filtered_levels
+
+    levels = np.array([-24.0, -18.0, -12.0, -6.0, 0.0, 6.0])
+    rng = np.random.default_rng(3)
+    n = 5 if case == "tiny" else 20_000
+    t = np.arange(n) / 48000
+    signal = 0.3 * np.sin(2 * np.pi * 196 * t) + 0.05 * rng.standard_normal(n)
+    envelope = {
+        "sweep": np.linspace(-40.0, 15.0, n),                        # crosses every level and both edges
+        "on_grid_points": np.resize(levels, n),                     # exactly on each grid point
+        "below_and_above_grid": np.where(np.arange(n) % 2, -80.0, 30.0),  # clamped at both ends
+        "constant_inside": np.full(n, -9.5),                         # never touches most levels
+        "tiny": np.array([-30.0, -18.0, -3.0, 6.0, 10.0]),
+    }[case]
+    firs = _level_firs(len(levels))
+
+    streamed = _mix_adjacent_filtered_levels(signal, firs, levels, envelope)
+    dense = _dense_reference_mix(signal, firs, levels, envelope)
+    assert np.array_equal(streamed, dense)  # exact float64 equality, not approximate
