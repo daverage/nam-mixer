@@ -1192,7 +1192,8 @@ function applyRecipe(recipe, prefix = "", { showMessage = true, noRecipeMessage 
     crossoverBaseline = { value: crossoverSlider.value, label: "recipe" };
     crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
     transitionSlider.value = recipe.width;
-    transitionValue.textContent = `${recipe.width} dB`;
+    // Show the slider's own (clamped/stepped) value, not the raw recipe number.
+    transitionValue.textContent = `${transitionSlider.value} dB`;
     syncCrossoverKnobFromDb();
     syncPresetButtonStates();
     updateTransitionAroundSwitchNote();

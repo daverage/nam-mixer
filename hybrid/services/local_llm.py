@@ -1009,7 +1009,7 @@ MODES — choose by requested signal behaviour, not genre/artist keywords:
   percent toward Amp B), explanation.
 - hybrid ('{CONTROL_LABELS['mode_hybrid']}'): the entire voice, including tone,
   touch response and drive, moves from A toward B as input level rises.
-  Required fields: mode='hybrid', switchKnob (0-10), width (1-24 dB), explanation.
+  Required fields: mode='hybrid', switchKnob (0-10), width (2-18 dB), explanation.
   Label these controls '{CONTROL_LABELS['switchKnob']}' and
   '{CONTROL_LABELS['width']}'. Guitar-volume numbers are playing targets, not
   calibrated physical thresholds; suggest adjusting by audition.

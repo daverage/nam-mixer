@@ -186,10 +186,11 @@ def test_local_llm_teaches_mode_selection_from_signal_behaviour(monkeypatch):
 
     local_llm.converse("Use one whole amp at low guitar volume and another at high volume.", opener=fake_open)
 
-    assert "constant mixture" in seen["system"]
-    assert "entire amp to become the other" in seen["system"]
-    assert "stable tonal foundation" in seen["system"]
-    assert "2-18 dB" in seen["system"]
+    assert "choose by requested signal behaviour" in seen["system"]
+    assert "FIXED mix" in seen["system"]
+    assert "the entire voice" in seen["system"]
+    assert "stable broad tone/feel" in seen["system"]
+    assert "2-18 dB" in seen["system"]  # must match the UI transition slider's range
     assert "Changes as you play harder" in seen["system"]
     assert "Parallel Blend" not in seen["system"]
 
