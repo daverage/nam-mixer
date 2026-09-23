@@ -11,9 +11,8 @@ Two implementations live here:
   attack/release). DEPRECATED for production use: its one-pole release has
   theoretically infinite memory, which is unacceptable for a signal that
   becomes the crossover control baked into a synthetic training target for a
-  causal, finite-receptive-field A2 model (see docs/phase3.md and
-  scripts/compare_envelopes.py). Kept only for the old regression tests and
-  the old-vs-new comparison script.
+  causal, finite-receptive-field A2 model (see docs/phase3.md). Kept only
+  for the old regression tests.
 - `bounded_causal_envelope_db` -- the PRODUCTION envelope used by
   `hybrid.pipeline.render_pair`. Same causal-RMS-then-smooth idea, but every
   stage is a finite window (FIR), so the total dry-input dependency of the
