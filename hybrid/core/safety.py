@@ -133,4 +133,6 @@ def preview_safety_limiter(audio: np.ndarray, ceiling_dbfs: float = -1.0) -> np.
     user's speakers/headphones.
     """
     ceiling_amp = 10.0 ** (ceiling_dbfs / 20.0)
+    # np.clip passes NaN through; silence it and pin +/-inf to the ceiling.
+    audio = np.nan_to_num(audio, nan=0.0, posinf=ceiling_amp, neginf=-ceiling_amp)
     return np.clip(audio, -ceiling_amp, ceiling_amp)
