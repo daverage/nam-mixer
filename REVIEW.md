@@ -108,7 +108,6 @@ surrounding code is being read anyway. Don't bulk-delete them here.
 | D2 `deliverables/` (8 trained `.nam`s in git) | release artifacts | archive | **archived** → `docs/history/Continuous Gain/deliverables/` (67fab8c) |
 | D3 `deliverables/README.md` links `docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md` | file is now under `docs/history/Continuous Gain/` | **fix link** | **fixed** (67fab8c) |
 | D4 `desktop/src-tauri/icons/Square*Logo.png`, `StoreLogo.png` (11 files) | Windows Store/MSIX icons; not in `tauri.conf.json`, CI builds macOS `app` only | ? delete, unless a Windows MSIX build is planned | **keep** (user) |
-
 | D5 `assets/di/peaks/moderate_brit.wav.reapeaks` | REAPER waveform-peak cache, referenced nowhere | **delete** (+ ignore `*.reapeaks`) | |
 
 Verified keep: `work/.gitkeep` (keeps the ignored dir), `.codebase-memory/.gitattributes`
