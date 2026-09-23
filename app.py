@@ -36,7 +36,7 @@ from flask import Flask, Response, g, jsonify, render_template, request, send_fi
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
-from cg_routes import register_cg_routes
+from routes.continuous_gain import register_cg_routes
 from hybrid.training.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.modes.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.modes.blend_training_target import generate_blend_training_bundle

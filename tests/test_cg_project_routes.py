@@ -15,7 +15,7 @@ import pytest
 import soundfile as sf
 from flask import Flask
 
-import cg_routes
+from routes import continuous_gain as cg_routes
 import hybrid.continuous_gain.project as cgp
 from hybrid.continuous_gain.project import CgProject, CgProjectError, suggest_position
 from hybrid.core.cab_ir import cab_design_from_prepared, get_prepared_cab_ir
