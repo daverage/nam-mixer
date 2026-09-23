@@ -303,7 +303,7 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
     safety = TargetSafetyReport(check.peak_dbfs, check.peak_dbfs - reduction, reduction, _sha256_file(raw_out), _sha256_file(final_out))
     receptive = compute_receptive_field_record(
         "character", amp_a, amp_b, input_info.sample_rate, design.cab,
-        bounded_envelope_max_history_ms(), design.envelope_smoothing_ms,
+        bounded_envelope_max_history_ms(), design.envelope_smoothing_ms, design.teacher_semantics_version,
     )
     available_rf = receptive.get("a2_receptive_field_samples_at_generation_time")
     if available_rf is not None and receptive.get(

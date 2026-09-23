@@ -325,13 +325,24 @@ def test_character_design_without_semantics_version_loads_as_legacy(tmp_path):
 
 
 def test_character_temporal_history_reports_serial_dependencies():
-    history = character_temporal_history_samples(1000, 40.0)
+    history = character_temporal_history_samples(1000, 40.0, semantics_version=2)
     assert history == {
+        "teacher_semantics_version": 2,
         "drive_smoothing_serial_samples": 39,
         "compensation_smoothing_serial_samples": 39,
         "donor_transition_serial_samples": 9,
         "correction_fir_serial_samples": 64,
         "donor_transition_exact_history_bounded": False,
+    }
+
+
+def test_character_v3_temporal_history_has_no_donor_transition_and_is_bounded():
+    assert character_temporal_history_samples(1000, 40.0, semantics_version=3) == {
+        "teacher_semantics_version": 3,
+        "drive_smoothing_serial_samples": 39,
+        "compensation_smoothing_serial_samples": 39,
+        "correction_fir_serial_samples": 64,
+        "donor_transition_exact_history_bounded": True,
     }
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import hybrid.core.receptive_field as receptive_field
@@ -221,7 +222,7 @@ def test_character_record_counts_both_smoothers_and_fir_on_control_path(monkeypa
     monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda _model: 100)
     record = compute_receptive_field_record(
         "character", model, model, 1000, None,
-        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0,
+        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0, character_teacher_semantics_version=2,
     )
     # 80 envelope + 39 drive smoothing + 9 transition + 39 compensation
     # smoothing + 64 correction FIR.
@@ -230,3 +231,64 @@ def test_character_record_counts_both_smoothers_and_fir_on_control_path(monkeypa
     assert record["formal_character_required_samples"] == 231
     assert record["exact_history_bounded"] is False
     assert "repeated mid-ramp reversals" in record["history_qualification"]
+
+
+def test_character_v3_record_counts_the_residual_envelope_path(monkeypatch):
+    from hybrid.modes.training_target import compute_receptive_field_record
+    import hybrid.modes.training_target as target_module
+
+    model = SimpleNamespace(path="synthetic.nam")
+    monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda _model: 100)
+    record = compute_receptive_field_record(
+        "character", model, model, 1000, None,
+        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0, character_teacher_semantics_version=3,
+    )
+    branches = record["branch_samples"]
+    assert branches["character_drive_control"] == 80 + 39 + 39 + 64          # no donor transition in v3
+    assert branches["character_residual_envelope"] == 100 + 80 + 64          # envelope over the amp outputs
+    assert record["formal_character_required_samples"] == 244
+    assert record["hard_required_samples"] == 100                            # the hard gate is unchanged
+    assert record["exact_history_bounded"] is True
+
+
+def test_character_v3_record_bounds_the_real_teachers_history(monkeypatch):
+    """Perturb the input only before sample p, with amps of known finite history
+    (boxcar FIR + tanh) and every teacher path live, and check that the output
+    stops changing within the formal v3 requirement. With a long Amp B history
+    the teacher really does exceed the old (v2-style) figure, via the residual
+    envelope over the amp outputs."""
+    from hybrid.core.envelope import bounded_envelope_max_history_ms
+    from hybrid.modes import character_blend as cb
+    from hybrid.modes.character_analysis import analyse_rendered_audio
+    from hybrid.modes.training_target import compute_receptive_field_record
+    import hybrid.modes.training_target as target_module
+
+    sr, n, p, taps = 48000, 36000, 12000, {"a.nam": 100, "b.nam": 9000}
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(0)
+    dry = 0.3 * np.sin(2 * np.pi * 110 * t) * (0.2 + 0.8 * (t % 0.25 < 0.12)) + 0.02 * rng.standard_normal(n)
+
+    def amp(x, name, drive):
+        return 0.5 * np.tanh(drive * np.convolve(x, np.ones(taps[name]) / taps[name])[: len(x)])
+
+    design = cb.CharacterBlendDesign("a.nam", "b.nam", tone_mix_b=.3, feel_mix_b=.7, drive_mix_b=.5,
+                                     drive_low_mix_b=.38, drive_mid_mix_b=.5, drive_high_mix_b=.62)
+    analyses = (analyse_rendered_audio(dry, amp(dry, "a.nam", 3.0), sr), analyse_rendered_audio(dry, amp(dry, "b.nam", 12.0), sr))
+
+    def teacher(x):
+        pair = SimpleNamespace(dry=x, amp_a=amp(x, "a.nam", 3.0), amp_b=amp(x, "b.nam", 12.0), sample_rate=sr)
+        return cb.build_character_blend(pair, design, analysis_a=analyses[0], analysis_b=analyses[1]).blend.astype(np.float64)
+
+    perturbed = dry.copy()
+    perturbed[:p] += 0.2 * rng.standard_normal(p)
+    base, changed = teacher(dry), teacher(perturbed)
+    observed = int(np.flatnonzero(np.abs(changed - base) > 1e-9 * np.max(np.abs(base))).max()) - (p - 1)
+
+    monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda model: taps[model.path])
+    record_args = ("character", SimpleNamespace(path="a.nam"), SimpleNamespace(path="b.nam"), sr, None,
+                   bounded_envelope_max_history_ms(), design.envelope_smoothing_ms)
+    v3 = compute_receptive_field_record(*record_args, character_teacher_semantics_version=3)
+    v2_style = compute_receptive_field_record(*record_args, character_teacher_semantics_version=2)
+    assert observed <= v3["formal_character_required_samples"]
+    assert observed > v2_style["formal_character_required_samples"]
+

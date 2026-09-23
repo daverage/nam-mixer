@@ -32,20 +32,40 @@ DRIVE_RESIDUAL_LIMIT_DB = -6.0
 def _clamp(value: float) -> float: return max(0.0, min(1.0, float(value)))
 
 
-def character_temporal_history_samples(sample_rate: int, smoothing_ms: float) -> dict[str, int]:
-    """History introduced by the Character Blend teacher itself.
+def character_temporal_history_samples(sample_rate: int, smoothing_ms: float,
+                                       semantics_version: int = 2) -> dict[str, int]:
+    """History introduced by the Character Blend teacher itself, per teacher
+    semantics version (see hybrid.modes.training_target.
+    compute_receptive_field_record for how the pieces combine).
 
     The source NAM paths, envelope, and these paths run in parallel until the
     final output.  Within the drive-control path, however, envelope smoothing
-    and donor transition state are serial dependencies.  The broad correction
-    FIR is serial with each selected amp path.  Reporting the pieces avoids
-    incorrectly treating all of them as one Dynamic-Hybrid envelope branch.
+    and (v1/v2) donor transition state are serial dependencies.  The broad
+    correction FIR is serial with each selected amp path.  Reporting the
+    pieces avoids incorrectly treating all of them as one Dynamic-Hybrid
+    envelope branch.
+
+    v3 has no donor transition state: its donor weight is a memoryless
+    smoothstep of the smoothed drive. It adds a different serial path
+    instead -- _bounded_residual_scale runs the bounded envelope over the amp
+    OUTPUTS, so amp history and envelope history add up.
     """
     smoothing = max(0, int(sample_rate * max(0.0, smoothing_ms) / 1000.0) - 1)
-    transition = max(0, int(round(sample_rate * DONOR_TRANSITION_MS / 1000.0)) - 1)
     # scipy.minimum_phase(..., half=True) yields ceil(129 / 2) = 65 taps.
     correction_fir = 64
+    if semantics_version == 3:
+        return {
+            "teacher_semantics_version": 3,
+            "drive_smoothing_serial_samples": smoothing,
+            "compensation_smoothing_serial_samples": smoothing,
+            "correction_fir_serial_samples": correction_fir,
+            # Every v3 stage is a finite window or memoryless, so the formal
+            # requirement is an exact upper bound on the teacher's history.
+            "donor_transition_exact_history_bounded": True,
+        }
+    transition = max(0, int(round(sample_rate * DONOR_TRANSITION_MS / 1000.0)) - 1)
     return {
+        "teacher_semantics_version": semantics_version,
         "drive_smoothing_serial_samples": smoothing,
         "compensation_smoothing_serial_samples": smoothing,
         "donor_transition_serial_samples": transition,

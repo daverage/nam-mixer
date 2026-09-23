@@ -399,6 +399,7 @@ def compute_receptive_field_record(
     cab: Optional[CabDesign],
     envelope_max_history_ms: Optional[float] = None,
     character_envelope_smoothing_ms: Optional[float] = None,
+    character_teacher_semantics_version: Optional[int] = None,
 ) -> dict:
     """Best-effort required-history record for the manifest -- see
     hybrid.core.receptive_field.combine_required_history. Only needs the source
@@ -500,26 +501,43 @@ def compute_receptive_field_record(
     character_history = None
     extra_branches = None
     if mode == "character":
-        from .character_blend import character_temporal_history_samples
+        from .character_blend import CHARACTER_TEACHER_SEMANTICS_VERSION, character_temporal_history_samples
 
+        semantics_version = (CHARACTER_TEACHER_SEMANTICS_VERSION if character_teacher_semantics_version is None
+                             else character_teacher_semantics_version)
         smoothing_ms = 40.0 if character_envelope_smoothing_ms is None else character_envelope_smoothing_ms
-        character_history = character_temporal_history_samples(sample_rate, smoothing_ms)
-        # The control path is envelope -> drive smoothing -> donor transition
-        # -> compensation smoothing -> correction FIR. The FIR also follows
-        # either selected amp path. These paths meet at the teacher output and
-        # therefore take a parallel maximum, while stages within each path add.
-        control_history = (
-            (envelope_samples or 0)
-            + character_history["drive_smoothing_serial_samples"]
-            + character_history["donor_transition_serial_samples"]
-            + character_history["compensation_smoothing_serial_samples"]
-            + character_history["correction_fir_serial_samples"]
-        )
+        character_history = character_temporal_history_samples(sample_rate, smoothing_ms, semantics_version)
+        fir = character_history["correction_fir_serial_samples"]
+        # Paths meet at the teacher output and therefore take a parallel
+        # maximum, while stages within each path add. The FIR follows every
+        # path, including either selected amp path.
         extra_branches = {
-            "character_amp_a_correction": amp_a_samples + character_history["correction_fir_serial_samples"],
-            "character_amp_b_correction": amp_b_samples + character_history["correction_fir_serial_samples"],
-            "character_drive_control": control_history,
+            "character_amp_a_correction": amp_a_samples + fir,
+            "character_amp_b_correction": amp_b_samples + fir,
         }
+        if semantics_version == 3:
+            # envelope -> drive smoothing -> (memoryless soft donor weight)
+            # -> compensation smoothing -> FIR, and, separately, the residual
+            # limit: the bounded envelope over the amp outputs -> FIR.
+            extra_branches["character_drive_control"] = (
+                (envelope_samples or 0)
+                + character_history["drive_smoothing_serial_samples"]
+                + character_history["compensation_smoothing_serial_samples"]
+                + fir
+            )
+            extra_branches["character_residual_envelope"] = (
+                max(amp_a_samples, amp_b_samples) + (envelope_samples or 0) + fir
+            )
+        else:
+            # envelope -> drive smoothing -> donor transition -> compensation
+            # smoothing -> FIR.
+            extra_branches["character_drive_control"] = (
+                (envelope_samples or 0)
+                + character_history["drive_smoothing_serial_samples"]
+                + character_history["donor_transition_serial_samples"]
+                + character_history["compensation_smoothing_serial_samples"]
+                + fir
+            )
     # Character processing is deliberately trainable as an approximation in
     # the standard packed A2, just like a baked cabinet.  Keep the source amps
     # and bounded envelope as the hard gate; record the longer Character
@@ -537,12 +555,22 @@ def compute_receptive_field_record(
         record["total_required_samples"] = record["formal_total_required_samples"]
     if character_history is not None:
         record["character_temporal_history"] = character_history
-        record["exact_history_bounded"] = False
-        record["history_qualification"] = (
-            "Character donor transitions settle within the recorded transition window after the last switch, "
-            "but repeated mid-ramp reversals retain explicit state beyond a finite input window. The numeric "
-            "hard requirement is the stable-settling dependency, not a claim of exact finite-memory equivalence."
-        )
+        if character_history["teacher_semantics_version"] == 3:
+            record["exact_history_bounded"] = True
+            record["history_qualification"] = (
+                "Character v3 has no stateful donor transition: every stage (bounded envelopes, including the "
+                "residual limit's envelope over the amp outputs, moving-average smoothing, the memoryless soft "
+                "donor weight and the correction FIR) is finite, so the formal Character requirement is an upper "
+                "bound on the teacher's history. It is advisory: beyond the A2 receptive field, A2 learns an "
+                "approximation."
+            )
+        else:
+            record["exact_history_bounded"] = False
+            record["history_qualification"] = (
+                "Character donor transitions settle within the recorded transition window after the last switch, "
+                "but repeated mid-ramp reversals retain explicit state beyond a finite input window. The numeric "
+                "hard requirement is the stable-settling dependency, not a claim of exact finite-memory equivalence."
+            )
     record["cab"] = cab_record
     if a2_rf_at_generation_time is not None:
         cab_requires_approximation = (
