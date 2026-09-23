@@ -168,7 +168,6 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
                 "training": training_record(st), "validation": val, "epoch_presets": A2_EPOCH_PRESETS, "selection_modes": list(SELECTION_MODES),
                 "anchor_methods": list(ANCHOR_METHODS), "held_out_dis": list(HELD_OUT_DIS)}
 
-    STAGES = ["captures", "analysed", "planned", "files", "trained", "validated"]
     _written: dict[str, tuple] = {}
 
     def trained_validation_report(m: dict, design_id: str) -> dict | None:

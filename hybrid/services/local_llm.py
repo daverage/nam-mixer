@@ -941,7 +941,6 @@ def converse(
     config = _config()
     if config is None:
         raise LocalLlmError("local LLM is not configured")
-    base_url, model = config.base_url, config.model
     # This is only a pre-call GUESS used to bias generation (which branch of
     # instructions to send, whether to ask for a recipe up front). It is
     # deliberately NOT what gates validation afterwards -- the model sees the
