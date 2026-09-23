@@ -176,11 +176,9 @@ separate commit.
       (b8fa25c reverted in 3e4242e). **Not changed, for the user to decide:**
       - ~~`align.estimate_offset` O(max_lag·n)~~: user approved the FFT
         version; it matches the old loop's chosen lag exactly (8e139fd).
-      - `nam_loader.is_calibrated` needs input+output levels, so an input-only
-        model shows "Calibration metadata unavailable" even though Auto
-        calibration uses its input level (a wording/definition choice).
-      - `coverage` reports 100% Amp A for an entirely silent DI.
-      - The `input_peak_dbfs` warning ignores calibration and per-amp gain.
+      - ~~Input-only calibration label~~: three-way status, Tools panel shows the input level (8212158).
+      - ~~Silent DI coverage~~: reports "No active playing detected" (c7ad644).
+      - ~~Input-peak warning ignores per-amp gain~~: per-amp input peaks + warning naming the gains (38897c5).
 - [ ] 2. `hybrid/modes/` (the three design modes and their target generators)
 - [ ] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`
 - [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
@@ -239,3 +237,5 @@ separate commit.
   locals, dead return). Suite fully green: 686 passed, 12 skipped. Process
   lesson: b8fa25c was pushed with a failing test because the shell chain
   didn't gate on pytest's result; commits and pushes are now gated on it.
+- 2026-09-23: The four group-1 items the user decided on are done (align FFT, calibration label,
+  silent-DI coverage, per-amp peak warning). 690 passed, 12 skipped. Verifying the group 2 (`hybrid/modes/`) findings next.
