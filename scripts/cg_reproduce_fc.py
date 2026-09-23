@@ -20,13 +20,7 @@ from hybrid.core.render import render
 
 P = json.loads((REPO / "work/p4" / a.amp / "profile.json").read_text()); A = json.loads((REPO / "work/p4" / a.amp / "audit.json").read_text())
 frozen = json.loads((REPO / "work/p4e/final" / a.amp / "FC_bundle/manifest.json").read_text())
-def _frozen_manifest():
-    import subprocess
-    for rel in ("docs/final/manifest_frozen.json", "docs/history/final/manifest_frozen.json"):
-        if (REPO / rel).is_file():
-            return json.loads((REPO / rel).read_text())
-    return json.loads(subprocess.check_output(["git", "show", "HEAD:docs/final/manifest_frozen.json"], cwd=REPO))
-F = _frozen_manifest()
+F = json.loads((REPO / "docs/history/Continuous Gain/final/manifest_frozen.json").read_text())
 res = {"amp": a.amp, "checks": {}}
 an = select_captures(P, A); sel = resolve_selection(an, P, A, "automatic")
 res["selected"] = sel["selected"]; res["checks"]["capture_set"] = sel["selected"] == [float(g) for g in frozen["gains"]]

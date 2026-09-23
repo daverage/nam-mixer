@@ -2,7 +2,7 @@
 
 Reads the archived Phase 4 measurements (work/p4/<amp>/{profile,audit}.json, restored from
 ~/Documents/hybrid-nam-builder-archive/research_work_dirs_*.tar.gz) and the frozen FC record
-(docs/final/manifest_frozen.json, or its committed copy), so it skips on a machine without them.
+(docs/history/Continuous Gain/final/manifest_frozen.json), so it skips on a machine without them.
 The expensive half -- rebuilding the training audio from the user's real captures and comparing its SHA-256 with
 the frozen bundle manifest -- runs only with CG_REPRODUCE_AUDIO=1 (scripts/cg_reproduce_fc.py does the same
 from the command line); it was verified bit-for-bit for both amps when the backend was written.
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -25,14 +24,11 @@ REPO = Path(__file__).resolve().parent.parent
 AMPS = ("jcm800", "vibrolux")
 
 
+FROZEN_MANIFEST = REPO / "docs" / "history" / "Continuous Gain" / "final" / "manifest_frozen.json"
+
+
 def _frozen() -> dict | None:
-    for rel in ("docs/final/manifest_frozen.json", "docs/history/final/manifest_frozen.json"):
-        if (REPO / rel).is_file():
-            return json.loads((REPO / rel).read_text())
-    try:
-        return json.loads(subprocess.check_output(["git", "show", "HEAD:docs/final/manifest_frozen.json"], cwd=REPO, stderr=subprocess.DEVNULL))
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
-        return None
+    return json.loads(FROZEN_MANIFEST.read_text()) if FROZEN_MANIFEST.is_file() else None
 
 
 def _archive(amp: str):
