@@ -1,6 +1,6 @@
 import numpy as np
 
-from hybrid.blend import CrossoverConfig, blend, blend_weight, smoothstep_curve
+from hybrid.modes.blend import CrossoverConfig, blend, blend_weight, smoothstep_curve
 
 
 def test_smoothstep_endpoints():

@@ -13,12 +13,12 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import hybrid.blend_training_target as blend_training_target
-import hybrid.training_target as training_target
-from hybrid.blend_training_target import generate_blend_training_bundle
-from hybrid.cab_ir import cab_design_from_prepared, load_and_prepare_cab_ir
-from hybrid.fixed_blend import BlendDesign
-from hybrid.training_target import TrainingInputError
+import hybrid.modes.blend_training_target as blend_training_target
+import hybrid.modes.training_target as training_target
+from hybrid.modes.blend_training_target import generate_blend_training_bundle
+from hybrid.core.cab_ir import cab_design_from_prepared, load_and_prepare_cab_ir
+from hybrid.modes.fixed_blend import BlendDesign
+from hybrid.modes.training_target import TrainingInputError
 
 
 @pytest.fixture(autouse=True)

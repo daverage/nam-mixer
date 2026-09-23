@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from hybrid.multi_blend import GainChain, chain_weights, multi_blend
+from hybrid.continuous_gain.multi_blend import GainChain, chain_weights, multi_blend
 
 
 def test_weights_sum_to_one_and_only_adjacent_mix():

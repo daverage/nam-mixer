@@ -37,55 +37,55 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from cg_routes import register_cg_routes
-from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
-from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
-from hybrid.blend_training_target import generate_blend_training_bundle
-from hybrid.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio, load_cached_analysis, sha256_file, store_cached_analysis
-from hybrid.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
-from hybrid.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
-from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
-from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
-from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
-from hybrid.design import freeze_design
-from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
-from hybrid.settings import (
+from hybrid.training.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
+from hybrid.modes.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
+from hybrid.modes.blend_training_target import generate_blend_training_bundle
+from hybrid.modes.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio, load_cached_analysis, sha256_file, store_cached_analysis
+from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
+from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
+from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
+from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
+from hybrid.core.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
+from hybrid.modes.design import freeze_design
+from hybrid.modes.fixed_blend import build_fixed_blend, freeze_blend_design
+from hybrid.services.settings import (
     SettingsValidationError,
     experimental_architectures_enabled,
     get_settings as get_app_settings,
     save_settings as save_app_settings,
 )
-from hybrid.input_profiles import (
+from hybrid.core.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
     db_to_amplitude,
     get_profile,
     resolve_profile_gain_db,
 )
-from hybrid.kaggle_training import (
+from hybrid.training.kaggle_training import (
     KaggleJobManager,
     KaggleTrainingError,
     find_active_job,
     load_job,
 )
-from hybrid.metadata import suggested_nam_filename
-from hybrid.local_training import LocalTrainingManager
-from hybrid.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, prompt_requests_recipe, status as local_llm_status, test_connection as test_ai_connection
-from hybrid.ollama_pull import (
+from hybrid.modes.metadata import suggested_nam_filename
+from hybrid.training.local_training import LocalTrainingManager
+from hybrid.services.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, prompt_requests_recipe, status as local_llm_status, test_connection as test_ai_connection
+from hybrid.services.ollama_pull import (
     OllamaPullError,
     get_pull_status as get_ollama_pull_status,
     start_pull as start_ollama_pull,
 )
-from hybrid.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
-from hybrid.nam_loader import load_nam
-from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
-from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
-from hybrid.render import NamRenderError, find_nam_render_exe, render
-from hybrid.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
-from hybrid.update_check import UpdateCheckError, check_for_update
-from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
-from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
-from hybrid.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
-from hybrid.wizard import summarise_amp_pair
+from hybrid.services.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
+from hybrid.core.nam_loader import load_nam
+from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
+from hybrid.core.pipeline import RenderedPair, build_hybrid, render_pair
+from hybrid.core.render import NamRenderError, find_nam_render_exe, render
+from hybrid.core.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
+from hybrid.services.update_check import UpdateCheckError, check_for_update
+from hybrid.core.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
+from hybrid.modes.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
+from hybrid.training.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
+from hybrid.modes.wizard import summarise_amp_pair
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
 # We warn rather than silently clip or normalize -- see docs/INPUT_PROFILE_RESEARCH.md.
@@ -1600,7 +1600,7 @@ def api_cab_upload():
     Prepares the IR against the currently-rendered pair's sample rate (if
     any) purely to report prepared/trimmed info back to the UI -- this is
     NOT what gets used for the actual official-input bake at generation
-    time (hybrid.training_target.maybe_bake_cab re-prepares against the
+    time (hybrid.modes.training_target.maybe_bake_cab re-prepares against the
     training input's own sample rate; see that function's docstring for why
     the tap count can differ).
     """
@@ -2503,7 +2503,7 @@ def api_preview():
     except CabIrError as exc:
         return jsonify({"error": f"cab preview error: {exc}"}), 400
     if cab is not None:
-        from hybrid.cab_ir import apply_cab_ir
+        from hybrid.core.cab_ir import apply_cab_ir
         audio = apply_cab_ir(audio.astype("float32"), cab)
 
     # Shared post-combination output gain -- only for the combined result,
@@ -2583,7 +2583,7 @@ def api_live_blend_stems():
         # Convolution is linear, so applying the shared cabinet to both stems
         # before the browser's linear blend is exactly equivalent to applying
         # it to their blend afterwards.
-        from hybrid.cab_ir import apply_cab_ir
+        from hybrid.core.cab_ir import apply_cab_ir
         amp_a = apply_cab_ir(amp_a, cab)
         amp_b = apply_cab_ir(amp_b, cab)
 
@@ -2931,7 +2931,7 @@ def api_generate():
 def _suggested_nam_filename(design_id: str) -> str:
     """Download filename for a trained A2 model -- reads the bundle's own
     training_manifest.json (already-recorded amp filenames/mode/mix) and
-    defers to hybrid.metadata.suggested_nam_filename so the naming logic
+    defers to hybrid.modes.metadata.suggested_nam_filename so the naming logic
     lives in one place shared with scripts/train_a2.py, rather than
     duplicated per caller. Falls back to `<design_id>.nam` if the manifest
     is missing/unreadable (e.g. a bundle generated before this existed)."""

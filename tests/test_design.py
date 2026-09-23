@@ -2,8 +2,8 @@ import json
 
 import numpy as np
 
-from hybrid.design import HybridDesign, freeze_design
-from hybrid.pipeline import HybridResult, RenderedPair
+from hybrid.modes.design import HybridDesign, freeze_design
+from hybrid.core.pipeline import HybridResult, RenderedPair
 
 
 def _pair():

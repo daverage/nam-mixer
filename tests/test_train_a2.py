@@ -412,8 +412,8 @@ def test_validate_exported_nam_rejects_non_finite(tmp_path, monkeypatch):
 
 def test_check_full_low_level_response_delegates_to_shared_helper_and_prints_verdict(tmp_path, monkeypatch, capsys):
     """The substantive sweep/comparison logic (docs/blend-mode-fixes.md,
-    Phases 10-11) lives in hybrid.character_training_target.check_full_low_
-    level_response, shared with hybrid.kaggle_training.validate_downloaded_
+    Phases 10-11) lives in hybrid.modes.character_training_target.check_full_low_
+    level_response, shared with hybrid.training.kaggle_training.validate_downloaded_
     model -- see tests/test_character_training_target.py for that logic.
     This only checks train_a2.py's wrapper delegates and reports a verdict."""
     manifest = {"mode": "character", "low_level_response": {}}

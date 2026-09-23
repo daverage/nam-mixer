@@ -1,4 +1,4 @@
-"""Flask routes for the Continuous Gain tab (`/api/cg/*`): a thin layer over `hybrid.cg_project` / `hybrid.cg_validation`.
+"""Flask routes for the Continuous Gain tab (`/api/cg/*`): a thin layer over `hybrid.continuous_gain.project` / `hybrid.continuous_gain.validation`.
 
 Training is NOT implemented here. `POST /api/cg/projects/<id>/generate` writes an ordinary A2 bundle into the app's
 existing A2 output directory (mode "continuous_gain"), and the UI then starts it through the EXISTING
@@ -20,14 +20,14 @@ from pathlib import Path
 from flask import jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
-from hybrid.a2_training_settings import A2_EPOCH_PRESETS
-from hybrid.cg_project import ANCHOR_METHODS, SELECTION_MODES, CgProject, CgProjectError
-from hybrid.cg_validation import (HELD_OUT_DIS, check_compatibility, check_progression, check_safety, write_audition)
-from hybrid.cg_audit import alignment_shift
-from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
-from hybrid.kaggle_training import find_active_job
-from hybrid.cg_probe import SR, load_reference_di
-from hybrid.nam_loader import load_nam
+from hybrid.training.a2_training_settings import A2_EPOCH_PRESETS
+from hybrid.continuous_gain.project import ANCHOR_METHODS, SELECTION_MODES, CgProject, CgProjectError
+from hybrid.continuous_gain.validation import (HELD_OUT_DIS, check_compatibility, check_progression, check_safety, write_audition)
+from hybrid.continuous_gain.audit import alignment_shift
+from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
+from hybrid.training.kaggle_training import find_active_job
+from hybrid.continuous_gain.probe import SR, load_reference_di
+from hybrid.core.nam_loader import load_nam
 
 _JOBS: dict[str, dict] = {}
 _JOB_LOCK = threading.Lock()

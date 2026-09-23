@@ -4,15 +4,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hybrid.cab_ir import (
+from hybrid.core.cab_ir import (
     CabDesign, CabIrError, EXPORT_MODE_EMBEDDED, EXPORT_MODE_LEARNED,
     EXPORT_MODE_NONE, PREPARATION_PRESERVE_ORIGINAL_TIMING,
     PREPARATION_TRIM_INITIAL_SILENCE, get_frozen_prepared_cab_ir,
     load_and_prepare_cab_ir,
 )
-from hybrid.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential, package_embedded_artifacts
-from hybrid.render import NamRenderError, find_sequential_nam_render_exe
-from hybrid.embedded_completion import complete_embedded_artifact
+from hybrid.training.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential, package_embedded_artifacts
+from hybrid.core.render import NamRenderError, find_sequential_nam_render_exe
+from hybrid.training.embedded_completion import complete_embedded_artifact
 
 
 def _a2_head(sample_rate=48000):
@@ -116,7 +116,7 @@ def test_embedded_packager_rejects_overflowing_scaled_taps():
 
 def test_embedded_validator_uses_default_renderer_when_not_overridden(monkeypatch):
     monkeypatch.delenv("NAM_RENDER_SEQUENTIAL_EXE", raising=False)
-    monkeypatch.setattr("hybrid.render.find_nam_render_exe", lambda: Path("/tmp/nam_render"))
+    monkeypatch.setattr("hybrid.core.render.find_nam_render_exe", lambda: Path("/tmp/nam_render"))
     assert find_sequential_nam_render_exe() == Path("/tmp/nam_render")
 
 

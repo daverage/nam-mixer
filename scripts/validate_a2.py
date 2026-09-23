@@ -2,7 +2,7 @@
 """Held-out musical validation of a trained A2 export against the LIVE
 reference hybrid -- docs/phase3.md sections 24-28.
 
-Runs entirely on the native NAMCore renderer (`hybrid.render.render`), no
+Runs entirely on the native NAMCore renderer (`hybrid.core.render.render`), no
 torch/neural-amp-modeler required -- safe to run in the normal app
 environment, independently of scripts/train_a2.py's training venv.
 
@@ -38,12 +38,12 @@ import soundfile as sf
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from hybrid.design import HybridDesign  # noqa: E402
-from hybrid.fixed_blend import BlendDesign  # noqa: E402
-from hybrid.character_blend import CharacterBlendDesign  # noqa: E402
-from hybrid.input_profiles import db_to_amplitude  # noqa: E402
-from hybrid.safety import check_audio  # noqa: E402
-from hybrid.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character, render_trained_a2  # noqa: E402
+from hybrid.modes.design import HybridDesign  # noqa: E402
+from hybrid.modes.fixed_blend import BlendDesign  # noqa: E402
+from hybrid.modes.character_blend import CharacterBlendDesign  # noqa: E402
+from hybrid.core.input_profiles import db_to_amplitude  # noqa: E402
+from hybrid.core.safety import check_audio  # noqa: E402
+from hybrid.training.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character, render_trained_a2  # noqa: E402
 
 # A single fixed listening-safety gain applied identically to every file in a
 # comparison, if any of them would clip -- never per-file, never a limiter,

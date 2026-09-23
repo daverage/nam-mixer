@@ -1,6 +1,6 @@
 import pytest
 
-from hybrid.research import _rank_tone3000_metadata, _require_tone3000_api_key
+from hybrid.services.research import _rank_tone3000_metadata, _require_tone3000_api_key
 
 
 def test_tone3000_credential_uses_saved_value_over_stale_shell(tmp_path, monkeypatch):
@@ -41,7 +41,7 @@ def test_tone3000_metadata_score_ignores_generic_query_words():
 
 
 def test_tone3000_search_ranks_the_complete_catalogue_page_before_limiting(monkeypatch):
-    import hybrid.research as research
+    import hybrid.services.research as research
 
     monkeypatch.setattr(research, "_require_tone3000_api_key", lambda **_kwargs: "t3k_cs_test")
 

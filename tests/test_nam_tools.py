@@ -1,6 +1,6 @@
 import pytest
 
-from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, calculate_gain_multiplier, compare_changes, describe_nam_tools
+from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, calculate_gain_multiplier, compare_changes, describe_nam_tools
 
 
 def slimmable(count=2):

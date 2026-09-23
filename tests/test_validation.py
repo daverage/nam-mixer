@@ -10,15 +10,15 @@ import json
 import numpy as np
 import pytest
 
-import hybrid.validation as validation
-from hybrid.design import HybridDesign
-from hybrid.validation import (
+import hybrid.training.validation as validation
+from hybrid.modes.design import HybridDesign
+from hybrid.training.validation import (
     compute_esr_metrics, load_frozen_design, render_processed_reference,
     render_reference_hybrid, render_reference_blend, render_reference_character,
 )
-from hybrid.fixed_blend import BlendDesign
-from hybrid.character_blend import CharacterBlendDesign
-from hybrid.validation_report import build_validation_report
+from hybrid.modes.fixed_blend import BlendDesign
+from hybrid.modes.character_blend import CharacterBlendDesign
+from hybrid.training.validation_report import build_validation_report
 
 
 @pytest.fixture(autouse=True)
@@ -142,7 +142,7 @@ def test_processed_reference_replays_fixed_output_and_safety_gains_once(tmp_path
 def test_processed_reference_applies_baked_cab_only_in_teacher_post_stage(monkeypatch, tmp_path):
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")
-    from hybrid.cab_ir import CabDesign
+    from hybrid.core.cab_ir import CabDesign
     design = _design(
         amp_a, amp_b,
         cab=CabDesign(selected=True, baked=True, ir_working_path=str(tmp_path / "cab.wav")),

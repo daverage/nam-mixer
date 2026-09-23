@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import hybrid.receptive_field as receptive_field
-from hybrid.receptive_field import (
+import hybrid.core.receptive_field as receptive_field
+from hybrid.core.receptive_field import (
     A2ReceptiveField,
     ReceptiveFieldUnavailable,
     _layer_array_receptive_field,
@@ -77,7 +77,7 @@ def test_receptive_field_unavailable_without_training_env():
 
 @pytest.mark.skipif(not _NAM_INSTALLED, reason="requires the neural-amp-modeler training package")
 def test_real_a2_receptive_field_fits_bounded_envelope_history():
-    from hybrid.envelope import bounded_envelope_max_history_samples
+    from hybrid.core.envelope import bounded_envelope_max_history_samples
     rf = compute_a2_receptive_field()
     history = bounded_envelope_max_history_samples(48000)
     assert history < rf.receptive_field_samples
@@ -125,7 +125,7 @@ def test_real_source_nam_captures_receptive_field(tmp_path):
     not just a hand-constructed test dict."""
     from pathlib import Path
 
-    from hybrid.nam_loader import load_nam
+    from hybrid.core.nam_loader import load_nam
 
     candidates = list(Path("assets/nam_models").glob("*.nam"))
     if not candidates:
@@ -214,8 +214,8 @@ def test_combine_required_history_includes_explicit_character_parallel_paths():
 
 
 def test_character_record_counts_both_smoothers_and_fir_on_control_path(monkeypatch):
-    from hybrid.training_target import compute_receptive_field_record
-    import hybrid.training_target as target_module
+    from hybrid.modes.training_target import compute_receptive_field_record
+    import hybrid.modes.training_target as target_module
 
     model = SimpleNamespace(path="synthetic.nam")
     monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda _model: 100)

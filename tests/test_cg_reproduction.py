@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from hybrid.cg_anchors import response_anchors
-from hybrid.cg_audit import alignment_shift
-from hybrid.cg_bundle import make_chain
-from hybrid.cg_selection import resolve_selection, select_captures
+from hybrid.continuous_gain.anchors import response_anchors
+from hybrid.continuous_gain.audit import alignment_shift
+from hybrid.continuous_gain.bundle import make_chain
+from hybrid.continuous_gain.selection import resolve_selection, select_captures
 
 REPO = Path(__file__).resolve().parent.parent
 AMPS = ("jcm800", "vibrolux")
@@ -69,7 +69,7 @@ def test_frozen_manifest_recipe_matches_the_default_recipe(amp):
     if frozen is None:
         pytest.skip("frozen FC manifest not available")
     _, _, bundle = _archive(amp)
-    from hybrid.cg_bundle import FC_RECIPE
+    from hybrid.continuous_gain.bundle import FC_RECIPE
     assert tuple(bundle["train_offsets_db"]) == FC_RECIPE.train_offsets_db and tuple(bundle["val_offsets_db"]) == FC_RECIPE.val_offsets_db
     assert bundle["reference_db"] == FC_RECIPE.reference_db
     assert frozen["training"]["epochs"] == 60 and frozen["training"]["batch_size"] == 16 and frozen["training"]["ny"] == 8192

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hybrid import nam_provenance as prov
+from hybrid.training import nam_provenance as prov
 
 
 def _model(**kwargs):

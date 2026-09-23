@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hybrid import render_bootstrap
+from hybrid.core import render_bootstrap
 
 
 class _FakeResponse(BytesIO):
@@ -58,7 +58,7 @@ def test_no_matching_release_raises(monkeypatch):
 
 
 def test_default_dest_path_matches_render_module_candidate():
-    from hybrid.render import _NAM_RENDER_EXE_CANDIDATES
+    from hybrid.core.render import _NAM_RENDER_EXE_CANDIDATES
 
     dest = render_bootstrap.default_dest_path()
     assert dest in _NAM_RENDER_EXE_CANDIDATES

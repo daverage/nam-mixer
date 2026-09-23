@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hybrid import ollama_pull
+from hybrid.services import ollama_pull
 
 
 @pytest.fixture(autouse=True)

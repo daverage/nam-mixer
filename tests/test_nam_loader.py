@@ -1,7 +1,7 @@
 import json
 
 
-from hybrid.nam_loader import load_nam
+from hybrid.core.nam_loader import load_nam
 
 
 def test_calibrated_nam(tmp_path):

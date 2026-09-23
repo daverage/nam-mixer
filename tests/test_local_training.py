@@ -4,7 +4,7 @@ import sys
 import time
 import pytest
 
-from hybrid.local_training import LocalTrainingManager
+from hybrid.training.local_training import LocalTrainingManager
 
 
 def test_cancel_stops_an_app_owned_process_and_reports_cancelled(tmp_path):
@@ -104,7 +104,7 @@ def test_status_surfaces_embedded_artifact_so_the_ui_can_offer_it(tmp_path, monk
 
 def test_setup_uses_own_interpreter_when_it_already_meets_the_version_floor(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
-    monkeypatch.setattr("hybrid.local_training._training_python_version", lambda argv: (3, 11))
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version", lambda argv: (3, 11))
     started = {}
     monkeypatch.setattr(manager, "_start", lambda command, state: started.update(command=command, state=state))
 
@@ -117,11 +117,11 @@ def test_setup_uses_own_interpreter_when_it_already_meets_the_version_floor(tmp_
 def test_setup_falls_back_to_system_python_when_own_interpreter_is_too_old(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     monkeypatch.delenv("NAM_MIXER_TRAINING_PYTHON", raising=False)
-    monkeypatch.setattr("hybrid.local_training.shutil.which", lambda name: "/usr/local/bin/python3" if name == "python3" else None)
+    monkeypatch.setattr("hybrid.training.local_training.shutil.which", lambda name: "/usr/local/bin/python3" if name == "python3" else None)
 
     def fake_version(argv):
         return (3, 9) if argv == [sys.executable] else (3, 11)
-    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version", fake_version)
     started = {}
     monkeypatch.setattr(manager, "_start", lambda command, state: started.update(command=command, state=state))
 
@@ -134,11 +134,11 @@ def test_setup_falls_back_to_system_python_when_own_interpreter_is_too_old(tmp_p
 def test_setup_explains_when_no_system_python_is_available(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     monkeypatch.delenv("NAM_MIXER_TRAINING_PYTHON", raising=False)
-    monkeypatch.setattr("hybrid.local_training.shutil.which", lambda _name: None)
+    monkeypatch.setattr("hybrid.training.local_training.shutil.which", lambda _name: None)
 
     def fake_version(argv):
         return (3, 9) if argv == [sys.executable] else None
-    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version", fake_version)
 
     with pytest.raises(RuntimeError, match=r"Python 3\.10\+ installed"):
         manager.setup()
@@ -158,14 +158,14 @@ def test_setup_skips_a_too_old_python_and_uses_a_valid_one(tmp_path, monkeypatch
         return {"python3.12": None, "python3.11": None, "python3.10": None,
                 "python3.13": None, "python3.14": None,
                 "python3": "/usr/bin/python3", "python": None}.get(name)
-    monkeypatch.setattr("hybrid.local_training.shutil.which", fake_which)
+    monkeypatch.setattr("hybrid.training.local_training.shutil.which", fake_which)
 
     def fake_version(argv):
         # Simulate the exact bug: the only thing on PATH is the ancient
         # Xcode-bundled Python 3.9. sys.executable is treated as equally too
         # old here, forcing the candidate search.
         return (3, 9) if argv in ([sys.executable], ["/usr/bin/python3"]) else None
-    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version", fake_version)
 
     with pytest.raises(RuntimeError, match=r"only found: 3\.9 \(/usr/bin/python3\)"):
         manager.setup()
@@ -177,13 +177,13 @@ def test_setup_prefers_a_versioned_python_over_the_bare_name(tmp_path, monkeypat
 
     def fake_which(name):
         return {"python3.12": "/opt/homebrew/bin/python3.12", "python3": "/usr/bin/python3"}.get(name)
-    monkeypatch.setattr("hybrid.local_training.shutil.which", fake_which)
+    monkeypatch.setattr("hybrid.training.local_training.shutil.which", fake_which)
 
     def fake_version(argv):
         return {tuple([sys.executable]): (3, 9),
                 ("/opt/homebrew/bin/python3.12",): (3, 12),
                 ("/usr/bin/python3",): (3, 9)}.get(tuple(argv))
-    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version", fake_version)
 
     started = {}
     monkeypatch.setattr(manager, "_start", lambda command, state: started.update(command=command, state=state))
@@ -200,7 +200,7 @@ def test_configured_training_python_below_minimum_version_is_rejected(tmp_path, 
 
     def fake_version(argv):
         return (3, 9)
-    monkeypatch.setattr("hybrid.local_training._training_python_version", fake_version)
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version", fake_version)
 
     with pytest.raises(RuntimeError, match=r"reports Python 3\.9.*needs Python 3\.10\+"):
         manager.setup()

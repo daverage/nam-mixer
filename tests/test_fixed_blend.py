@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from hybrid.fixed_blend import (
+from hybrid.modes.fixed_blend import (
     BlendDesign,
     build_fixed_blend,
     compute_active_trim,
     freeze_blend_design,
 )
-from hybrid.pipeline import RenderedPair
+from hybrid.core.pipeline import RenderedPair
 
 
 def _pair(amp_a, amp_b, envelope_db=None, sample_rate=48000):

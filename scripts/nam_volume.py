@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from hybrid.nam_tools import NamToolError, apply_volume_change, compare_changes, load_nam, save_nam
+from hybrid.training.nam_tools import NamToolError, apply_volume_change, compare_changes, load_nam, save_nam
 
 
 def _default_output(source: Path, db: float) -> Path:

@@ -10,13 +10,13 @@ import os
 ap = argparse.ArgumentParser(); ap.add_argument("amp"); ap.add_argument("--out", type=Path, default=None); ap.add_argument("--skip-audio", action="store_true"); a = ap.parse_args()
 os.environ["SINGLE_NAM_AMP"] = a.amp
 from single_nam_common import capture_path, official_input
-from hybrid.cg_probe import load_reference_di, SR
-from hybrid.cg_selection import select_captures, resolve_selection
-from hybrid.cg_anchors import response_anchors
-from hybrid.cg_audit import alignment_shift
-from hybrid.cg_bundle import make_chain, build_training_audio, bundle_manifest_core, FC_RECIPE
-from hybrid.nam_loader import load_nam
-from hybrid.render import render
+from hybrid.continuous_gain.probe import load_reference_di, SR
+from hybrid.continuous_gain.selection import select_captures, resolve_selection
+from hybrid.continuous_gain.anchors import response_anchors
+from hybrid.continuous_gain.audit import alignment_shift
+from hybrid.continuous_gain.bundle import make_chain, build_training_audio, bundle_manifest_core, FC_RECIPE
+from hybrid.core.nam_loader import load_nam
+from hybrid.core.render import render
 
 P = json.loads((REPO / "work/p4" / a.amp / "profile.json").read_text()); A = json.loads((REPO / "work/p4" / a.amp / "audit.json").read_text())
 frozen = json.loads((REPO / "work/p4e/final" / a.amp / "FC_bundle/manifest.json").read_text())

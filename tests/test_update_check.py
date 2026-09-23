@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hybrid import update_check
+from hybrid.services import update_check
 
 
 class _FakeResponse(BytesIO):

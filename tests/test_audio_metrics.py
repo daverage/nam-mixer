@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from hybrid.audio_metrics import (
+from hybrid.core.audio_metrics import (
     envelope_error_db,
     framed_spectral_correlation,
     multi_resolution_log_spectral_distance,

@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from hybrid import local_llm
+from hybrid.services import local_llm
 
 
 @pytest.fixture(autouse=True)
@@ -218,7 +218,7 @@ def test_local_llm_compacts_prose_but_preserves_a_structured_source_plan(monkeyp
     assert len(messages) == 8  # system, six compact history turns, user
     assert all(len(message["content"]) <= 900 for message in messages[1:-1])
     assert len(messages[-1]["content"]) <= len("Which file should I use?") + 5_200
-    # Computed from the real formula (hybrid.local_llm._default_max_tokens applied to the actual char-limit constants) rather
+    # Computed from the real formula (hybrid.services.local_llm._default_max_tokens applied to the actual char-limit constants) rather
     # than a hardcoded number: a hardcoded 1400 here silently went stale after the char limits changed and only "passed" by
     # coincidence on machines whose .env happened to pin NAM_MIXER_AI_MAX_TOKENS/NAM_MIXER_LOCAL_LLM_MAX_TOKENS to 1400.
     expected_max_tokens = local_llm._default_max_tokens(

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from hybrid.cab_ir import (
+from hybrid.core.cab_ir import (
     CabIrError,
     apply_cab_ir,
     cab_design_from_prepared,
@@ -165,7 +165,7 @@ def test_energy_percentile_indices_are_known_for_synthetic_ir():
     silent, so leading/trailing trimming doesn't interfere) samples --
     99%/99.9%/99.99% energy must all be reached within the first ~100
     "loud" samples, well before the tail is exhausted."""
-    from hybrid.cab_ir import _energy_percentile_sample_counts
+    from hybrid.core.cab_ir import _energy_percentile_sample_counts
 
     loud = np.full(100, 1.0, dtype=np.float32)
     quiet = np.full(100, 1e-6, dtype=np.float32)  # negligible energy contribution

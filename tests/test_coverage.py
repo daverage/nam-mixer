@@ -1,6 +1,6 @@
 import numpy as np
 
-from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
+from hybrid.core.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
 
 
 def _synthetic_envelope(n=10000):

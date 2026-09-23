@@ -1,12 +1,16 @@
 """NAM Mixer core package.
 
-See the top-level README for the concept. Modules:
-- nam_loader: parse .nam files and their calibration metadata.
-- render: run audio through a loaded NAM model (NOT YET IMPLEMENTED, see module).
-- envelope: dry-input level/envelope extraction that drives the crossover.
-- level_match: automatic Amp A/B trim calculation focused on the crossover region.
-- align: sample-offset detection/correction between two amp renders.
-- blend: the actual dynamic crossfade (smoothstep by default, replaceable).
-- safety: NaN/clip checks and non-limiting peak-ceiling gain staging.
-- metadata: the JSON sidecar schema describing how a hybrid target was generated.
+See the top-level README for the concept. Subpackages:
+- core: NAM I/O (nam_loader, render) and shared signal processing (envelope,
+  level_match, align, safety, cab_ir, receptive_field, pipeline, ...).
+- modes: the three design modes -- Dynamic Hybrid (blend, design,
+  training_target), Parallel Blend (fixed_blend, blend_training_target) and
+  Character Blend (character_*).
+- continuous_gain: the Continuous Gain tab (one amp, N captures -> one .nam).
+- training: A2 training settings, local/Kaggle backends, export packaging,
+  and validation.
+- services: settings/.env, the local recipe assistant, research lookups,
+  update checks.
+`paths` stays at this top level because it derives the repo root from its
+own location.
 """

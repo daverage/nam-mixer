@@ -11,7 +11,7 @@ What it does, in order (aborts non-zero on any failure -- never silently
 degrades to "worked around it"):
 
   1. Print environment diagnostics (Python/nam/torch/lightning/accelerator).
-  2. Load the manifest written by hybrid.training_target.generate_training_bundle,
+  2. Load the manifest written by hybrid.modes.training_target.generate_training_bundle,
      locate input.wav/hybrid_target.wav next to it, and verify their hashes,
      sample rate, and frame-count equality against the manifest (docs/phase3.md
      section 16 -- input and target must stay exactly sample-aligned; latency
@@ -55,7 +55,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from hybrid.a2_training_settings import (  # noqa: E402
+from hybrid.training.a2_training_settings import (  # noqa: E402
     A2_EPOCH_PRESETS,
     A2_QUICK_SETTINGS,
     DEFAULT_EPOCH_PRESET,
@@ -63,19 +63,19 @@ from hybrid.a2_training_settings import (  # noqa: E402
     settings_for_preset,
     user_metadata_kwargs,
 )
-from hybrid.cab_ir import CabIrError, get_prepared_cab_ir  # noqa: E402
-import hybrid.character_training_target as character_training_target  # noqa: E402
-from hybrid.receptive_field import (  # noqa: E402
+from hybrid.core.cab_ir import CabIrError, get_prepared_cab_ir  # noqa: E402
+import hybrid.modes.character_training_target as character_training_target  # noqa: E402
+from hybrid.core.receptive_field import (  # noqa: E402
     ReceptiveFieldUnavailable,
     assert_required_history_fits,
     compute_source_nam_receptive_field,
 )
-from hybrid.render import NamRenderError, render  # noqa: E402
-from hybrid.metadata import suggested_nam_filename  # noqa: E402
-from hybrid.nam_loader import load_nam  # noqa: E402
-from hybrid.validation import compute_esr_metrics  # noqa: E402
-from hybrid.validation_report import build_validation_report  # noqa: E402
-from hybrid.embedded_completion import complete_embedded_artifact  # noqa: E402
+from hybrid.core.render import NamRenderError, render  # noqa: E402
+from hybrid.modes.metadata import suggested_nam_filename  # noqa: E402
+from hybrid.core.nam_loader import load_nam  # noqa: E402
+from hybrid.training.validation import compute_esr_metrics  # noqa: E402
+from hybrid.training.validation_report import build_validation_report  # noqa: E402
+from hybrid.training.embedded_completion import complete_embedded_artifact  # noqa: E402
 
 
 class TrainingAbort(RuntimeError):
@@ -187,7 +187,7 @@ def _resolve_baked_cab_fir_samples(manifest: dict, cab: dict, sample_rate: int) 
     """Resolve (fir_history_samples, fir_length_samples) for a baked cab.
 
     Prefers recomputing the EXACT prepared tap count from the actual cab IR
-    file (the same `get_prepared_cab_ir` call `hybrid.training_target.
+    file (the same `get_prepared_cab_ir` call `hybrid.modes.training_target.
     maybe_bake_cab` used to produce hybrid_target.wav) -- this local trainer,
     unlike the self-contained Kaggle cloud worker, can import hybrid/ and
     normally runs on the same machine that generated the bundle, so the IR
@@ -571,7 +571,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
 
 def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate: int, slim: bool = False) -> dict:
     """`slim=True` exercises the Lite/slim submodel of a packed A2 export
-    (NAMCore's `--slim` flag, forwarded via hybrid.render.render's `slim`
+    (NAMCore's `--slim` flag, forwarded via hybrid.core.render.render's `slim`
     kwarg -- see docs/phase3.md section 20); `slim=False` (default) exercises
     the Full submodel. Only meaningful for a slimmable/packed export; a
     NamRenderError from a non-slimmable model when slim=True is expected and
@@ -600,10 +600,10 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
 
 
 def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float = 0.0) -> "dict | None":
-    """Thin wrapper over `hybrid.character_training_target.check_full_low_
+    """Thin wrapper over `hybrid.modes.character_training_target.check_full_low_
     level_response` (docs/blend-mode-fixes.md, Phases 10-11) that also prints
     a verdict line -- the actual sweep/comparison logic is shared with
-    `hybrid.kaggle_training.validate_downloaded_model` so both local and
+    `hybrid.training.kaggle_training.validate_downloaded_model` so both local and
     Kaggle-trained models are held to the identical bar (see that function's
     docstring). Only meaningful for Character Blend bundles that recorded a
     `low_level_response` section; returns None otherwise.

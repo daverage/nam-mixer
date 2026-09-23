@@ -14,8 +14,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import hybrid.kaggle_training as kaggle_training
-from hybrid.kaggle_training import (
+import hybrid.training.kaggle_training as kaggle_training
+from hybrid.training.kaggle_training import (
     A2_EPOCH_PRESETS,
     ACCELERATOR,
     DEFAULT_EPOCH_PRESET,
@@ -1356,9 +1356,9 @@ def _write_bundle_wavs(a2_output_dir: Path, design_id: str, n: int = 1000, sr: i
 def test_validate_downloaded_model_runs_low_level_response_check_when_manifest_is_character_mode(monkeypatch, tmp_path):
     """docs/blend-mode-fixes.md Phase 10/11: a Kaggle-trained Character
     Blend A2 gets the same low-level-response bar as a locally-trained one,
-    via the SAME hybrid.character_training_target.check_full_low_level_
+    via the SAME hybrid.modes.character_training_target.check_full_low_level_
     response function scripts/train_a2.py uses."""
-    import hybrid.character_training_target as character_training_target
+    import hybrid.modes.character_training_target as character_training_target
 
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"

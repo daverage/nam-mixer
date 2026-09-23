@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import hybrid.character_training_target as character_training_target
-import hybrid.training_target as training_target
-from hybrid.character_blend import CharacterBlendDesign, LowLevelResponseCheck
-from hybrid.character_training_target import generate_character_training_bundle
-from hybrid.training_target import TrainingInputError
+import hybrid.modes.character_training_target as character_training_target
+import hybrid.modes.training_target as training_target
+from hybrid.modes.character_blend import CharacterBlendDesign, LowLevelResponseCheck
+from hybrid.modes.character_training_target import generate_character_training_bundle
+from hybrid.modes.training_target import TrainingInputError
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def identity_render(monkeypatch):
     def fake_render(model, audio, sample_rate, **kwargs):
         return np.asarray(audio, dtype=np.float32).copy()
     monkeypatch.setattr(character_training_target, "render", fake_render)
-    # validate_training_input() (imported from hybrid.training_target) hashes
+    # validate_training_input() (imported from hybrid.modes.training_target) hashes
     # against the real official V3 excitation file -- bypass for this
     # synthetic fixture, same as test_training_target.py.
     monkeypatch.setattr(training_target, "_md5_file", lambda path: training_target.OFFICIAL_V3_INPUT_MD5)
@@ -98,7 +98,7 @@ def test_generate_character_training_bundle_aborts_on_low_level_collapse(tmp_pat
 # ---------------------------------------------------------------------------
 # Phases 10/11 -- post-training validation: the trained Full A2 must track
 # the teacher's own recorded low-level response, shared with
-# hybrid.kaggle_training.validate_downloaded_model and scripts/train_a2.py.
+# hybrid.training.kaggle_training.validate_downloaded_model and scripts/train_a2.py.
 # ---------------------------------------------------------------------------
 
 def test_check_full_low_level_response_returns_none_for_non_character_or_missing_section(tmp_path):
@@ -137,8 +137,8 @@ def _equivalent_reference_manifest(tmp_path, audio, levels_db, teacher_rms):
 
 
 def test_check_full_low_level_response_passes_when_full_tracks_teacher(tmp_path):
-    from hybrid.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS
-    from hybrid.input_profiles import db_to_amplitude
+    from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS
+    from hybrid.core.input_profiles import db_to_amplitude
 
     nam_path = _write_nam(tmp_path / "model.nam")
     levels_db = [0.0, -6.0, -12.0]

@@ -1,6 +1,6 @@
 import numpy as np
 
-from hybrid.envelope import rms_envelope_db
+from hybrid.core.envelope import rms_envelope_db
 
 
 def test_envelope_length_matches_input():

@@ -56,7 +56,7 @@ binaries = []
 nam_render_exe = REPO_ROOT / "native" / "nam_render" / "build" / "nam_render"
 if nam_render_exe.is_file():
     binaries.append((str(nam_render_exe), "native/nam_render/build"))
-    # hybrid.render.find_nam_render_exe() looks for this relative to
+    # hybrid.core.render.find_nam_render_exe() looks for this relative to
     # wherever ITS OWN hybrid/ copy sits -- training_support/hybrid/render.py
     # resolves that to training_support/native/nam_render/build/, a
     # separate lookup from the main app's copy above.

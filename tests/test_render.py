@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from hybrid.nam_loader import load_nam
-from hybrid.render import NamRenderError, find_nam_render_exe, render
+from hybrid.core.nam_loader import load_nam
+from hybrid.core.render import NamRenderError, find_nam_render_exe, render
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = REPO_ROOT / "assets" / "nam_models" / "FenderSuperReverb1977_Clean.nam"
@@ -60,7 +60,7 @@ def test_render_is_deterministic():
 
 
 def test_render_rejects_stereo_input(monkeypatch):
-    import hybrid.render as render_module
+    import hybrid.core.render as render_module
 
     monkeypatch.setattr(render_module, "find_nam_render_exe", lambda: Path("unused-renderer"))
     model = SimpleNamespace(path=Path("unused-model.nam"))
@@ -71,7 +71,7 @@ def test_render_rejects_stereo_input(monkeypatch):
 
 
 def test_render_missing_exe_raises_nam_render_error(monkeypatch):
-    import hybrid.render as render_module
+    import hybrid.core.render as render_module
 
     def _raise():
         raise NamRenderError("not found")

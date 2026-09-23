@@ -13,7 +13,7 @@ BUNDLED_ASSET = REPO_ROOT / "assets" / "training" / "official_nam_v3_input.wav"
 
 
 def test_bundled_asset_matches_official_v3_md5():
-    from hybrid.training_target import OFFICIAL_V3_INPUT_MD5
+    from hybrid.modes.training_target import OFFICIAL_V3_INPUT_MD5
 
     assert BUNDLED_ASSET.is_file()
     digest = hashlib.md5(BUNDLED_ASSET.read_bytes()).hexdigest()

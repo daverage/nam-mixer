@@ -6,7 +6,8 @@ import os
 
 import pytest
 
-from hybrid import env_file, settings
+from hybrid.services import env_file
+from hybrid.services import settings
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 import numpy as np
 
-from hybrid.align import align_to_reference, estimate_offset
+from hybrid.core.align import align_to_reference, estimate_offset
 
 
 def test_estimate_offset_detects_known_shift():

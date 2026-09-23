@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from hybrid.a2_training_settings import (
+from hybrid.training.a2_training_settings import (
     A2_EPOCH_PRESETS,
     A2_QUICK_SETTINGS,
     A2_TRAINING_SETTINGS,
@@ -22,7 +22,7 @@ from hybrid.a2_training_settings import (
     settings_for_preset,
     user_metadata_kwargs,
 )
-from hybrid.training_target import OFFICIAL_V3_INPUT_MD5 as TRAINING_TARGET_MD5
+from hybrid.modes.training_target import OFFICIAL_V3_INPUT_MD5 as TRAINING_TARGET_MD5
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

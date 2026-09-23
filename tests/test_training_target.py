@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import hybrid.training_target as training_target
-from hybrid.design import HybridDesign
-from hybrid.training_target import (
+import hybrid.modes.training_target as training_target
+from hybrid.modes.design import HybridDesign
+from hybrid.modes.training_target import (
     TrainingInputError,
     generate_training_bundle,
     validate_training_input,
@@ -104,7 +104,7 @@ def test_validate_training_input_rejects_non_v3_file(tmp_path, monkeypatch):
     rejected -- docs/phase3.md review: 'any recognized input' is not enough,
     it must be V3 specifically."""
     monkeypatch.undo()  # remove the autouse identity_render/_md5_file bypass for this test
-    import hybrid.training_target as training_target
+    import hybrid.modes.training_target as training_target
     monkeypatch.setattr(training_target, "render", lambda model, audio, sr: np.asarray(audio, dtype=np.float32).copy())
 
     path = _write_training_input(tmp_path / "in.wav")
@@ -118,7 +118,7 @@ def test_validate_training_input_accepts_real_md5_match(tmp_path, monkeypatch):
     constant to this fixture's real hash, since we don't ship the real
     27MB official file) is accepted."""
     monkeypatch.undo()
-    import hybrid.training_target as training_target
+    import hybrid.modes.training_target as training_target
     monkeypatch.setattr(training_target, "render", lambda model, audio, sr: np.asarray(audio, dtype=np.float32).copy())
 
     path = _write_training_input(tmp_path / "in.wav")
@@ -177,8 +177,8 @@ def test_manifest_amp_provenance_includes_descriptive_source_metadata(tmp_path):
     assert manifest["amp_b"]["name"] == "Mesa Lead"
     assert manifest["amp_b"]["tone_type"] == "hi_gain"
     # No suffix baked into the manifest itself -- that's applied later by
-    # hybrid.a2_training_settings.user_metadata_kwargs at train time.
-    from hybrid.a2_training_settings import user_metadata_kwargs
+    # hybrid.training.a2_training_settings.user_metadata_kwargs at train time.
+    from hybrid.training.a2_training_settings import user_metadata_kwargs
     assert user_metadata_kwargs(manifest)["tone_type"] is None  # clean != hi_gain, not copied
     assert user_metadata_kwargs(manifest)["name"].endswith("[Amp Only]")
 
@@ -338,7 +338,7 @@ def test_baked_cab_alters_hybrid_target_but_preview_only_does_not(tmp_path):
     """docs/blend-mode.md acceptance criteria 10/11: preview and bake use the
     same core cab processing, and a preview-only cab must never alter the
     generated training target -- only baking does."""
-    from hybrid.cab_ir import cab_design_from_prepared, load_and_prepare_cab_ir
+    from hybrid.core.cab_ir import cab_design_from_prepared, load_and_prepare_cab_ir
 
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")
@@ -387,7 +387,7 @@ def test_baked_cab_target_uses_the_full_prepared_ir_no_truncation(tmp_path):
     regardless of the crossover blend weight -- letting us assert the baked
     raw target equals `apply_cab_ir(official_input, full_prepared_ir)`
     EXACTLY, byte for byte, rather than merely "different from no-cab"."""
-    from hybrid.cab_ir import apply_cab_ir, cab_design_from_prepared, load_and_prepare_cab_ir
+    from hybrid.core.cab_ir import apply_cab_ir, cab_design_from_prepared, load_and_prepare_cab_ir
 
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")

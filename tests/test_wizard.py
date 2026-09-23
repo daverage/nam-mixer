@@ -1,5 +1,5 @@
-from hybrid.character_analysis import AmpCharacterAnalysis, AmpLevelAnalysis
-from hybrid.wizard import summarise_amp_pair
+from hybrid.modes.character_analysis import AmpCharacterAnalysis, AmpLevelAnalysis
+from hybrid.modes.wizard import summarise_amp_pair
 
 
 def _analysis(output_rms: float, compression: tuple[float, float], high: float) -> AmpCharacterAnalysis:

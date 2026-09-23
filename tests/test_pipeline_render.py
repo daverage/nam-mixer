@@ -12,11 +12,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import hybrid.pipeline as pipeline
-from hybrid.envelope import bounded_causal_envelope_db
-from hybrid.input_profiles import db_to_amplitude
-from hybrid.nam_loader import NamModel
-from hybrid.pipeline import render_pair
+import hybrid.core.pipeline as pipeline
+from hybrid.core.envelope import bounded_causal_envelope_db
+from hybrid.core.input_profiles import db_to_amplitude
+from hybrid.core.nam_loader import NamModel
+from hybrid.core.pipeline import render_pair
 
 
 def _fake_model(input_level_dbu=None):

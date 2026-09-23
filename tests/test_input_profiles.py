@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from hybrid.input_profiles import (
+from hybrid.core.input_profiles import (
     BASS_PROFILES,
     GUITAR_PROFILES,
     db_to_amplitude,

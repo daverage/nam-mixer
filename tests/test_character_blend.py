@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from hybrid.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio
-from hybrid.character_blend import (
+from hybrid.modes.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio
+from hybrid.modes.character_blend import (
     CharacterBlendDesign,
     LowLevelResponseCheck,
     _adjacent_level_weights,
@@ -188,7 +188,7 @@ def test_evaluate_low_level_response_passes_for_healthy_linear_amps():
 
 
 def test_evaluate_low_level_response_flags_a_hard_gate(monkeypatch):
-    import hybrid.character_blend as character_blend_module
+    import hybrid.modes.character_blend as character_blend_module
 
     def fake_build(pair, design, **kwargs):
         # Simulates the pre-fix bug: flat output until the envelope falls

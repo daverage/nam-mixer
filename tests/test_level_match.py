@@ -1,6 +1,6 @@
 import numpy as np
 
-from hybrid.level_match import compute_crossover_trim
+from hybrid.core.level_match import compute_crossover_trim
 
 
 def test_suggested_trim_matches_known_offset():

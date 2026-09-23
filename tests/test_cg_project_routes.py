@@ -16,9 +16,9 @@ import soundfile as sf
 from flask import Flask
 
 import cg_routes
-import hybrid.cg_project as cgp
-from hybrid.cg_project import CgProject, CgProjectError, suggest_position
-from hybrid.cab_ir import cab_design_from_prepared, get_prepared_cab_ir
+import hybrid.continuous_gain.project as cgp
+from hybrid.continuous_gain.project import CgProject, CgProjectError, suggest_position
+from hybrid.core.cab_ir import cab_design_from_prepared, get_prepared_cab_ir
 from tests.cg_synth import SR, amp_render, synth_di
 
 

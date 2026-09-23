@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from hybrid.cg_bundle import (FC_RECIPE, FcRecipe, build_training_audio, bundle_manifest_core, make_chain, sha256_f32, write_bundle)
-from hybrid.safety import apply_peak_ceiling
+from hybrid.continuous_gain.bundle import (FC_RECIPE, FcRecipe, build_training_audio, bundle_manifest_core, make_chain, sha256_f32, write_bundle)
+from hybrid.core.safety import apply_peak_ceiling
 from tests.cg_synth import SR, synth_di
 
 TINY = FcRecipe(train_dis=("a", "b"), val_dis=("v",), train_offsets_db=(-6.0, 6.0), val_offsets_db=(0.0,), di_seconds=1, val_seconds=1)

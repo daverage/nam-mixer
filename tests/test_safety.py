@@ -1,6 +1,6 @@
 import numpy as np
 
-from hybrid.safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
+from hybrid.core.safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
 
 
 def test_detects_nan():

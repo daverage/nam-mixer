@@ -4,11 +4,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hybrid.cg_anchors import effective_min_sep, fixed_ladder_anchors, mapping_table, position_input_gain_db, response_anchors
-from hybrid.cg_audit import alignment_shift, audit_captures
-from hybrid.cg_probe import FIT_DIS, probe_capture
-from hybrid.cg_profile import build_profile
-from hybrid.cg_selection import (GROUPS, MAX_EXHAUSTIVE_ELIGIBLE, PHYS, evaluate_set, resolve_selection, select_captures)
+from hybrid.continuous_gain.anchors import effective_min_sep, fixed_ladder_anchors, mapping_table, position_input_gain_db, response_anchors
+from hybrid.continuous_gain.audit import alignment_shift, audit_captures
+from hybrid.continuous_gain.probe import FIT_DIS, probe_capture
+from hybrid.continuous_gain.profile import build_profile
+from hybrid.continuous_gain.selection import (GROUPS, MAX_EXHAUSTIVE_ELIGIBLE, PHYS, evaluate_set, resolve_selection, select_captures)
 from tests.cg_synth import SR, amp_render, synth_di
 
 GAINS = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
@@ -181,7 +181,7 @@ def test_mapping_marks_anchors_and_interpolates_the_rest():
 
 # ---- parallel rendering + probe cache: outputs identical to the serial computation
 def test_pmap_preserves_order_and_propagates_errors(monkeypatch):
-    from hybrid.cg_parallel import default_workers, pmap
+    from hybrid.continuous_gain.parallel import default_workers, pmap
     import time as _t
     assert pmap(lambda i: (_t.sleep(0.02 * (5 - i)), i * i)[1], range(6), workers=4) == [0, 1, 4, 9, 16, 25]
     assert pmap(lambda i: i, [], workers=4) == [] and pmap(lambda i: i + 1, [3], workers=8) == [4]

@@ -20,9 +20,9 @@ import pytest
 import soundfile as sf
 
 import app as app_module
-import hybrid.blend_training_target as blend_training_target
-import hybrid.pipeline as pipeline
-import hybrid.training_target as training_target
+import hybrid.modes.blend_training_target as blend_training_target
+import hybrid.core.pipeline as pipeline
+import hybrid.modes.training_target as training_target
 
 # Smallest bundled DI fixture (17.75s) -- keeps these tests fast since the
 # causal envelope follower is a real (if cheap) per-sample computation.
@@ -60,7 +60,7 @@ def _write_fake_nam(path, input_level_dbu=None):
 
 
 def test_selected_cab_warns_for_explicit_amp_cab_source_metadata(tmp_path):
-    from hybrid.cab_ir import CabDesign
+    from hybrid.core.cab_ir import CabDesign
     source = tmp_path / "source.nam"
     source.write_text(jsonlib.dumps({"architecture": "Test", "config": {}, "sample_rate": 48000,
                                      "metadata": {"gear_type": "amp_cab"}}))
@@ -611,7 +611,7 @@ def test_deleting_a_session_with_an_active_kaggle_job_requires_explicit_confirma
     specific warning about cancelling the Kaggle job -- then actually
     cancel it once the caller passes ?cancel_active_jobs=1, rather than
     leaving an orphaned Kaggle kernel/dataset with no session managing it."""
-    from hybrid.kaggle_training import KaggleJob, save_job
+    from hybrid.training.kaggle_training import KaggleJob, save_job
 
     session_dir = tmp_path / "sessions"
     model_dir = session_dir / "models"
@@ -795,7 +795,7 @@ def test_upload_sweep_also_checks_generated_sessions(tmp_path, monkeypatch):
 
 
 def test_update_check_route_reports_an_available_update(client, monkeypatch):
-    from hybrid.update_check import UpdateCheckResult
+    from hybrid.services.update_check import UpdateCheckResult
     monkeypatch.setattr(app_module, "check_for_update", lambda current: UpdateCheckResult(
         current_version=current, latest_version="v9.9.9", update_available=True,
         release_url="https://github.com/daverage/nam-mixer/releases/tag/v9.9.9", asset_url="https://example.invalid/asset.dmg"))
@@ -806,7 +806,7 @@ def test_update_check_route_reports_an_available_update(client, monkeypatch):
 
 
 def test_update_check_route_reports_a_ui_safe_error_without_raising(client, monkeypatch):
-    from hybrid.update_check import UpdateCheckError
+    from hybrid.services.update_check import UpdateCheckError
     def boom(current):
         raise UpdateCheckError("Could not reach GitHub to check for updates: no route to host")
     monkeypatch.setattr(app_module, "check_for_update", boom)
@@ -821,7 +821,7 @@ def test_update_check_route_never_hits_the_real_network(client):
     call, never as a side effect of import/app-startup/collection -- proven here by having urlopen itself fail
     and confirming the route still only reports a UI-safe error, rather than the test suite having quietly made
     a real network call before this point."""
-    import hybrid.update_check as update_check_module
+    import hybrid.services.update_check as update_check_module
     with patch.object(update_check_module, "urlopen", side_effect=OSError("must not hit the real network")) as mock_urlopen:
         response = client.get("/api/update/check")
     assert mock_urlopen.call_count == 1
@@ -884,7 +884,7 @@ def test_renaming_loaded_generated_session_updates_untrained_manifest(client, tm
 
 
 def test_rejected_training_start_preserves_running_bundle_protection(client, tmp_path, monkeypatch):
-    from hybrid.local_training import LocalTrainingManager
+    from hybrid.training.local_training import LocalTrainingManager
 
     a2_dir = tmp_path / "a2"
     for design in ("running-A", "other-B"):
@@ -1246,7 +1246,7 @@ def _comparison_bundle(tmp_path, monkeypatch):
     amp_a, amp_b, model = bundle / "a.nam", bundle / "b.nam", bundle / "model.nam"
     for path in (amp_a, amp_b, model):
         _write_fake_nam(path)
-    from hybrid.design import HybridDesign
+    from hybrid.modes.design import HybridDesign
     HybridDesign(
         str(amp_a), str(amp_b), crossover_dbfs=-20.0, calibration_mode="raw",
     ).write_json(bundle / "hybrid_design.json")
@@ -1579,7 +1579,7 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     assert manifest["cab"]["selected"] is True
     assert manifest["cab"]["display_name"] == "Modern Boutique 4x12"
 
-    from hybrid.a2_training_settings import user_metadata_kwargs
+    from hybrid.training.a2_training_settings import user_metadata_kwargs
     assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
@@ -1665,7 +1665,7 @@ def test_settings_api_rejects_tone3000_publishable_key(client, tmp_path, monkeyp
 
 
 def test_local_llm_pull_route_reports_backend_error_as_json(client, monkeypatch):
-    from hybrid.ollama_pull import OllamaPullError
+    from hybrid.services.ollama_pull import OllamaPullError
 
     def fake_start_pull(model=None):
         raise OllamaPullError("ollama not found")
@@ -1697,7 +1697,7 @@ def test_local_llm_pull_status_route_returns_current_state(client, monkeypatch):
 
 
 def test_renderer_download_route_reports_backend_error_as_json(client, monkeypatch):
-    from hybrid.render_bootstrap import NamRenderDownloadError
+    from hybrid.core.render_bootstrap import NamRenderDownloadError
 
     def fake_download():
         raise NamRenderDownloadError("no prebuilt binary for this platform")

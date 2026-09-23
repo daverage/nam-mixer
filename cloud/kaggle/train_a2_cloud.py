@@ -8,7 +8,7 @@ target), because the Kaggle sandbox has neither this repo's package layout
 nor a way to build that binary, and training itself only needs
 `nam.train.core`, never our own NAMCore wrapper -- NAMCore verification of
 the returned model happens back on the local machine
-(`hybrid.kaggle_training.validate_downloaded_model`), exactly like
+(`hybrid.training.kaggle_training.validate_downloaded_model`), exactly like
 `scripts/train_a2.py` does for a local run. The few constants that must stay
 identical to the local trainer (official V3 input MD5, training
 hyperparameters) are duplicated here in literal form and are checked for
@@ -243,7 +243,7 @@ def _resolve_baked_cab_fir_samples(manifest: dict) -> int:
     receives the actual cab IR file (see docs/blend-mode.md "TRAINING /
     KAGGLE": source NAMs/cab IRs are not uploaded to Kaggle), so, unlike
     scripts/train_a2.py's local equivalent, it can only ever trust numbers
-    already computed by hybrid.training_target.compute_receptive_field_record
+    already computed by hybrid.modes.training_target.compute_receptive_field_record
     at generation time. Prefers the nested receptive_field.cab record
     (computed at the OFFICIAL TRAINING INPUT's sample rate, i.e. accurate for
     what was actually baked into hybrid_target.wav) over the CabDesign's own
@@ -268,7 +268,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     script never receives the source .nam files or cab IR (see
     docs/blend-mode.md "TRAINING / KAGGLE"), so branch samples come from
     manifest["receptive_field"]["branch_samples"], computed locally at
-    generation time by hybrid.training_target.compute_receptive_field_record.
+    generation time by hybrid.modes.training_target.compute_receptive_field_record.
 
     Two separate questions, exactly as in the local script:
 

@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from hybrid.sequential_nam import build_embedded_sequential
+from hybrid.training.sequential_nam import build_embedded_sequential
 
 
 BASELINE = os.environ.get("NAM_RENDER_BASELINE")

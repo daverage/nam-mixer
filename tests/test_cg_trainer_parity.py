@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from hybrid.a2_training_settings import custom_split_train_stop, user_metadata_kwargs
+from hybrid.training.a2_training_settings import custom_split_train_stop, user_metadata_kwargs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

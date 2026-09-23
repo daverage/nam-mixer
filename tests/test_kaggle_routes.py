@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 import app as app_module
-from hybrid.kaggle_training import KaggleJob, KaggleTrainingError
+from hybrid.training.kaggle_training import KaggleJob, KaggleTrainingError
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def test_auth_start_falls_back_to_python_module_when_console_script_missing(clie
         class _P:
             pass
         return _P()
-    monkeypatch.setattr("hybrid.kaggle_training.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("hybrid.training.kaggle_training.subprocess.Popen", fake_popen)
 
     resp = client.post("/api/kaggle/auth/start")
     assert resp.status_code == 200
@@ -152,7 +152,7 @@ def test_job_status_unknown_job_returns_404(client, tmp_path, monkeypatch):
 
 
 def test_job_status_refreshes_and_returns_state(client, tmp_path, monkeypatch):
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     job = KaggleJob(job_id="j1", design_id="mydesign", state="running")
@@ -175,7 +175,7 @@ def test_job_status_refreshes_and_returns_state(client, tmp_path, monkeypatch):
 
 
 def test_job_logs_bounded(client, tmp_path, monkeypatch):
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     job = KaggleJob(job_id="j1", design_id="mydesign", state="running")
@@ -200,7 +200,7 @@ def test_cleanup_unknown_job_404(client, tmp_path, monkeypatch):
 
 
 def test_cleanup_surfaces_error_distinctly(client, tmp_path, monkeypatch):
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     job = KaggleJob(job_id="j1", design_id="mydesign", state="running")
@@ -221,7 +221,7 @@ def test_job_status_download_filename_matches_what_download_endpoint_serves(clie
     the unrelated internal `hybrid_a2.nam` export basename baked inside the
     Kaggle kernel -- the UI's download button used to display that internal
     name while the browser actually saved a differently-named file."""
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     bundle_dir = tmp_path / "mydesign"
@@ -249,7 +249,7 @@ def test_job_status_download_filename_matches_what_download_endpoint_serves(clie
 
 
 def test_kaggle_status_job_dict_also_carries_download_filename(client, tmp_path, monkeypatch):
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     job = KaggleJob(job_id="j1", design_id="mydesign", state="complete", output_nam_path=str(tmp_path / "hybrid_a2.nam"))
@@ -280,7 +280,7 @@ def test_download_unknown_job_404(client, tmp_path, monkeypatch):
 
 
 def test_download_rejects_incomplete_job(client, tmp_path, monkeypatch):
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     job = KaggleJob(job_id="j1", design_id="mydesign", state="running")
@@ -294,7 +294,7 @@ def test_download_rejects_incomplete_job(client, tmp_path, monkeypatch):
 def test_download_rejects_complete_job_with_missing_recorded_path(client, tmp_path, monkeypatch):
     """Defensive: even a 'complete' job must not crash if its recorded .nam
     somehow no longer exists on disk (moved/deleted out of band)."""
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     job = KaggleJob(job_id="j1", design_id="mydesign", state="complete",
@@ -307,7 +307,7 @@ def test_download_rejects_complete_job_with_missing_recorded_path(client, tmp_pa
 
 
 def test_download_serves_the_recorded_nam_file(client, tmp_path, monkeypatch):
-    from hybrid.kaggle_training import save_job
+    from hybrid.training.kaggle_training import save_job
 
     monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path)
     nam_path = tmp_path / "output" / "hybrid_a2.nam"
