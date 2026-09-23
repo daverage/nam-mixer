@@ -174,9 +174,8 @@ separate commit.
       Parallel Blend (5bea99f), preview limiter NaN (df838d2). **Rejected:**
       "trim on the shifted envelope" contradicted a deliberate, tested design
       (b8fa25c reverted in 3e4242e). **Not changed, for the user to decide:**
-      - `align.estimate_offset` is O(max_lag·n) and could be minutes on long
-        audio. Alignment is off by default; an FFT correlation would make it
-        fast, but it's a behaviour-sensitive change.
+      - ~~`align.estimate_offset` O(max_lag·n)~~: user approved the FFT
+        version; it matches the old loop's chosen lag exactly (8e139fd).
       - `nam_loader.is_calibrated` needs input+output levels, so an input-only
         model shows "Calibration metadata unavailable" even though Auto
         calibration uses its input level (a wording/definition choice).
