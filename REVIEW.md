@@ -49,7 +49,7 @@ it before anything is removed. Delete in one commit per category.
 - [x] Docs: duplicates, stale locations, broken path references
 - [x] Frontend: every static/template file referenced; JS functions scanned
 - [x] **User reviews the candidate list below and fills in Decision** (2026-09-23: "please remove")
-- [~] Delete approved items, one commit per category: A 4ec0ac8, C1 83a27ec, D5 d5c9db9 done; **D1 blocked** (see Log)
+- [x] Delete approved items, one commit per category: A 4ec0ac8, C1 83a27ec, D5 d5c9db9, D1 (see Log)
 
 ### Candidate list (2026-09-23)
 
@@ -104,7 +104,7 @@ surrounding code is being read anyway. Don't bulk-delete them here.
 
 | Item | Evidence | Rec. | Decision |
 |------|----------|------|----------|
-| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | now both copies are under `docs/history/Continuous Gain/` (`deliverables/` + `phase4e/models/`); delete the `deliverables/` copies? | **approved, but blocked**: the permission classifier refused `git rm` of these 4 files |
+| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | now both copies are under `docs/history/Continuous Gain/` (`deliverables/` + `phase4e/models/`); delete the `deliverables/` copies? | **removed** (user ran `git rm`; README points at phase4e/models) |
 | D2 `deliverables/` (8 trained `.nam`s in git) | release artifacts | archive | **archived** → `docs/history/Continuous Gain/deliverables/` (67fab8c) |
 | D3 `deliverables/README.md` links `docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md` | file is now under `docs/history/Continuous Gain/` | **fix link** | **fixed** (67fab8c) |
 | D4 `desktop/src-tauri/icons/Square*Logo.png`, `StoreLogo.png` (11 files) | Windows Store/MSIX icons; not in `tauri.conf.json`, CI builds macOS `app` only | ? delete, unless a Windows MSIX build is planned | **keep** (user) |
@@ -158,7 +158,7 @@ User decisions (2026-09-23): 5 subpackages, drop the `cg_` prefix inside
       left as provenance.
 - [x] Tests unchanged after every step (673/1/16; JS 17/17)
 - [x] Codebase-memory re-indexed (4507 nodes)
-- [ ] D1 (4 duplicate `.nam` files) is still waiting for the user to run `git rm`
+- [x] D1 duplicate `.nam` files removed
 
 ---
 
@@ -224,3 +224,4 @@ separate commit.
 - 2026-09-23: Phase 2 done (14d8863, d5fdf43, 3fdb5c7, c4e1b70, 20581f8). New
   layout: hybrid/{core,modes,continuous_gain,training,services}, routes/.
   Findings for Phase 3 are listed under Phase 3. D1 still pending (user).
+- 2026-09-23: D1 done (user ran `git rm`, bfef3c9). Phase 1 and 2 are complete. Starting Phase 3 group 1 (`hybrid/core/`).
