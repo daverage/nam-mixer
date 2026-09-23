@@ -1416,7 +1416,6 @@ def _sweep_orphaned_render_sources(*, grace_seconds: float = 1800.0) -> list[str
     # when none of its files are referenced (in practice each folder holds one file).
     referenced_folders = {p.parent.resolve() for p in referenced_files}
     return _sweep_directory(root, referenced_folders, grace_seconds=grace_seconds, files_only=False)
-    return removed
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
