@@ -43,7 +43,8 @@ why deliberately NOT truncating at an energy percentile is a hard rule here.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import io
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -171,12 +172,19 @@ class PreparedCabIr:
         return max(0.0, min(1.0, partial / self.total_energy))
 
 
+def _read_ir_bytes(path: Path) -> bytes:
+    """The IR file's bytes, or CabIrError -- never a raw OSError, so every
+    caller's existing CabIrError handling covers a missing/unreadable file."""
+    if not path.is_file():
+        raise CabIrError(f"cabinet IR file not found: {path}")
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise CabIrError(f"could not read cabinet IR file {path}: {exc}") from exc
+
+
 def _sha256_file(path: str | Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    return hashlib.sha256(_read_ir_bytes(Path(path))).hexdigest()
 
 
 def _trim_leading_silence(ir: np.ndarray, threshold_relative_db: float) -> tuple[np.ndarray, int]:
@@ -201,11 +209,10 @@ def load_and_prepare_cab_ir(
     `target_sample_rate`. Raises `CabIrError` for anything that can't be
     safely used -- never silently coerces a bad file into "probably fine"."""
     path = Path(path)
-    if not path.is_file():
-        raise CabIrError(f"cabinet IR file not found: {path}")
-
+    # Read once: the hash and the decoded samples must describe the same bytes.
+    data = _read_ir_bytes(path)
     try:
-        raw, original_sample_rate = sf.read(path, dtype="float32", always_2d=True)
+        raw, original_sample_rate = sf.read(io.BytesIO(data), dtype="float32", always_2d=True)
     except Exception as exc:  # noqa: BLE001 -- any soundfile failure means "not a usable IR"
         raise CabIrError(f"could not read cabinet IR WAV {path}: {exc}") from exc
 
@@ -249,7 +256,7 @@ def load_and_prepare_cab_ir(
         samples=prepared,
         sample_rate=int(target_sample_rate),
         source_path=str(path),
-        sha256=_sha256_file(path),
+        sha256=hashlib.sha256(data).hexdigest(),
         original_sample_rate=int(original_sample_rate),
         original_channels=int(original_channels),
         original_frame_count=int(original_frame_count),
@@ -284,12 +291,16 @@ def get_prepared_cab_ir(
     key = (sha256, int(target_sample_rate), float(leading_silence_threshold_db), preparation_mode)
     cached = _prepared_cache.get(key)
     if cached is not None:
-        return cached
+        # Same content can live at several (content-addressed upload) paths;
+        # report the path actually asked for, not whichever was cached first.
+        return cached if cached.source_path == str(path) else replace(cached, source_path=str(path))
 
     prepared = load_and_prepare_cab_ir(path, target_sample_rate, leading_silence_threshold_db, preparation_mode)
     if len(_prepared_cache) >= _MAX_CACHE_ENTRIES:
         _prepared_cache.pop(next(iter(_prepared_cache)))
-    _prepared_cache[key] = prepared
+    # Key by the hash of the bytes actually decoded, in case the file changed
+    # since `sha256` above was taken.
+    _prepared_cache[(prepared.sha256, *key[1:])] = prepared
     return prepared
 
 
