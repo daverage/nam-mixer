@@ -179,7 +179,30 @@ separate commit.
       - ~~Input-only calibration label~~: three-way status, Tools panel shows the input level (8212158).
       - ~~Silent DI coverage~~: reports "No active playing detected" (c7ad644).
       - ~~Input-peak warning ignores per-amp gain~~: per-amp input peaks + warning naming the gains (38897c5).
-- [ ] 2. `hybrid/modes/` (the three design modes and their target generators)
+- [x] 2. `hybrid/modes/`: reviewed 2026-09-23 (10 findings, all Character
+      Blend except the duplication one). Fixed: preview analysed the raw DI
+      instead of profiled_dry, and the analysis cache was keyed on the .nam
+      only (2d09f87); the preview low-level check omitted per-amp input gain
+      (bd4e000); generation didn't check that the .nam still matches the
+      frozen hash (4895d51); the gate now runs before the full renders
+      (b12ca6b). **Checked, not a problem:** the gate's t=0 excerpt. The
+      official V3 input has ~1 s of near-silence, then real playing.
+      **Not changed, for the user to decide:**
+      - (5) The Character receptive-field record doesn't model v3's
+        residual-envelope path (amp RF + envelope, serial) and still counts
+        a v2-style donor transition. It is advisory-tier only, so it never
+        gates training, but the reported numbers may be wrong.
+      - (7) `_spectrum` FFTs a stitched, non-contiguous selection of samples
+        near each level. The seams add HF energy that feeds the ±4 dB EQ
+        correction. A fix would change measured analyses.
+      - (8) The per-level correction builds dense n_levels×n arrays (about a
+        GB on the full V3 input). It could accumulate the two active levels
+        instead, with an equivalence test.
+      - (9) `freeze_character_design` drops `level_window_db` from the
+        recorded config. Latent: production always uses the default window.
+      - (10) The three bundle generators duplicate the output-gain /
+        embedded-scalar / manifest-skeleton code, and the Character manifest
+        has already drifted from the others.
 - [ ] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`
 - [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
@@ -239,3 +262,4 @@ separate commit.
   didn't gate on pytest's result; commits and pushes are now gated on it.
 - 2026-09-23: The four group-1 items the user decided on are done (align FFT, calibration label,
   silent-DI coverage, per-amp peak warning). 690 passed, 12 skipped. Verifying the group 2 (`hybrid/modes/`) findings next.
+- 2026-09-23: Phase 3 group 2 (`hybrid/modes/`) done, see the checklist. 694 passed, 12 skipped.
