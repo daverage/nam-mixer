@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from scipy.signal import correlate
 
 logger = logging.getLogger(__name__)
 
@@ -49,27 +50,29 @@ def estimate_offset(reference: np.ndarray, other: np.ndarray, max_lag: int = _MA
     oth = oth - oth.mean()
 
     max_lag = min(max_lag, n - 1)
-    best_lag = 0
-    best_score = -np.inf
-    for lag in range(-max_lag, max_lag + 1):
-        # Testing ref[i] ~= oth[i + lag]: lag > 0 means oth's matching content
-        # starts `lag` samples later than ref's (oth lags ref).
-        if lag >= 0:
-            a = ref[: n - lag]
-            b = oth[lag:]
-        else:
-            a = ref[-lag:]
-            b = oth[: n + lag]
-        if len(a) < 2:
-            continue
-        denom = np.linalg.norm(a) * np.linalg.norm(b)
-        if denom < 1e-12:
-            continue
-        score = float(np.dot(a, b) / denom)
-        if score > best_score:
-            best_score = score
-            best_lag = lag
-    return best_lag
+    if max_lag < 0:
+        return 0
+    # Score every lag at once: one FFT cross-correlation for the dot products
+    # and prefix sums of squares for the per-lag norms, instead of a Python
+    # loop doing O(n) work per lag. For lag >= 0 this scores ref[:n-lag]
+    # against oth[lag:]; for lag < 0, ref[-lag:] against oth[:n+lag].
+    lags = np.arange(-max_lag, max_lag + 1)
+    dots = correlate(oth, ref, mode="full", method="fft")[lags + n - 1]
+    ref_sq = np.concatenate(([0.0], np.cumsum(ref * ref)))
+    oth_sq = np.concatenate(([0.0], np.cumsum(oth * oth)))
+    pos = np.maximum(lags, 0)   # samples dropped from the front of `oth`
+    neg = np.maximum(-lags, 0)  # samples dropped from the front of `ref`
+    ref_energy = ref_sq[n - pos] - ref_sq[neg]
+    oth_energy = oth_sq[n - neg] - oth_sq[pos]
+    denom = np.sqrt(np.clip(ref_energy, 0.0, None) * np.clip(oth_energy, 0.0, None))
+    usable = (n - np.abs(lags) >= 2) & (denom >= 1e-12)
+    if not usable.any():
+        return 0
+    scores = np.full(len(lags), -np.inf)
+    scores[usable] = dots[usable] / denom[usable]
+    # argmax takes the first maximum, i.e. the most negative lag on a tie --
+    # the same tie-break as scanning lags upward with a strict ">".
+    return int(lags[int(np.argmax(scores))])
 
 
 def align_to_reference(
