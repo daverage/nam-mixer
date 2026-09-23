@@ -48,8 +48,8 @@ it before anything is removed. Delete in one commit per category.
 - [x] Files that probably shouldn't be tracked
 - [x] Docs: duplicates, stale locations, broken path references
 - [x] Frontend: every static/template file referenced; JS functions scanned
-- [ ] **User reviews the candidate list below and fills in Decision**
-- [ ] Delete approved items, one commit per category (A–F)
+- [x] **User reviews the candidate list below and fills in Decision** (2026-09-23: "please remove")
+- [~] Delete approved items, one commit per category: A 4ec0ac8, C1 83a27ec, D5 d5c9db9 done; **D1 blocked** (see Log)
 
 ### Candidate list (2026-09-23)
 
@@ -60,14 +60,14 @@ recommendation is in **bold**.
 
 | Item | Evidence | Rec. | Decision |
 |------|----------|------|----------|
-| `hybrid/audio_metrics.py:129` `band_energy_dbfs` | no reference anywhere | **delete** | |
-| `hybrid/metadata.py:47` `HybridMetadata.write_sidecar` | no reference anywhere | **delete** | |
-| `hybrid/research.py:312` `tone3000_notes` | no reference anywhere | **delete** | |
-| `hybrid/kaggle_training.py:420` `KaggleCli.datasets_create` | only named in a test (not called by prod) | **check test, likely delete** | |
-| `scripts/single_nam_common.py` `render_capture`, `render_file_nam`, `load_law`, `save_json` | only `capture_path`/`official_input` are imported (by `cg_reproduce_fc.py`); the rest belong to the abandoned single_nam law | **delete** | |
-| `static/app.js:1421` `notImplementedAction` | defined, never called | **delete** | |
-| 10 unused imports (ruff F401): `hybrid/training_target.py`, `hybrid/cg_validation.py`, `hybrid/cg_project.py` ×2, `cg_routes.py`, `scripts/cg_reproduce_fc.py` ×2, 3 test files | not monkeypatch targets (grepped tests) | **delete (`ruff --fix`)** | |
-| 8 unused locals (ruff F841) | 5 in tests: delete. `hybrid/local_llm.py` `model`, `base_url` and `cg_routes.py` `STAGES` might be real bugs (a value computed then ignored), so hand these to the Phase 3 review | **tests: delete; prod: Phase 3** | |
+| `hybrid/audio_metrics.py:129` `band_energy_dbfs` | no reference anywhere | **delete** | **removed** (4ec0ac8) |
+| `hybrid/metadata.py:47` `HybridMetadata.write_sidecar` | no reference anywhere | **delete** | **removed** (4ec0ac8) |
+| `hybrid/research.py:312` `tone3000_notes` | no reference anywhere | **delete** | **removed** (4ec0ac8) |
+| `hybrid/kaggle_training.py:420` `KaggleCli.datasets_create` | only named in a test (not called by prod) | **check test, likely delete** | **removed** with its test stub (4ec0ac8) |
+| `scripts/single_nam_common.py` `render_capture`, `render_file_nam`, `load_law`, `save_json` | only `capture_path`/`official_input` are imported (by `cg_reproduce_fc.py`); the rest belong to the abandoned single_nam law | **delete** | **removed**; the whole module is now trimmed to those two functions (4ec0ac8) |
+| `static/app.js:1421` `notImplementedAction` | defined, never called | **delete** | **removed** (4ec0ac8) |
+| 10 unused imports (ruff F401): `hybrid/training_target.py`, `hybrid/cg_validation.py`, `hybrid/cg_project.py` ×2, `cg_routes.py`, `scripts/cg_reproduce_fc.py` ×2, 3 test files | not monkeypatch targets (grepped tests) | **delete (`ruff --fix`)** | **removed** (4ec0ac8) |
+| 8 unused locals (ruff F841) | 5 in tests: delete. `hybrid/local_llm.py` `model`, `base_url` and `cg_routes.py` `STAGES` might be real bugs (a value computed then ignored), so hand these to the Phase 3 review | **tests: delete; prod: Phase 3** | tests **removed** (4ec0ac8); prod 3 → Phase 3 |
 
 False positives, ignored: every Flask `api_*` route (decorator-registered),
 pydantic `@field_validator` methods in `local_llm.py`, `HTMLParser.handle_*`
@@ -97,18 +97,18 @@ surrounding code is being read anyway. Don't bulk-delete them here.
 
 | Item | Evidence | Rec. | Decision |
 |------|----------|------|----------|
-| C1 `scripts/compare_envelopes.py` | one-off old-vs-new envelope comparison; only referenced in the `envelope.py` docstring | **delete** (and fix the docstring) | |
+| C1 `scripts/compare_envelopes.py` | one-off old-vs-new envelope comparison; only referenced in the `envelope.py` docstring | **delete** (and fix the docstring) | **removed** (83a27ec) |
 | All other scripts | referenced by README/CLAUDE.md/tests/code/CI | **keep** | |
 
 #### D. Duplicated / questionable tracked files
 
 | Item | Evidence | Rec. | Decision |
 |------|----------|------|----------|
-| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | now both copies are under `docs/history/Continuous Gain/` (`deliverables/` + `phase4e/models/`); delete the `deliverables/` copies? | ? (archive only so far) |
+| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | now both copies are under `docs/history/Continuous Gain/` (`deliverables/` + `phase4e/models/`); delete the `deliverables/` copies? | **approved, but blocked**: the permission classifier refused `git rm` of these 4 files |
 | D2 `deliverables/` (8 trained `.nam`s in git) | release artifacts | archive | **archived** → `docs/history/Continuous Gain/deliverables/` (67fab8c) |
 | D3 `deliverables/README.md` links `docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md` | file is now under `docs/history/Continuous Gain/` | **fix link** | **fixed** (67fab8c) |
 | D4 `desktop/src-tauri/icons/Square*Logo.png`, `StoreLogo.png` (11 files) | Windows Store/MSIX icons; not in `tauri.conf.json`, CI builds macOS `app` only | ? delete, unless a Windows MSIX build is planned | **keep** (user) |
-| D5 `assets/di/peaks/moderate_brit.wav.reapeaks` | REAPER waveform-peak cache, referenced nowhere | **delete** (+ ignore `*.reapeaks`) | |
+| D5 `assets/di/peaks/moderate_brit.wav.reapeaks` | REAPER waveform-peak cache, referenced nowhere | **delete** (+ ignore `*.reapeaks`) | **removed** (d5c9db9) |
 
 Verified keep: `work/.gitkeep` (keeps the ignored dir), `.codebase-memory/.gitattributes`
 (indexer merge rule; graph files are ignored), `packaging/backend/dist/` (ignored).
@@ -190,3 +190,8 @@ separate commit.
   `docs/history/Continuous Gain/deliverables/` (67fab8c); settings UX plan, CG UI
   proposal, and amp-control research → `docs/history/` (c4aaa29). Tests unchanged
   (673/1/16). Still to confirm: A, C1, D1 (duplicate .nam), D5.
+- 2026-09-23: User approved all remaining deletions. Done: A (4ec0ac8), C1
+  (83a27ec), D5 (d5c9db9). Tests unchanged after each (673/1/16; JS 17/17).
+  D1 (4 duplicate .nam copies in `docs/history/Continuous Gain/deliverables/`)
+  was blocked twice by the auto-mode permission classifier, so the user needs
+  to run it or allow it.
