@@ -44,6 +44,7 @@ from .input_profiles import db_to_amplitude
 from .metadata import HybridMetadata
 from .nam_loader import NamModel, load_nam
 from .nam_provenance import source_metadata_fields as _source_metadata_fields
+from .paths import REPO_ROOT
 from .receptive_field import combine_required_history, compute_source_nam_receptive_field
 from .render import render
 from .safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
@@ -103,7 +104,7 @@ def _git_commit() -> Optional[str]:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5,
-            cwd=Path(__file__).resolve().parent.parent,
+            cwd=REPO_ROOT,
         )
         if result.returncode == 0:
             return result.stdout.strip()

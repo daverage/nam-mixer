@@ -49,6 +49,7 @@ from .a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from .character_training_target import check_export_low_level_response
 from .embedded_completion import complete_embedded_artifact
 from .nam_loader import load_nam
+from .paths import REPO_ROOT
 from .render import NamRenderError, render
 from .validation import compute_esr_metrics
 
@@ -644,7 +645,7 @@ class KaggleJobManager:
         self.dataset_verify_timeout_s = dataset_verify_timeout_s
         self.dataset_verify_interval_s = dataset_verify_interval_s
         self.cloud_worker_path = Path(cloud_worker_path) if cloud_worker_path is not None else (
-            Path(__file__).resolve().parent.parent / "cloud" / "kaggle" / "train_a2_cloud.py"
+            REPO_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py"
         )
         self._status_json_supported: Optional[bool] = None
 

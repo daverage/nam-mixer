@@ -19,6 +19,8 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from .paths import REPO_ROOT
+
 _REPO = "daverage/nam-mixer"
 _RELEASES_API = f"https://api.github.com/repos/{_REPO}/releases"
 _DOWNLOAD_TIMEOUT_SECONDS = 60
@@ -60,9 +62,8 @@ def _latest_tag() -> str:
 
 def default_dest_path() -> Path:
     """The exact location hybrid.render.find_nam_render_exe already checks first."""
-    repo_root = Path(__file__).resolve().parent.parent
     filename = "nam_render.exe" if sys.platform == "win32" else "nam_render"
-    return repo_root / "native" / "nam_render" / "build" / filename
+    return REPO_ROOT / "native" / "nam_render" / "build" / filename
 
 
 def download_prebuilt_nam_render(dest_path: Path | None = None) -> Path:

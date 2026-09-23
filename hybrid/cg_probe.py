@@ -16,6 +16,7 @@ from typing import Callable
 import numpy as np
 
 from .envelope import bounded_causal_envelope_db
+from .paths import REPO_ROOT
 
 SR = 48000
 PROBE_VERSION = 1          # bump when the probe bank or its features change: cached probes from another version are ignored
@@ -141,7 +142,7 @@ def load_reference_di(name: str) -> np.ndarray:
 
     import soundfile as sf
 
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))       # the packaged desktop app keeps assets/ beside the bundle root
+    base = Path(getattr(sys, "_MEIPASS", REPO_ROOT))       # the packaged desktop app keeps assets/ beside the bundle root
     x, sr = sf.read(base / "assets" / "di" / f"{name}.wav", dtype="float32")
     if sr != SR:
         raise ValueError(f"DI {name} is {sr} Hz, expected {SR}")

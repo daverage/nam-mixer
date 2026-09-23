@@ -30,8 +30,8 @@ import numpy as np
 import soundfile as sf
 
 from .nam_loader import NamModel
+from .paths import REPO_ROOT as _REPO_ROOT
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
 _NAM_RENDER_EXE_CANDIDATES = (
     _REPO_ROOT / "native" / "nam_render" / "build" / "Release" / "nam_render.exe",
     _REPO_ROOT / "native" / "nam_render" / "build" / "nam_render.exe",

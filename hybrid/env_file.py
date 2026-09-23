@@ -14,12 +14,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .paths import REPO_ROOT
+
 
 def _env_file() -> Path:
     override = os.environ.get("NAM_MIXER_ENV_FILE", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path(__file__).resolve().parent.parent / ".env"
+    return REPO_ROOT / ".env"
 
 
 def read_env_value(name: str) -> str:
