@@ -265,17 +265,19 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
             )
     calibration = resolve_calibration(design.calibration_mode, design.reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu)
     warnings = [calibration.warning] if calibration.warning else []
-    a = render(amp_a, (official_input * db_to_amplitude(calibration.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32), input_info.sample_rate)
-    b = render(amp_b, (official_input * db_to_amplitude(calibration.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32), input_info.sample_rate)
-    pair = SimpleNamespace(dry=official_input, amp_a=a, amp_b=b, sample_rate=input_info.sample_rate)
-    target_raw = build_character_blend(pair, design).blend
-    if len(target_raw) != len(official_input): raise TrainingInputError("generated Character Blend target is not sample-aligned with training input")
+    # The hard low-level gate needs only a short excerpt, so run it before the
+    # full-length renders and teacher build rather than after them.
     low_level_response = evaluate_bundle_low_level_response(design, amp_a, amp_b, calibration, official_input, input_info.sample_rate)
     if not low_level_response.ok:
         raise TrainingInputError(
             f"Character Blend low-level response check failed -- {low_level_response.warning} "
             "-- refusing to generate a training bundle with a hard low-level gate baked in (see docs/history/blend-mode-fixes.md)"
         )
+    a = render(amp_a, (official_input * db_to_amplitude(calibration.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32), input_info.sample_rate)
+    b = render(amp_b, (official_input * db_to_amplitude(calibration.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32), input_info.sample_rate)
+    pair = SimpleNamespace(dry=official_input, amp_a=a, amp_b=b, sample_rate=input_info.sample_rate)
+    target_raw = build_character_blend(pair, design).blend
+    if len(target_raw) != len(official_input): raise TrainingInputError("generated Character Blend target is not sample-aligned with training input")
     target_raw = maybe_bake_cab(target_raw, design.cab, input_info.sample_rate)
 
     # Shared post-combination output gain -- see hybrid.modes.design.HybridDesign's
