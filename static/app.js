@@ -1854,6 +1854,13 @@ async function updateCoverage() {
     if (!resp.ok) return;
 
     coverageTbody.innerHTML = "";
+    if (data.active_signal === false) {
+      coverageTable.hidden = true;
+      coverageWarning.hidden = true;
+      coverageEmpty.textContent = "No active playing detected in this DI, so coverage can't be estimated.";
+      coverageEmpty.hidden = false;
+      return;
+    }
     data.coverage.forEach((row) => {
       const tr = document.createElement("tr");
       const cell = (text) => {

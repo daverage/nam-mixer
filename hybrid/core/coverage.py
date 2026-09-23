@@ -52,7 +52,9 @@ def analyse_profile_coverage(
     """
     config = CrossoverConfig(crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db)
     mask = active_signal_mask(source_envelope_db)
-    active_envelope_db = source_envelope_db[mask] if mask.any() else source_envelope_db
+    # No active playing -> no fractions (0/0/0 below), rather than measuring
+    # the silence and reporting it as "100% Amp A".
+    active_envelope_db = source_envelope_db[mask]
 
     results = []
     for profile_id, gain_db in profiles:

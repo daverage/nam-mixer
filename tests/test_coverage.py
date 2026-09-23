@@ -29,7 +29,7 @@ def test_coverage_monotonic_across_increasing_profile_gain():
 
 
 def test_coverage_all_below_crossover_is_all_amp_a():
-    envelope_db = np.full(1000, -60.0)
+    envelope_db = np.full(1000, -40.0)  # active (> -50 dBFS), well below the crossover
     results = analyse_profile_coverage(envelope_db, [("x", 0.0)], crossover_dbfs=-10.0, transition_width_db=4.0)
     assert results[0].amp_a_fraction == 1.0
     assert results[0].amp_b_fraction == 0.0
@@ -57,3 +57,10 @@ def test_suggest_crossover_within_active_range():
 
 def test_suggest_crossover_none_when_fully_silent():
     assert suggest_crossover_dbfs(np.full(1000, -80.0)) is None
+
+
+def test_coverage_of_fully_silent_di_reports_no_fractions():
+    """A silent DI has no active playing: don't measure the silence and call it 100% Amp A."""
+    (result,) = analyse_profile_coverage(np.full(1000, -80.0), [("p", 0.0)], -20.0, 6.0)
+    assert (result.amp_a_fraction, result.transition_fraction, result.amp_b_fraction) == (0.0, 0.0, 0.0)
+

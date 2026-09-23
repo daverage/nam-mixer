@@ -45,7 +45,12 @@ from hybrid.modes.character_blend import CharacterBlendDesign, build_character_b
 from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
-from hybrid.core.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
+from hybrid.core.coverage import (
+    active_signal_mask,
+    analyse_profile_coverage,
+    envelope_percentiles,
+    suggest_crossover_dbfs,
+)
 from hybrid.modes.design import freeze_design
 from hybrid.modes.fixed_blend import build_fixed_blend, freeze_blend_design
 from hybrid.services.settings import (
@@ -2169,7 +2174,8 @@ def api_profile_coverage():
     elif all_amp_b:
         reachability_warning = "Crossover is probably too low: the hybrid spends almost no time in Amp A."
 
-    return jsonify({"coverage": coverage, "reachability_warning": reachability_warning})
+    active_signal = bool(active_signal_mask(pair.source_envelope_db).any())
+    return jsonify({"coverage": coverage, "reachability_warning": reachability_warning, "active_signal": active_signal})
 
 
 def _parse_blend_params(data: dict):
