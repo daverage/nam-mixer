@@ -116,7 +116,13 @@ class NamModel:
 
     @property
     def calibration_status(self) -> str:
-        return "Calibrated NAM" if self.is_calibrated else "Calibration metadata unavailable"
+        # Auto calibration (hybrid.core.calibration) needs only the INPUT
+        # level, so an input-only file is still usable for it and says so.
+        if self.is_calibrated:
+            return "Calibrated NAM"
+        if self.input_level_dbu is not None:
+            return "Input level only (enough for Auto calibration)"
+        return "Calibration metadata unavailable"
 
     def summary(self) -> dict:
         return {

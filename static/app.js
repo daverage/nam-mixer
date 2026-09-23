@@ -3922,9 +3922,13 @@ async function setToolNam(data, label) {
   }
 
   const calibration = inspection.calibration || {};
-  toolCalibrationStatus.textContent = calibration.status === "Calibrated NAM"
-    ? `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`
-    : "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
+  if (calibration.status === "Calibrated NAM") {
+    toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`;
+  } else if (calibration.input_level_dbu != null) {
+    toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output not recorded (read-only). The input level is enough for Auto calibration.`;
+  } else {
+    toolCalibrationStatus.textContent = "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
+  }
   if (inspection.volume_unsupported_reason) {
     // e.g. an embedded-cab export's "Sequential" architecture -- see
     // hybrid/training/sequential_nam.py. Metadata editing below still works fine;
