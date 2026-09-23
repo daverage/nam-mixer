@@ -167,7 +167,21 @@ User decisions (2026-09-23): 5 subpackages, drop the `cg_` prefix inside
 For each group: `/code-review high <path>`, then fix what it finds in a
 separate commit.
 
-- [ ] 1. `hybrid/core/` (envelope, safety, level_match, align, cab_ir, receptive_field, render, pipeline, …)
+- [x] 1. `hybrid/core/`: reviewed 2026-09-23 (10 findings + 4 minor). Fixed:
+      cab_ir missing-file/double-read/cache-path (a05df5b), render OSError →
+      NamRenderError (2f038f6), render_bootstrap atomic replace + CPU-aware
+      asset + 100-release page (551a73c), silent-amp auto-trim in core AND
+      Parallel Blend (5bea99f), preview limiter NaN (df838d2). **Rejected:**
+      "trim on the shifted envelope" contradicted a deliberate, tested design
+      (b8fa25c reverted in 3e4242e). **Not changed, for the user to decide:**
+      - `align.estimate_offset` is O(max_lag·n) and could be minutes on long
+        audio. Alignment is off by default; an FFT correlation would make it
+        fast, but it's a behaviour-sensitive change.
+      - `nam_loader.is_calibrated` needs input+output levels, so an input-only
+        model shows "Calibration metadata unavailable" even though Auto
+        calibration uses its input level (a wording/definition choice).
+      - `coverage` reports 100% Amp A for an entirely silent DI.
+      - The `input_peak_dbfs` warning ignores calibration and per-amp gain.
 - [ ] 2. `hybrid/modes/` (the three design modes and their target generators)
 - [ ] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`
 - [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
@@ -176,14 +190,10 @@ separate commit.
 
 ### Findings carried into Phase 3
 
-- `app.py:1419` has an undefined name, `removed` (ruff F821). It was already there before Phase 2, and running that line raises `NameError`.
-- `tests/test_cg_reproduction.py` and `scripts/cg_reproduce_fc.py` look for
-  the frozen manifest in `docs/final/` and `docs/history/final/`, but it lives
-  in `docs/history/Continuous Gain/final/manifest_frozen.json`, so 4 tests
-  skip ("frozen FC manifest not available").
-- Values computed and then never used (ruff F841): `hybrid/services/local_llm.py` `model`, `base_url`;
-  `routes/continuous_gain.py` `STAGES`.
-- Already failing on master: `test_local_llm_teaches_mode_selection_from_signal_behaviour`.
+- ~~`app.py:1419` undefined `removed`~~: an unreachable line; removed (8c5901c).
+- ~~CG reproduction manifest path~~: fixed; 4 tests now run and pass (c4908bb).
+- ~~Unused locals in local_llm / CG routes~~: removed (507178c).
+- ~~Already failing on master: local_llm mode-selection test~~: the prompt had also started advertising a 1-24 dB width against the UI's 2-18 dB slider; fixed both (9de4114). **Suite is fully green.**
 - Split `app.py` (3,285 lines, ~60 routes) into `routes/` blueprints (a refactor).
 - Category B (production code used only by tests): decide per group.
 
@@ -225,3 +235,8 @@ separate commit.
   layout: hybrid/{core,modes,continuous_gain,training,services}, routes/.
   Findings for Phase 3 are listed under Phase 3. D1 still pending (user).
 - 2026-09-23: D1 done (user ran `git rm`, bfef3c9). Phase 1 and 2 are complete. Starting Phase 3 group 1 (`hybrid/core/`).
+- 2026-09-23: Phase 3 group 1 (`hybrid/core/`) done, see the checklist. Also
+  fixed the known findings (CG manifest path, local_llm width/test, unused
+  locals, dead return). Suite fully green: 686 passed, 12 skipped. Process
+  lesson: b8fa25c was pushed with a failing test because the shell chain
+  didn't gate on pytest's result; commits and pushes are now gated on it.
