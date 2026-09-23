@@ -170,3 +170,19 @@ def test_default_render_pair_is_backward_compatible_raw_zero_gain():
     np.testing.assert_allclose(pair.profiled_dry, dry)
     np.testing.assert_allclose(pair.amp_a, dry)
     np.testing.assert_allclose(pair.amp_b, dry)
+
+
+def test_per_amp_input_peak_includes_that_amps_own_trim():
+    """The common input can be well under 0 dBFS while one amp, after its own
+    input trim, is fed peaks above it; only that amp gets a warning."""
+    dry = _dry(amplitude=0.5)  # common peak ~ -6 dBFS
+    pair = render_pair(
+        _fake_model(), _fake_model(), dry, 48000, calibration_mode="raw",
+        amp_a_input_gain_db=0.0, amp_b_input_gain_db=12.0,
+    )
+    assert pair.input_peak_dbfs < 0.0
+    assert pair.amp_a_input_peak_dbfs == pytest.approx(pair.input_peak_dbfs, abs=1e-4)
+    assert pair.amp_b_input_peak_dbfs == pytest.approx(pair.input_peak_dbfs + 12.0, abs=1e-3)
+    warnings = pipeline.amp_input_peak_warnings(pair)
+    assert len(warnings) == 1 and warnings[0].startswith("Amp B receives peaks of +")
+    assert "input trim +12.0 dB" in warnings[0]

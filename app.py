@@ -83,7 +83,7 @@ from hybrid.services.ollama_pull import (
 from hybrid.services.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
 from hybrid.core.nam_loader import load_nam
 from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
-from hybrid.core.pipeline import RenderedPair, build_hybrid, render_pair
+from hybrid.core.pipeline import RenderedPair, amp_input_peak_warnings, build_hybrid, render_pair
 from hybrid.core.render import NamRenderError, find_nam_render_exe, render
 from hybrid.core.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
 from hybrid.services.update_check import UpdateCheckError, check_for_update
@@ -2072,6 +2072,7 @@ def api_render_pair():
             "this combined profile + test gain would have clipped. Treat "
             "this as a stress test."
         )
+    warnings.extend(amp_input_peak_warnings(pair, PEAK_WARNING_THRESHOLD_DBFS))
 
     suggested_crossover = suggest_crossover_dbfs(pair.source_envelope_db)
 
@@ -2091,6 +2092,8 @@ def api_render_pair():
         "test_gain_db": test_gain_db,
 
         "input_peak_dbfs": pair.input_peak_dbfs,
+        "amp_a_input_peak_dbfs": pair.amp_a_input_peak_dbfs,
+        "amp_b_input_peak_dbfs": pair.amp_b_input_peak_dbfs,
 
         "calibration_mode": pair.calibration_mode,
         "calibration_applied": pair.calibration_applied,

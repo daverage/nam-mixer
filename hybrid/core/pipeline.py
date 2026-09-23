@@ -73,6 +73,11 @@ class RenderedPair:
     amp_b_input_gain_db: float = 0.0
 
     input_peak_dbfs: float = float("-inf")
+    # Peak of what each NAM actually receives: profiled_dry plus that amp's
+    # calibration gain and input trim. input_peak_dbfs above is the common
+    # virtual-instrument signal before that per-amp split.
+    amp_a_input_peak_dbfs: float = float("-inf")
+    amp_b_input_peak_dbfs: float = float("-inf")
     calibration_warning: Optional[str] = None
 
 
@@ -170,8 +175,30 @@ def render_pair(
         amp_a_input_gain_db=amp_a_input_gain_db,
         amp_b_input_gain_db=amp_b_input_gain_db,
         input_peak_dbfs=_peak_dbfs(profiled_dry),
+        amp_a_input_peak_dbfs=_peak_dbfs(amp_a_input),
+        amp_b_input_peak_dbfs=_peak_dbfs(amp_b_input),
         calibration_warning=calib.warning,
     )
+
+
+def amp_input_peak_warnings(pair: RenderedPair, threshold_dbfs: float = 0.0) -> list[str]:
+    """One warning per amp whose actual NAM input peaks at or above
+    `threshold_dbfs`, naming the gains that got it there. NAM captures are
+    trained on audio within +/-1.0, so these peaks are outside what the model
+    has seen, whatever the common input peak says."""
+    warnings = []
+    shared_db = pair.input_profile_gain_db + pair.test_gain_db
+    for label, peak, calibration_db, trim_db in (
+        ("Amp A", pair.amp_a_input_peak_dbfs, pair.amp_a_calibration_gain_db, pair.amp_a_input_gain_db),
+        ("Amp B", pair.amp_b_input_peak_dbfs, pair.amp_b_calibration_gain_db, pair.amp_b_input_gain_db),
+    ):
+        if peak >= threshold_dbfs:
+            warnings.append(
+                f"{label} receives peaks of {peak:+.1f} dBFS (profile/test {shared_db:+.1f} dB, "
+                f"calibration {calibration_db:+.1f} dB, input trim {trim_db:+.1f} dB). NAM captures are "
+                "trained on audio within 0 dBFS, so this amp may respond unpredictably at these peaks."
+            )
+    return warnings
 
 
 @dataclass
