@@ -11,7 +11,7 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
   // Rough elapsed-time estimates -- real measurements from this project's own end-to-end runs (parallel capture
-  // rendering + a per-capture probe cache, see hybrid/cg_parallel.py), not a guarantee: "usually", not exact.
+  // rendering + a per-capture probe cache, see hybrid/continuous_gain/parallel.py), not a guarantee: "usually", not exact.
   const estimateSeconds = (count) => 20 + count * 2.6;      // ~20s fixed (timing/dither audit) + ~2.6s/capture, measured on 19 captures
   const formatDuration = (seconds) => seconds < 90 ? `about ${Math.max(10, Math.round(seconds / 10) * 10)} seconds` : `about ${Math.round(seconds / 60)} minutes`;
   const say = (t, bad) => setStatus(t || "", Boolean(bad));       // the app-wide status line (app.js), not a second message area

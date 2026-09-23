@@ -1,4 +1,4 @@
-"""Tests for hybrid/validation.py -- docs/phase3.md sections 24-28.
+"""Tests for hybrid/training/validation.py -- docs/history/phase3.md sections 24-28.
 
 Uses a fake identity render() (same pattern as other pipeline tests) so
 these run without the native nam_render tool or real .nam captures.

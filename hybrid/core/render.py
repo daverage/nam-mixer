@@ -111,7 +111,7 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | N
       native/nam_render/build/_deps/namcore-src/NAM/wavenet/slimmable.cpp).
       Left as `None` (the default, no flag passed) for ordinary
       non-slimmable models -- this is purely additive, existing callers are
-      unaffected. docs/phase3.md section 20.
+      unaffected. docs/history/phase3.md section 20.
     - Raises NamRenderError if the native tool is missing, times out, exits
       non-zero, or its output doesn't match this function's contract (mono,
       same length, same sample rate, all-finite) -- this module is the

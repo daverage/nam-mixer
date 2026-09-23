@@ -1,6 +1,6 @@
-"""Parity assertions between the shared hybrid/a2_training_settings.py
+"""Parity assertions between the shared hybrid/training/a2_training_settings.py
 constants, the local trainer (scripts/train_a2.py), and the cloud worker
-(cloud/kaggle/train_a2_cloud.py) -- see docs/kaggle_training.md. This is the
+(cloud/kaggle/train_a2_cloud.py) -- see docs/history/kaggle_training.md. This is the
 mechanism that makes local/cloud training-hyperparameter drift a test
 failure instead of a silent divergence.
 """
@@ -197,7 +197,7 @@ def test_learned_cab_export_appends_cabinet_and_suffix():
 
 def test_embedded_cab_export_leaves_head_name_unsuffixed():
     # The SlimmableContainer head isn't the final deliverable for an
-    # embedded export -- hybrid/sequential_nam.py's packaged Sequential
+    # embedded export -- hybrid/training/sequential_nam.py's packaged Sequential
     # file carries its own "[Embedded Cab · Full]" suffix instead.
     manifest = {
         "model_name": "British American High Gain",

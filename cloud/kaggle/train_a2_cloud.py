@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Kaggle GPU cloud worker for A2 training -- runs INSIDE a private Kaggle
-kernel, never in this repo's normal environments. See docs/kaggle_training.md.
+kernel, never in this repo's normal environments. See docs/history/kaggle_training.md.
 
 This script is deliberately SELF-CONTAINED: it does not import `hybrid/` or
-depend on the native `nam_render` C++ tool (`hybrid/render.py`'s shell-out
+depend on the native `nam_render` C++ tool (`hybrid/core/render.py`'s shell-out
 target), because the Kaggle sandbox has neither this repo's package layout
 nor a way to build that binary, and training itself only needs
 `nam.train.core`, never our own NAMCore wrapper -- NAMCore verification of
@@ -12,7 +12,7 @@ the returned model happens back on the local machine
 `scripts/train_a2.py` does for a local run. The few constants that must stay
 identical to the local trainer (official V3 input MD5, training
 hyperparameters) are duplicated here in literal form and are checked for
-equality against the authoritative `hybrid/a2_training_settings.py` values by
+equality against the authoritative `hybrid/training/a2_training_settings.py` values by
 tests/test_a2_training_settings.py on the machine that ships this file, so
 the two can never silently diverge without a failing test.
 
@@ -38,7 +38,7 @@ import traceback
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Constants shared with hybrid/a2_training_settings.py -- kept as literals
+# Constants shared with hybrid/training/a2_training_settings.py -- kept as literals
 # here (see module docstring) rather than imported, and cross-checked by
 # tests/test_a2_training_settings.py.
 # ---------------------------------------------------------------------------
@@ -80,14 +80,14 @@ def settings_for_preset(preset: str) -> dict:
 
 
 # Exercised by tests/test_a2_training_settings.py's parity check against
-# hybrid/a2_training_settings.py's A2_TRAINING_SETTINGS (both use the same
+# hybrid/training/a2_training_settings.py's A2_TRAINING_SETTINGS (both use the same
 # DEFAULT_EPOCH_PRESET).
 TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
 QUICK_SETTINGS = {**_BASE_SETTINGS, "epochs": 1, "fast_dev_run": True}
 
 
 def custom_split_train_stop(manifest: dict):
-    """Duplicated literally from hybrid/a2_training_settings.py (this module is self-contained);
+    """Duplicated literally from hybrid/training/a2_training_settings.py (this module is self-contained);
     parity is asserted in tests/test_a2_training_settings.py."""
     ti = manifest.get("training_input") or {}
     if not ti.get("custom_split"):
@@ -240,7 +240,7 @@ def validate_inputs(bundle_dir: Path) -> dict:
 def _resolve_baked_cab_fir_samples(manifest: dict) -> int:
     """Resolve a baked cab's formal serial FIR-history sample count from
     whatever the manifest recorded -- this self-contained worker never
-    receives the actual cab IR file (see docs/blend-mode.md "TRAINING /
+    receives the actual cab IR file (see docs/history/blend-mode.md "TRAINING /
     KAGGLE": source NAMs/cab IRs are not uploaded to Kaggle), so, unlike
     scripts/train_a2.py's local equivalent, it can only ever trust numbers
     already computed by hybrid.modes.training_target.compute_receptive_field_record
@@ -266,7 +266,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     MUST stay semantically identical to it (see
     tests/test_receptive_field_parity.py). Reads ONLY the manifest -- this
     script never receives the source .nam files or cab IR (see
-    docs/blend-mode.md "TRAINING / KAGGLE"), so branch samples come from
+    docs/history/blend-mode.md "TRAINING / KAGGLE"), so branch samples come from
     manifest["receptive_field"]["branch_samples"], computed locally at
     generation time by hybrid.modes.training_target.compute_receptive_field_record.
 
@@ -426,7 +426,7 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
 
 
 def user_metadata_kwargs(manifest: dict) -> dict:
-    """Identical logic to hybrid/a2_training_settings.py's
+    """Identical logic to hybrid/training/a2_training_settings.py's
     user_metadata_kwargs -- duplicated here per this module's
     self-containment rule (see module docstring); parity is asserted in
     tests/test_a2_training_settings.py."""
@@ -515,7 +515,7 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
 
     export_dir = output_dir / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
-    # docs/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
+    # docs/history/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
     # gear type when baking a cab, IF the installed package actually has one
     # -- mirrors scripts/train_a2.py's _build_user_metadata, duplicated here
     # per this module's self-containment rule (see module docstring).

@@ -1,6 +1,6 @@
 """Unit tests for scripts/train_a2.py's orchestration logic -- mocks the
 official trainer entry point so these run without Torch/neural-amp-modeler
-installed (see docs/phase3.md section 37: "mock the official trainer for
+installed (see docs/history/phase3.md section 37: "mock the official trainer for
 normal unit tests... have a separate integration/manual test path for real
 A2 training").
 """
@@ -126,7 +126,7 @@ def _write_nam_with_config(path, kernel_sizes, dilations):
 
 
 def test_check_receptive_field_uses_max_across_envelope_and_amp_branches(tmp_path, monkeypatch):
-    """docs/phase3.md review: the complete CORE dependency is
+    """docs/history/phase3.md review: the complete CORE dependency is
     max(envelope, Amp A, Amp B) since the branches run in parallel -- prove
     check_receptive_field actually computes that max and passes IT (not just
     the envelope) to the A2 fits-check."""
@@ -208,7 +208,7 @@ def test_check_receptive_field_warns_but_continues_when_amp_path_missing(tmp_pat
 
 
 def test_check_receptive_field_blend_mode_ignores_envelope_and_uses_amp_max(tmp_path, monkeypatch):
-    """docs/blend-mode.md: Blend mode's CORE dependency is max(Amp A, Amp B)
+    """docs/history/blend-mode.md: Blend mode's CORE dependency is max(Amp A, Amp B)
     only -- no envelope branch at all, even if envelope_max_history_ms were
     (incorrectly) present in the manifest."""
     amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])  # small RF
@@ -351,9 +351,9 @@ def test_check_receptive_field_exact_fit_boundary_still_permitted(tmp_path, monk
 
 
 def test_check_receptive_field_real_world_bug_report_scenario_trains(tmp_path, monkeypatch):
-    """Acceptance criterion #1 (docs/blend-mode.md): a Blend whose Amp A and
+    """Acceptance criterion #1 (docs/history/blend-mode.md): a Blend whose Amp A and
     Amp B each require 6332 samples (the real installed A2's own receptive
-    field, per hybrid/receptive_field.py's module docstring) can still train
+    field, per hybrid/core/receptive_field.py's module docstring) can still train
     with a baked 500ms/24000-sample cabinet IR -- the exact real-world
     scenario that used to be incorrectly refused."""
     amp_a = _write_nam_with_config(tmp_path / "a.nam", [6332], [1])  # RF = 1 + 6331*1 = 6332
@@ -411,7 +411,7 @@ def test_validate_exported_nam_rejects_non_finite(tmp_path, monkeypatch):
 
 
 def test_check_full_low_level_response_delegates_to_shared_helper_and_prints_verdict(tmp_path, monkeypatch, capsys):
-    """The substantive sweep/comparison logic (docs/blend-mode-fixes.md,
+    """The substantive sweep/comparison logic (docs/history/blend-mode-fixes.md,
     Phases 10-11) lives in hybrid.modes.character_training_target.check_full_low_
     level_response, shared with hybrid.training.kaggle_training.validate_downloaded_
     model -- see tests/test_character_training_target.py for that logic.

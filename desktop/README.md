@@ -41,7 +41,7 @@ folder, which doesn't fit that model. Bundling the whole folder as a Tauri
 
 ## What's NOT bundled
 
-Local A2 training (`hybrid/local_training.py`) creates its own separate,
+Local A2 training (`hybrid/training/local_training.py`) creates its own separate,
 dedicated Python venv (`.venv-a2`, with Torch) completely independently of
 whatever runs this Flask process -- see `CLAUDE.md`. Bundling this desktop
 backend never touches that; a user who wants local training still needs to

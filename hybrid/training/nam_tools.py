@@ -26,7 +26,7 @@ class NamToolError(ValueError):
 # `gear_type` is deliberately NOT here (see the metadata-categories design
 # review): it's a fact about what was actually built -- amp-only vs.
 # amp+cab -- determined by the export/cabinet mode at generation time
-# (hybrid/nam_provenance.py, scripts/train_a2.py), not a free-text label a
+# (hybrid/training/nam_provenance.py, scripts/train_a2.py), not a free-text label a
 # user can retroactively relabel on an already-exported file. It's still
 # shown to the user via READ_ONLY_METADATA_FIELDS/inspect(), just not
 # editable.
@@ -95,7 +95,7 @@ def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
 
     Volume adjustment and metadata editing are independent features: an
     architecture find_output_scalers() can't safely handle (e.g.
-    "Sequential", an embedded-cab export -- see hybrid/sequential_nam.py)
+    "Sequential", an embedded-cab export -- see hybrid/training/sequential_nam.py)
     must not block the metadata editor, which only ever touches the
     top-level `metadata` object regardless of architecture. Any such
     failure is reported via `volume_unsupported_reason` instead of raised,

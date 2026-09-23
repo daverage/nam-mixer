@@ -7,32 +7,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The app has three design modes, all sharing Amp A/B, the preview DI, input
 profile/calibration, render, test gain, Listen controls, the Cabinet IR
 stage, official training input, A2 quality, and training -- switching modes
-never re-runs NAM inference (see `hybrid/pipeline.py`'s `RenderedPair`,
+never re-runs NAM inference (see `hybrid/core/pipeline.py`'s `RenderedPair`,
 reused by all):
 
-- **Dynamic Hybrid** (the original/default mode): `hybrid/blend.py` +
-  `hybrid/design.py` + `hybrid/training_target.py` -- level-driven crossfade,
+- **Dynamic Hybrid** (the original/default mode): `hybrid/modes/blend.py` +
+  `hybrid/modes/design.py` + `hybrid/modes/training_target.py` -- level-driven crossfade,
   unchanged maths from before Fixed Blend existed.
-- **Parallel Blend**: `hybrid/fixed_blend.py` + `hybrid/blend_training_target.py`
+- **Parallel Blend**: `hybrid/modes/fixed_blend.py` + `hybrid/modes/blend_training_target.py`
   -- Amp A/Amp B combined at one constant user-chosen ratio
   (`result = A*(1-mix_b) + B*mix_b`), independent of playing level, no
   crossover envelope. Its own auto level-match
-  (`hybrid.fixed_blend.compute_active_trim`) uses the DI's ACTIVE playing
-  material (via `hybrid.coverage.active_signal_mask`), not a crossover band.
-- **Character Blend**: `hybrid/character_blend.py` +
-  `hybrid/character_training_target.py` -- creates a deterministic teacher
+  (`hybrid.modes.fixed_blend.compute_active_trim`) uses the DI's ACTIVE playing
+  material (via `hybrid.core.coverage.active_signal_mask`), not a crossover band.
+- **Character Blend**: `hybrid/modes/character_blend.py` +
+  `hybrid/modes/character_training_target.py` -- creates a deterministic teacher
   from a continuous, residual-bounded drive carrier plus measured tone/feel
   corrections; it is not a parallel waveform mix. Its low-level response
   sweep is a hard preflight gate for bundle generation, preventing a hard
   gate from being baked into a training target.
 
-A mode-independent **Cabinet IR** stage (`hybrid/cab_ir.py`) sits AFTER the
+A mode-independent **Cabinet IR** stage (`hybrid/core/cab_ir.py`) sits AFTER the
 amp combination in every mode: ordinary causal FIR convolution,
 optionally preview-only or "baked" into the generated A2 target via the same
 `apply_cab_ir` function on the COMPLETE prepared IR (never shortened) in
 both cases.
 
-**Receptive-field policy (`hybrid.receptive_field.combine_required_history`)
+**Receptive-field policy (`hybrid.core.receptive_field.combine_required_history`)
 has three tiers:**
 
 - **CORE (hard gate).** Amp A/Amp B RF (+ the bounded crossover envelope,
@@ -69,7 +69,7 @@ truncate the actual FIR taps.
 ## Continuous Gain tab
 
 A fourth workflow, separate from the three design modes: one amp, N fixed-gain captures -> one standard `.nam`
-(`hybrid/cg_*.py`, `cg_routes.py`, `static/cg.js`; see docs/continuous_gain_tab.md). The production default reproduces the frozen
+(`hybrid/continuous_gain/*.py`, `routes/continuous_gain.py`, `static/cg.js`; see docs/continuous_gain_tab.md). The production default reproduces the frozen
 FC recipe (Phase 4D selection, response-distance anchors on [-20, +14] dB, level-driven target, one peak-ceiling scale) and its
 bundle (`mode: "continuous_gain"`, custom input with `training_input.custom_split`) goes to the existing local/Kaggle trainers.
 `tests/test_cg_reproduction.py` / `scripts/cg_reproduce_fc.py` guard the frozen JCM800/Vibrolux configurations.
@@ -84,7 +84,7 @@ blended audio. See README.md for the full concept, rationale, and current
 limitations — it is detailed and should be read before making architectural changes.
 
 **Key thing to know before touching this repo:** NAM inference
-(`hybrid/render.py`) is implemented via a native C++ tool, not the Python
+(`hybrid/core/render.py`) is implemented via a native C++ tool, not the Python
 `neural-amp-modeler`/torch package. `render()` shells out to `nam_render`
 (built from `native/nam_render/`, which links
 [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore) —
@@ -94,8 +94,8 @@ NAMCore's own loader is authoritative. The full render → level-match → blend
 pipeline is wired into the Flask routes and browser UI (`/api/render_pair`,
 `/api/preview`, `/api/blend_info`, `/api/blend_curve`, `/api/input_profiles`,
 `/api/profile_coverage`), and `/api/generate` (final A2 training-target
-generation, `hybrid/training_target.py`) is real as of the phase-3 work in
-docs/history/Continuous Gain/phase3.md — it freezes the current design (`hybrid/design.py`) and
+generation, `hybrid/modes/training_target.py`) is real as of the phase-3 work in
+docs/history/phase3.md — it freezes the current design (`hybrid/modes/design.py`) and
 blends the OFFICIAL NAM training excitation through it (never the preview
 DI, never with the pickup-profile gain applied — see that doc). Actually
 training the resulting bundle into a `.nam` (`scripts/train_a2.py`) requires
@@ -106,11 +106,11 @@ the Flask app itself.
 **Second key thing:** there are three separate, easily-conflated "level"
 concepts, at two different costs:
 
-- **Input profile** (`hybrid/input_profiles.py`) simulates a different
+- **Input profile** (`hybrid/core/input_profiles.py`) simulates a different
   instrument/pickup driving the signal BEFORE either NAM sees it. Changing it
   is EXPENSIVE (`render_pair()` re-runs NAM inference for both amps). See
   `docs/history/INPUT_PROFILE_RESEARCH.md`.
-- **NAM input calibration** (`hybrid/calibration.py`) reconciles two `.nam`
+- **NAM input calibration** (`hybrid/core/calibration.py`) reconciles two `.nam`
   captures' own recording-calibration metadata (`input_level_dbu`) via the
   official NAM plugin's compensation formula, also applied inside
   `render_pair()` — a different concept from the input profile (instrument
@@ -134,14 +134,14 @@ python -m pytest tests/test_blend.py           # single test file
 python -m pytest tests/test_blend.py::test_name -v  # single test
 ```
 
-The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
-`hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`,
-`hybrid/nam_loader.py`, `hybrid/input_profiles.py`, `hybrid/calibration.py`,
-`hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`,
-`hybrid/training_target.py`, `hybrid/a2_training_settings.py`,
-`hybrid/kaggle_training.py`, `hybrid/fixed_blend.py`,
-`hybrid/blend_training_target.py`, `hybrid/cab_ir.py`, and
-`hybrid/receptive_field.py` against synthetic signals only (the pipeline/
+The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/safety.py`,
+`hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
+`hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
+`hybrid/modes/training_target.py`, `hybrid/training/a2_training_settings.py`,
+`hybrid/training/kaggle_training.py`, `hybrid/modes/fixed_blend.py`,
+`hybrid/modes/blend_training_target.py`, `hybrid/core/cab_ir.py`, and
+`hybrid/core/receptive_field.py` against synthetic signals only (the pipeline/
 training-target tests fake out `render()` via monkeypatch; the Kaggle tests
 mock the CLI at the `subprocess` boundary — see docs/history/kaggle_training.md) —
 no torch, built native tool, or real Kaggle credentials required.
@@ -158,7 +158,7 @@ been built AND a real `.nam` file exists at
 user-provided). `tests/test_receptive_field.py` and part of
 `tests/test_train_a2.py` auto-skip/exercise their "unavailable" path unless a
 training environment (see `requirements-training.txt`) is actually installed
--- see docs/history/Continuous Gain/phase3.md for the training-environment split.
+-- see docs/history/phase3.md for the training-environment split.
 
 ```bash
 cmake -B native/nam_render/build -S native/nam_render
@@ -172,8 +172,17 @@ characteristics of the bundled DI fixtures).
 ## Architecture
 
 `hybrid/` is a pure audio-processing library with no Flask/UI dependencies;
-`app.py` + `templates/`/`static/` is a thin Flask UI layer over it. The intended
-end-to-end pipeline (see README.md "Workflow" section for the full picture):
+`app.py` + `routes/` + `templates/`/`static/` is a thin Flask UI layer over it.
+`hybrid/` is split into subpackages: `core/` (NAM I/O and shared DSP: items
+1-5, 7 and 9-12 below, plus `cab_ir`, `receptive_field`, `audio_metrics`,
+`render_bootstrap`), `modes/` (the three design modes and their target
+generators, plus `metadata` and `wizard`), `continuous_gain/` (the CG tab;
+module names without the old `cg_` prefix), `training/` (A2 settings,
+local/Kaggle backends, validation, export packaging) and `services/`
+(settings/.env, local LLM, research, update check). `hybrid/paths.py`
+(`REPO_ROOT`) must stay at the top level, because it derives the repo root from
+its own location. The intended end-to-end pipeline (see README.md "Workflow"
+section for the full picture):
 
 1. **`nam_loader.py`** parses `.nam` files into a `NamModel`, including
    `input_level_dbu`/`output_level_dbu` calibration metadata when present (older
@@ -205,9 +214,9 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
    - `preview_safety_limiter` — an actual limiter, but only for the **live
      preview/playback** path (speaker/headphone safety net). Never apply this to
      a training-target file.
-8. **`metadata.py`** defines the JSON sidecar schema recording exactly how a
-   given hybrid target was generated (amps used, crossover point, trims, etc.),
-   for provenance.
+8. **`metadata.py`** defines the provenance record (written into the
+   training bundle's manifest) of exactly how a given hybrid target was
+   generated (amps used, crossover point, trims, etc.).
 9. **`input_profiles.py`** defines research-grounded relative-gain presets for
    guitar/bass pickup families (see docs/history/INPUT_PROFILE_RESEARCH.md) plus
    `db_to_amplitude`/`resolve_profile_gain_db`. Active/buffered pickups
@@ -245,9 +254,9 @@ end-to-end pipeline (see README.md "Workflow" section for the full picture):
 15. **`fixed_blend.py`** is the Fixed Blend design mode: `build_fixed_blend`
     (cheap, pure-numpy fixed-ratio combination of an already-rendered
     `RenderedPair`), `compute_active_trim` (active-playing-material auto
-    level-match, NOT the crossover-band one `hybrid.level_match` uses), and
+    level-match, NOT the crossover-band one `hybrid.core.level_match` uses), and
     `BlendDesign`/`freeze_blend_design` (the Fixed Blend analogue of
-    `hybrid.design.HybridDesign`/`freeze_design`).
+    `hybrid.modes.design.HybridDesign`/`freeze_design`).
 16. **`blend_training_target.py`** is Fixed Blend's A2 target generator --
     the counterpart to `training_target.generate_training_bundle`, reusing
     its shared helpers (`validate_training_input`, `TrainingInputError`,
@@ -319,13 +328,13 @@ project fixtures like `assets/di/*.wav`.
 
 ## Known caveats in the current implementation
 
-- `hybrid/envelope.py`'s `rms_envelope_db` is deliberately **causal** (a
+- `hybrid/core/envelope.py`'s `rms_envelope_db` is deliberately **causal** (a
   zero-padded windowed sum, not `np.convolve(..., mode="same")`) — the
   envelope becomes the crossover control signal baked into the synthetic
   training target, so it must never be influenced by samples after the
   current one, or a causal A2 model trained on the result would be asked to
   predict the future.
-- `hybrid/align.py`'s `align_to_reference` cross-correlates Amp A's render
+- `hybrid/core/align.py`'s `align_to_reference` cross-correlates Amp A's render
   directly against Amp B's render, which can misread a genuine tonal/phase
   difference between dissimilar amps (e.g. clean vs. heavily distorted) as
   latency. Pass `enabled=False` (skips correction, still length-matches) until

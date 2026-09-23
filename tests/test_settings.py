@@ -1,5 +1,5 @@
-"""Tests for hybrid/settings.py and the .env read/write helpers it relies on
-(hybrid/env_file.py) -- these back the browser Settings page, which lets
+"""Tests for hybrid/services/settings.py and the .env read/write helpers it relies on
+(hybrid/services/env_file.py) -- these back the browser Settings page, which lets
 someone configure the app without a shell to `export` env vars into.
 """
 import os
@@ -20,7 +20,7 @@ def isolated_env_file(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     yield env_path
     # write_env_values() sets os.environ directly (by design -- so a saved
-    # setting takes effect immediately, see hybrid/env_file.py), which
+    # setting takes effect immediately, see hybrid/services/env_file.py), which
     # monkeypatch doesn't track since it wasn't set via monkeypatch.setenv;
     # clean up explicitly so a value saved in one test can't leak into others.
     for field in settings.SETTINGS:

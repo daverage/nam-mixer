@@ -3,7 +3,7 @@
 No telemetry: nothing is reported TO GitHub about this install, and this is never called automatically -- only in
 response to the Settings page's "Check for updates" button, matching the app's local-first/no-background-network
 policy (README's "Local-first & private"). It shares the same unauthenticated GitHub releases API and error style
-as hybrid/render_bootstrap.py's nam_render downloader, but looks at the app's own `v<major>.<minor>.<patch>` tags
+as hybrid/core/render_bootstrap.py's nam_render downloader, but looks at the app's own `v<major>.<minor>.<patch>` tags
 rather than that module's separate `nam-render-v*` tag namespace.
 """
 from __future__ import annotations

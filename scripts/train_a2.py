@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Train a real A2 (PackedWaveNet) model on a generated hybrid bundle --
-docs/phase3.md sections 13-21, 31-33.
+docs/history/phase3.md sections 13-21, 31-33.
 
 Runs INSIDE the dedicated training environment (see scripts/setup_a2_env.ps1)
 -- has no Flask import, is independently runnable:
@@ -13,11 +13,11 @@ degrades to "worked around it"):
   1. Print environment diagnostics (Python/nam/torch/lightning/accelerator).
   2. Load the manifest written by hybrid.modes.training_target.generate_training_bundle,
      locate input.wav/hybrid_target.wav next to it, and verify their hashes,
-     sample rate, and frame-count equality against the manifest (docs/phase3.md
+     sample rate, and frame-count equality against the manifest (docs/history/phase3.md
      section 16 -- input and target must stay exactly sample-aligned; latency
      is authoritatively 0 for this synthetic target).
   3. Confirm the bounded crossover envelope's declared history actually fits
-     inside the installed A2's real receptive field (hybrid/receptive_field.py)
+     inside the installed A2's real receptive field (hybrid/core/receptive_field.py)
      -- not just asserted once at design time, but re-checked against
      whatever nam version is ACTUALLY installed in this environment.
   4. Call the official current simplified A2 training entry point (adapter
@@ -27,7 +27,7 @@ degrades to "worked around it"):
      at runtime and reports exactly which one it used, rather than guessing
      blind at one).
   5. Verify the exported .nam: parse it, load it via the existing native
-     NeuralAmpModelerCore renderer (hybrid/render.py), render the training
+     NeuralAmpModelerCore renderer (hybrid/core/render.py), render the training
      input through it, and confirm mono/finite/correct length/correct sample
      rate.
   6. Compare the A2's re-rendered output against hybrid_target.wav (basic
@@ -35,7 +35,7 @@ degrades to "worked around it"):
   7. Update training_manifest.json's "training" section with the real
      environment/settings actually used.
 
-Does NOT bypass the official trainer's own data-validation checks (docs/phase3.md
+Does NOT bypass the official trainer's own data-validation checks (docs/history/phase3.md
 section 17) and does NOT default to a low-epoch smoke-test config (section 15)
 -- pass --quick explicitly to opt into a fast development run.
 """
@@ -97,7 +97,7 @@ def _read_audio(path: Path):
 
 
 def print_environment_diagnostics() -> dict:
-    """docs/phase3.md section 32."""
+    """docs/history/phase3.md section 32."""
     info: dict = {"python_version": platform.python_version()}
     print(f"Python: {info['python_version']}")
 
@@ -173,7 +173,7 @@ def load_and_validate_manifest(manifest_path: Path) -> dict:
     if len(input_audio) != len(target_audio):
         raise TrainingAbort(
             f"frame count mismatch: input={len(input_audio)} target={len(target_audio)} -- "
-            "input/target must be exactly sample-aligned (docs/phase3.md section 16)"
+            "input/target must be exactly sample-aligned (docs/history/phase3.md section 16)"
         )
 
     print(f"Manifest OK: input/target aligned at {len(input_audio)} frames, {input_sr} Hz.")
@@ -214,7 +214,7 @@ def _resolve_baked_cab_fir_samples(manifest: dict, cab: dict, sample_rate: int) 
 
 def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     """CORE (hard) vs. Character/CABINET (formal/advisory) receptive-field
-    policy -- see docs/blend-mode.md's cabinet-approximation-policy section
+    policy -- see docs/history/blend-mode.md's cabinet-approximation-policy section
     for the full rationale this implements. Two separate questions:
 
     1. Does the CORE Hybrid/Blend dependency -- Amp A/Amp B (+ the crossover
@@ -397,13 +397,13 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
 
 def _build_user_metadata(manifest: dict):
     """NAM `UserMetadata` for the final export, built from the manifest --
-    see docs/phase3.md review section 5. Only called after `nam.train.core`
+    see docs/history/phase3.md review section 5. Only called after `nam.train.core`
     has already been imported successfully, so `nam.models.metadata` is
     guaranteed importable too.
     """
     from nam.models.metadata import GearType, ToneType, UserMetadata
 
-    # docs/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
+    # docs/history/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
     # gear type when baking a cab, IF the installed package actually has one
     # -- never invent an unsupported enum value. Checked dynamically against
     # whatever GearType members are ACTUALLY installed rather than hardcoding
@@ -420,7 +420,7 @@ def _build_user_metadata(manifest: dict):
         # GearType.AMP and rely on our own manifest.cab record for accuracy.
 
     # Shared with cloud/kaggle/train_a2_cloud.py -- see
-    # hybrid/a2_training_settings.py's user_metadata_kwargs docstring. Only
+    # hybrid/training/a2_training_settings.py's user_metadata_kwargs docstring. Only
     # the nam-specific enum (gear_type/tone_type) and output_level_dbu
     # omissions live here; everything else is the shared plain-dict logic.
     kwargs = user_metadata_kwargs(manifest)
@@ -429,7 +429,7 @@ def _build_user_metadata(manifest: dict):
     # helper -- only set it when the installed package's ToneType enum
     # actually has a matching member, exactly like gear_type above; a
     # source pair rarely agrees on tone_type at all (see
-    # hybrid/nam_provenance.py's agreed_tone_type), so this is usually None.
+    # hybrid/training/nam_provenance.py's agreed_tone_type), so this is usually None.
     tone_type_name = kwargs.pop("tone_type", None)
     tone_type = getattr(ToneType, tone_type_name.upper(), None) if tone_type_name else None
 
@@ -491,7 +491,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
     the exported model location -- confirmed via `inspect.getsource`, the
     function always builds `model_config = _get_packed_model_config()`
     (loading the exact `nam.train._resources/config_model_packed.json` file
-    hybrid/receptive_field.py inspects), so this genuinely is the official
+    hybrid/core/receptive_field.py inspects), so this genuinely is the official
     A2/PackedWaveNet architecture, never a hand-rolled one. `train()` does
     NOT export a `.nam` file itself -- the returned `TrainOutput.model` is a
     `LightningModule` wrapping the trained net; `.net.export(...)` (a real,
@@ -516,7 +516,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
         _apply_custom_split_patch(core, custom_train_stop)
     # `settings` (an A2TrainingSettings -- either A2_QUICK_SETTINGS or
     # settings_for_preset(<draft|standard|high_def>)) is shared with
-    # cloud/kaggle/train_a2_cloud.py -- see hybrid/a2_training_settings.py.
+    # cloud/kaggle/train_a2_cloud.py -- see hybrid/training/a2_training_settings.py.
     # This is the parity mechanism that keeps local and Kaggle GPU training
     # from silently drifting apart.
     result = core.train(
@@ -524,7 +524,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
         output_path=str(target_path),
         train_path=str(output_dir),
         epochs=settings.epochs,
-        latency=settings.latency,  # docs/phase3.md section 16 -- synthetic latency is authoritatively 0, never auto-detected
+        latency=settings.latency,  # docs/history/phase3.md section 16 -- synthetic latency is authoritatively 0, never auto-detected
         batch_size=settings.batch_size,
         ny=settings.ny,
         seed=settings.seed,
@@ -533,7 +533,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
         # (latency-calibration plots, validation-ESR plot) -- with latency=0
         # already fixed there's nothing for a human to approve interactively,
         # and a blocking plt.show() here would hang a non-interactive/headless
-        # run forever. docs/phase3.md section 31 explicitly requires
+        # run forever. docs/history/phase3.md section 31 explicitly requires
         # suppressing interactive plots.
         silent=settings.silent,
         modelname="model",
@@ -544,7 +544,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
         raise TrainingAbort(
             "nam.train.core.train() returned no model -- the official trainer's own data "
             "checks likely failed (see its printed output above). Not bypassing that check "
-            "(docs/phase3.md section 17); investigate the cause instead of forcing a run "
+            "(docs/history/phase3.md section 17); investigate the cause instead of forcing a run "
             "with ignore_checks."
         )
 
@@ -572,7 +572,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
 def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate: int, slim: bool = False) -> dict:
     """`slim=True` exercises the Lite/slim submodel of a packed A2 export
     (NAMCore's `--slim` flag, forwarded via hybrid.core.render.render's `slim`
-    kwarg -- see docs/phase3.md section 20); `slim=False` (default) exercises
+    kwarg -- see docs/history/phase3.md section 20); `slim=False` (default) exercises
     the Full submodel. Only meaningful for a slimmable/packed export; a
     NamRenderError from a non-slimmable model when slim=True is expected and
     surfaces as a TrainingAbort so callers can treat "Lite not supported by
@@ -601,7 +601,7 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
 
 def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float = 0.0) -> "dict | None":
     """Thin wrapper over `hybrid.modes.character_training_target.check_full_low_
-    level_response` (docs/blend-mode-fixes.md, Phases 10-11) that also prints
+    level_response` (docs/history/blend-mode-fixes.md, Phases 10-11) that also prints
     a verdict line -- the actual sweep/comparison logic is shared with
     `hybrid.training.kaggle_training.validate_downloaded_model` so both local and
     Kaggle-trained models are held to the identical bar (see that function's

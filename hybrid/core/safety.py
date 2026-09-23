@@ -89,7 +89,7 @@ def compute_auto_output_gain_db(audio: np.ndarray, target_peak_dbfs: float) -> t
     """Suggest a BOOST-only gain (dB) to bring `audio`'s peak up to
     `target_peak_dbfs`, using whatever headroom is unused -- the auto
     "make it louder" counterpart to apply_peak_ceiling's reduce-only
-    behaviour (see hybrid/safety.py module docstring: neither function is a
+    behaviour (see hybrid/core/safety.py module docstring: neither function is a
     limiter, both are a single fixed gain applied to the whole file so
     dynamics are never altered).
 

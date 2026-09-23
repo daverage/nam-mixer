@@ -26,7 +26,7 @@ def test_align_to_reference_matches_length():
 def test_align_to_reference_disabled_by_default():
     """Regression test: alignment must be opt-in, not applied automatically.
 
-    See hybrid/align.py's module docstring -- cross-correlating two tonally
+    See hybrid/core/align.py's module docstring -- cross-correlating two tonally
     dissimilar amp renders can misread a real tonal/phase difference as
     latency, so correction must not happen unless the caller explicitly asks
     for it via enabled=True.

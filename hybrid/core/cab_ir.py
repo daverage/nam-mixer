@@ -1,5 +1,5 @@
 """Shared cabinet-IR convolution stage, used identically for live preview and
-for a baked A2 training target -- see docs/blend-mode.md "CAB IR PROCESSING".
+for a baked A2 training target -- see docs/history/blend-mode.md "CAB IR PROCESSING".
 
 The cabinet sits AFTER the amp combination (Hybrid crossfade or Fixed Blend
 mix), never before it and never as two separate per-branch cabs -- see
@@ -37,7 +37,7 @@ a long, mostly-inaudible decay tail; these numbers exist so a user (and
 `scripts/train_a2.py`/the Kaggle cloud worker) can see how much of a long IR
 is functionally meaningful WITHOUT that ever causing the actual convolution
 to be shortened -- the full prepared IR is always used for both preview and
-a baked training target. See "TRAILING IR PADDING" in docs/blend-mode.md for
+a baked training target. See "TRAILING IR PADDING" in docs/history/blend-mode.md for
 why deliberately NOT truncating at an energy percentile is a hard rule here.
 """
 from __future__ import annotations
@@ -54,7 +54,7 @@ from scipy.signal import fftconvolve, resample_poly
 # A sample below this level, relative to the IR's own peak, is considered
 # "before the cab actually starts responding" and trimmed from the front
 # before convolution -- consistent in spirit with the -50 dBFS ABSOLUTE
-# active-signal convention used elsewhere (hybrid/coverage.py), but RELATIVE
+# active-signal convention used elsewhere (hybrid/core/coverage.py), but RELATIVE
 # here because an IR's absolute level is arbitrary (unlike a calibrated DI).
 LEADING_SILENCE_THRESHOLD_RELATIVE_DB = -40.0
 PREPARATION_TRIM_INITIAL_SILENCE = "trim_initial_silence"
@@ -161,7 +161,7 @@ class PreparedCabIr:
         (the amp branches consume their own history too -- see
         hybrid.core.receptive_field.combine_required_history) -- only an
         indication of how much LATE cab energy a fixed-size model may be
-        unable to reproduce exactly. See docs/blend-mode.md "CABINET ENERGY
+        unable to reproduce exactly. See docs/history/blend-mode.md "CABINET ENERGY
         ANALYSIS".
         """
         if self.total_energy <= 0 or window_samples <= 0:
@@ -317,7 +317,7 @@ def apply_cab_ir(audio: np.ndarray, prepared: PreparedCabIr) -> np.ndarray:
     return exactly `len(audio)` samples (full convolution, tail truncated) --
     see module docstring. Does NOT apply any limiter/normalization; that
     remains the caller's job (`preview_safety_limiter` for preview,
-    `apply_peak_ceiling` for a training target -- see hybrid/safety.py)."""
+    `apply_peak_ceiling` for a training target -- see hybrid/core/safety.py)."""
     audio = np.asarray(audio, dtype=np.float32)
     if not np.all(np.isfinite(audio)):
         raise CabIrError("cab input audio contains NaN/Inf samples")
@@ -330,7 +330,7 @@ def apply_cab_ir(audio: np.ndarray, prepared: PreparedCabIr) -> np.ndarray:
 class CabDesign:
     """Frozen provenance for the shared Cabinet IR stage -- attached to both
     `hybrid.modes.design.HybridDesign` and `hybrid.modes.fixed_blend.BlendDesign` (a cab
-    is a shared, mode-independent post-amp stage, see docs/blend-mode.md).
+    is a shared, mode-independent post-amp stage, see docs/history/blend-mode.md).
 
     `ir_working_path` is the server-side working copy used to actually
     re-run the convolution at generation time -- functional, not sensitive
@@ -343,7 +343,7 @@ class CabDesign:
     original_filename: Optional[str] = None
     # User-editable label shown in a learned/embedded export's name (e.g.
     # "Modern Boutique 4x12") -- the only cabinet field a user may edit; see
-    # hybrid/nam_provenance.py's build_export_name. Falls back to
+    # hybrid/training/nam_provenance.py's build_export_name. Falls back to
     # `original_filename` when blank, never auto-derived from IR content.
     display_name: Optional[str] = None
     sha256: Optional[str] = None
@@ -362,9 +362,9 @@ class CabDesign:
     original_frame_count: Optional[int] = None
     prepared_frame_count: Optional[int] = None
     leading_samples_trimmed: Optional[int] = None
-    fir_history_samples: Optional[int] = None  # prepared_frame_count - 1, the FORMAL serial RF cost when baked -- see hybrid/receptive_field.py
+    fir_history_samples: Optional[int] = None  # prepared_frame_count - 1, the FORMAL serial RF cost when baked -- see hybrid/core/receptive_field.py
 
-    # Diagnostic-only cabinet energy profile (docs/blend-mode.md "CABINET
+    # Diagnostic-only cabinet energy profile (docs/history/blend-mode.md "CABINET
     # ENERGY ANALYSIS") -- never used to alter the actual FIR taps.
     prepared_duration_ms: Optional[float] = None
     energy_99_samples: Optional[int] = None

@@ -10,7 +10,7 @@ in the `.nam` JSON), the official plugin compensates for it with:
     model_input_adjustment_db = reference_input_level_dbu - model_input_level_dbu
 
 This module implements that formula and the Auto/Raw mode selection logic
-described in docs/INPUT_PROFILE_RESEARCH.md.
+described in docs/history/INPUT_PROFILE_RESEARCH.md.
 """
 from __future__ import annotations
 

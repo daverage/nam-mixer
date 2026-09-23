@@ -1,4 +1,4 @@
-"""Tests for hybrid/cab_ir.py -- see docs/blend-mode.md "CAB IR PROCESSING"."""
+"""Tests for hybrid/core/cab_ir.py -- see docs/history/blend-mode.md "CAB IR PROCESSING"."""
 from __future__ import annotations
 
 import numpy as np
@@ -111,7 +111,7 @@ def test_leading_silence_is_trimmed_and_recorded(tmp_path):
 
 def test_preview_and_bake_use_the_same_prepared_ir_path(tmp_path):
     """get_prepared_cab_ir (used by both preview and baked-target
-    generation, see hybrid/training_target.py::maybe_bake_cab) must be
+    generation, see hybrid/modes/training_target.py::maybe_bake_cab) must be
     cache-consistent: same file + same target rate -> identical result."""
     ir_path = _write_wav(tmp_path / "ir.wav", np.random.default_rng(4).uniform(-1, 1, 300))
     a = get_prepared_cab_ir(ir_path, 48000)
@@ -144,7 +144,7 @@ def test_cab_design_display_name_defaults_to_none_and_round_trips(tmp_path):
     assert named.to_dict()["display_name"] == "Modern Boutique 4x12"
 
 
-# -- Cabinet energy diagnostics -- docs/blend-mode.md "CABINET ENERGY ANALYSIS" ---
+# -- Cabinet energy diagnostics -- docs/history/blend-mode.md "CABINET ENERGY ANALYSIS" ---
 # Purely informational: must never alter the actual FIR taps/convolution.
 
 def test_energy_one_tap_ir_reports_immediate_effective_energy(tmp_path):

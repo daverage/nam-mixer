@@ -1,6 +1,6 @@
-"""Tests for hybrid/nam_provenance.py -- shared source-model provenance and
+"""Tests for hybrid/training/nam_provenance.py -- shared source-model provenance and
 export-name suffix logic used by all three design modes' manifest builders
-and by hybrid/a2_training_settings.py's user_metadata_kwargs."""
+and by hybrid/training/a2_training_settings.py's user_metadata_kwargs."""
 from types import SimpleNamespace
 
 import pytest

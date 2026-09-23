@@ -1,4 +1,4 @@
-# Training-only dependencies for the A2 hybrid target -- docs/phase3.md
+# Training-only dependencies for the A2 hybrid target -- docs/history/phase3.md
 # sections 13-14. Deliberately SEPARATE from requirements.txt: the normal
 # Flask/runtime app (hybrid/, app.py) must keep working without any of this
 # installed (see CLAUDE.md) -- render.py shells out to the native nam_render
@@ -15,7 +15,7 @@
 # (scripts/train_a2.py does this automatically).
 neural-amp-modeler==0.13.0
 
-# scripts/train_a2.py imports hybrid/cab_ir.py and hybrid/envelope.py,
+# scripts/train_a2.py imports hybrid/core/cab_ir.py and hybrid/core/envelope.py,
 # which need soundfile and scipy directly -- pin both explicitly rather than
 # relying on them arriving as transitive dependencies of neural-amp-modeler's
 # own librosa dependency.

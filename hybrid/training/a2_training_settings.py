@@ -1,6 +1,6 @@
 """Single source of truth for the A2 (PackedWaveNet) training settings used by
 BOTH the local trainer (`scripts/train_a2.py`) and the Kaggle cloud worker
-(`cloud/kaggle/train_a2_cloud.py`) -- see docs/kaggle_training.md.
+(`cloud/kaggle/train_a2_cloud.py`) -- see docs/history/kaggle_training.md.
 
 Pure data, no torch/nam import, safe to import from the normal torch-free
 Flask/runtime environment as well as both training environments. The whole
@@ -64,8 +64,8 @@ def settings_for_preset(preset: str) -> A2TrainingSettings:
 # Normal, full-quality training run at the default preset.
 A2_TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
 
-# Fast development/smoke-test run only -- never the final model (docs/phase3.md
-# section 15, docs/kaggle_training.md "real end-to-end test" section).
+# Fast development/smoke-test run only -- never the final model (docs/history/phase3.md
+# section 15, docs/history/kaggle_training.md "real end-to-end test" section).
 A2_QUICK_SETTINGS = A2TrainingSettings(
     epochs=1,
     batch_size=A2_TRAINING_SETTINGS.batch_size,
@@ -83,10 +83,10 @@ A2_QUICK_SETTINGS = A2TrainingSettings(
 NEURAL_AMP_MODELER_VERSION = "0.13.0"
 
 # The official NAM v3.0.0 training/reamp input file's MD5 -- see
-# hybrid/training_target.py's OFFICIAL_V3_INPUT_MD5 docstring for how this was
+# hybrid/modes/training_target.py's OFFICIAL_V3_INPUT_MD5 docstring for how this was
 # verified. Duplicated here (rather than imported) because the Kaggle cloud
 # worker is deliberately self-contained (see cloud/kaggle/train_a2_cloud.py's
-# module docstring) and cannot import hybrid/training_target.py, which pulls
+# module docstring) and cannot import hybrid/modes/training_target.py, which pulls
 # in soundfile/numpy assumptions tied to this repo's package layout. Tested
 # for equality against the authoritative constant in
 # tests/test_a2_training_settings.py so the two can never silently diverge.
@@ -116,7 +116,7 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     a training_manifest.json dict -- pure Python, no nam/torch import, so both
     `scripts/train_a2.py` (local) and `cloud/kaggle/train_a2_cloud.py` (cloud)
     can share this exact logic instead of maintaining two copies that could
-    silently drift (see docs/kaggle_training.md). Callers construct the real
+    silently drift (see docs/history/kaggle_training.md). Callers construct the real
     `UserMetadata(**user_metadata_kwargs(manifest))` themselves, after
     importing `nam.models.metadata` in their own environment.
 
@@ -130,11 +130,11 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     Suffix/gear_type-adjacent naming logic here is intentionally duplicated
     literally in cloud/kaggle/train_a2_cloud.py's copy of this function
-    (that module cannot import hybrid/nam_provenance.py -- it runs
+    (that module cannot import hybrid/training/nam_provenance.py -- it runs
     self-contained inside a Kaggle kernel with no hybrid package installed)
-    rather than imported from hybrid/nam_provenance.py, so both copies stay
+    rather than imported from hybrid/training/nam_provenance.py, so both copies stay
     exactly the shape tests/test_a2_training_settings.py's parity test
-    checks. hybrid/nam_provenance.py's TONE_TYPES/SUFFIX_* constants are the
+    checks. hybrid/training/nam_provenance.py's TONE_TYPES/SUFFIX_* constants are the
     canonical reference for what "identical logic" means here.
     """
     from pathlib import Path
@@ -145,7 +145,7 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     # Only report input_level_dbu when calibration was genuinely applied to
     # BOTH source models -- never invent one for a Raw-fallback pair
-    # (docs/phase3.md section 9).
+    # (docs/history/phase3.md section 9).
     input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
 
     mode = manifest.get("mode", "hybrid")
@@ -168,11 +168,11 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     base_name = str(manifest.get("model_name") or "").strip() or name
 
     # Automatic export-identity suffix -- see the "Design modes" export
-    # table in CLAUDE.md / hybrid/nam_provenance.py. A no-cab and a
+    # table in CLAUDE.md / hybrid/training/nam_provenance.py. A no-cab and a
     # learned-cab export are otherwise indistinguishable in a NAM player
     # (both SlimmableContainer); an embedded export's own SlimmableContainer
     # head is deliberately left unsuffixed since it isn't the final
-    # deliverable in that mode -- hybrid/sequential_nam.py's packaged
+    # deliverable in that mode -- hybrid/training/sequential_nam.py's packaged
     # Sequential file carries "[Embedded Cab · Full]" instead.
     cab = manifest.get("cab") or {}
     export_mode = cab.get("export_mode") or ("learned" if cab.get("baked") else "none")

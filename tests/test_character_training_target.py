@@ -1,5 +1,5 @@
-"""Tests for hybrid/character_training_target.py's low-level response gate
-(docs/blend-mode-fixes.md, Phases 5/7/11) -- uses a fake identity render()
+"""Tests for hybrid/modes/character_training_target.py's low-level response gate
+(docs/history/blend-mode-fixes.md, Phases 5/7/11) -- uses a fake identity render()
 (same pattern as test_training_target.py) so these run without the native
 nam_render tool or real .nam captures.
 """

@@ -1,6 +1,6 @@
 """Held-out validation: compare the LIVE reference hybrid (two source NAMs +
 a locked HybridDesign) against a trained A2 export, on material the A2 never
-trained on -- docs/phase3.md sections 24-28.
+trained on -- docs/history/phase3.md sections 24-28.
 
 Deliberately independent of the training environment: rendering both the
 reference hybrid and the trained A2 export uses `hybrid.core.render.render()`
@@ -119,7 +119,7 @@ def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: 
     transition, fixed B trim, calibration rule, and envelope config as
     `hybrid.core.pipeline.render_pair`/`build_hybrid`, alignment OFF unless the
     design says otherwise. `dry` may already have a real input-profile gain
-    applied by the caller (docs/phase3.md section 25 -- unlike target
+    applied by the caller (docs/history/phase3.md section 25 -- unlike target
     generation, validation DOES apply real profile gains, as actual audio,
     never the deprecated envelope-only `dry_gain_db`).
     """

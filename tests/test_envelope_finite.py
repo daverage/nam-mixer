@@ -1,5 +1,5 @@
 """Tests for the bounded, finite-memory production envelope
-(`hybrid.core.envelope.bounded_causal_envelope_db`) -- see docs/phase3.md section 4.
+(`hybrid.core.envelope.bounded_causal_envelope_db`) -- see docs/history/phase3.md section 4.
 
 Unlike `rms_envelope_db`'s one-pole release (recursive, theoretically
 infinite memory), this envelope must have a documented, provable, EXACT

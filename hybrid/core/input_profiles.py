@@ -1,7 +1,7 @@
 """Research-grounded relative-output profiles for common pickup types.
 
 The goal here is NOT to claim we can measure a real guitar's actual output
-level -- see docs/INPUT_PROFILE_RESEARCH.md for the full research writeup and
+level -- see docs/history/INPUT_PROFILE_RESEARCH.md for the full research writeup and
 its caveats. It's to give the crossover-reachability question ("does a
 realistic player actually drive this hybrid into Amp B?") a defensible,
 documented set of relative-gain simulations to test against, instead of an
@@ -58,7 +58,7 @@ GUITAR_PROFILES: dict[str, InputProfile] = {
         research_range_db="~90-125 mV vs 250 mV ref (-8.9 to -6.0 dB)",
         description="Low-output vintage-style single coil (e.g. early Strat/Tele pickups).",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "standard_single": InputProfile(
         id="standard_single", instrument="guitar",
@@ -67,7 +67,7 @@ GUITAR_PROFILES: dict[str, InputProfile] = {
         research_range_db="~160-200 mV vs 250 mV ref (-3.9 to -1.9 dB)",
         description="Mid-output single coil, hotter-wound than vintage-spec.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "vintage_humbucker": InputProfile(
         id="vintage_humbucker", instrument="guitar",
@@ -85,7 +85,7 @@ GUITAR_PROFILES: dict[str, InputProfile] = {
         research_range_db="~270-287 mV vs 250 mV ref (+0.7 to +1.2 dB)",
         description="P90-style single coil, slightly hotter than a PAF humbucker.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "modern_humbucker": InputProfile(
         id="modern_humbucker", instrument="guitar",
@@ -94,7 +94,7 @@ GUITAR_PROFILES: dict[str, InputProfile] = {
         research_range_db="~300-375 mV vs 250 mV ref (+1.6 to +3.5 dB)",
         description="Modern medium-output passive humbucker.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "hot_humbucker": InputProfile(
         id="hot_humbucker", instrument="guitar",
@@ -103,7 +103,7 @@ GUITAR_PROFILES: dict[str, InputProfile] = {
         research_range_db="~400-435 mV vs 250 mV ref (+4.1 to +4.8 dB)",
         description="Hot-wound passive humbucker.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "extreme_passive": InputProfile(
         id="extreme_passive", instrument="guitar",
@@ -112,7 +112,7 @@ GUITAR_PROFILES: dict[str, InputProfile] = {
         research_range_db="~510 mV vs 250 mV ref (+6.2 dB)",
         description="The hottest commonly-available passive pickups.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "active_buffered": InputProfile(
         id="active_buffered", instrument="guitar",
@@ -149,7 +149,7 @@ BASS_PROFILES: dict[str, InputProfile] = {
         research_range_db="~170-200 mV",
         description="Moderately hotter passive bass pickup.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "hot_passive_bass": InputProfile(
         id="hot_passive_bass", instrument="bass",
@@ -158,7 +158,7 @@ BASS_PROFILES: dict[str, InputProfile] = {
         research_range_db="~230-250 mV",
         description="High-output passive bass pickup.",
         confidence="research-based category simulation",
-        source_notes="Rounded from manufacturer relative-output data -- see docs/INPUT_PROFILE_RESEARCH.md",
+        source_notes="Rounded from manufacturer relative-output data -- see docs/history/INPUT_PROFILE_RESEARCH.md",
     ),
     "active_preamped_bass": InputProfile(
         id="active_preamped_bass", instrument="bass",

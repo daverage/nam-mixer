@@ -69,7 +69,7 @@ def test_selected_cab_warns_for_explicit_amp_cab_source_metadata(tmp_path):
 
 
 def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client, monkeypatch):
-    # provider != "local" never gets a `reachable` probe (see hybrid/local_llm.py's
+    # provider != "local" never gets a `reachable` probe (see hybrid/services/local_llm.py's
     # status()) -- the checklist must not fall through to a bogus "start ollama
     # serve" message for a fully-configured Cloudflare/custom provider.
     monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True, "provider": "cloudflare", "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
@@ -81,7 +81,7 @@ def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client
 
 
 def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch, tmp_path):
-    # Isolate from a real .env on this machine (hybrid/env_file.py's deliberate fallback), same as tests/test_local_llm.py.
+    # Isolate from a real .env on this machine (hybrid/services/env_file.py's deliberate fallback), same as tests/test_local_llm.py.
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
     assert client.get("/api/local_llm/status").get_json()["enabled"] is False
@@ -943,7 +943,7 @@ def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
 
 def test_nam_tools_inspect_works_for_embedded_cab_sequential_export(client, tmp_path):
     # Regression test: an embedded-cab export's architecture is "Sequential"
-    # (hybrid/sequential_nam.py), which find_output_scalers() can't find a
+    # (hybrid/training/sequential_nam.py), which find_output_scalers() can't find a
     # head_scale for -- that must not block the metadata editor from
     # loading at all (it previously raised a hard error, see the NAM Tools
     # UI bug report this test guards against).

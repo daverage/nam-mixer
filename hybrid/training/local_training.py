@@ -337,7 +337,7 @@ class LocalTrainingManager:
             "(subprocess.check_call([str(py),'-m','pip','install','--upgrade','torch','torchvision']) if sys.platform=='darwin' else None); "
             # Actually import every package scripts/train_a2.py needs at
             # training time (not just torch) -- soundfile in particular is
-            # a hybrid/cab_ir.py dependency that pip can silently skip if an
+            # a hybrid/core/cab_ir.py dependency that pip can silently skip if an
             # earlier install step was interrupted, which used to leave
             # `ready` true and Train enabled against a broken environment.
             "import_check=\"import torch, soundfile, numpy, scipy; print('MPS available: ' + str(torch.backends.mps.is_available())); print('MPS built: ' + str(torch.backends.mps.is_built()))\"; "

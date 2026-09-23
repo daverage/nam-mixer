@@ -1,4 +1,4 @@
-"""Tests for hybrid/render_bootstrap.py -- the in-app "download nam_render"
+"""Tests for hybrid/core/render_bootstrap.py -- the in-app "download nam_render"
 button's backend (Settings page), mocked at the urlopen boundary so these
 never hit the real network.
 """

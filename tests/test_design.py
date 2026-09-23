@@ -62,7 +62,7 @@ def test_freeze_design_captures_auditioned_values():
 
 
 def test_freeze_design_never_captures_test_gain_db():
-    """test_gain_db (hybrid/pipeline.py's stress-test-only additional gain)
+    """test_gain_db (hybrid/core/pipeline.py's stress-test-only additional gain)
     must never leak into the frozen design -- unlike
     design_reference_profile_gain_db, it isn't an instrument identity and
     has no field on HybridDesign at all."""

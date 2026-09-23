@@ -200,7 +200,7 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
             let exe_dir = exe.parent().unwrap();
             cmd.current_dir(exe_dir);
             // Local A2 training's OWN separate venv subprocess (see
-            // hybrid/local_training.py) needs real loose scripts/hybrid
+            // hybrid/training/local_training.py) needs real loose scripts/hybrid
             // source + requirements-training.txt on disk -- bundled at
             // training_support/ alongside this exe (see the .spec file's
             // datas), never inside this frozen process's own packed

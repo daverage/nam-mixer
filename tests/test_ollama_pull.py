@@ -1,4 +1,4 @@
-"""Tests for hybrid/ollama_pull.py -- the Settings page's one-click "pull
+"""Tests for hybrid/services/ollama_pull.py -- the Settings page's one-click "pull
 gemma4:e4b via Ollama" button backend. Subprocess/PATH access is mocked so
 these never actually invoke Ollama."""
 import time

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a dedicated virtual environment for A2 training -- docs/phase3.md
+# Create a dedicated virtual environment for A2 training -- docs/history/phase3.md
 # sections 13-14. Does NOT touch the main app's Python environment; the
 # runtime app (app.py, hybrid/) must keep working without Torch installed.
 #

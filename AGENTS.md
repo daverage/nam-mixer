@@ -4,7 +4,9 @@
 
 The Flask entry point is `app.py`; browser assets live in `templates/` and
 `static/`. Core DSP, cabinet-IR, design, validation, training, and export
-logic is organized under `hybrid/`. Local and Kaggle training helpers are in
+logic is organized under `hybrid/` in subpackages (`core/`, `modes/`,
+`continuous_gain/`, `training/`, `services/`); `routes/` holds Flask route
+modules registered by `app.py`. Local and Kaggle training helpers are in
 `scripts/` and `cloud/kaggle/`. The native `nam_render` CLI is built from
 `native/nam_render/`. Tests are under `tests/`, with reusable audio/model
 fixtures in `assets/`. Generated sessions, training bundles, and build

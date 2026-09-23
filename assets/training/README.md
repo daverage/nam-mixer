@@ -9,7 +9,7 @@ recognizes by exact MD5 match against its own table of known official inputs
 for the project that publishes it.
 
 - MD5: `36cd1af62985c2fac3e654333e36431e` (matches
-  `hybrid/training_target.py`'s `OFFICIAL_V3_INPUT_MD5` exactly -- that
+  `hybrid/modes/training_target.py`'s `OFFICIAL_V3_INPUT_MD5` exactly -- that
   constant is the actual verification this project performs; this README is
   documentation, not the check itself).
 - Sample rate: 48 kHz, mono.

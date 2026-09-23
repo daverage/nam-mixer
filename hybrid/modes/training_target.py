@@ -1,13 +1,13 @@
 """Real A2 training-target generation -- the actual implementation behind
-`/api/generate` and `scripts/train_a2.py`'s input. See docs/phase3.md,
+`/api/generate` and `scripts/train_a2.py`'s input. See docs/history/phase3.md,
 particularly sections 1 and 7-12, for the full rationale; the short version:
 
 - Uses a FROZEN `hybrid.modes.design.HybridDesign` (never recomputes auto-trim or
-  crossover against the training input -- see hybrid/design.py).
+  crossover against the training input -- see hybrid/modes/design.py).
 - Feeds the OFFICIAL NAM training excitation to both source models at the
   design's reference (0 dB) profile level -- `design.design_reference_profile_gain_db`
   is recorded in the manifest for provenance but is NEVER applied to the
-  actual training signal (docs/phase3.md section 1/23). Only per-model NAM
+  actual training signal (docs/history/phase3.md section 1/23). Only per-model NAM
   calibration compensation (the same `resolve_calibration` rules
   `hybrid.core.pipeline.render_pair` uses) is applied.
 - The crossover envelope is computed from the common, un-calibrated official
@@ -55,7 +55,7 @@ REQUIRED_TRAINING_INPUT_SAMPLE_RATE = 48000
 # (max(|y|) < 1.0, i.e. < 0 dBFS) -- and it already normalizes training
 # output internally (to -18 dBFS RMS) before reversing that normalization on
 # export, so there's no training-quality reason to force every hot target
-# down to some fixed "safe" ceiling like -3 dBFS (docs/phase3.md review
+# down to some fixed "safe" ceiling like -3 dBFS (docs/history/phase3.md review
 # section 4). We therefore only ever apply the MINIMUM whole-file attenuation
 # needed to bring a clipping/near-clipping target just under 0 dBFS -- a
 # target that never reaches this ceiling is left completely untouched, so
@@ -73,7 +73,7 @@ HYBRID_BUILDER_VERSION = "phase3-a2-v1"
 # official simplified trainer's own data checks are calibrated around V3's
 # validation-signal layout (two ~9s repeated passages at the head/tail) and
 # explicitly fail for other versions unless force-ignored -- which we never
-# do (docs/phase3.md section 17). See
+# do (docs/history/phase3.md section 17). See
 # https://github.com/sdatkinson/neural-amp-modeler for how to obtain it.
 OFFICIAL_V3_INPUT_MD5 = "36cd1af62985c2fac3e654333e36431e"
 
@@ -81,7 +81,7 @@ OFFICIAL_V3_INPUT_MD5 = "36cd1af62985c2fac3e654333e36431e"
 class TrainingInputError(ValueError):
     """Raised when the supplied official training input, or the generated
     target derived from it, fails validation. Generation aborts rather than
-    working around the problem -- see docs/phase3.md section 7."""
+    working around the problem -- see docs/history/phase3.md section 7."""
 
 
 def _sha256_file(path: str | Path) -> str:
@@ -240,7 +240,7 @@ def _hybrid_metadata_dict(design: HybridDesign) -> dict:
         amp_b_calibration_gain_db=design.amp_b_calibration_gain_db,
     )
     d = meta.to_dict()
-    # Explicit per docs/phase3.md section 23 -- must never become ambiguous later.
+    # Explicit per docs/history/phase3.md section 23 -- must never become ambiguous later.
     d["hybrid"]["pickup_profile_applied_to_training_input"] = False
     return d
 
@@ -356,7 +356,7 @@ def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int
     export mode --
     used by both Hybrid and Blend target generation (see
     hybrid.modes.blend_training_target). Must run BEFORE safety/peak-ceiling
-    processing (docs/blend-mode.md "CAB PREVIEW SEMANTICS" / "SHARED
+    processing (docs/history/blend-mode.md "CAB PREVIEW SEMANTICS" / "SHARED
     CABINET IR STAGE"). No-op (returns `audio` unchanged) if no cab is
     baked -- this keeps existing no-cab Hybrid generation byte-for-byte
     unchanged.
@@ -403,12 +403,12 @@ def compute_receptive_field_record(
     """Best-effort required-history record for the manifest -- see
     hybrid.core.receptive_field.combine_required_history. Only needs the source
     `.nam` files (pure JSON-schema math, no torch/neural-amp-modeler
-    required -- see hybrid/receptive_field.py), so this can always be
+    required -- see hybrid/core/receptive_field.py), so this can always be
     computed at generation time in the plain Flask environment; validating
     the CORE (hard) dependency against the actually-installed A2's real
     receptive field happens later, in scripts/train_a2.py (local) or the
     Kaggle cloud worker, which run in the dedicated training environment
-    (see CLAUDE.md) -- see docs/blend-mode.md's cabinet approximation policy
+    (see CLAUDE.md) -- see docs/history/blend-mode.md's cabinet approximation policy
     for why a baked cab's formal history is calculated here but never used
     to gate generation itself.
 
@@ -461,7 +461,7 @@ def compute_receptive_field_record(
     # NOT have neural-amp-modeler installed (see CLAUDE.md), so this is
     # usually None -- the AUTHORITATIVE cab-approximation determination
     # happens at train time (scripts/train_a2.py / the Kaggle cloud worker),
-    # never here. Never guess/falsify this value -- see docs/blend-mode.md
+    # never here. Never guess/falsify this value -- see docs/history/blend-mode.md
     # "Do not hide or falsify the RF numbers."
     cab_requires_approximation: Optional[bool] = None
     a2_rf_at_generation_time: Optional[int] = None
@@ -585,7 +585,7 @@ def generate_training_bundle(
         warnings.append(calib.warning)
 
     # NOTE: design.design_reference_profile_gain_db is deliberately NOT
-    # applied here -- see module docstring / docs/phase3.md section 1.
+    # applied here -- see module docstring / docs/history/phase3.md section 1.
     # amp_a_input_gain_db/amp_b_input_gain_db, unlike the profile gain, ARE
     # applied -- they correct what each amp actually receives (see
     # hybrid.core.pipeline.RenderedPair's docstring), not a hypothetical pickup.
@@ -596,7 +596,7 @@ def generate_training_bundle(
     amp_b_render = render(amp_b, amp_b_input, input_info.sample_rate)
 
     # Crossover envelope sees the common, uncalibrated official input --
-    # BEFORE the per-model calibration split above (docs/phase3.md section 8).
+    # BEFORE the per-model calibration split above (docs/history/phase3.md section 8).
     envelope_db = bounded_causal_envelope_db(official_input, input_info.sample_rate, envelope_config)
 
     amp_b_aligned, alignment_offset = align_to_reference(
@@ -617,7 +617,7 @@ def generate_training_bundle(
         )
 
     # Baked cab (if any) runs AFTER the Hybrid combination, BEFORE safety --
-    # see docs/blend-mode.md "SHARED CABINET IR STAGE"/"CAB PREVIEW SEMANTICS".
+    # see docs/history/blend-mode.md "SHARED CABINET IR STAGE"/"CAB PREVIEW SEMANTICS".
     # No-op for every pre-Blend-mode design (design.cab is None), preserving
     # existing no-cab Hybrid output exactly.
     hybrid_raw = maybe_bake_cab(hybrid_raw, design.cab, input_info.sample_rate)

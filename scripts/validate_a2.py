@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Held-out musical validation of a trained A2 export against the LIVE
-reference hybrid -- docs/phase3.md sections 24-28.
+reference hybrid -- docs/history/phase3.md sections 24-28.
 
 Runs entirely on the native NAMCore renderer (`hybrid.core.render.render`), no
 torch/neural-amp-modeler required -- safe to run in the normal app
@@ -23,7 +23,7 @@ combination.
 Unlike training-target generation, input-profile gains ARE applied here as
 real audio gain (never the deprecated envelope-only `dry_gain_db`) --
 that's the whole point of this validation: testing how different real
-input levels behave (docs/phase3.md section 25).
+input levels behave (docs/history/phase3.md section 25).
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ from hybrid.training.validation import compute_esr_metrics, render_reference_hyb
 
 # A single fixed listening-safety gain applied identically to every file in a
 # comparison, if any of them would clip -- never per-file, never a limiter,
-# per docs/phase3.md section 27 ("use the SAME fixed gain for all compared
+# per docs/history/phase3.md section 27 ("use the SAME fixed gain for all compared
 # files and document it").
 LISTENING_TARGET_PEAK_DBFS = -3.0
 SILENCE_GAP_S = 1.0
@@ -123,7 +123,7 @@ def run_validation(
 def _write_listening_files(case_dir: Path, reference: np.ndarray, full: np.ndarray, lite, sample_rate: int) -> None:
     """Apply ONE shared fixed gain (if any of the three would clip) to all
     three files identically -- never normalize each independently
-    (docs/phase3.md section 27)."""
+    (docs/history/phase3.md section 27)."""
     case_dir.mkdir(parents=True, exist_ok=True)
     n = min(len(reference), len(full), len(lite) if lite is not None else len(full))
     clips = [reference[:n], full[:n]] + ([lite[:n]] if lite is not None else [])

@@ -1,4 +1,4 @@
-"""Flask route tests for /api/kaggle/* -- see hybrid/kaggle_training.py.
+"""Flask route tests for /api/kaggle/* -- see hybrid/training/kaggle_training.py.
 KaggleJobManager is monkeypatched at the app-module boundary, so these never
 touch a real Kaggle CLI/network/credentials.
 """

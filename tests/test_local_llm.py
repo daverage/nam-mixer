@@ -13,7 +13,7 @@ from hybrid.services import local_llm
 @pytest.fixture(autouse=True)
 def isolated_env_file(tmp_path, monkeypatch):
     """These tests exercise NAM_MIXER_AI_*/NAM_MIXER_LOCAL_LLM_* purely via monkeypatched os.environ, so a real .env on the
-    developer's machine (hybrid/env_file.py's fallback, used deliberately in production) must never leak in -- point it at a
+    developer's machine (hybrid/services/env_file.py's fallback, used deliberately in production) must never leak in -- point it at a
     file that doesn't exist. Tests that want the .env fallback itself set NAM_MIXER_ENV_FILE to a real tmp_path file explicitly."""
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
     for name in local_llm.PROVIDER_AI_ENV_NAMES:
@@ -376,7 +376,7 @@ def test_local_llm_keeps_a_detailed_but_bounded_explanation(monkeypatch):
 def test_canonical_explanation_and_reply_char_caps_are_actually_read(monkeypatch):
     # Regression test: these two caps used to be looked up by their legacy
     # NAM_MIXER_LOCAL_LLM_* name directly, so the canonical NAM_MIXER_AI_*
-    # setting the Settings page now exposes (see hybrid/settings.py) was
+    # setting the Settings page now exposes (see hybrid/services/settings.py) was
     # silently ignored. Confirm the canonical name actually wins.
     monkeypatch.setenv("NAM_MIXER_AI_MAX_EXPLANATION_CHARS", "12")
     monkeypatch.setenv("NAM_MIXER_AI_MAX_REPLY_CHARS", "9")

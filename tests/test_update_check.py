@@ -1,4 +1,4 @@
-"""Tests for hybrid/update_check.py -- the Settings page's manual "Check for updates" button's backend, mocked at
+"""Tests for hybrid/services/update_check.py -- the Settings page's manual "Check for updates" button's backend, mocked at
 the urlopen boundary (same style as tests/test_render_bootstrap.py) so these never hit the real network.
 """
 import json

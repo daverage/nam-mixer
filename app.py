@@ -88,7 +88,7 @@ from hybrid.training.validation import compute_esr_metrics, load_frozen_design, 
 from hybrid.modes.wizard import summarise_amp_pair
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
-# We warn rather than silently clip or normalize -- see docs/INPUT_PROFILE_RESEARCH.md.
+# We warn rather than silently clip or normalize -- see docs/history/INPUT_PROFILE_RESEARCH.md.
 PEAK_WARNING_THRESHOLD_DBFS = 0.0
 
 logging.basicConfig(level=logging.INFO)
@@ -111,7 +111,7 @@ TRAINING_INPUT_DIR = WORK_DIR / "training_input"
 TRAINING_INPUT_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
 # The official NAM v3.0.0 training/reamp input (see
-# hybrid/training_target.py's OFFICIAL_V3_INPUT_MD5) ships with the app --
+# hybrid/modes/training_target.py's OFFICIAL_V3_INPUT_MD5) ships with the app --
 # assets/training/README.md documents its provenance/MD5 -- so training
 # works immediately without a manual upload first. This is a one-time local
 # file copy, never a network fetch: seeded once into the (gitignored,
@@ -324,7 +324,7 @@ def api_input_profiles():
 def api_settings_get():
     """Current values + UI metadata for every user-configurable setting.
 
-    See hybrid/settings.py -- lets anything normally set via `export FOO=bar`
+    See hybrid/services/settings.py -- lets anything normally set via `export FOO=bar`
     be configured from the browser instead.
     """
     return jsonify({"settings": get_app_settings()})
@@ -369,7 +369,7 @@ def api_local_llm_test():
 @app.post("/api/local_llm/pull")
 def api_local_llm_pull():
     """Start a background `ollama pull` of the recommended local model (or a
-    caller-specified one) -- see hybrid/ollama_pull.py. Any OpenAI-compatible
+    caller-specified one) -- see hybrid/services/ollama_pull.py. Any OpenAI-compatible
     local host works with the AI Assistant tab; this is just the one-click
     path for someone who doesn't already have a model running."""
     data = request.get_json(silent=True) or {}
@@ -817,7 +817,7 @@ def api_renderer_readiness():
 
 @app.route("/api/renderer/download", methods=["POST"])
 def api_renderer_download():
-    """Fetch a prebuilt nam_render binary for this OS -- see hybrid/render_bootstrap.py.
+    """Fetch a prebuilt nam_render binary for this OS -- see hybrid/core/render_bootstrap.py.
 
     Makes nam_render part of the app's own setup flow rather than a separate
     manual install/path the user has to go find.
@@ -831,7 +831,7 @@ def api_renderer_download():
 
 @app.get("/api/update/check")
 def api_update_check():
-    """Manual-only "is a newer version available?" check for the Settings page -- see hybrid/update_check.py.
+    """Manual-only "is a newer version available?" check for the Settings page -- see hybrid/services/update_check.py.
 
     Never called automatically: this is the app's one deliberate exception to "no network unless the user asks
     for it" (README's "Local-first & private"), and it stays that way by only ever running in response to this
@@ -958,7 +958,7 @@ def api_setup_status():
         llm_item["detail"] = "Optional -- not configured. Only needed for the AI Assistant tab's recipe suggestions; everything else (preview, design, generate, train) works fully without it."
     elif llm_provider != "local":
         # Cloudflare/custom providers have no local process to "reach" --
-        # status()'s `reachable` field is local-only (see hybrid/local_llm.py),
+        # status()'s `reachable` field is local-only (see hybrid/services/local_llm.py),
         # so "enabled" already means fully configured for these.
         llm_item["ready"] = True
         provider_label = "Cloudflare Workers AI" if llm_provider == "cloudflare" else "a custom AI provider"
@@ -1346,7 +1346,7 @@ def _referenced_upload_paths() -> set[Path]:
 
 def _referenced_render_sources() -> set[Path]:
     """Every work/render_sources file a REMAINING training bundle's manifest still points at (amp_a.path / amp_b.path -- the
-    only fields _retain_render_source's output is ever persisted into; see hybrid/training_target.py and its Blend/Character
+    only fields _retain_render_source's output is ever persisted into; see hybrid/modes/training_target.py and its Blend/Character
     counterparts). The DI copy retained for the same render is never written into a manifest (only its filename, for
     provenance), so a render_sources DI copy is never "referenced" once the render/preview that made it is over -- it is
     always safe to sweep. Continuous Gain bundles render straight from the project's own captures/ and never touch this
@@ -1595,7 +1595,7 @@ def api_cab_upload():
     """Accept a cabinet IR WAV picked in the browser, save it under
     work/uploaded_cab/, and return its parsed metadata plus the server-side
     path used by /api/preview and /api/generate's cab params -- see
-    hybrid/cab_ir.py and docs/history/blend-mode.md "CAB UPLOAD / STORAGE".
+    hybrid/core/cab_ir.py and docs/history/blend-mode.md "CAB UPLOAD / STORAGE".
 
     Prepares the IR against the currently-rendered pair's sample rate (if
     any) purely to report prepared/trimmed info back to the UI -- this is
@@ -1680,7 +1680,7 @@ def _parse_cab_params(data: dict, pair_sample_rate: int):
 def _resolve_cab_design(data: dict, pair_sample_rate: int):
     """Build a `CabDesign` for provenance/freezing from generate-request
     params, or None if no cab is selected. Mirrors _parse_cab_params but
-    also records `export_mode` -- see hybrid/cab_ir.py's CabDesign."""
+    also records `export_mode` -- see hybrid/core/cab_ir.py's CabDesign."""
     cab_path = data.get("cab_path")
     if not cab_path:
         return None
@@ -1733,8 +1733,8 @@ def _parse_output_gain_params(data: dict):
     """Shared post-combination output-gain parsing for /api/preview
     (source=hybrid/blend/character) and /api/generate. Mode-independent and
     applied AFTER the amp combination + cab (mirrors cab's own ordering) --
-    see hybrid/design.py's HybridDesign.output_gain_mode/manual_output_gain_db
-    and hybrid/safety.py's compute_auto_output_gain_db/apply_output_gain.
+    see hybrid/modes/design.py's HybridDesign.output_gain_mode/manual_output_gain_db
+    and hybrid/core/safety.py's compute_auto_output_gain_db/apply_output_gain.
     "auto" (the default) is not resolved to a number here -- it's computed
     downstream from the actual audio at the point it's applied, since that's
     what makes it "auto" (uses whatever headroom THIS signal actually has).
@@ -1968,7 +1968,7 @@ def api_render_pair():
     This is the EXPENSIVE step (runs NAM inference twice) -- the UI should
     call this only when Amp A, Amp B, the DI clip, or the INPUT PROFILE/
     CALIBRATION settings change (a profile changes the actual signal fed to
-    both NAMs -- see hybrid/pipeline.py), never on a crossover/transition/
+    both NAMs -- see hybrid/core/pipeline.py), never on a crossover/transition/
     trim slider move (that's /api/preview, against the cached RenderedPair
     below).
     """
@@ -2176,7 +2176,7 @@ def api_profile_coverage():
 def _parse_blend_params(data: dict):
     """Fixed Blend equivalent of _parse_hybrid_params -- mix_b/manual trim/
     auto_level only, no crossover/transition (Blend has no envelope, see
-    hybrid/fixed_blend.py)."""
+    hybrid/modes/fixed_blend.py)."""
     mix_b = max(0.0, min(1.0, float(data.get("mix_b", 0.5))))
     manual_b_trim_db = float(data.get("manual_b_trim_db", 0.0))
     auto_level = bool(data.get("auto_level", True))
@@ -2438,7 +2438,7 @@ def api_preview():
     Hybrid/Blend result (see docs/history/blend-mode.md "CAB PREVIEW SEMANTICS") so
     A/Result/B comparisons stay fair -- applied AFTER the amp combination,
     BEFORE preview_safety_limiter (playback safety net only -- never used on
-    a training target, see hybrid/safety.py).
+    a training target, see hybrid/core/safety.py).
     """
     data = request.get_json(force=True)
     snapshot, error = _require_render_snapshot(data)
@@ -2509,7 +2509,7 @@ def api_preview():
     # Shared post-combination output gain -- only for the combined result,
     # not raw Amp A/B auditioning (see _parse_output_gain_params). Applied
     # BEFORE preview_safety_limiter, matching the training-target ordering in
-    # hybrid/training_target.py so preview represents what generation will
+    # hybrid/modes/training_target.py so preview represents what generation will
     # actually do. preview_safety_limiter is a HARD CLIP (np.clip), not a
     # soft limiter -- an excessive manual gain distorts here rather than
     # just quietly compressing, so the response headers below let the UI
@@ -2618,7 +2618,7 @@ def api_live_blend_stems():
 @app.route("/api/training_input/status", methods=["GET"])
 def api_training_input_status():
     """Whether an official NAM training input has been uploaded/is usable --
-    see docs/phase3.md section 7. Never falls back to a genre DI clip."""
+    see docs/history/phase3.md section 7. Never falls back to a genre DI clip."""
     if not TRAINING_INPUT_PATH.is_file():
         return jsonify({"ready": False, "path": str(TRAINING_INPUT_PATH), "error": "no official training input uploaded yet"})
     try:
@@ -2719,7 +2719,7 @@ def api_local_training_download():
 def api_training_input_upload():
     """Accept the official NAM training input WAV picked in the browser.
     Validated immediately (mono, 48 kHz, finite) -- an invalid file is
-    rejected and not saved, per docs/phase3.md section 7's "ABORT, do not
+    rejected and not saved, per docs/history/phase3.md section 7's "ABORT, do not
     bypass the check"."""
     upload = request.files.get("file")
     if upload is None or not upload.filename:
@@ -2746,8 +2746,8 @@ def api_generate():
     """Freeze the currently-auditioned design (Hybrid or Blend, `mode` in the
     request body, defaulting to "hybrid" for backward compatibility) and
     generate a real, reproducible A2 training bundle from it -- see
-    hybrid/design.py, hybrid/fixed_blend.py, hybrid/training_target.py, and
-    hybrid/blend_training_target.py. Requires a rendered/auditioned amp pair
+    hybrid/modes/design.py, hybrid/modes/fixed_blend.py, hybrid/modes/training_target.py, and
+    hybrid/modes/blend_training_target.py. Requires a rendered/auditioned amp pair
     (POST /api/render_pair) and an uploaded official NAM training input
     (POST /api/training_input/upload) -- never trains on the preview/genre DI.
     """
@@ -2959,7 +2959,7 @@ def _job_dict_for_client(job) -> dict:
 @app.route("/api/kaggle/status", methods=["GET"])
 def api_kaggle_status():
     """CLI/auth/quota status plus the most recent job for a design, if any --
-    see hybrid/kaggle_training.py. Never raises for a missing/unauthenticated
+    see hybrid/training/kaggle_training.py. Never raises for a missing/unauthenticated
     CLI -- reports that plainly instead."""
     info = _kaggle_manager.status()
     with _kaggle_install_lock:
@@ -3010,7 +3010,7 @@ def api_kaggle_install():
 def api_kaggle_auth_start():
     """Starts `kaggle auth login` as a non-blocking background process --
     never a custom OAuth implementation, never reads/stores the resulting
-    credential (docs/kaggle_training.md)."""
+    credential (docs/history/kaggle_training.md)."""
     if not _kaggle_manager.cli.is_installed():
         return jsonify({"error": "Kaggle CLI is not installed. Run: pip install kaggle", "command": "pip install kaggle"}), 400
     started = _kaggle_manager.cli.launch_auth_login()
@@ -3033,7 +3033,7 @@ def api_kaggle_train():
     stage/upload/verify/kernel pipeline runs on a background thread
     (KaggleJobManager.submit_async), NOT inline in this request. A real
     production upload was observed taking several minutes under real
-    network conditions (see docs/kaggle_training.md); blocking this request
+    network conditions (see docs/history/kaggle_training.md); blocking this request
     for that long left the Flask dev server unresponsive with no way for
     the UI to show progress, and any interruption lost the job's state
     entirely. Poll GET /api/kaggle/jobs/<job_id> for progress.
@@ -3230,7 +3230,7 @@ def api_health():
 def api_system_usage():
     """Polled by the footer's CPU/memory readout so a long local training
     run (which shows nothing per-epoch for minutes at a time otherwise --
-    see hybrid/local_training.py's _collect() docstring) has SOME visible
+    see hybrid/training/local_training.py's _collect() docstring) has SOME visible
     sign the machine is actually doing something, not silently stuck.
     GPU is best-effort: NVIDIA systems are queried through nvidia-smi when
     available. Apple Silicon has no nvidia-smi equivalent, but the kernel's

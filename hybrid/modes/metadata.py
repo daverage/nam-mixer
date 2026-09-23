@@ -2,7 +2,7 @@
 
 The .nam/.wav formats have no agreed place to embed this today, so
 `HybridMetadata.to_dict()` is recorded in the training bundle's manifest
-(see hybrid/training_target.py) rather than guessing at an embedding scheme.
+(see hybrid/modes/training_target.py) rather than guessing at an embedding scheme.
 If NAM tooling later adds a supported metadata field for derived/synthetic
 models, this is the dict to put there.
 """
@@ -25,8 +25,8 @@ class HybridMetadata:
     level_match: str  # "automatic" or "manual"
     blend_algorithm: str = "smoothstep-linear"
 
-    # Input-profile/calibration provenance (see hybrid/pipeline.py,
-    # docs/INPUT_PROFILE_RESEARCH.md) -- not yet populated by any generation
+    # Input-profile/calibration provenance (see hybrid/core/pipeline.py,
+    # docs/history/INPUT_PROFILE_RESEARCH.md) -- not yet populated by any generation
     # step (no A2 target generation exists yet), but recorded here now so a
     # future generated hybrid is reproducible: which virtual instrument/pickup
     # profile and which NAM calibration assumptions produced it.

@@ -5,7 +5,7 @@ app.py` can instead be set from the Settings page in the browser, no shell
 required.
 
 Every setting here is backed by the existing `.env` fallback mechanism in
-hybrid/env_file.py -- this module adds no new storage, just describes what's
+hybrid/services/env_file.py -- this module adds no new storage, just describes what's
 safe to expose in the UI and how. Saving a value writes it to `.env` (or
 `NAM_MIXER_ENV_FILE`, see env_file.py) and also updates the current
 process's os.environ so most settings take effect immediately, without a
@@ -55,7 +55,7 @@ SETTINGS: tuple[SettingField, ...] = (
         kind="path",
         placeholder="/path/to/nam_render",
     ),
-    # NAM_RENDER_SEQUENTIAL_EXE (hybrid/render.py's find_sequential_nam_render_exe)
+    # NAM_RENDER_SEQUENTIAL_EXE (hybrid/core/render.py's find_sequential_nam_render_exe)
     # is deliberately NOT exposed here. Since the switch to a single render
     # engine, it already falls back to the same NAM_RENDER_EXE binary by
     # default -- it exists only as a developer/CI override for the

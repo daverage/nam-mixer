@@ -1,6 +1,6 @@
-"""Fixed Blend: the second design mode -- see docs/blend-mode.md.
+"""Fixed Blend: the second design mode -- see docs/history/blend-mode.md.
 
-Do not confuse this module with `hybrid/blend.py`, which implements the
+Do not confuse this module with `hybrid/modes/blend.py`, which implements the
 level-DRIVEN crossfade used by Dynamic Hybrid mode. Fixed Blend has no
 crossover envelope at all: Amp A and Amp B are combined at one constant,
 user-chosen ratio, independent of playing level --
@@ -13,7 +13,7 @@ the same guitar signal, not independent/decorrelated sources.
 
 Shares `hybrid.core.pipeline.RenderedPair` with Dynamic Hybrid mode -- rendering
 Amp A/B is the expensive step and is identical regardless of which design
-mode is auditioned afterwards (see hybrid/pipeline.py).
+mode is auditioned afterwards (see hybrid/core/pipeline.py).
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def compute_active_trim(
     """Suggest a trim (dB) to apply to Amp B so it matches Amp A's loudness
     over the DI's ACTIVE playing material -- deliberately NOT the crossover
     band `hybrid.core.level_match.compute_crossover_trim` uses, since Fixed Blend
-    has no crossover at all (see module docstring / docs/blend-mode.md
+    has no crossover at all (see module docstring / docs/history/blend-mode.md
     "BLEND LEVEL MATCHING"). Reuses the same active/silence threshold
     convention as `hybrid.core.coverage.active_signal_mask`.
 
@@ -93,7 +93,7 @@ def build_fixed_blend(
 ) -> BlendResult:
     """Combine an already-rendered amp pair at a FIXED mix ratio. Cheap --
     pure numpy, safe to call on every mix-slider move without re-running NAM
-    inference (see hybrid/pipeline.py's cost split).
+    inference (see hybrid/core/pipeline.py's cost split).
 
     `mix_b` is clamped to [0, 1]: 0.0 -> 100% Amp A, 1.0 -> 100% Amp B.
     """
@@ -131,14 +131,14 @@ def build_fixed_blend(
 class BlendDesign:
     """Immutable snapshot of an auditioned Fixed Blend, frozen before
     generating a real training target -- analogous to
-    `hybrid.modes.design.HybridDesign` for Dynamic Hybrid, see docs/blend-mode.md
+    `hybrid.modes.design.HybridDesign` for Dynamic Hybrid, see docs/history/blend-mode.md
     "CODE STRUCTURE FOR FIXED BLEND".
 
     `effective_b_trim_db` is FROZEN from a `build_fixed_blend()` call the
     user actually auditioned -- target generation reuses it verbatim rather
     than recomputing the active-playing trim against the (completely
     different) official training input, exactly like HybridDesign's own
-    `effective_b_trim_db` -- see hybrid/blend_training_target.py.
+    `effective_b_trim_db` -- see hybrid/modes/blend_training_target.py.
     """
 
     amp_a_path: str

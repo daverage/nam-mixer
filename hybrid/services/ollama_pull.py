@@ -2,14 +2,14 @@
 
 Any local LLM host that speaks the OpenAI-compatible /v1 API works with the
 AI Assistant tab (Ollama, LM Studio, llama.cpp server, ...) -- see
-hybrid/local_llm.py. Ollama is the one we can actually automate a model
+hybrid/services/local_llm.py. Ollama is the one we can actually automate a model
 download for, since it has a simple CLI (`ollama pull <model>`); this is not
 a claim that Ollama is required, just the easiest path for someone who
 doesn't already have a preferred host running.
 
 Pulling a model can take minutes, so this runs the CLI in a background
 thread and exposes poll-able state -- mirrors the shape of
-hybrid/kaggle_training.py's job manager, at a much smaller scale (one global
+hybrid/training/kaggle_training.py's job manager, at a much smaller scale (one global
 job, no persistence needed across restarts).
 """
 from __future__ import annotations

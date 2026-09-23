@@ -1,5 +1,5 @@
-"""Tests for hybrid/blend_training_target.py -- Fixed Blend A2 target
-generation, see docs/blend-mode.md "FIXED BLEND TRAINING TARGET".
+"""Tests for hybrid/modes/blend_training_target.py -- Fixed Blend A2 target
+generation, see docs/history/blend-mode.md "FIXED BLEND TRAINING TARGET".
 
 Mirrors tests/test_training_target.py's fixture pattern (fake identity
 render(), bypassed official-V3 MD5 check) since these run without the

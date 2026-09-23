@@ -1,5 +1,5 @@
-"""Tests for hybrid/fixed_blend.py -- Fixed Blend design mode, see
-docs/blend-mode.md "TAB 2 -- FIXED BLEND" / "BLEND LEVEL MATCHING".
+"""Tests for hybrid/modes/fixed_blend.py -- Fixed Blend design mode, see
+docs/history/blend-mode.md "TAB 2 -- FIXED BLEND" / "BLEND LEVEL MATCHING".
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def test_manual_trim_shifts_amp_b_before_mixing():
 def test_active_level_match_uses_active_playing_not_crossover_region():
     """compute_active_trim must ignore silent samples and NOT depend on any
     crossover config -- it only needs an active-signal mask over the whole
-    clip (docs/blend-mode.md "BLEND LEVEL MATCHING")."""
+    clip (docs/history/blend-mode.md "BLEND LEVEL MATCHING")."""
     envelope_db = np.concatenate([
         np.full(500, -80.0, dtype=np.float32),   # silence -- excluded
         np.full(500, -10.0, dtype=np.float32),   # active

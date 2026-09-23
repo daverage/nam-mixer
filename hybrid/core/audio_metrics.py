@@ -61,7 +61,7 @@ def framed_spectral_correlation(a: np.ndarray, b: np.ndarray, window_size: int =
     """Like `spectral_magnitude_correlation`, but correlates log-magnitude
     spectra frame-by-frame (50% overlap) rather than one whole-signal FFT --
     more sensitive to LOCAL spectral mismatches that a single long window
-    can average away. See docs/CONTINUOUS_GAIN_RESPONSE_COORDINATE.md's 5150
+    can average away. See docs/history/Continuous Gain/CONTINUOUS_GAIN_RESPONSE_COORDINATE.md's 5150
     metric-discrimination experiment: a useful metric must be able to tell
     an obviously-narrow-bracketed reconstruction from an obviously-wide one
     on the same heavily saturated material, which the whole-signal version
@@ -106,7 +106,7 @@ def envelope_error_db(a: np.ndarray, b: np.ndarray, sample_rate: int, frame_ms: 
     signals -- a coarse dynamics/envelope-shape distance, independent of the
     sample-domain phase alignment that `hybrid.training.validation.compute_esr_metrics`
     is sensitive to. Deliberately simple (non-overlapping fixed-size frames,
-    no attack/release smoothing) per docs/CONTINUOUS_GAIN_RESPONSE_COORDINATE.md's
+    no attack/release smoothing) per docs/history/Continuous Gain/CONTINUOUS_GAIN_RESPONSE_COORDINATE.md's
     instruction not to overengineer this."""
     n = min(len(a), len(b))
     frame = max(1, int(sample_rate * frame_ms / 1000.0))

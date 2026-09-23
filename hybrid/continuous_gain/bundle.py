@@ -15,7 +15,7 @@ docs/final/manifest_frozen.json). The recipe:
 The trainers receive a bundle in the same shape as every other A2 bundle (`input.wav`, `hybrid_target.wav`,
 `training_manifest.json`, mode "continuous_gain"); the custom (non-official) input is declared in the manifest
 as `training_input.custom_split` with the train/validation boundary, and both trainers apply the same
-data-config patch the FC models were trained with (see hybrid/a2_training_settings.py).
+data-config patch the FC models were trained with (see hybrid/training/a2_training_settings.py).
 """
 from __future__ import annotations
 

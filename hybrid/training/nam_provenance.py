@@ -1,7 +1,7 @@
 """Shared source-model provenance and metadata-inheritance rules.
 
-Used by all three design modes' manifest builders (hybrid/training_target.py,
-hybrid/blend_training_target.py, hybrid/character_training_target.py) so the
+Used by all three design modes' manifest builders (hybrid/modes/training_target.py,
+hybrid/modes/blend_training_target.py, hybrid/modes/character_training_target.py) so the
 "what do we know about the two source NAMs, and what may the mixed result
 inherit from them" logic lives in exactly one place instead of drifting
 across three near-identical dict blocks.
@@ -15,7 +15,7 @@ Inheritance rules (do not invent facts about a mixed model):
   - `gear_type` is never inherited at all -- it always describes the
     OUTPUT's own architecture/cabinet mode, set by the exporter itself
     (see scripts/train_a2.py's _build_user_metadata and
-    hybrid/sequential_nam.py), never a source's gear_type.
+    hybrid/training/sequential_nam.py), never a source's gear_type.
 """
 from __future__ import annotations
 
@@ -39,8 +39,8 @@ def source_metadata_fields(model: NamModel) -> dict:
     amp_a/amp_b block was missing: name/modeled_by/gear_type/gear_make/
     gear_model/tone_type. Additive to each caller's existing filename/path/
     sha256/architecture/sample_rate/input_level_dbu/output_level_dbu keys
-    (hybrid/training_target.py, hybrid/blend_training_target.py,
-    hybrid/character_training_target.py all build that dict separately --
+    (hybrid/modes/training_target.py, hybrid/modes/blend_training_target.py,
+    hybrid/modes/character_training_target.py all build that dict separately --
     this is the one place the "what else do we know about this source NAM"
     fields live, so it can't drift across the three).
     """
@@ -72,10 +72,10 @@ def export_name_suffix(cab: Optional[dict]) -> str:
     """The automatic suffix for a SlimmableContainer export (no-cab/learned-cab).
 
     `cab` is the manifest's "cab" dict (or None), whose `export_mode` is
-    "none"/"learned"/"embedded" -- see hybrid/cab_ir.py's CabDesign. An
+    "none"/"learned"/"embedded" -- see hybrid/core/cab_ir.py's CabDesign. An
     "embedded" export's SlimmableContainer head is deliberately left
     unsuffixed here: it isn't the final deliverable in that mode (the
-    packaged Sequential file is, see hybrid/sequential_nam.py, which adds
+    packaged Sequential file is, see hybrid/training/sequential_nam.py, which adds
     its own SUFFIX_EMBEDDED_CAB), and suffixing the head too would produce
     a doubled-up name like "X [Amp Only] + Y [Embedded Cab - Full]".
     """

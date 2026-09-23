@@ -112,7 +112,7 @@ def test_freeze_character_design_preserves_per_amp_input_gains():
 
 # ---------------------------------------------------------------------------
 # Phase 1/2 -- adjacent-level interpolation weights never zero out below/
-# above the analysis grid (docs/blend-mode-fixes.md).
+# above the analysis grid (docs/history/blend-mode-fixes.md).
 # ---------------------------------------------------------------------------
 
 _ANALYSIS_LEVELS = np.array([-24.0, -18.0, -12.0, -6.0, 0.0, 6.0])

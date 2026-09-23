@@ -1,6 +1,6 @@
-"""Unit tests for hybrid/kaggle_training.py -- all Kaggle CLI interaction is
+"""Unit tests for hybrid/training/kaggle_training.py -- all Kaggle CLI interaction is
 mocked at the subprocess boundary. No real network/CLI call, no credentials,
-no Kaggle quota consumed -- see docs/kaggle_training.md.
+no Kaggle quota consumed -- see docs/history/kaggle_training.md.
 """
 import json
 import subprocess
@@ -275,7 +275,7 @@ def bundle_dir(tmp_path):
 
 @pytest.fixture
 def cloud_script(tmp_path, monkeypatch):
-    """hybrid/kaggle_training.py locates cloud/kaggle/train_a2_cloud.py
+    """hybrid/training/kaggle_training.py locates cloud/kaggle/train_a2_cloud.py
     relative to the real repo -- that file exists for real, so no fixture
     needed; this fixture is a no-op placeholder kept for clarity."""
     return None
@@ -883,7 +883,7 @@ def test_create_dataset_never_creates_kernel_when_verification_fails(tmp_path, b
 
 
 def test_dataset_upload_is_never_automatically_retried(tmp_path, bundle_dir, monkeypatch):
-    """A deliberate design decision (see docs/kaggle_training.md): on upload
+    """A deliberate design decision (see docs/history/kaggle_training.md): on upload
     failure we fail clearly and preserve diagnostics rather than blindly
     retrying and risking multiple orphaned partial datasets. Locks that in."""
     def responses(argv):
@@ -1354,7 +1354,7 @@ def _write_bundle_wavs(a2_output_dir: Path, design_id: str, n: int = 1000, sr: i
 
 
 def test_validate_downloaded_model_runs_low_level_response_check_when_manifest_is_character_mode(monkeypatch, tmp_path):
-    """docs/blend-mode-fixes.md Phase 10/11: a Kaggle-trained Character
+    """docs/history/blend-mode-fixes.md Phase 10/11: a Kaggle-trained Character
     Blend A2 gets the same low-level-response bar as a locally-trained one,
     via the SAME hybrid.modes.character_training_target.check_full_low_level_
     response function scripts/train_a2.py uses."""

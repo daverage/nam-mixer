@@ -1,6 +1,6 @@
 """Real A2 training-target generation for FIXED BLEND design mode -- the
 Blend-mode counterpart to `hybrid.modes.training_target.generate_training_bundle`.
-See docs/blend-mode.md "FIXED BLEND TRAINING TARGET".
+See docs/history/blend-mode.md "FIXED BLEND TRAINING TARGET".
 
 Deliberately NOT a rewrite of the Hybrid generator: this reuses the shared
 bundle-writing/safety/provenance infrastructure from `hybrid.modes.training_target`
@@ -186,7 +186,7 @@ def generate_blend_training_bundle(
 
     # design.design_reference_profile_gain_db is DESIGN CONTEXT ONLY --
     # never re-applied to the official training excitation, exactly like
-    # Hybrid mode (see hybrid/training_target.py module docstring).
+    # Hybrid mode (see hybrid/modes/training_target.py module docstring).
     # amp_a_input_gain_db/amp_b_input_gain_db ARE applied, same as Hybrid
     # mode -- see hybrid.core.pipeline.RenderedPair's docstring.
     amp_a_input = (official_input * db_to_amplitude(calib.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32)
@@ -212,12 +212,12 @@ def generate_blend_training_bundle(
         )
 
     # Baked cab (if any) runs AFTER the fixed-mix combination, BEFORE safety
-    # -- see docs/blend-mode.md "SHARED CABINET IR STAGE".
+    # -- see docs/history/blend-mode.md "SHARED CABINET IR STAGE".
     blend_raw = maybe_bake_cab(blend_raw, design.cab, input_info.sample_rate)
 
     # Shared post-combination output gain -- see hybrid.modes.design.HybridDesign's
     # output_gain_mode/manual_output_gain_db docstring and the mirror-image
-    # comment in hybrid/training_target.py's generate_training_bundle.
+    # comment in hybrid/modes/training_target.py's generate_training_bundle.
     if design.output_gain_mode == "manual":
         output_gain_db = design.manual_output_gain_db
         output_gain_peak_before_dbfs = check_audio(blend_raw).peak_dbfs
@@ -241,7 +241,7 @@ def generate_blend_training_bundle(
 
     input_out = output_directory / "input.wav"
     raw_out = output_directory / "hybrid_target_raw.wav"
-    final_out = output_directory / "hybrid_target.wav"  # legacy/internal filename, see docs/blend-mode.md
+    final_out = output_directory / "hybrid_target.wav"  # legacy/internal filename, see docs/history/blend-mode.md
     manifest_out = output_directory / "training_manifest.json"
 
     shutil.copyfile(official_input_path, input_out)

@@ -24,7 +24,7 @@ from .training_target import (
 from ..training.validation_report import DEFAULT_VALIDATION_POLICY
 
 HYBRID_BUILDER_VERSION = "character-blend-v2"
-# Bounded so the sweep (Phases 4-5, docs/blend-mode-fixes.md) costs a fixed
+# Bounded so the sweep (Phases 4-5, docs/history/blend-mode-fixes.md) costs a fixed
 # handful of extra NAM renders regardless of how long the official training
 # input is -- it is a sanity check on the teacher's low-level response, not
 # a re-render of the whole excitation file.
@@ -126,7 +126,7 @@ def build_export_validation_reference(design, amp_a, amp_b, calibration, officia
 
 
 def check_export_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int, *, variant: str, slim: float) -> "dict | None":
-    """Re-run the teacher's low-level response sweep (docs/blend-mode-fixes.md,
+    """Re-run the teacher's low-level response sweep (docs/history/blend-mode-fixes.md,
     Phases 10-11) through an exported Full A2 and compare its output RMS at
     each level against the teacher's OWN recorded RMS (the `low_level_response`
     section a Character Blend manifest carries after `evaluate_bundle_low_level_
@@ -264,7 +264,7 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
     if not low_level_response.ok:
         raise TrainingInputError(
             f"Character Blend low-level response check failed -- {low_level_response.warning} "
-            "-- refusing to generate a training bundle with a hard low-level gate baked in (see docs/blend-mode-fixes.md)"
+            "-- refusing to generate a training bundle with a hard low-level gate baked in (see docs/history/blend-mode-fixes.md)"
         )
     target_raw = maybe_bake_cab(target_raw, design.cab, input_info.sample_rate)
 

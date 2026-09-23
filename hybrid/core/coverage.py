@@ -4,7 +4,7 @@ Answers "does a realistic instrument input profile actually traverse Amp A ->
 transition -> Amp B for these crossover settings?" without running NAM
 inference for every profile -- it only needs the (already-rendered) source
 DI's envelope, since the smoothstep blend weight is a pure function of the
-envelope and the crossover config (see `hybrid/blend.py`). Reuses
+envelope and the crossover config (see `hybrid/modes/blend.py`). Reuses
 `blend_weight` directly rather than re-implementing the smoothstep math.
 """
 from __future__ import annotations

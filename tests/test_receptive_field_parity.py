@@ -1,6 +1,6 @@
 """Local/cloud parity for the receptive-field policy: CORE dependency is a
 HARD gate; Character processing and a baked cabinet's FORMAL totals are advisory -- see
-docs/blend-mode.md's cabinet-approximation-policy section. Both
+docs/history/blend-mode.md's cabinet-approximation-policy section. Both
 `scripts/train_a2.py::check_receptive_field` (imports hybrid/, recomputes
 Amp A/B RF from the actual .nam files) and
 `cloud/kaggle/train_a2_cloud.py::check_receptive_field` (self-contained,

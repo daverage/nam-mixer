@@ -190,7 +190,7 @@ if (!welcomeAlreadySeen) showWelcome();
 // Tabs are DESIGN MODES, not separate applications -- Amp A/B, the preview
 // DI, input profile/calibration, render, test gain, Listen controls, the
 // Cabinet IR stage, official training input, A2 quality, and training all
-// stay SHARED between tabs (see docs/blend-mode.md). Only the crossover/
+// stay SHARED between tabs (see docs/history/blend-mode.md). Only the crossover/
 // transition/level-match controls, the journey/coverage diagnostics, and
 // the Create A2 wording differ per mode. Switching tabs never re-renders.
 let currentMode = "hybrid";
@@ -363,9 +363,9 @@ document.getElementById("amp-b-file").addEventListener("change", () =>
 );
 
 // ---- Shared Cabinet IR stage (both design modes) ----
-// See docs/blend-mode.md "SHARED CABINET IR STAGE"/"CAB UI". The cab sits
+// See docs/history/blend-mode.md "SHARED CABINET IR STAGE"/"CAB UI". The cab sits
 // AFTER the amp combination and is applied identically to Amp A/Result/Amp B
-// previews (fair comparisons) -- see hybrid/cab_ir.py and app.py's
+// previews (fair comparisons) -- see hybrid/core/cab_ir.py and app.py's
 // _parse_cab_params/_resolve_cab_design.
 let cabServerPath = null;
 const cabFileInput = document.getElementById("cab-file");
@@ -461,7 +461,7 @@ cabExportMode.addEventListener("change", () => {
     sequentialEmbeddedWarningAcknowledged = true;
   }
   // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
-  // is also enabled" -- docs/blend-mode.md "CAB UI".
+  // is also enabled" -- docs/history/blend-mode.md "CAB UI".
   updateCabStatus();
   resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
   invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
@@ -519,7 +519,7 @@ function populateProfileSelect() {
 
 // Anything that changes what the two amps actually receive (amp files, DI
 // clip, instrument/profile/custom-gain, calibration mode, reference level)
-// invalidates the cached RenderedPair -- see hybrid/pipeline.py's
+// invalidates the cached RenderedPair -- see hybrid/core/pipeline.py's
 // render_pair() docstring for the authoritative list. This makes that
 // staleness impossible to miss: preview buttons disable, the Render Amps
 // button gets a pulsing highlight, and the status line names WHAT changed
@@ -574,7 +574,7 @@ customGainSlider.addEventListener("input", () => {
 calibrationModeSelect.addEventListener("change", () => markProfileStale("Calibration mode changed"));
 referenceDbuInput.addEventListener("change", () => markProfileStale("Reference level changed"));
 
-// Independent per-amp pre-render input trim -- see hybrid/pipeline.py's
+// Independent per-amp pre-render input trim -- see hybrid/core/pipeline.py's
 // RenderedPair docstring. A render-stage control like the profile/
 // calibration settings above (it changes what each amp actually receives),
 // not a blend-stage one, so it invalidates the cached RenderedPair too.
@@ -592,7 +592,7 @@ ampBInputGainSlider.addEventListener("input", () => {
 });
 
 // Real audio gain (unlike the deprecated preview-only dry_gain_db) -- see
-// hybrid/pipeline.py's render_pair() docstring. Does NOT affect the
+// hybrid/core/pipeline.py's render_pair() docstring. Does NOT affect the
 // coverage table (that's computed from the un-gained source envelope so it
 // can compare hypothetical profiles independently of this stress-test knob).
 //
@@ -646,7 +646,7 @@ testGainSlider.addEventListener("input", () => {
 });
 
 // DI filenames beginning with "bass_" are a trivial, documented instrument
-// hint (see hybrid/input_profiles.py) -- used only as a default, never as a
+// hint (see hybrid/core/input_profiles.py) -- used only as a default, never as a
 // claim about what pickup actually produced the recording.
 const diSelector = document.getElementById("di-selector");
 
@@ -1698,7 +1698,7 @@ function characterParamsBody() {
 }
 
 // Rendered display for a LowLevelResponseCheck dict (see
-// hybrid.character_blend.LowLevelResponseCheck / docs/blend-mode-fixes.md
+// hybrid.modes.character_blend.LowLevelResponseCheck / docs/history/blend-mode-fixes.md
 // Phase 6) -- shared by the on-demand check button and the Generate result.
 function renderLowLevelResponseHtml(check) {
   if (!check) return "";
@@ -1707,7 +1707,7 @@ function renderLowLevelResponseHtml(check) {
     .join("");
   const verdict = check.ok
     ? `<div class="ok-line">&#10003; continuous low-level response, no dead zone</div>`
-    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design -- see docs/blend-mode-fixes.md.</div>`;
+    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design -- see docs/history/blend-mode-fixes.md.</div>`;
   return `
     <div><strong>LOW-LEVEL RESPONSE</strong></div>
     <table class="coverage-table"><tbody>${rows}</tbody></table>
@@ -1733,8 +1733,8 @@ function cabParamsBody() {
 
 // --- Output gain (shared, post-combination, all modes) -----------------
 // Mirrors cabParamsBody()'s "shared control" pattern -- see
-// hybrid/design.py's output_gain_mode/manual_output_gain_db and
-// hybrid/safety.py's compute_auto_output_gain_db/apply_output_gain.
+// hybrid/modes/design.py's output_gain_mode/manual_output_gain_db and
+// hybrid/core/safety.py's compute_auto_output_gain_db/apply_output_gain.
 const outputGainAutoCheckbox = document.getElementById("output-gain-auto");
 const outputGainManualSlider = document.getElementById("output-gain-manual-slider");
 const outputGainManualValue = document.getElementById("output-gain-manual-value");
@@ -2298,7 +2298,7 @@ async function refreshTrainingInputStatus() {
     const data = await resp.json();
     trainingInputReady = !!data.ready;
     // A "ready" file is always byte-identical to the official NAM v3.0.0
-    // input -- validate_training_input (hybrid/training_target.py) rejects
+    // input -- validate_training_input (hybrid/modes/training_target.py) rejects
     // anything else outright, including a different custom sweep. So
     // "ready" and "the bundled default (or an identical copy of it) is
     // loaded" are the same fact; make that obvious instead of leaving the
@@ -3926,7 +3926,7 @@ async function setToolNam(data, label) {
     : "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
   if (inspection.volume_unsupported_reason) {
     // e.g. an embedded-cab export's "Sequential" architecture -- see
-    // hybrid/sequential_nam.py. Metadata editing below still works fine;
+    // hybrid/training/sequential_nam.py. Metadata editing below still works fine;
     // only the volume slider (which needs a recognised head_scale) is
     // unavailable for this file.
     toolVolumeSlider.disabled = true;
@@ -3952,7 +3952,7 @@ tone3000Tab.addEventListener("click", () => setTone3000Open(true));
 document.getElementById("btn-close-tone3000").addEventListener("click", () => setTone3000Open(false));
 
 // ---- Settings: exposes the same env vars the app has always read (see
-// hybrid/settings.py), with a place to change them without a shell. ----
+// hybrid/services/settings.py), with a place to change them without a shell. ----
 const settingsGroups = document.getElementById("settings-groups");
 const settingsStatus = document.getElementById("settings-status");
 const btnDiscardSettings = document.getElementById("btn-reload-settings");
@@ -4084,7 +4084,7 @@ function renderSettings() {
     let deferredStatusRow = null;
     // Fields without a subgroup render first, then each subgroup in
     // first-seen order under its own sub-heading (see SettingField.subgroup
-    // in hybrid/settings.py) -- keeps long groups like AI Assistant scannable.
+    // in hybrid/services/settings.py) -- keeps long groups like AI Assistant scannable.
     const subgroupFields = new Map();
     const directFields = [];
     for (const field of fields) {
@@ -4155,7 +4155,7 @@ function renderSettings() {
       validation.setAttribute("role", "alert");
       if (field.kind === "secret") {
         // The real value never comes back from the server (see
-        // hybrid/settings.py's get_settings); leaving this blank on save
+        // hybrid/services/settings.py's get_settings); leaving this blank on save
         // means "unchanged", not "clear it".
         input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
         input.value = "";
@@ -4167,7 +4167,7 @@ function renderSettings() {
         input.placeholder = field.placeholder || "";
         input.value = field.value || "";
         if (field.name === "NAM_MIXER_AI_MODEL" && field.suggestions?.length && !input.value) {
-          // Recommended model differs per provider (see hybrid/settings.py's
+          // Recommended model differs per provider (see hybrid/services/settings.py's
           // _MODEL_FIELD_TEXT, which get_settings() picks by current provider) --
           // suggestions[0] is always that provider's recommendation.
           input.value = field.suggestions[0];
@@ -4523,7 +4523,7 @@ settingsGroups.addEventListener("change", async (event) => {
   const provider = event.target.value;
   settingsGroups.querySelectorAll("[data-cloudflare-setup]").forEach((row) => { row.hidden = provider !== "cloudflare"; });
   // The recommended default model, its description, and its suggestions all
-  // depend on the provider (see hybrid/settings.py's _MODEL_FIELD_TEXT) -- the
+  // depend on the provider (see hybrid/services/settings.py's _MODEL_FIELD_TEXT) -- the
   // reload below re-fetches them instead of guessing a provider's default here.
   settingsGroups.querySelector("[data-ai-status-row]")?.refreshAiStatus?.();
   settingsGroups.querySelectorAll("[data-provider-field]").forEach((row) => {

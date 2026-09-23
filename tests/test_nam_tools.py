@@ -51,7 +51,7 @@ def test_metadata_editor_refuses_gear_type():
     # gear_type is a fact about what was actually built (amp vs. amp+cab),
     # determined by the export/cabinet mode at generation time -- not a
     # free-text label a user can retroactively relabel here. See the
-    # metadata-categories design review / hybrid/nam_provenance.py.
+    # metadata-categories design review / hybrid/training/nam_provenance.py.
     with pytest.raises(NamToolError, match="only permits"):
         apply_metadata_changes(slimmable(1), {"gear_type": "amp_cab"})
 
@@ -69,7 +69,7 @@ def test_editor_reports_current_loudness_and_standard_metadata():
 
 def test_describe_nam_tools_still_works_for_unsupported_volume_architecture():
     # Regression test: an embedded-cab export's top-level architecture is
-    # "Sequential" (hybrid/sequential_nam.py) -- find_output_scalers()
+    # "Sequential" (hybrid/training/sequential_nam.py) -- find_output_scalers()
     # correctly can't identify a head_scale for that shape, but that must
     # not block the metadata editor, which only touches the top-level
     # `metadata` object regardless of architecture. Previously this raised

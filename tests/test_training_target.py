@@ -1,4 +1,4 @@
-"""Tests for hybrid/training_target.py -- docs/phase3.md sections 7-12.
+"""Tests for hybrid/modes/training_target.py -- docs/history/phase3.md sections 7-12.
 
 Uses a fake identity render() (same pattern as test_pipeline_render.py) so
 these run without the native nam_render tool or real .nam captures.
@@ -101,7 +101,7 @@ def test_validate_training_input_accepts_good_file(tmp_path):
 def test_validate_training_input_rejects_non_v3_file(tmp_path, monkeypatch):
     """With the real MD5 check active (undoing the autouse bypass), a
     correctly-formatted (mono, 48kHz) but non-official file must still be
-    rejected -- docs/phase3.md review: 'any recognized input' is not enough,
+    rejected -- docs/history/phase3.md review: 'any recognized input' is not enough,
     it must be V3 specifically."""
     monkeypatch.undo()  # remove the autouse identity_render/_md5_file bypass for this test
     import hybrid.modes.training_target as training_target
@@ -196,7 +196,7 @@ def test_generate_training_bundle_target_is_float32_not_pcm16(tmp_path):
 
 def test_generate_training_bundle_never_applies_pickup_profile_gain(tmp_path):
     """The design was auditioned with a +6dB profile -- the actual training
-    target's amp inputs must NOT reflect that gain (docs/phase3.md section 1)."""
+    target's amp inputs must NOT reflect that gain (docs/history/phase3.md section 1)."""
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")
     training_input_path = tmp_path / "input.wav"
@@ -294,7 +294,7 @@ def test_generate_training_bundle_applies_only_fixed_peak_ceiling_when_hot(tmp_p
 
 
 def test_generate_training_bundle_leaves_target_untouched_when_already_safe(tmp_path):
-    """docs/phase3.md review section 4: a target that never reaches 0 dBFS
+    """docs/history/phase3.md review section 4: a target that never reaches 0 dBFS
     must be left COMPLETELY unchanged, not massaged down to some arbitrary
     fixed ceiling like the old -3 dBFS default."""
     amp_a = _write_nam(tmp_path / "a.nam")
@@ -335,7 +335,7 @@ def test_manifest_records_mode_hybrid_and_no_cab_by_default(tmp_path):
 
 
 def test_baked_cab_alters_hybrid_target_but_preview_only_does_not(tmp_path):
-    """docs/blend-mode.md acceptance criteria 10/11: preview and bake use the
+    """docs/history/blend-mode.md acceptance criteria 10/11: preview and bake use the
     same core cab processing, and a preview-only cab must never alter the
     generated training target -- only baking does."""
     from hybrid.core.cab_ir import cab_design_from_prepared, load_and_prepare_cab_ir
@@ -370,7 +370,7 @@ def test_baked_cab_alters_hybrid_target_but_preview_only_does_not(tmp_path):
     np.testing.assert_allclose(t_no_cab, t_preview, atol=1e-6)
     assert bundle_baked.manifest["cab"]["baked"] is True
     assert bundle_baked.manifest["receptive_field"]["cab_fir_serial_samples"] == prepared.prepared_frame_count - 1
-    # New RF-policy manifest fields (docs/blend-mode.md "REFRACTOR THE RF
+    # New RF-policy manifest fields (docs/history/blend-mode.md "REFRACTOR THE RF
     # RECORD"), alongside the legacy ones asserted above.
     assert bundle_baked.manifest["receptive_field"]["hard_required_samples"] == bundle_baked.manifest["receptive_field"]["base_required_samples"]
     assert bundle_baked.manifest["receptive_field"]["formal_total_required_samples"] == bundle_baked.manifest["receptive_field"]["total_required_samples"]
@@ -379,7 +379,7 @@ def test_baked_cab_alters_hybrid_target_but_preview_only_does_not(tmp_path):
 
 
 def test_baked_cab_target_uses_the_full_prepared_ir_no_truncation(tmp_path):
-    """The exact intended teacher signal (docs/blend-mode.md "TRAINING
+    """The exact intended teacher signal (docs/history/blend-mode.md "TRAINING
     TARGET MUST REMAIN THE SAME") must use the COMPLETE prepared IR, not an
     energy-percentile-truncated approximation. With effective_b_trim_db=0.0
     and the identity-render fixture, Amp A/Amp B renders are both exactly

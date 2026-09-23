@@ -31,7 +31,7 @@ def test_envelope_is_causal_future_independent():
     """A sample's envelope must not depend on audio that comes after it.
 
     This becomes the crossover control signal baked into the synthetic
-    training target, so it must be causal -- see hybrid/envelope.py's
+    training target, so it must be causal -- see hybrid/core/envelope.py's
     docstring. Regression test: two signals identical up to sample `split`
     but arbitrarily different after it must produce identical envelopes up
     to `split` (a centered/non-causal window would leak the future content

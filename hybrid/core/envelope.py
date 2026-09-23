@@ -11,7 +11,7 @@ Two implementations live here:
   attack/release). DEPRECATED for production use: its one-pole release has
   theoretically infinite memory, which is unacceptable for a signal that
   becomes the crossover control baked into a synthetic training target for a
-  causal, finite-receptive-field A2 model (see docs/phase3.md). Kept only
+  causal, finite-receptive-field A2 model (see docs/history/phase3.md). Kept only
   for the old regression tests.
 - `bounded_causal_envelope_db` -- the PRODUCTION envelope used by
   `hybrid.core.pipeline.render_pair`. Same causal-RMS-then-smooth idea, but every
@@ -143,9 +143,9 @@ class BoundedEnvelopeConfig:
 
 DEFAULT_BOUNDED_ENVELOPE_CONFIG = BoundedEnvelopeConfig()
 
-# The target ceiling from docs/phase3.md ("<= about 100 ms at 48 kHz"). The
+# The target ceiling from docs/history/phase3.md ("<= about 100 ms at 48 kHz"). The
 # default config above sums to 80 ms, leaving 20 ms of margin against the A2
-# receptive field check in hybrid/receptive_field.py.
+# receptive field check in hybrid/core/receptive_field.py.
 MAX_HISTORY_MS_TARGET = 100.0
 
 

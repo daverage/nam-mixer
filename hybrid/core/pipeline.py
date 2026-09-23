@@ -5,7 +5,7 @@ because they have very different costs.
 called again when Amp A, Amp B, the DI, or the INPUT PROFILE/CALIBRATION
 changes (an input profile changes the actual signal fed to both NAMs, so it
 is a render-stage concern, not a blend-stage one -- see
-docs/INPUT_PROFILE_RESEARCH.md). `build_hybrid` is CHEAP (pure numpy) and is
+docs/history/INPUT_PROFILE_RESEARCH.md). `build_hybrid` is CHEAP (pure numpy) and is
 what should run on every crossover/transition/trim slider move -- see the
 module docstrings of blend.py/level_match.py/align.py for the individual
 steps this composes.
@@ -68,7 +68,7 @@ class RenderedPair:
     # amp with limited headroom will distort at exactly the loud moments the
     # crossfade selects it, regardless of crossover tuning. Real, production
     # control (unlike test_gain_db): IS applied during A2 generation, see
-    # hybrid/design.py's HybridDesign/hybrid/training_target.py.
+    # hybrid/modes/design.py's HybridDesign/hybrid/modes/training_target.py.
     amp_a_input_gain_db: float = 0.0
     amp_b_input_gain_db: float = 0.0
 

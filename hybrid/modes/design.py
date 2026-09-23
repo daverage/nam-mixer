@@ -1,11 +1,11 @@
 """`HybridDesign`: an immutable snapshot of everything that went into an
 auditioned hybrid, frozen before generating a real training target -- see
-docs/phase3.md sections 2-3.
+docs/history/phase3.md sections 2-3.
 
-The critical rule this module exists to enforce (see docs/phase3.md section
+The critical rule this module exists to enforce (see docs/history/phase3.md section
 1): `design_reference_profile_gain_db` is DESIGN CONTEXT ONLY. It records
 which pickup profile the design was auditioned with and is written into
-provenance, but nothing in this module or `hybrid/training_target.py` ever
+provenance, but nothing in this module or `hybrid/modes/training_target.py` ever
 re-applies it to the official NAM training excitation -- see
 `training_target.generate_training_bundle`'s docstring for where that
 distinction is actually enforced.
@@ -14,7 +14,7 @@ Likewise `effective_b_trim_db` is a FROZEN number, captured once from a
 `build_hybrid()` call the user actually auditioned. Target generation must
 reuse it verbatim (`auto_level=False, manual_b_trim_db=design.effective_b_trim_db`)
 rather than recomputing auto-match against the (completely different) official
-training input -- see docs/phase3.md section 3.
+training input -- see docs/history/phase3.md section 3.
 """
 from __future__ import annotations
 
@@ -61,9 +61,9 @@ class HybridDesign:
     calibration_warning: Optional[str] = None
 
     # Independent per-amp pre-render input trim, frozen from the RenderedPair
-    # that was actually auditioned -- see hybrid/pipeline.py's RenderedPair
+    # that was actually auditioned -- see hybrid/core/pipeline.py's RenderedPair
     # docstring. Unlike design_reference_profile_gain_db, this IS re-applied
-    # during real A2 generation (hybrid/training_target.py) -- it corrects
+    # during real A2 generation (hybrid/modes/training_target.py) -- it corrects
     # what each amp actually receives, not a hypothetical pickup identity.
     amp_a_input_gain_db: float = 0.0
     amp_b_input_gain_db: float = 0.0
@@ -78,13 +78,13 @@ class HybridDesign:
 
     mode: str = "hybrid"
 
-    # Shared Cabinet IR stage, mode-independent -- see hybrid/cab_ir.py.
+    # Shared Cabinet IR stage, mode-independent -- see hybrid/core/cab_ir.py.
     # `None` (the default) means "no cab selected", identical to every
     # pre-Blend-mode design and fully backward compatible with previously
     # written hybrid_design.json files that predate this field.
     cab: Optional[CabDesign] = None
 
-    # Shared post-combination output gain (hybrid/safety.py's
+    # Shared post-combination output gain (hybrid/core/safety.py's
     # compute_auto_output_gain_db/apply_output_gain), mode-independent like
     # cab. "auto" is NOT frozen to a number here -- unlike effective_b_trim_db,
     # it is recomputed fresh at generation time against the actual official

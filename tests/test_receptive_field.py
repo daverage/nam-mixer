@@ -1,10 +1,10 @@
-"""Tests for hybrid/receptive_field.py -- docs/phase3.md section 5.
+"""Tests for hybrid/core/receptive_field.py -- docs/history/phase3.md section 5.
 
 The pure math (receptive-field formula) is tested directly against a
 constructed config dict, independent of whether neural-amp-modeler is
 actually installed. The "real installed config" path is exercised only when
 the training environment is present (skipped otherwise, matching
-docs/phase3.md section 37's "have a separate integration/manual test path for
+docs/history/phase3.md section 37's "have a separate integration/manual test path for
 real A2 training" for anything that needs the actual package).
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ def test_layer_array_receptive_field_dilated_stack():
 
 def test_layer_array_receptive_field_per_layer_kernel_sizes():
     """The real installed 0.13.x packed config uses a PER-LAYER kernel_sizes
-    list (not one shared kernel size) -- see hybrid/receptive_field.py's
+    list (not one shared kernel size) -- see hybrid/core/receptive_field.py's
     module docstring."""
     cfg = {"kernel_sizes": [6, 15, 6], "dilations": [1, 3, 7]}
     expected = 1 + (6 - 1) * 1 + (15 - 1) * 3 + (6 - 1) * 7
@@ -140,7 +140,7 @@ def _fake_a2_rf(samples: int) -> A2ReceptiveField:
 
 
 def test_assert_required_history_fits_permits_exact_fit(monkeypatch):
-    """docs/phase3.md review: Amp A/B/envelope run in PARALLEL and the final
+    """docs/history/phase3.md review: Amp A/B/envelope run in PARALLEL and the final
     blend is memoryless, so required == available is a legitimate exact fit,
     not a failure -- only required > available should raise."""
     monkeypatch.setattr(receptive_field, "compute_a2_receptive_field", lambda: _fake_a2_rf(1000))
@@ -160,7 +160,7 @@ def test_assert_required_history_fits_accepts_comfortable_margin(monkeypatch):
     assert rf.receptive_field_samples == 1000
 
 
-# -- docs/blend-mode.md "RECEPTIVE FIELD" -----------------------------------
+# -- docs/history/blend-mode.md "RECEPTIVE FIELD" -----------------------------------
 
 def test_cab_fir_serial_history_samples_is_length_minus_one():
     assert cab_fir_serial_history_samples(1) == 0

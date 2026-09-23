@@ -1,4 +1,4 @@
-"""Kaggle GPU training backend -- see docs/kaggle_training.md.
+"""Kaggle GPU training backend -- see docs/history/kaggle_training.md.
 
 Service layer between Flask (`app.py`'s `/api/kaggle/*` routes) and the
 Kaggle CLI. Deliberately torch-free and import-safe in the normal Flask
@@ -6,7 +6,7 @@ runtime environment: this module only ever shells out to the external
 `kaggle` executable, never imports `kaggle` (the Python package) or any
 training dependency itself.
 
-Two costs, mirroring hybrid/pipeline.py's render_pair()/build_hybrid() split:
+Two costs, mirroring hybrid/core/pipeline.py's render_pair()/build_hybrid() split:
 
 - `KaggleCli` is a thin, fully-mocked-in-tests wrapper around individual
   `kaggle ...` subprocess invocations. It never raises for an expected
@@ -95,7 +95,7 @@ KERNEL_VERIFY_DELAY_S = 5
 
 # Allow-list of files staged into the Kaggle dataset for a job -- nothing
 # else is ever copied out of a design's bundle dir, in particular never
-# assets/nam_models/*.nam or any preview DI (see docs/kaggle_training.md).
+# assets/nam_models/*.nam or any preview DI (see docs/history/kaggle_training.md).
 STAGED_BUNDLE_FILES = ("input.wav", "hybrid_target.wav", "training_manifest.json")
 
 # The files that MUST actually exist in the remote dataset, with sizes
@@ -508,7 +508,7 @@ TERMINAL_STATES = ("complete", "failed")
 # a migration table.
 
 # Kaggle's own kernel statuses, mapped defensively -- anything unrecognized
-# falls back to "running" rather than raising, per docs/kaggle_training.md
+# falls back to "running" rather than raising, per docs/history/kaggle_training.md
 # ("tolerant of unexpected strings").
 _KERNEL_STATUS_MAP = {
     "queued": "queued",
@@ -583,7 +583,7 @@ def save_job(a2_output_dir: Path, job: KaggleJob) -> None:
     """Persists the job atomically. Defense-in-depth redaction on top of
     KaggleCli._run's own stdout/stderr scrubbing -- `error`/`cleanup_error`
     are free-text fields that could in principle carry secret-shaped text
-    from any source, and job.json must never contain one (docs/kaggle_training.md)."""
+    from any source, and job.json must never contain one (docs/history/kaggle_training.md)."""
     job.updated_at = time.time()
     data = job.to_dict()
     if data.get("error"):
@@ -675,7 +675,7 @@ class KaggleJobManager:
         training_manifest.json/cloud_job.json) never bundles in the cloud
         worker script, and the private KERNEL push never re-uploads the
         training data it already gets via `dataset_sources` -- see
-        docs/kaggle_training.md."""
+        docs/history/kaggle_training.md."""
         job_dir = _job_dir(self.a2_output_dir, job.design_id, job.job_id)
         dataset_staging = job_dir / "dataset_staging"
         kernel_staging = job_dir / "kernel_staging"
@@ -1021,7 +1021,7 @@ class KaggleJobManager:
         """Synchronous end-to-end submission -- blocks for the entire
         upload. Kept for tests and any caller that genuinely wants to wait;
         the Flask route uses `submit_async` instead so a slow/flaky Kaggle
-        upload (see docs/kaggle_training.md -- a real production run took
+        upload (see docs/history/kaggle_training.md -- a real production run took
         several minutes under real network conditions) never blocks the
         request thread."""
         job = self._precheck_and_reserve_job(design_id, epoch_preset)
@@ -1033,7 +1033,7 @@ class KaggleJobManager:
         once CLI/auth pre-checks pass; the actual stage/upload/verify/kernel
         pipeline runs on a background thread. A plain daemon thread is
         acceptable here -- this is a single-user local app (see
-        docs/kaggle_training.md), not a multi-tenant server -- but every
+        docs/history/kaggle_training.md), not a multi-tenant server -- but every
         step still persists job state to disk immediately, so a Flask
         restart mid-upload loses only the ability to keep watching that one
         upload live, never the record of what happened."""
@@ -1130,7 +1130,7 @@ class KaggleJobManager:
     @staticmethod
     def parse_progress(log_text: str) -> Optional[dict]:
         """Best-effort epoch-progress extraction -- UX only, never allowed to
-        raise or affect job correctness (docs/kaggle_training.md)."""
+        raise or affect job correctness (docs/history/kaggle_training.md)."""
         try:
             matches = re.findall(r"[Ee]poch\s+(\d+)\s*/\s*(\d+)", log_text or "")
             if not matches:

@@ -6,7 +6,7 @@
 # This backend's own RUNTIME (the frozen exe/pyz) mirrors requirements.txt
 # ONLY -- never requirements-training.txt; Torch/neural-amp-modeler are never
 # installed into it. Local A2 training creates its OWN separate, dedicated
-# venv (hybrid/local_training.py's LocalTrainingManager) that this frozen
+# venv (hybrid/training/local_training.py's LocalTrainingManager) that this frozen
 # process merely launches as a subprocess -- see CLAUDE.md's "Kaggle GPU
 # training backend" note and the desktop-architecture note for why a frozen
 # build must never try to relaunch itself as a generic interpreter. That
@@ -57,7 +57,7 @@ nam_render_exe = REPO_ROOT / "native" / "nam_render" / "build" / "nam_render"
 if nam_render_exe.is_file():
     binaries.append((str(nam_render_exe), "native/nam_render/build"))
     # hybrid.core.render.find_nam_render_exe() looks for this relative to
-    # wherever ITS OWN hybrid/ copy sits -- training_support/hybrid/render.py
+    # wherever ITS OWN hybrid/ copy sits -- training_support/hybrid/core/render.py
     # resolves that to training_support/native/nam_render/build/, a
     # separate lookup from the main app's copy above.
     binaries.append((str(nam_render_exe), "training_support/native/nam_render/build"))

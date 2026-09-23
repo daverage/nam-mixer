@@ -1,4 +1,4 @@
-"""Unit tests for scripts/validate_a2.py -- docs/phase3.md sections 24-28.
+"""Unit tests for scripts/validate_a2.py -- docs/history/phase3.md sections 24-28.
 
 Mocks rendering (native NAMCore isn't required for these), same pattern as
 tests/test_validation.py.

@@ -125,7 +125,7 @@ class CharacterBlendResult:
 
 
 # Fixed reference sweep for the low-level response sanity check (see
-# docs/blend-mode-fixes.md, "Phase 4"). Deliberately highest-to-lowest so a
+# docs/history/blend-mode-fixes.md, "Phase 4"). Deliberately highest-to-lowest so a
 # reader (and the manifest/UI) sees it in the same order a player backing off
 # their instrument would experience it.
 DEFAULT_LOW_LEVEL_SWEEP_DB: tuple[float, ...] = (0.0, -6.0, -12.0, -18.0, -24.0, -30.0, -36.0)
@@ -160,7 +160,7 @@ def evaluate_low_level_response(
 ) -> LowLevelResponseCheck:
     """Render+blend a fixed reference DI across `levels_db` relative input
     gains and verify Character Blend remains a responsive amplifier rather
-    than developing a hard low-level gate (docs/blend-mode-fixes.md, Phases
+    than developing a hard low-level gate (docs/history/blend-mode-fixes.md, Phases
     4-5). This is the same `build_character_blend()` used by preview and
     training-bundle generation (Phase 7) -- only the sweep of input gains
     driving it is new.

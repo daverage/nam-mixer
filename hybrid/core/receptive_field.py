@@ -1,6 +1,6 @@
 """Inspect the official `neural-amp-modeler` A2/PackedWaveNet config to compute
-its receptive field, so hybrid/envelope.py's bounded crossover history can be
-checked against it rather than assumed -- see docs/phase3.md section 5.
+its receptive field, so hybrid/core/envelope.py's bounded crossover history can be
+checked against it rather than assumed -- see docs/history/phase3.md section 5.
 
 This module does NOT require torch to be importable: `nam.train._resources`
 ships `config_model_packed.json` as plain package data, and the receptive
@@ -125,7 +125,7 @@ def compute_source_nam_receptive_field(nam_model) -> int:
     because a hybrid target's total dry-input dependency is
     `max(envelope history, Amp A receptive field, Amp B receptive field)`,
     not the envelope history alone: the two amp branches run in parallel
-    with the crossover envelope on the same dry input (docs/phase3.md
+    with the crossover envelope on the same dry input (docs/history/phase3.md
     review) -- see `hybrid.core.pipeline.render_pair`.
 
     Takes a `hybrid.core.nam_loader.NamModel` (or anything with a `.raw` dict
@@ -210,7 +210,7 @@ def compute_a2_receptive_field() -> A2ReceptiveField:
 def cab_fir_serial_history_samples(fir_length_samples: int) -> int:
     """Additional temporal-dependency samples a BAKED cabinet FIR of
     `fir_length_samples` taps adds on top of whatever the Hybrid/Blend
-    combination already needs -- see docs/blend-mode.md "RECEPTIVE FIELD".
+    combination already needs -- see docs/history/blend-mode.md "RECEPTIVE FIELD".
 
     The FIR runs AFTER the amp combination, so it's a SERIAL dependency, not
     a parallel one like Amp A/Amp B/the crossover envelope: producing one
@@ -232,7 +232,7 @@ def combine_required_history(
     additional_parallel_branches: Optional[dict[str, int]] = None,
 ) -> dict:
     """Combine the per-branch dependency samples of a generated target into
-    one required-history record, mode-aware -- see docs/blend-mode.md
+    one required-history record, mode-aware -- see docs/history/blend-mode.md
     "IMPORTANT CONCEPTUAL POLICY":
 
         Hybrid (parallel):  hard core = max(Amp A, Amp B, envelope)
@@ -241,7 +241,7 @@ def combine_required_history(
           (already the L-1 serial-history count, via
           `cab_fir_serial_history_samples`)
 
-    IMPORTANT POLICY DISTINCTION (see docs/blend-mode.md's cabinet
+    IMPORTANT POLICY DISTINCTION (see docs/history/blend-mode.md's cabinet
     approximation policy): `hard_required_samples` is the CORE Hybrid/Blend
     dependency -- Amp A/Amp B (+ envelope for Hybrid) alone, with NO cab
     contribution. This is the value that MUST fit inside the destination
@@ -301,7 +301,7 @@ def assert_required_history_fits(
     independently, so their temporal requirements do NOT add, they take the
     max) exceeds the actual installed A2's receptive field.
 
-    This is the CORE/HARD check -- see docs/blend-mode.md's cabinet
+    This is the CORE/HARD check -- see docs/history/blend-mode.md's cabinet
     approximation policy: callers must pass the CORE Hybrid/Blend dependency
     here (`hybrid.core.receptive_field.combine_required_history`'s
     `hard_required_samples`), NEVER a cab-inflated total. A baked cabinet's

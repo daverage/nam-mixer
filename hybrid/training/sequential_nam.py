@@ -81,7 +81,7 @@ def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
     """
     head_metadata = full_head.get("metadata")
     head_metadata = head_metadata if isinstance(head_metadata, dict) else {}
-    # The head's own name is left unsuffixed by hybrid/a2_training_settings.py
+    # The head's own name is left unsuffixed by hybrid/training/a2_training_settings.py
     # for an "embedded" export_mode (it isn't the final deliverable in this
     # mode -- this packaged Sequential file is), so it's safe to use
     # directly here without stripping an "[Amp Only]"/"[Learned Cab]" suffix
