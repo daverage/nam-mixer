@@ -140,12 +140,25 @@ scanned (low value).
 
 ## Phase 2: Tidy the structure (moves only, no behaviour change)
 
-- [ ] `cg_routes.py` (repo root, next to `app.py`) → a proper routes package
-- [ ] `hybrid/` (51 flat modules) → subpackages (core DSP, one per design mode,
-      training, validation)
-- [ ] Only move files and fix imports; run the tests after each move
-- [ ] Update CLAUDE.md, README, AGENTS.md (they reference module paths heavily)
-- [ ] Re-index codebase-memory after the structural commits
+User decisions (2026-09-23): 5 subpackages, drop the `cg_` prefix inside
+`continuous_gain/`, move only `cg_routes.py` into `routes/`; splitting
+`app.py` into blueprints is a refactor, so it goes on the Phase 3 list.
+
+- [x] `hybrid/paths.py` `REPO_ROOT` replaces six `Path(__file__).parent.parent`
+      computations, so later moves can't silently change paths (14d8863)
+- [x] `hybrid/` → `core/`, `modes/`, `continuous_gain/`, `training/`, `services/`
+      via `git mv` + import rewrite; monkeypatch strings updated (d5fdf43)
+- [x] `cg_routes.py` → `routes/continuous_gain.py` (3fdb5c7)
+- [x] Main-app phase docs (phase2/3/4 + progress) moved out of
+      `docs/history/Continuous Gain/` into `docs/history/` (c4e1b70)
+- [x] Path references updated in 74 live files, plus README tree,
+      CLAUDE.md, AGENTS.md (20581f8). `docs/history/` and this file's
+      candidate list keep old paths as historical records. Comments citing
+      the archived research scripts (`scripts/p4_*.py`, `fc_*.py`, …) are
+      left as provenance.
+- [x] Tests unchanged after every step (673/1/16; JS 17/17)
+- [x] Codebase-memory re-indexed (4507 nodes)
+- [ ] D1 (4 duplicate `.nam` files) is still waiting for the user to run `git rm`
 
 ---
 
@@ -154,12 +167,25 @@ scanned (low value).
 For each group: `/code-review high <path>`, then fix what it finds in a
 separate commit.
 
-- [ ] 1. Core signal processing: `envelope`, `safety`, `level_match`, `align`, `cab_ir`
-- [ ] 2. `pipeline`, `design`, and the three design modes (`blend`, `fixed_blend`, `character_blend`)
-- [ ] 3. Training targets, `receptive_field`, validation, Kaggle, and the `cg_*` modules
-- [ ] 4. The Flask layer (`app.py`, routes), `static/*.js`, `desktop/`, `cloud/`, `native/`
+- [ ] 1. `hybrid/core/` (envelope, safety, level_match, align, cab_ir, receptive_field, render, pipeline, …)
+- [ ] 2. `hybrid/modes/` (the three design modes and their target generators)
+- [ ] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`
+- [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
 - [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
+
+### Findings carried into Phase 3
+
+- `app.py:1419` has an undefined name, `removed` (ruff F821). It was already there before Phase 2, and running that line raises `NameError`.
+- `tests/test_cg_reproduction.py` and `scripts/cg_reproduce_fc.py` look for
+  the frozen manifest in `docs/final/` and `docs/history/final/`, but it lives
+  in `docs/history/Continuous Gain/final/manifest_frozen.json`, so 4 tests
+  skip ("frozen FC manifest not available").
+- Values computed and then never used (ruff F841): `hybrid/services/local_llm.py` `model`, `base_url`;
+  `routes/continuous_gain.py` `STAGES`.
+- Already failing on master: `test_local_llm_teaches_mode_selection_from_signal_behaviour`.
+- Split `app.py` (3,285 lines, ~60 routes) into `routes/` blueprints (a refactor).
+- Category B (production code used only by tests): decide per group.
 
 ### Rules to check in every group
 
@@ -195,3 +221,6 @@ separate commit.
   D1 (4 duplicate .nam copies in `docs/history/Continuous Gain/deliverables/`)
   was blocked twice by the auto-mode permission classifier, so the user needs
   to run it or allow it.
+- 2026-09-23: Phase 2 done (14d8863, d5fdf43, 3fdb5c7, c4e1b70, 20581f8). New
+  layout: hybrid/{core,modes,continuous_gain,training,services}, routes/.
+  Findings for Phase 3 are listed under Phase 3. D1 still pending (user).
