@@ -13,7 +13,7 @@ Branch `research/continuous-gain-model`, code at `cb635a5` plus the `scripts/tr_
 ## 1. Source identities
 
 - Real references: the original fixed-gain NAM captures, rendered with NAMCore (`native/nam_render`) and the verified Phase 4A alignment (no corrections were needed for the pilot captures). JCM800 integer positions G1-G10 (the half-steps were not used here); Vibrolux G1-G10 integers.
-- Models: `deliverables/<amp>/alt_FC_s0.nam` and `alt_FC_s1.nam` (FC seeds 0 and 1, frozen at `99ca9b6`, trained at `work/p4e/final/<amp>/FC_bundle/`); output scale c from each bundle manifest (JCM800 0.7219, Vibrolux 1.0). No output-gain change was applied.
+- Models: `docs/history/Continuous Gain/deliverables/<amp>/alt_FC_s0.nam` and `alt_FC_s1.nam` (FC seeds 0 and 1, frozen at `99ca9b6`, trained at `work/p4e/final/<amp>/FC_bundle/`); output scale c from each bundle manifest (JCM800 0.7219, Vibrolux 1.0). No output-gain change was applied.
 - Mapping: the frozen FC anchor mapping (JCM800 G1/G2/G4/G10 at -20/-9.2/-1.7/+14 dB; Vibrolux G1/G2/G3/G4/G7/G10 at -20/-15.6/-7.1/-2.2/+5.7/+14 dB) with position-to-Input-gain interpolation in the response coordinate. It was not refitted per DI or gain. Intended Input gain per position is in the tables below.
 - DIs: held-out `moderate_brit`, `clean_mayer`, `bass_rollin` at -12/-6/0/+6 dB for all evaluation; fit DIs `clean_smooth`, `moderate_hotrod`, `high_thrash`, `high_metalcore` at -6/0 dB for EQ fitting only.
 

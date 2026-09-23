@@ -1,0 +1,2 @@
+# Continuous Gain final candidates
+Each folder holds `RECOMMENDED_*` (frozen-rule selection: Phase 4E B seed 0), plus `alt_v3_C3.nam` and `alt_FC_s0/s1.nam`. Use the ordinary NAM player Input gain (-20..+14 dB); output gain JCM800 +4.7 dB, Vibrolux 0 dB. Player guide, mapping, weaknesses and validation status: `../CONTINUOUS_GAIN_FINAL_CANDIDATES.md`. The recommendation is measurement-based; human listening (v3 C3 vs B done, FC pending) favoured v3 C3 over B.
