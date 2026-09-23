@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .audio_metrics import rms_dbfs as _rms_dbfs
+from .audio_metrics import is_audible_dbfs, rms_dbfs as _rms_dbfs
 
 
 @dataclass
@@ -62,7 +62,7 @@ def compute_crossover_trim(
     a_region_db = _rms_dbfs(a[mask])
     b_region_db = _rms_dbfs(b[mask])
 
-    if np.isfinite(a_region_db) and np.isfinite(b_region_db):
+    if is_audible_dbfs(a_region_db) and is_audible_dbfs(b_region_db):
         suggested_trim = a_region_db - b_region_db
     else:
         suggested_trim = 0.0

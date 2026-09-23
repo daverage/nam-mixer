@@ -4,6 +4,17 @@ from __future__ import annotations
 import numpy as np
 
 
+# rms_dbfs floors digital silence at -200 dBFS instead of -inf, so a level
+# difference against a silent region is a meaningless huge number, not a
+# trim. Anything this quiet is treated as "no usable level".
+SILENCE_DBFS = -120.0
+
+
+def is_audible_dbfs(level_dbfs: float) -> bool:
+    """True if `level_dbfs` is a real signal level, not silence/empty."""
+    return bool(np.isfinite(level_dbfs) and level_dbfs > SILENCE_DBFS)
+
+
 def rms_dbfs(audio: np.ndarray, floor_dbfs: float | None = None) -> float:
     """Return RMS level in dBFS, with an optional lower reporting floor."""
     if len(audio) == 0:

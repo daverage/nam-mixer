@@ -25,7 +25,7 @@ from typing import Optional
 import numpy as np
 
 from ..core.align import align_to_reference
-from ..core.audio_metrics import rms_dbfs as _rms_dbfs
+from ..core.audio_metrics import is_audible_dbfs, rms_dbfs as _rms_dbfs
 from .blend import DEFAULT_TRANSITION_WIDTH_DB  # noqa: F401 -- re-exported for symmetry, unused here
 from ..core.cab_ir import CabDesign
 from ..core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
@@ -63,7 +63,7 @@ def compute_active_trim(
 
     a_db = _rms_dbfs(a)
     b_db = _rms_dbfs(b)
-    suggested_trim = a_db - b_db if (np.isfinite(a_db) and np.isfinite(b_db)) else 0.0
+    suggested_trim = a_db - b_db if (is_audible_dbfs(a_db) and is_audible_dbfs(b_db)) else 0.0
 
     return BlendLevelMatchResult(
         amp_a_active_dbfs=a_db,
