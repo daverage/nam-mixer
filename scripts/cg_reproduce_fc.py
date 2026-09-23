@@ -9,7 +9,6 @@ sys.path.insert(0, str(REPO)); sys.path.insert(0, str(REPO / "scripts"))
 import os
 ap = argparse.ArgumentParser(); ap.add_argument("amp"); ap.add_argument("--out", type=Path, default=None); ap.add_argument("--skip-audio", action="store_true"); a = ap.parse_args()
 os.environ["SINGLE_NAM_AMP"] = a.amp
-import numpy as np, soundfile as sf
 from single_nam_common import capture_path, official_input
 from hybrid.cg_probe import load_reference_di, SR
 from hybrid.cg_selection import select_captures, resolve_selection

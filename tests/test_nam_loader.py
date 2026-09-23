@@ -1,6 +1,5 @@
 import json
 
-import pytest
 
 from hybrid.nam_loader import load_nam
 

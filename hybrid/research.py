@@ -307,10 +307,3 @@ def tone3000_model_download(tone_id: int, model_id: int, *, opener=urlopen) -> t
     if not data:
         raise RuntimeError("TONE3000 returned an empty NAM download.")
     return data, str(model.get("name") or f"tone3000-{model_id}")
-
-
-def tone3000_notes(query: str, *, rig_scope: str, author: str = "", opener=urlopen) -> str:
-    return "\n".join(
-        f"- TONE3000: {result['title']} — by {result['creator']}. {result['description']}"[:600]
-        for result in tone3000_search(query, rig_scope=rig_scope, author=author, opener=opener)[:4]
-    )

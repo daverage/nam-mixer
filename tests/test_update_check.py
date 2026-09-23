@@ -2,7 +2,6 @@
 the urlopen boundary (same style as tests/test_render_bootstrap.py) so these never hit the real network.
 """
 import json
-import sys
 from io import BytesIO
 from unittest.mock import patch
 

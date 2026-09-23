@@ -5,7 +5,6 @@ from hybrid.level_match import compute_crossover_trim
 
 def test_suggested_trim_matches_known_offset():
     n = 44100 * 5
-    sr = 44100
     envelope_db = np.full(n, -22.0)  # entire signal sits at the crossover point
     rng = np.random.default_rng(0)
     amp_a = rng.uniform(-1, 1, n) * (10 ** (-16.3 / 20))

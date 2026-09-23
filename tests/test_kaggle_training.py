@@ -1219,8 +1219,6 @@ def test_verify_settling_never_starts_kernel_creation(tmp_path, bundle_dir, monk
     cli, calls = make_cli(monkeypatch, responses=responses)
     manager.cli = cli
 
-    kernel_calls_before_verified = []
-
     real_create_kernel = manager.create_kernel
 
     def wrapped_create_kernel(job_arg, staging_arg):
@@ -1281,8 +1279,8 @@ class _DownloadStubCli:
     kernels_output() call (in particular: whether a file_pattern was ever
     passed) without touching the filesystem -- tests populate the output
     directory directly to simulate what a real `kaggle kernels output -p
-    <dir>` download would have written. datasets_create/kernels_push raise
-    if ever called, since recovery must never re-create either."""
+    <dir>` download would have written. datasets_create_streaming/kernels_push
+    raise if ever called, since recovery must never re-create either."""
 
     def __init__(self, kernel_status_text="andrzejmarczewski/foo has status \"KernelWorkerStatus.COMPLETE\"",
                  kernel_status_ok=True, output_ok=True, output_error="",
@@ -1320,9 +1318,6 @@ class _DownloadStubCli:
         _populate_output(Path(out_dir), nam_name=self.nam_name, training_result=self.training_result,
                           extra_files=self.extra_files)
         return CliResult(ok=True, returncode=0, stdout="", stderr="")
-
-    def datasets_create(self, *a, **k):
-        raise AssertionError("recovery must never create a new dataset")
 
     def datasets_create_streaming(self, *a, **k):
         raise AssertionError("recovery must never create a new dataset")
@@ -1628,7 +1623,7 @@ def test_retry_download_recovers_completed_job_without_new_kernel_or_dataset(mon
     assert recovered.local_validation is not None
     assert recovered.local_validation["full"]["rendered_ok"] is True
     assert recovered.local_validation["lite"]["rendered_ok"] is True
-    # datasets_create/kernels_push raise on _DownloadStubCli if ever called --
+    # datasets_create_streaming/kernels_push raise on _DownloadStubCli if ever called --
     # reaching `complete` here already proves neither was invoked.
 
 

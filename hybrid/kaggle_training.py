@@ -417,12 +417,9 @@ class KaggleCli:
         match = re.search(r"username:\s*(\S+)", result.combined)
         return match.group(1) if match else None
 
-    def datasets_create(self, dataset_dir: Path) -> CliResult:
-        return self._run(["datasets", "create", "-p", str(dataset_dir)], timeout=600)
-
     def datasets_create_streaming(self, dataset_dir: Path, log_path: Path, timeout: int = DATASET_UPLOAD_TIMEOUT_S) -> CliResult:
-        """Like `datasets_create`, but streams progress into `log_path` as it
-        happens instead of returning only once the whole upload finishes --
+        """Runs `kaggle datasets create`, streaming progress into `log_path` as
+        it happens instead of returning only once the whole upload finishes --
         see `run_streaming`'s docstring for why this matters for a
         potentially multi-minute upload."""
         return self.run_streaming(["datasets", "create", "-p", str(dataset_dir)], log_path, timeout=timeout)

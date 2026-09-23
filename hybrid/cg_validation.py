@@ -20,7 +20,6 @@ from typing import Callable
 
 import numpy as np
 
-from .cg_audit import alignment_shift
 from .cg_parallel import pmap
 from .cg_probe import SR, features, load_reference_di
 from .nam_loader import load_nam

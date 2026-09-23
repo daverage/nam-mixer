@@ -31,7 +31,7 @@ import soundfile as sf
 
 from .align import align_to_reference
 from .blend import CrossoverConfig, blend
-from .cab_ir import CabDesign, CabIrError, apply_cab_ir, get_prepared_cab_ir
+from .cab_ir import CabDesign, CabIrError, apply_cab_ir
 from .calibration import CalibrationResult, resolve_calibration
 from .design import HybridDesign
 from .envelope import (

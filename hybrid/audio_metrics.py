@@ -124,22 +124,3 @@ def rms_dbfs_per_frame(frames: np.ndarray) -> np.ndarray:
     """Vectorized per-row `rms_dbfs`, for an (n_frames, frame_length) array."""
     rms = np.sqrt(np.mean(frames ** 2, axis=1))
     return 20.0 * np.log10(np.maximum(rms, 1e-10))
-
-
-def band_energy_dbfs(audio: np.ndarray, sample_rate: int, low_hz: float = 0.0, high_hz: float | None = None) -> float:
-    """RMS level (dBFS) of `audio` restricted to [low_hz, high_hz) via a hard
-    FFT-domain band mask -- a coarse, deterministic band-energy measurement
-    (not a proper filter design), good enough to compare how much of a
-    difference between two renders is concentrated in a given frequency
-    band without pulling in a separate spectral-analysis dependency."""
-    audio = np.asarray(audio, dtype=np.float64)
-    if len(audio) == 0:
-        return -np.inf
-    spectrum = np.fft.rfft(audio)
-    freqs = np.fft.rfftfreq(len(audio), 1.0 / sample_rate)
-    mask = freqs >= low_hz
-    if high_hz is not None:
-        mask &= freqs < high_hz
-    banded = np.zeros_like(spectrum)
-    banded[mask] = spectrum[mask]
-    return rms_dbfs(np.fft.irfft(banded, n=len(audio)))

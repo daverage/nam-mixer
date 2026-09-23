@@ -9,7 +9,6 @@ SR = 48000
 def synth_di(name: str = "x", seconds: float = 6.0) -> np.ndarray:
     rng = np.random.default_rng(abs(hash(name)) % 1000)
     n = int(seconds * SR)
-    t = np.arange(n) / SR
     x = np.zeros(n)
     for k in range(int(seconds * 3)):
         f0 = 110 * 2 ** (rng.integers(0, 12) / 12)

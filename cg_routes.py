@@ -22,7 +22,7 @@ from werkzeug.utils import secure_filename
 
 from hybrid.a2_training_settings import A2_EPOCH_PRESETS
 from hybrid.cg_project import ANCHOR_METHODS, SELECTION_MODES, CgProject, CgProjectError
-from hybrid.cg_validation import (HELD_OUT_DIS, SWEEP_GAINS_DB, check_compatibility, check_progression, check_safety, write_audition)
+from hybrid.cg_validation import (HELD_OUT_DIS, check_compatibility, check_progression, check_safety, write_audition)
 from hybrid.cg_audit import alignment_shift
 from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.kaggle_training import find_active_job

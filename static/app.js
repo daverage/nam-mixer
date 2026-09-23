@@ -1418,16 +1418,6 @@ ampBTrimSlider.addEventListener("input", () => {
   scheduleAuditionRefresh();
 });
 
-async function notImplementedAction(url) {
-  try {
-    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    const data = await resp.json();
-    setStatus(data.error || "Not implemented yet.", true);
-  } catch (err) {
-    setStatus("Request failed: " + err, true);
-  }
-}
-
 const previewButtons = [
   document.getElementById("btn-preview-a"),
   document.getElementById("btn-preview-mix"),

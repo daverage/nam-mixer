@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -25,7 +24,7 @@ from typing import Callable
 import numpy as np
 
 from .cg_anchors import REFERENCE_DB, fixed_ladder_anchors, mapping_table, response_anchors
-from .cg_audit import ELIGIBLE_STATUSES, alignment_shift, audit_captures
+from .cg_audit import alignment_shift, audit_captures
 from .cg_bundle import (FC_RECIPE, build_training_audio, frozen_design_record, make_chain, receptive_field_record,
                         source_records, write_bundle)
 from .cg_parallel import pmap

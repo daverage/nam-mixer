@@ -393,7 +393,7 @@ def test_baked_cab_target_uses_the_full_prepared_ir_no_truncation(tmp_path):
     amp_b = _write_nam(tmp_path / "b.nam")
     training_input_path = tmp_path / "input.wav"
     n = 4800
-    training_input = _write_training_input(training_input_path, n=n)
+    _write_training_input(training_input_path, n=n)
 
     # 99.9% of the energy sits in the first few taps, but a long, low-level
     # tail follows -- if generation ever truncated at an energy percentile,

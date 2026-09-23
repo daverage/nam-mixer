@@ -83,7 +83,6 @@ def test_active_level_match_uses_active_playing_not_crossover_region():
     """compute_active_trim must ignore silent samples and NOT depend on any
     crossover config -- it only needs an active-signal mask over the whole
     clip (docs/blend-mode.md "BLEND LEVEL MATCHING")."""
-    n = 1000
     envelope_db = np.concatenate([
         np.full(500, -80.0, dtype=np.float32),   # silence -- excluded
         np.full(500, -10.0, dtype=np.float32),   # active
