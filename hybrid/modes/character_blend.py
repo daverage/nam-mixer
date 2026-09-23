@@ -370,8 +370,14 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     level-derived gain curve and broad minimum-phase correction are applied.
     Raw A+B waveform summing is intentionally absent from this function.
     """
-    n = min(len(pair.dry), len(pair.amp_a), len(pair.amp_b))
-    dry, a, b = pair.dry[:n], pair.amp_a[:n], pair.amp_b[:n]
+    # The dry reference is what both amps were driven by before their per-amp
+    # split: a preview RenderedPair's profiled_dry (DI + profile/test gain),
+    # or the official input for generation/validation pairs, which have only
+    # `dry`. The raw DI would offset every level by the profile gain.
+    source = getattr(pair, "profiled_dry", None)
+    source = pair.dry if source is None else source
+    n = min(len(source), len(pair.amp_a), len(pair.amp_b))
+    dry, a, b = source[:n], pair.amp_a[:n], pair.amp_b[:n]
     envelope = bounded_causal_envelope_db(dry, pair.sample_rate)
     config = CharacterAnalysisConfig(**design.analysis_config) if design.analysis_config else CharacterAnalysisConfig()
     analysis_a = analysis_a or _analysis_from_design(design.analysis_a) or analyse_rendered_audio(dry, a, pair.sample_rate, config)

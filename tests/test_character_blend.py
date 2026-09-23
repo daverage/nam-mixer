@@ -332,3 +332,26 @@ def test_character_temporal_history_reports_serial_dependencies():
         "correction_fir_serial_samples": 64,
         "donor_transition_exact_history_bounded": False,
     }
+
+
+def test_preview_pair_is_measured_against_profiled_dry_not_raw_di():
+    """A preview RenderedPair's amps were driven by profiled_dry; the teacher
+    must match a generation-style pair whose `dry` IS that profiled signal."""
+    base = _pair()
+    profiled = (base.dry * 2.0).astype(np.float32)  # +6 dB pickup profile
+    preview = SimpleNamespace(**{**vars(base), "dry": base.dry, "profiled_dry": profiled})
+    generation_style = SimpleNamespace(**{**vars(base), "dry": profiled})
+    design = CharacterBlendDesign("a.nam", "b.nam", tone_mix_b=.4, feel_mix_b=.6, drive_mix_b=.5)
+    assert np.array_equal(build_character_blend(preview, design).blend,
+                          build_character_blend(generation_style, design).blend)
+
+
+def test_analysis_cache_key_changes_with_the_measured_audio():
+    from hybrid.modes.character_analysis import analysis_cache_key
+
+    pair = _pair()
+    key = analysis_cache_key("nam", pair.dry, pair.amp_a)
+    assert key == analysis_cache_key("nam", pair.dry.copy(), pair.amp_a.copy())
+    assert key != analysis_cache_key("nam", pair.dry * 2.0, pair.amp_a)   # different DI level/profile
+    assert key != analysis_cache_key("nam", pair.dry, pair.amp_a * 0.5)   # different render (e.g. input trim)
+    assert key != analysis_cache_key("other", pair.dry, pair.amp_a)

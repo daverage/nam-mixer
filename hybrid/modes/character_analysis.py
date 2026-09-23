@@ -120,20 +120,29 @@ def analyse_rendered_audio(
     return AmpCharacterAnalysis(sample_rate, config.frequencies_hz, tuple(levels), config.cache_key(), source_hash, config.version)
 
 
-def analysis_cache_path(cache_dir: str | Path, source_hash: str, config: CharacterAnalysisConfig) -> Path:
-    return Path(cache_dir) / f"character-analysis-{source_hash}-{config.cache_key()}.json"
+def analysis_cache_key(source_hash: str, dry: np.ndarray, rendered: np.ndarray) -> str:
+    """Key for everything an analysis depends on: the source .nam plus the
+    exact dry and rendered audio measured. The DI, profile/test gain,
+    calibration and per-amp input gain all show up in those two arrays, so
+    changing any of them can never serve a stale analysis."""
+    digest = hashlib.sha256(source_hash.encode("utf-8"))
+    for audio in (dry, rendered):
+        digest.update(np.ascontiguousarray(audio, dtype=np.float32).tobytes())
+    return digest.hexdigest()
 
 
-def load_cached_analysis(cache_dir: str | Path, source_hash: str, config: CharacterAnalysisConfig) -> AmpCharacterAnalysis | None:
-    path = analysis_cache_path(cache_dir, source_hash, config)
+def analysis_cache_path(cache_dir: str | Path, cache_key: str, config: CharacterAnalysisConfig) -> Path:
+    return Path(cache_dir) / f"character-analysis-{cache_key}-{config.cache_key()}.json"
+
+
+def load_cached_analysis(cache_dir: str | Path, cache_key: str, config: CharacterAnalysisConfig) -> AmpCharacterAnalysis | None:
+    path = analysis_cache_path(cache_dir, cache_key, config)
     if not path.is_file(): return None
     return AmpCharacterAnalysis.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
-def store_cached_analysis(cache_dir: str | Path, analysis: AmpCharacterAnalysis) -> Path:
-    path = analysis_cache_path(cache_dir, analysis.source_hash, CharacterAnalysisConfig(
-        levels_db=tuple(level.input_gain_db for level in analysis.levels), frequencies_hz=analysis.frequencies_hz,
-    ))
+def store_cached_analysis(cache_dir: str | Path, analysis: AmpCharacterAnalysis, config: CharacterAnalysisConfig, cache_key: str) -> Path:
+    path = analysis_cache_path(cache_dir, cache_key, config)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(analysis.to_dict(), indent=2), encoding="utf-8")
     return path

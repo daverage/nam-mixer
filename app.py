@@ -40,7 +40,14 @@ from routes.continuous_gain import register_cg_routes
 from hybrid.training.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from hybrid.modes.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
 from hybrid.modes.blend_training_target import generate_blend_training_bundle
-from hybrid.modes.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio, load_cached_analysis, sha256_file, store_cached_analysis
+from hybrid.modes.character_analysis import (
+    CharacterAnalysisConfig,
+    analyse_rendered_audio,
+    analysis_cache_key,
+    load_cached_analysis,
+    sha256_file,
+    store_cached_analysis,
+)
 from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
 from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
@@ -2214,14 +2221,18 @@ def _build_character_result(pair: RenderedPair, data: dict):
     cache_dir = WORK_DIR / "character_analysis"
     a_path, b_path = _request_render_snapshot()["amp_a_path"], _request_render_snapshot()["amp_b_path"]
     a_hash, b_hash = (sha256_file(a_path) if a_path else ""), (sha256_file(b_path) if b_path else "")
-    analysis_a = load_cached_analysis(cache_dir, a_hash, config) if a_hash else None
-    analysis_b = load_cached_analysis(cache_dir, b_hash, config) if b_hash else None
+    # Measured against what the amps were actually driven by (see build_character_blend).
+    dry = pair.profiled_dry
+    a_key = analysis_cache_key(a_hash, dry, pair.amp_a) if a_hash else ""
+    b_key = analysis_cache_key(b_hash, dry, pair.amp_b) if b_hash else ""
+    analysis_a = load_cached_analysis(cache_dir, a_key, config) if a_key else None
+    analysis_b = load_cached_analysis(cache_dir, b_key, config) if b_key else None
     if analysis_a is None:
-        analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config, a_hash)
-        if a_hash: store_cached_analysis(cache_dir, analysis_a)
+        analysis_a = analyse_rendered_audio(dry, pair.amp_a, pair.sample_rate, config, a_hash)
+        if a_key: store_cached_analysis(cache_dir, analysis_a, config, a_key)
     if analysis_b is None:
-        analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config, b_hash)
-        if b_hash: store_cached_analysis(cache_dir, analysis_b)
+        analysis_b = analyse_rendered_audio(dry, pair.amp_b, pair.sample_rate, config, b_hash)
+        if b_key: store_cached_analysis(cache_dir, analysis_b, config, b_key)
     return build_character_blend(pair, design, analysis_a=analysis_a, analysis_b=analysis_b), params
 
 
@@ -2283,8 +2294,8 @@ def api_wizard_insight():
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
     config = CharacterAnalysisConfig()
-    analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
-    analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
+    analysis_a = analyse_rendered_audio(pair.profiled_dry, pair.amp_a, pair.sample_rate, config)
+    analysis_b = analyse_rendered_audio(pair.profiled_dry, pair.amp_b, pair.sample_rate, config)
     return jsonify(summarise_amp_pair(analysis_a, analysis_b))
 
 
