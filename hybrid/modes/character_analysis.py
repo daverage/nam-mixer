@@ -51,6 +51,10 @@ class AmpCharacterAnalysis:
     config_hash: str
     source_hash: str = ""
     version: int = ANALYSIS_VERSION
+    # The config's level window, so a frozen design can record the config
+    # that produced this analysis. Analyses stored before this field existed
+    # were all measured with the default window.
+    level_window_db: float = CharacterAnalysisConfig.level_window_db
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,6 +65,7 @@ class AmpCharacterAnalysis:
             sample_rate=int(data["sample_rate"]), frequencies_hz=tuple(data["frequencies_hz"]),
             levels=tuple(AmpLevelAnalysis(**{**item, "spectrum_db": tuple(item["spectrum_db"])}) for item in data["levels"]),
             config_hash=data["config_hash"], source_hash=data.get("source_hash", ""), version=int(data.get("version", 1)),
+            level_window_db=float(data.get("level_window_db", CharacterAnalysisConfig.level_window_db)),
         )
 
 
@@ -117,7 +122,8 @@ def analyse_rendered_audio(
             output_peak_dbfs=float(20.0 * np.log10(max(float(np.max(np.abs(y))) if len(y) else 0.0, _EPS))),
             compression_gain_db=output_rms - input_rms, spectrum_db=_spectrum(y, sample_rate, config.frequencies_hz),
         ))
-    return AmpCharacterAnalysis(sample_rate, config.frequencies_hz, tuple(levels), config.cache_key(), source_hash, config.version)
+    return AmpCharacterAnalysis(sample_rate, config.frequencies_hz, tuple(levels), config.cache_key(), source_hash, config.version,
+                                config.level_window_db)
 
 
 def analysis_cache_key(source_hash: str, dry: np.ndarray, rendered: np.ndarray) -> str:

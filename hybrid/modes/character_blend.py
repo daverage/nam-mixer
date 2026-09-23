@@ -428,7 +428,10 @@ def freeze_character_design(pair, result: CharacterBlendResult, amp_a_path: str,
     # has exactly the same representation that is later signed/written/read.
     frozen_a = json.loads(json.dumps(result.analysis_a.to_dict()))
     frozen_b = json.loads(json.dumps(result.analysis_b.to_dict()))
+    if result.analysis_a.level_window_db != result.analysis_b.level_window_db:
+        raise ValueError("Amp A and Amp B analyses were measured with different level windows")
     config = json.loads(json.dumps(asdict(CharacterAnalysisConfig(
         levels_db=tuple(x.input_gain_db for x in result.analysis_a.levels), frequencies_hz=result.analysis_a.frequencies_hz,
+        level_window_db=result.analysis_a.level_window_db,
     ))))
     return CharacterBlendDesign(amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path), analysis_a=frozen_a, analysis_b=frozen_b, analysis_config=config, instrument_type=pair.instrument_type, design_reference_profile_id=pair.input_profile_id, design_reference_profile_gain_db=pair.input_profile_gain_db, calibration_mode=pair.calibration_mode, reference_input_level_dbu=pair.reference_input_level_dbu, amp_a_input_level_dbu=pair.amp_a_model_input_level_dbu, amp_b_input_level_dbu=pair.amp_b_model_input_level_dbu, amp_a_calibration_gain_db=pair.amp_a_calibration_gain_db, amp_b_calibration_gain_db=pair.amp_b_calibration_gain_db, amp_a_input_gain_db=pair.amp_a_input_gain_db, amp_b_input_gain_db=pair.amp_b_input_gain_db, calibration_applied=pair.calibration_applied, calibration_effective_mode=pair.calibration_mode if pair.calibration_applied else "raw", calibration_warning=pair.calibration_warning, **kwargs)

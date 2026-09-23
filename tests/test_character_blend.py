@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -355,3 +356,39 @@ def test_analysis_cache_key_changes_with_the_measured_audio():
     assert key != analysis_cache_key("nam", pair.dry * 2.0, pair.amp_a)   # different DI level/profile
     assert key != analysis_cache_key("nam", pair.dry, pair.amp_a * 0.5)   # different render (e.g. input trim)
     assert key != analysis_cache_key("other", pair.dry, pair.amp_a)
+
+
+@pytest.mark.parametrize("window_db", [3.0, 2.0])
+def test_frozen_design_records_and_restores_the_analysis_level_window(tmp_path, window_db):
+    """Default and non-default windows survive freeze -> JSON -> load, and the
+    restored config reproduces the analyses' own config hash exactly."""
+    pair = _pair()
+    config = CharacterAnalysisConfig(level_window_db=window_db)
+    analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=analysis_a, analysis_b=analysis_b)
+
+    frozen = freeze_character_design(pair, result, "a.nam", "b.nam")
+    loaded = CharacterBlendDesign.read_json(frozen.write_json(tmp_path / "character.json"))
+
+    restored = CharacterAnalysisConfig(**loaded.analysis_config)
+    assert restored.level_window_db == window_db
+    assert restored.cache_key() == analysis_a.config_hash == analysis_b.config_hash
+
+
+def test_legacy_frozen_design_without_level_window_keeps_its_behaviour():
+    """Designs frozen before the window was recorded: analyses without the
+    field load as the default window, and the teacher is unchanged."""
+    pair = _pair()
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"))
+    current = freeze_character_design(pair, result, "a.nam", "b.nam").to_dict()
+
+    legacy = json.loads(json.dumps(current))
+    for key in ("analysis_a", "analysis_b"):
+        del legacy[key]["level_window_db"]
+    del legacy["analysis_config"]["level_window_db"]
+    legacy_design = CharacterBlendDesign(**legacy)
+
+    assert CharacterAnalysisConfig(**legacy_design.analysis_config).level_window_db == 3.0
+    assert np.array_equal(build_character_blend(pair, legacy_design).blend,
+                          build_character_blend(pair, CharacterBlendDesign(**current)).blend)
