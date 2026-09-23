@@ -188,21 +188,26 @@ separate commit.
       (b12ca6b). **Checked, not a problem:** the gate's t=0 excerpt. The
       official V3 input has ~1 s of near-silence, then real playing.
       **Not changed, for the user to decide:**
-      - (5) The Character receptive-field record doesn't model v3's
-        residual-envelope path (amp RF + envelope, serial) and still counts
-        a v2-style donor transition. It is advisory-tier only, so it never
-        gates training, but the reported numbers may be wrong.
-      - (7) `_spectrum` FFTs a stitched, non-contiguous selection of samples
-        near each level. The seams add HF energy that feeds the ±4 dB EQ
-        correction. A fix would change measured analyses.
-      - (8) The per-level correction builds dense n_levels×n arrays (about a
-        GB on the full V3 input). It could accumulate the two active levels
-        instead, with an equivalence test.
-      - (9) `freeze_character_design` drops `level_window_db` from the
-        recorded config. Latent: production always uses the default window.
-      - (10) The three bundle generators duplicate the output-gain /
-        embedded-scalar / manifest-skeleton code, and the Character manifest
-        has already drifted from the others.
+      - ~~(5) Character RF record vs v3 teacher~~: now derived per teacher version;
+        v3 adds the residual-envelope branch, is exactly bounded, and was checked
+        against the real teacher; still advisory (2b3454d).
+      - ~~(8) Per-level correction memory~~: streamed, bit-identical on the full V3
+        input; the mix step drops ~1.9 GB → ~0.65 GB and the overall peak goes
+        1905 → 1531 MiB (now set by `_select_donor`, ~1.3 GB, and the envelope,
+        ~0.9 GB, which are untouched) (8133ad3).
+      - ~~(9) level_window_db dropped at freeze~~: recorded and restored; legacy
+        designs load as 3.0 (f902e1c).
+      - (7) Stitched-sample spectrum: **v2 contiguous-frame method implemented
+        as opt-in analysis version 2 (626a5d3); default is still v1.**
+        Comparison on real captures: per-cell EQ-correction changes up to
+        8 dB (mean 0.7–1.3 dB), teacher band changes ≤ 0.7 dB, difference
+        signal −24 to −33 dB. **Waiting for the user's listening review:**
+        `work/character_spectrum_listening/` (README + 18 WAVs +
+        comparison.json).
+      - (10) Duplicated bundle generators: deferred until the above is
+        settled. When done, keep each mode's format-specific behaviour, add
+        before/after manifest + target regression tests, and document any
+        intentional manifest correction separately.
 - [ ] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`
 - [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
@@ -263,3 +268,4 @@ separate commit.
 - 2026-09-23: The four group-1 items the user decided on are done (align FFT, calibration label,
   silent-DI coverage, per-amp peak warning). 690 passed, 12 skipped. Verifying the group 2 (`hybrid/modes/`) findings next.
 - 2026-09-23: Phase 3 group 2 (`hybrid/modes/`) done, see the checklist. 694 passed, 12 skipped.
+- 2026-09-23: modes #5, #8 and #9 done; #7 implemented as opt-in v2, stopped for the listening review; #10 deferred. 709 passed, 12 skipped.
