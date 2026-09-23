@@ -3969,7 +3969,7 @@ const btnDiscardSettings = document.getElementById("btn-reload-settings");
 let settingsFields = [];
 // Tracks whether the draft has unsaved edits, so "Discard changes" only
 // offers to do something when there is actually something to discard (see
-// docs/settings_ux_refactor_plan.md's single-save-action goal).
+// docs/history/settings_ux_refactor_plan.md's single-save-action goal).
 let settingsDirty = false;
 
 function setSettingsDirty(dirty) {

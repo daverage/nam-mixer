@@ -782,7 +782,7 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
 .site-footer a { color: var(--text-muted); }
 .site-footer a:hover { color: var(--text); }
 /* Settings page: one reusable group layout (heading, rows, actions) shared
-   by every settings-group, per docs/settings_ux_refactor_plan.md. Each
+   by every settings-group, per docs/history/settings_ux_refactor_plan.md. Each
    .settings-row is a two-column label/control grid on wide screens
    (min(11rem,25%) label column so short "Port"-style labels don't leave a
    huge dead gap, generous control column) and collapses to a single stacked
