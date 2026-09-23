@@ -436,6 +436,11 @@ def build_character_blend(pair, design: CharacterBlendDesign, *, analysis_a: Amp
     config = CharacterAnalysisConfig(**design.analysis_config) if design.analysis_config else CharacterAnalysisConfig()
     analysis_a = analysis_a or _analysis_from_design(design.analysis_a) or analyse_rendered_audio(dry, a, pair.sample_rate, config)
     analysis_b = analysis_b or _analysis_from_design(design.analysis_b) or analyse_rendered_audio(dry, b, pair.sample_rate, config)
+    if analysis_a.version != analysis_b.version:
+        raise ValueError(
+            f"Amp A and Amp B analyses use different Character analysis versions "
+            f"({analysis_a.version} vs {analysis_b.version}); their spectra are not comparable"
+        )
     levels = np.array([x.input_gain_db for x in analysis_a.levels])
     drive_b = _smooth(_drive_curve(design, envelope, levels), pair.sample_rate, design.envelope_smoothing_ms)
     if design.teacher_semantics_version not in (1, 2, CHARACTER_TEACHER_SEMANTICS_VERSION):
@@ -485,6 +490,6 @@ def freeze_character_design(pair, result: CharacterBlendResult, amp_a_path: str,
         raise ValueError("Amp A and Amp B analyses were measured with different level windows")
     config = json.loads(json.dumps(asdict(CharacterAnalysisConfig(
         levels_db=tuple(x.input_gain_db for x in result.analysis_a.levels), frequencies_hz=result.analysis_a.frequencies_hz,
-        level_window_db=result.analysis_a.level_window_db,
+        level_window_db=result.analysis_a.level_window_db, version=result.analysis_a.version,
     ))))
     return CharacterBlendDesign(amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path), analysis_a=frozen_a, analysis_b=frozen_b, analysis_config=config, instrument_type=pair.instrument_type, design_reference_profile_id=pair.input_profile_id, design_reference_profile_gain_db=pair.input_profile_gain_db, calibration_mode=pair.calibration_mode, reference_input_level_dbu=pair.reference_input_level_dbu, amp_a_input_level_dbu=pair.amp_a_model_input_level_dbu, amp_b_input_level_dbu=pair.amp_b_model_input_level_dbu, amp_a_calibration_gain_db=pair.amp_a_calibration_gain_db, amp_b_calibration_gain_db=pair.amp_b_calibration_gain_db, amp_a_input_gain_db=pair.amp_a_input_gain_db, amp_b_input_gain_db=pair.amp_b_input_gain_db, calibration_applied=pair.calibration_applied, calibration_effective_mode=pair.calibration_mode if pair.calibration_applied else "raw", calibration_warning=pair.calibration_warning, **kwargs)

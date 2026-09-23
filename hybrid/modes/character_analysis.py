@@ -16,7 +16,18 @@ import numpy as np
 
 from ..core.envelope import bounded_causal_envelope_db
 
+# Analysis method versions (recorded in every analysis and frozen config):
+#   1 -- per-level spectrum from the first 0.5 s of the (non-contiguous)
+#        samples near that level, stitched together. The seams between
+#        stitched runs add broadband/HF energy that is not in the audio.
+#   2 -- per-level spectrum averaged over real contiguous frames whose level
+#        is near that level (see _contiguous_level_spectrum). No seams.
+# The default stays 1 until version 2 is approved as the production method;
+# frozen designs always keep the version they were analysed with.
 ANALYSIS_VERSION = 1
+SUPPORTED_ANALYSIS_VERSIONS = (1, 2)
+SPECTRUM_FRAME_SAMPLES = 4096
+SPECTRUM_MIN_FRAMES = 4
 DEFAULT_LEVELS_DB = (-24.0, -18.0, -12.0, -6.0, 0.0, 6.0)
 DEFAULT_FREQUENCIES_HZ = tuple(np.geomspace(80.0, 10_000.0, 24))
 _EPS = 1e-10
@@ -93,6 +104,33 @@ def _spectrum(audio: np.ndarray, sample_rate: int, frequencies: tuple[float, ...
     return tuple(float(v) for v in np.interp(np.log(frequencies), np.log(np.maximum(bins, 1.0)), mags))
 
 
+def _contiguous_level_spectrum(rendered: np.ndarray, envelope: np.ndarray, level_db: float, window_db: float,
+                               sample_rate: int, frequencies: tuple[float, ...]) -> tuple[float, ...]:
+    """Version-2 spectrum: average the Hann-windowed power spectra of real,
+    contiguous frames whose median dry-envelope level is within `window_db`
+    of `level_db` (or, if fewer than SPECTRUM_MIN_FRAMES qualify, the frames
+    nearest that level). Each frame is an unbroken stretch of audio, so no
+    splice discontinuities enter the measurement."""
+    n = len(rendered)
+    if n < 8:
+        return tuple([-120.0] * len(frequencies))
+    frame = min(SPECTRUM_FRAME_SAMPLES, n)
+    hop = max(1, frame // 2)
+    starts = np.arange(0, n - frame + 1, hop)
+    frame_levels = np.median(np.lib.stride_tricks.sliding_window_view(envelope[:n], frame)[::hop], axis=1)
+    distance = np.abs(frame_levels - level_db)
+    chosen = np.flatnonzero(distance <= window_db)
+    if len(chosen) < SPECTRUM_MIN_FRAMES:
+        chosen = np.argsort(distance, kind="stable")[: min(SPECTRUM_MIN_FRAMES, len(starts))]
+    window = np.hanning(frame)
+    power = np.zeros(frame // 2 + 1)
+    for start in starts[np.sort(chosen)]:
+        power += np.abs(np.fft.rfft(np.asarray(rendered[start:start + frame], dtype=np.float64) * window)) ** 2
+    mags = 10.0 * np.log10(np.maximum(power / len(chosen), _EPS ** 2))
+    bins = np.fft.rfftfreq(frame, 1.0 / sample_rate)
+    return tuple(float(v) for v in np.interp(np.log(frequencies), np.log(np.maximum(bins, 1.0)), mags))
+
+
 def analyse_rendered_audio(
     dry: np.ndarray, rendered: np.ndarray, sample_rate: int,
     config: CharacterAnalysisConfig = CharacterAnalysisConfig(), source_hash: str = "",
@@ -103,6 +141,8 @@ def analyse_rendered_audio(
     the nearest samples are used.  This keeps the design deterministic and
     makes the limitation visible in provenance rather than inventing signal.
     """
+    if config.version not in SUPPORTED_ANALYSIS_VERSIONS:
+        raise ValueError(f"unsupported Character analysis version {config.version}; supported: {SUPPORTED_ANALYSIS_VERSIONS}")
     n = min(len(dry), len(rendered))
     dry, rendered = np.asarray(dry[:n], dtype=np.float64), np.asarray(rendered[:n], dtype=np.float64)
     envelope = bounded_causal_envelope_db(dry, sample_rate)
@@ -117,10 +157,15 @@ def analyse_rendered_audio(
             mask = np.zeros(n, dtype=bool); mask[idx] = True
         x, y = dry[mask], rendered[mask]
         input_rms, output_rms = _db_rms(x), _db_rms(y)
+        if config.version == 1:
+            spectrum = _spectrum(y, sample_rate, config.frequencies_hz)
+        else:
+            spectrum = _contiguous_level_spectrum(rendered, envelope, level, config.level_window_db,
+                                                  sample_rate, config.frequencies_hz)
         levels.append(AmpLevelAnalysis(
             input_gain_db=float(level), input_rms_dbfs=input_rms, output_rms_dbfs=output_rms,
             output_peak_dbfs=float(20.0 * np.log10(max(float(np.max(np.abs(y))) if len(y) else 0.0, _EPS))),
-            compression_gain_db=output_rms - input_rms, spectrum_db=_spectrum(y, sample_rate, config.frequencies_hz),
+            compression_gain_db=output_rms - input_rms, spectrum_db=spectrum,
         ))
     return AmpCharacterAnalysis(sample_rate, config.frequencies_hz, tuple(levels), config.cache_key(), source_hash, config.version,
                                 config.level_window_db)

@@ -444,3 +444,55 @@ def test_streamed_level_mix_is_bit_identical_to_the_dense_sum(case):
     streamed = _mix_adjacent_filtered_levels(signal, firs, levels, envelope)
     dense = _dense_reference_mix(signal, firs, levels, envelope)
     assert np.array_equal(streamed, dense)  # exact float64 equality, not approximate
+
+
+def _alternating_level_sine(seconds=6, sample_rate=48000):
+    """A pure 220 Hz tone alternating between -12 and -30 dB RMS every 150 ms:
+    the samples near either level form separate runs, so stitching them
+    creates seams, while any contiguous stretch has almost no HF energy."""
+    t = np.arange(sample_rate * seconds) / sample_rate
+    gain = np.where((np.arange(len(t)) // int(0.150 * sample_rate)) % 2 == 0, 10 ** (-9 / 20), 10 ** (-27 / 20))
+    return np.sin(2 * np.pi * 220 * t) * gain
+
+
+def _hf_below_peak_db(analysis, level_db=-12.0):
+    freqs = np.array(analysis.frequencies_hz)
+    spectrum = np.array(next(x for x in analysis.levels if x.input_gain_db == level_db).spectrum_db)
+    return float(np.mean(spectrum[freqs >= 2000]) - spectrum.max())
+
+
+def test_v1_spectrum_shows_the_stitching_artefact_and_v2_does_not():
+    x = _alternating_level_sine()
+    stitched = analyse_rendered_audio(x, x, 48000, CharacterAnalysisConfig(version=1))
+    contiguous = analyse_rendered_audio(x, x, 48000, CharacterAnalysisConfig(version=2))
+    assert _hf_below_peak_db(stitched) > -50.0      # seams put HF energy into a pure tone
+    assert _hf_below_peak_db(contiguous) < -75.0    # contiguous frames do not
+    assert contiguous.version == 2 and stitched.version == 1
+
+
+def test_default_analysis_is_still_the_version_1_method():
+    x = _alternating_level_sine(seconds=2)
+    y = np.tanh(3.0 * x)
+    default = analyse_rendered_audio(x, y, 48000)
+    assert CharacterAnalysisConfig().version == 1
+    assert default == analyse_rendered_audio(x, y, 48000, CharacterAnalysisConfig(version=1))
+
+
+def test_analyses_of_different_versions_cannot_be_mixed():
+    pair = _pair()
+    a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, CharacterAnalysisConfig(version=1))
+    b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, CharacterAnalysisConfig(version=2))
+    with pytest.raises(ValueError, match="different Character analysis versions"):
+        build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=a, analysis_b=b)
+
+
+def test_version_2_design_records_and_restores_its_analysis_version(tmp_path):
+    pair = _pair(n=48000)
+    config = CharacterAnalysisConfig(version=2)
+    a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=a, analysis_b=b)
+    loaded = CharacterBlendDesign.read_json(freeze_character_design(pair, result, "a.nam", "b.nam").write_json(tmp_path / "d.json"))
+    assert loaded.analysis_config["version"] == 2 and loaded.analysis_a["version"] == 2
+    assert CharacterAnalysisConfig(**loaded.analysis_config).cache_key() == a.config_hash
+    assert np.array_equal(build_character_blend(pair, loaded).blend, result.blend)
