@@ -253,6 +253,16 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
     official_input, input_info = validate_training_input(official_input_path)
     amp_a, amp_b = load_nam(design.amp_a_path), load_nam(design.amp_b_path)
     a_sha, b_sha = _sha256_file(design.amp_a_path), _sha256_file(design.amp_b_path)
+    # The frozen analysis_a/b describe the .nam files as they were at freeze
+    # time; a file replaced at the same path would be corrected with another
+    # model's measurements. Designs saved before hashes were recorded have none.
+    for label, path, frozen_sha, actual_sha in (("Amp A", design.amp_a_path, design.amp_a_sha256, a_sha),
+                                                 ("Amp B", design.amp_b_path, design.amp_b_sha256, b_sha)):
+        if frozen_sha and frozen_sha != actual_sha:
+            raise TrainingInputError(
+                f"{label} ({path}) has changed since this Character Blend design was frozen, so its frozen "
+                "analysis no longer describes it. Render and audition the pair again to refreeze the design."
+            )
     calibration = resolve_calibration(design.calibration_mode, design.reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu)
     warnings = [calibration.warning] if calibration.warning else []
     a = render(amp_a, (official_input * db_to_amplitude(calibration.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32), input_info.sample_rate)

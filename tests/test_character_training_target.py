@@ -75,6 +75,18 @@ def test_generate_character_training_bundle_records_a_healthy_low_level_response
     )
 
 
+def test_generate_character_training_bundle_rejects_a_nam_changed_since_freeze(tmp_path):
+    amp_a = _write_nam(tmp_path / "a.nam")
+    amp_b = _write_nam(tmp_path / "b.nam")
+    training_input = _write_training_input(tmp_path / "input.wav")
+    design = _design(amp_a, amp_b, amp_a_sha256=character_training_target._sha256_file(amp_a),
+                     amp_b_sha256=character_training_target._sha256_file(amp_b))
+    amp_b.write_text(json.dumps({"architecture": "WaveNet", "sample_rate": 48000.0, "retrained": True}), encoding="utf-8")
+
+    with pytest.raises(TrainingInputError, match="Amp B .* has changed since this Character Blend design was frozen"):
+        generate_character_training_bundle(design, training_input, tmp_path / "out")
+
+
 def test_generate_character_training_bundle_aborts_on_low_level_collapse(tmp_path, monkeypatch):
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")
