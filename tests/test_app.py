@@ -1708,3 +1708,26 @@ def test_renderer_download_route_reports_backend_error_as_json(client, monkeypat
     data = resp.get_json()
     assert data["ok"] is False
     assert "no prebuilt binary" in data["error"]
+
+
+def test_character_low_level_check_applies_per_amp_input_gain(client, tmp_path, monkeypatch):
+    """The preview sweep must feed each amp the same input the bundle gate does
+    (calibration + that amp's input trim), or preview and generation disagree."""
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    body = _render_body(amp_a, amp_b, calibration_mode="raw", amp_b_input_gain_db=-12.0)
+    assert client.post("/api/render_pair", json=body).status_code == 200
+
+    peaks = {"a.nam": [], "b.nam": []}
+
+    def recording_render(model, audio, sample_rate):
+        peaks[Path(model.path).name].append(float(np.max(np.abs(audio))))
+        return np.asarray(audio, dtype=np.float32).copy()
+
+    monkeypatch.setattr(app_module, "render", recording_render)
+    resp = client.post("/api/character/low_level_check", json={"render_id": _current_render_id()})
+    assert resp.status_code == 200
+    assert peaks["a.nam"] and len(peaks["a.nam"]) == len(peaks["b.nam"])
+    for peak_a, peak_b in zip(peaks["a.nam"], peaks["b.nam"]):
+        assert peak_b == pytest.approx(peak_a * 10 ** (-12.0 / 20.0), rel=1e-4)

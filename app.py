@@ -2266,8 +2266,9 @@ def api_character_low_level_check():
 
     def build_pair_at_gain(gain_db: float):
         scaled = (reference * db_to_amplitude(gain_db)).astype(np.float32)
-        a = render(amp_a, (scaled * db_to_amplitude(pair.amp_a_calibration_gain_db)).astype(np.float32), pair.sample_rate)
-        b = render(amp_b, (scaled * db_to_amplitude(pair.amp_b_calibration_gain_db)).astype(np.float32), pair.sample_rate)
+        # Same per-amp input as the bundle gate: calibration AND input trim.
+        a = render(amp_a, (scaled * db_to_amplitude(pair.amp_a_calibration_gain_db + pair.amp_a_input_gain_db)).astype(np.float32), pair.sample_rate)
+        b = render(amp_b, (scaled * db_to_amplitude(pair.amp_b_calibration_gain_db + pair.amp_b_input_gain_db)).astype(np.float32), pair.sample_rate)
         return SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=pair.sample_rate)
 
     check = evaluate_low_level_response(build_pair_at_gain, design)
