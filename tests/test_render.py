@@ -95,3 +95,14 @@ def test_renderer_env_override_rejects_non_executable(monkeypatch, tmp_path):
     monkeypatch.setenv("NAM_RENDER_EXE", str(configured))
     with pytest.raises(NamRenderError, match="NAM_RENDER_EXE"):
         find_nam_render_exe()
+
+
+def test_render_unlaunchable_exe_raises_nam_render_error(tmp_path):
+    """A renderer that exists but can't be executed (no exec bit, or a binary for
+    another CPU) must surface as NamRenderError, not a raw OSError."""
+    not_executable = tmp_path / "nam_render"
+    not_executable.write_text("#!/bin/sh\nexit 0\n")
+    not_executable.chmod(0o644)
+    model = SimpleNamespace(path=Path("unused-model.nam"))
+    with pytest.raises(NamRenderError, match="could not run nam_render"):
+        render(model, np.zeros(100, dtype=np.float32), 48000, executable=not_executable)

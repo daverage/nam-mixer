@@ -145,6 +145,8 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | N
             raise NamRenderError(
                 f"nam_render timed out after {_SUBPROCESS_TIMEOUT_S}s for {model.path}"
             ) from exc
+        except OSError as exc:  # e.g. no exec bit, or a binary for another CPU
+            raise NamRenderError(f"could not run nam_render at {exe}: {exc}") from exc
 
         if result.returncode != 0 or not out_path.is_file():
             message = result.stderr.strip() or result.stdout.strip() or "unknown error"
