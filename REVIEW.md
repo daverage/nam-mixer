@@ -40,21 +40,100 @@ Tooling: `ruff` available (system Python 3.11); `vulture` not installed.
 Build a list of deletion candidates with evidence for each. The user reviews
 it before anything is removed. Delete in one commit per category.
 
-- [ ] Python code nothing uses: codebase-memory graph (no callers), `vulture`,
-      `ruff --select F401,F841`. Code only called from tests counts as dead too.
-- [ ] Scripts: for each file in `scripts/`, check for references (code, docs, CI,
-      tests). Keep deliberately guarded ones, e.g. `cg_reproduce_fc.py`, which
-      guards the frozen FC recipe.
-- [ ] Files that probably shouldn't be tracked: a tracked file in the
-      gitignored `work/`; decide on `deliverables/` and `.codebase-memory/`.
-- [ ] Docs: duplicated docs or docs for dropped designs. Moving them to
-      `docs/history/` is often better than deleting them.
-- [ ] Frontend: JS/CSS/template code no route or page uses.
+- [x] Python code nothing uses: `vulture` (run with and without `tests/`),
+      `ruff --select F401,F841,F811`, grep to confirm. (The codebase-memory
+      Cypher dialect allows only one `WITH` and can't express "no non-test
+      callers", so vulture + grep were used instead.)
+- [x] Scripts: every file in `scripts/` checked for references
+- [x] Files that probably shouldn't be tracked
+- [x] Docs: duplicates, stale locations, broken path references
+- [x] Frontend: every static/template file referenced; JS functions scanned
+- [ ] **User reviews the candidate list below and fills in Decision**
+- [ ] Delete approved items, one commit per category (A–F)
 
-### Candidate list
+### Candidate list (2026-09-23)
 
-| Path | Category | Evidence | Decision |
-|------|----------|----------|----------|
+Decision column: `delete` / `keep` / `move` / `?` (user to decide). My
+recommendation is in **bold**.
+
+#### A. Dead Python/JS code (unused even by tests, confirmed by grep)
+
+| Item | Evidence | Rec. | Decision |
+|------|----------|------|----------|
+| `hybrid/audio_metrics.py:129` `band_energy_dbfs` | no reference anywhere | **delete** | |
+| `hybrid/metadata.py:47` `HybridMetadata.write_sidecar` | no reference anywhere | **delete** | |
+| `hybrid/research.py:312` `tone3000_notes` | no reference anywhere | **delete** | |
+| `hybrid/kaggle_training.py:420` `KaggleCli.datasets_create` | only named in a test (not called by prod) | **check test, likely delete** | |
+| `scripts/single_nam_common.py` `render_capture`, `render_file_nam`, `load_law`, `save_json` | only `capture_path`/`official_input` are imported (by `cg_reproduce_fc.py`); the rest belong to the abandoned single_nam law | **delete** | |
+| `static/app.js:1421` `notImplementedAction` | defined, never called | **delete** | |
+| 10 unused imports (ruff F401): `hybrid/training_target.py`, `hybrid/cg_validation.py`, `hybrid/cg_project.py` ×2, `cg_routes.py`, `scripts/cg_reproduce_fc.py` ×2, 3 test files | not monkeypatch targets (grepped tests) | **delete (`ruff --fix`)** | |
+| 8 unused locals (ruff F841) | 5 in tests: delete. `hybrid/local_llm.py` `model`, `base_url` and `cg_routes.py` `STAGES` might be real bugs (a value computed then ignored), so hand these to the Phase 3 review | **tests: delete; prod: Phase 3** | |
+
+False positives, ignored: every Flask `api_*` route (decorator-registered),
+pydantic `@field_validator` methods in `local_llm.py`, `HTMLParser.handle_*`
+overrides in `research.py`, and anything under `packaging/backend/dist/`
+(gitignored build output).
+
+#### B. Production code used only by tests
+
+| Item | Rec. | Decision |
+|------|------|----------|
+| `a2_training_settings.settings_for` | ? | |
+| `audio_metrics.envelope_error_db`, `framed_spectral_correlation`, `multi_resolution_log_spectral_distance` (CG research metrics, cited in history docs) | ? | |
+| `cab_ir.PreparedCabIr.energy_fraction_within` (CLAUDE.md documents it as a diagnostic) | **keep** | |
+| `cg_excitation.level_swept_excitation`, `active_rms` | ? | |
+| `kaggle_training.KaggleJobManager.submit` | ? (check whether the routes use a different entry point) | |
+| `local_llm.suggest_recipe` | ? | |
+| `multi_blend.*.designated_gain_db` | ? | |
+| `nam_provenance.build_export_name`, `agreed_tone_type` (named in comments in `cab_ir.py`/`train_a2.py`) | ? | |
+| `receptive_field.cab_fir_serial_history_samples` | **keep** (RF policy maths, tested) | |
+| `sequential_nam.package_embedded_sequential` | ? | |
+| `envelope.rms_envelope_db` (DEPRECATED; only tests + `compare_envelopes.py`) | **keep for now**; revisit if C1 is deleted | |
+
+Recommendation: decide these in the Phase 3 review of each group, where the
+surrounding code is being read anyway. Don't bulk-delete them here.
+
+#### C. Scripts
+
+| Item | Evidence | Rec. | Decision |
+|------|----------|------|----------|
+| C1 `scripts/compare_envelopes.py` | one-off old-vs-new envelope comparison; only referenced in the `envelope.py` docstring | **delete** (and fix the docstring) | |
+| All other scripts | referenced by README/CLAUDE.md/tests/code/CI | **keep** | |
+
+#### D. Duplicated / questionable tracked files
+
+| Item | Evidence | Rec. | Decision |
+|------|----------|------|----------|
+| D1 4 `.nam` files byte-identical between `deliverables/` and `docs/history/Continuous Gain/phase4e/models/` (`*_P4E_B_s0` = `RECOMMENDED_*`, `v3/*_3Captures` = `alt_v3_C3`) | md5 match | **delete the docs/history copies**, point history docs at `deliverables/` | |
+| D2 `deliverables/` (8 trained `.nam`s in git) | release artifacts | ? keep in repo vs. move to a GitHub Release | |
+| D3 `deliverables/README.md` links `docs/CONTINUOUS_GAIN_FINAL_CANDIDATES.md` | file is now under `docs/history/Continuous Gain/` | **fix link** | |
+| D4 `desktop/src-tauri/icons/Square*Logo.png`, `StoreLogo.png` (11 files) | Windows Store/MSIX icons; not in `tauri.conf.json`, CI builds macOS `app` only | ? delete, unless a Windows MSIX build is planned | |
+
+Verified keep: `work/.gitkeep` (keeps the ignored dir), `.codebase-memory/.gitattributes`
+(indexer merge rule; graph files are ignored), `packaging/backend/dist/` (ignored).
+
+#### E. Docs
+
+| Item | Evidence | Rec. | Decision |
+|------|----------|------|----------|
+| E1 `docs/Continuous Gain/continuous_gain_ui_package/` (proposal + 5 SVGs) | the CG tab is implemented (`docs/continuous_gain_tab.md` is the live doc) | **move to docs/history** | |
+| E2 `docs/Continuous Gain/AMP_CONTROL_RESEARCH.md` | research background | ? keep as live doc or move to history | |
+| E3 `docs/settings_ux_refactor_plan.md` | plan doc, no status marker (last touched 2026-09-22) | ? move to history if implemented | |
+| E4 `docs/history/Continuous Gain/phase3.md` + `phase3_progress.md` | about the Hybrid A2 training target, not Continuous Gain; misfiled | **move to `docs/history/`** (Phase 2) | |
+| E5 ~9.6 MB of PNG/.nam under `docs/history/` | history plots/models | ? keep (only D1 dupes removed) | |
+
+#### F. Broken doc-path references (a mechanical fix; own commit in Phase 2)
+
+~50 source/test/doc files point at `docs/<name>.md` paths that moved into
+`docs/history/` (`phase3.md` in ~20 files, `blend-mode.md` in ~15,
+`kaggle_training.md`, `INPUT_PROFILE_RESEARCH.md`, `blend-mode-fixes.md`, and
+3 CG docs). Fix after the Phase 2 moves so each path is only rewritten once.
+
+#### Frontend
+
+All `static/` and `templates/` files are referenced. 199 JS functions were
+scanned; only `notImplementedAction` (A) is unused. CSS selectors were not
+scanned (low value).
 
 ---
 
@@ -103,3 +182,5 @@ separate commit.
 
 - 2026-09-23: Phase 0 done. Branch created, codebase-memory re-indexed OK,
   baseline 673/1/16 (1 failure already on master, see Baseline).
+- 2026-09-23: Phase 1 candidate list written (A–F). Waiting for the user's
+  decisions before deleting anything.
