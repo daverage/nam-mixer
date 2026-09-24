@@ -237,3 +237,23 @@ def test_training_ownership_follows_accepted_manifest_and_survives_launch_failur
         manager.train(manifests[1], "standard")
     assert manager.design_id == "first"
     assert manager.manifest_path == manifests[0]
+
+
+def test_collect_keeps_crlf_lines_and_multibyte_characters_split_across_reads(tmp_path):
+    """Windows ends every line with '\\r\\n', which must not erase the line; a
+    bare '\\r' is still a progress-bar overwrite; and a UTF-8 character split
+    across two os.read chunks must decode intact."""
+    import os
+    from types import SimpleNamespace
+
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    read_fd, write_fd = os.pipe()
+    bar = "\u2588".encode("utf-8")  # a tqdm block glyph, 3 bytes
+    os.write(write_fd, b"Epoch 1/60 done\r\nprogress 10%\rprogress 90%\r\nbar " + bar[:1])
+    os.write(write_fd, bar[1:] + b" end\r\n")
+    os.close(write_fd)
+    with os.fdopen(read_fd, "rb") as stdout:
+        manager.process = SimpleNamespace(stdout=stdout, wait=lambda: 0)
+        manager._collect()
+    assert list(manager.log)[-3:] == ["Epoch 1/60 done", "progress 90%", "bar \u2588 end"]
+

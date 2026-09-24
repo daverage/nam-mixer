@@ -1,6 +1,7 @@
 """Cross-platform, local-only runner for the dedicated A2 environment."""
 from __future__ import annotations
 
+import codecs
 import os
 import json
 import re
@@ -259,7 +260,13 @@ class LocalTrainingManager:
         within seconds)."""
         assert self.process and self.process.stdout
         fd = self.process.stdout.fileno()
+        # Incremental: a multi-byte character (e.g. tqdm's block glyphs) can
+        # straddle two 4096-byte reads.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         buffer = ""
+        # A '\r' is only a progress-bar overwrite if the next character is not
+        # '\n'; '\r\n' (every line on Windows) must still complete the line.
+        pending_cr = False
         while True:
             try:
                 chunk = os.read(fd, 4096)
@@ -267,8 +274,11 @@ class LocalTrainingManager:
                 break
             if not chunk:
                 break
-            text = chunk.decode("utf-8", errors="replace")
-            for char in text:
+            for char in decoder.decode(chunk):
+                if pending_cr:
+                    pending_cr = False
+                    if char != "\n":
+                        buffer = ""  # bare '\r': the next text overwrites the line
                 if char == "\n":
                     with self._lock:
                         self.log.append(buffer)
@@ -277,9 +287,10 @@ class LocalTrainingManager:
                 elif char == "\r":
                     with self._lock:
                         self._live_line = buffer
-                    buffer = ""
+                    pending_cr = True
                 else:
                     buffer += char
+        buffer += decoder.decode(b"", final=True)
         if buffer:
             with self._lock:
                 self.log.append(buffer)
