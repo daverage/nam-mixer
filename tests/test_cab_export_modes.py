@@ -15,6 +15,14 @@ from hybrid.core.render import NamRenderError, find_sequential_nam_render_exe
 from hybrid.training.embedded_completion import complete_embedded_artifact
 
 
+@pytest.fixture(autouse=True)
+def experimental_architectures_on(monkeypatch, tmp_path):
+    """These tests exercise the embedded (Sequential) package itself, which is
+    only produced with experimental architectures enabled."""
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true")
+
+
 def _a2_head(sample_rate=48000):
     def wave(label):
         return {"version": "0.7.0", "architecture": "WaveNet", "config": {"label": label}, "weights": [1], "sample_rate": sample_rate}
@@ -272,3 +280,15 @@ def test_embedded_package_is_named_from_the_base_name_not_the_suffixed_head(tmp_
     assert metadata["name"] == "Studio + v30.wav [Embedded Cab · Full]"
     assert metadata["gear_type"] == "amp_cab"
     assert json.loads(head_path.read_text())["metadata"]["name"] == "Studio [Amp Only]"   # the head download is untouched
+
+
+def test_embedded_completion_is_disabled_unless_experimental_architectures_are_on(monkeypatch, tmp_path):
+    import soundfile as sf
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(_a2_head()))
+    manifest, ir_path = _embedded_manifest(tmp_path)
+    monkeypatch.delenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES")
+    result = complete_embedded_artifact(manifest, head_path, tmp_path / "out", sample_rate=48000,
+                                        final_scalar=1.0, validation_input=ir_path)
+    assert result["state"] == "disabled"
+    assert "artifacts" not in result and not (tmp_path / "out").exists()
+    assert head_path.is_file()

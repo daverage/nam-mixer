@@ -38,6 +38,13 @@ def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Pa
     cab_data = manifest.get("cab") or {}
     if cab_data.get("export_mode") != "embedded":
         return {"state": "not_requested"}
+    # The Sequential package is for a possible future NAM specification and is
+    # never produced unless the user has enabled experimental architectures,
+    # even for a bundle generated while the setting was on.
+    from ..services.settings import experimental_architectures_enabled
+    if not experimental_architectures_enabled():
+        return {"state": "disabled", "experimental": True,
+                "reason": "experimental NAM architectures are disabled in Settings > Advanced"}
     state: dict[str, Any] = {"state": "packaging", "experimental": True, "variant": "full_only"}
     try:
         artifacts = package_embedded_artifacts(head_nam_path, output_dir, CabDesign.from_dict(cab_data),

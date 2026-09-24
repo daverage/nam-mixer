@@ -373,14 +373,21 @@ const cabInfoEl = document.getElementById("cab-info");
 const cabPreviewEnabled = document.getElementById("cab-preview-enabled");
 const cabExportMode = document.getElementById("cab-export-mode");
 const cabStatusEl = document.getElementById("cab-status");
+const cabExportModeInfo = document.getElementById("cab-export-mode-info");
+const CAB_EXPORT_MODE_NOTES = {
+  none: "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.",
+  learned: "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download.",
+  embedded: "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it.",
+};
 
 function updateCabStatus() {
+  if (cabExportModeInfo) cabExportModeInfo.textContent = CAB_EXPORT_MODE_NOTES[cabExportMode.value] || CAB_EXPORT_MODE_NOTES.none;
   if (!cabServerPath) {
     cabStatusEl.textContent = "Cab: off";
   } else if (cabExportMode.value === "embedded") {
     cabStatusEl.textContent = "Cab: two downloads -- tested head-only NAM plus exact embedded-cab NAM";
   } else if (cabExportMode.value === "learned") {
-    cabStatusEl.textContent = "Cab: Baked In -- trained into the A2 model";
+    cabStatusEl.textContent = "Cab: learned -- trained into the A2 model";
   } else if (cabPreviewEnabled.checked) {
     cabStatusEl.textContent = "Cab: preview only -- exported A2 remains amp/head only";
   } else {
@@ -393,7 +400,7 @@ cabFileInput.addEventListener("change", async () => {
   const file = cabFileInput.files[0];
   cabServerPath = null;
   cabPreviewEnabled.checked = false;
-  cabExportMode.value = "none";
+  setCabExportMode("none");
   cabPreviewEnabled.disabled = true;
   cabExportMode.disabled = true;
   if (!file) {
@@ -415,7 +422,7 @@ cabFileInput.addEventListener("change", async () => {
     cabServerPath = data.path;
     cabPreviewEnabled.disabled = false;
     cabExportMode.disabled = false;
-    cabExportMode.value = experimentalArchitecturesEnabled() ? "embedded" : "none";
+    setCabExportMode("none");
     const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
     const preparedMs = data.prepared_duration_ms !== undefined ? data.prepared_duration_ms.toFixed(1) : null;
     const energy999Ms = data.energy_999_ms !== undefined ? data.energy_999_ms.toFixed(1) : null;
@@ -454,12 +461,13 @@ cabExportMode.addEventListener("change", () => {
       "The tested head-only A2 will also be available as a separate download."
     );
     if (!proceed) {
-      cabExportMode.value = "none";
+      setCabExportMode("none");
       updateCabStatus();
       return;
     }
     sequentialEmbeddedWarningAcknowledged = true;
   }
+  syncCabExportOptions();
   // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
   // is also enabled" -- docs/history/blend-mode.md "CAB UI".
   updateCabStatus();
@@ -2792,7 +2800,7 @@ function validationSummaryHtml(report) {
 function renderLocalDownloadResult(designId, validationReport = null, downloadFilename = "model.nam", embeddedArtifact = null) {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
   const namFilename = downloadFilename || "model.nam";
-  const embeddedValidated = embeddedArtifact?.state === "validated";
+  const embeddedValidated = experimentalArchitecturesEnabled() && embeddedArtifact?.state === "validated";
   const embeddedFilename = namFilename.replace(/\.nam$/, "-with-cab.nam");
   completedNamArtifact = { type: "local", designId, downloadUrl, filename: namFilename, embeddedArtifact };
   completedValidationReport = validationReport;
@@ -2803,7 +2811,7 @@ function renderLocalDownloadResult(designId, validationReport = null, downloadFi
   const cabHtml = embeddedValidated
     ? `<a href="${downloadUrl}&artifact=embedded" download="${escapeHtml(embeddedFilename)}" class="btn btn-secondary btn-block btn-download-artifact">${desktopSaveLabel("Download NAM with embedded cabinet")}</a>`
     : "";
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel("Download tested head-only NAM")}</a>${cabHtml}<div class="hint">The validation below belongs to <code>${escapeHtml(namFilename)}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ""}</div>${validationSummaryHtml(validationReport)}`;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel(embeddedValidated ? "Download tested head-only NAM" : "Download tested NAM")}</a>${cabHtml}<div class="hint">The validation below belongs to <code>${escapeHtml(namFilename)}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ""}</div>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -2978,7 +2986,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // basename), which previously made the button's label lie about what
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
-  const embeddedValidated = data.embedded_artifact?.state === "validated";
+  const embeddedValidated = experimentalArchitecturesEnabled() && data.embedded_artifact?.state === "validated";
   const embeddedFilename = namFilename.replace(/\.nam$/, "-with-cab.nam");
   completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename, toolPath: data.output_nam_path || null, embeddedArtifact: data.embedded_artifact || null };
   document.dispatchEvent(new CustomEvent("nam:training-complete", { detail: { designId } }));
@@ -2989,7 +2997,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
     ? `<a href="${downloadUrl}&artifact=embedded" download="${embeddedFilename}" class="btn btn-secondary btn-block">${desktopSaveLabel("Download NAM with embedded cabinet")}</a>`
     : "";
   kaggleResultEl.innerHTML = `
-    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel("Download tested head-only NAM")}</a>
+    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel(embeddedValidated ? "Download tested head-only NAM" : "Download tested NAM")}</a>
     ${cabHtml}
     <div class="hint" title="${data.output_nam_path || ""}">Validated head artifact: <code>${namFilename}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ` Full path: <code>${data.output_nam_path || "(unknown)"}</code>`}</div>
     <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
@@ -3414,7 +3422,7 @@ function applySessionSettings(s) {
   cabPreviewEnabled.disabled = !s.cab.path;
   cabExportMode.disabled = !s.cab.path;
   cabPreviewEnabled.checked = s.cab.previewEnabled;
-  cabExportMode.value = s.cab.exportMode || (s.cab.baked ? "learned" : "none");
+  setCabExportMode(s.cab.exportMode || (s.cab.baked ? "learned" : "none"));
   applyCabDerivativeVisibility();
   updateCabStatus();
 
@@ -4277,21 +4285,41 @@ function renderSettings() {
 // the separately labelled exact head+cab download.
 const cabExportOptionEmbedded = document.getElementById("cab-export-option-embedded");
 const cabExportCompatibilityHint = document.getElementById("cab-export-compatibility-hint");
-const cabExportExperimentalHint = document.getElementById("cab-export-experimental-hint");
 let sequentialEmbeddedWarningAcknowledged = false;
 
-function applyCabDerivativeVisibility() {
-  const enabled = settingsFields.some((field) =>
-    field.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES" && field.value
+// The embedded (Sequential) cabinet export is for a possible future NAM
+// specification: unavailable everywhere unless this setting is on.
+function experimentalArchitecturesEnabled() {
+  return settingsFields.some((field) =>
+    field.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES" && field.value === true
   );
-  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = !enabled;
-  if (cabExportExperimentalHint) cabExportExperimentalHint.hidden = enabled;
-  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = !enabled;
-  if (!enabled && cabExportMode.value === "embedded") {
-    cabExportMode.value = "none";
-    updateCabStatus();
+}
+
+// WebKit (Safari and the desktop app) ignores `hidden` on <option>, so the
+// embedded choice is taken out of the list when it is unavailable.
+function syncCabExportOptions() {
+  if (!cabExportOptionEmbedded) return;
+  if (experimentalArchitecturesEnabled()) {
+    if (!cabExportOptionEmbedded.parentNode) cabExportMode.append(cabExportOptionEmbedded);
+  } else {
+    if (cabExportMode.value === "embedded") cabExportMode.value = "none";
+    cabExportOptionEmbedded.remove();
   }
 }
+
+function setCabExportMode(value) {
+  if (value === "embedded" && experimentalArchitecturesEnabled()) syncCabExportOptions();
+  cabExportMode.value = value === "embedded" && !experimentalArchitecturesEnabled() ? "none" : value;
+}
+
+function applyCabDerivativeVisibility() {
+  const enabled = experimentalArchitecturesEnabled();
+  const before = cabExportMode.value;
+  syncCabExportOptions();
+  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = !enabled;
+  if (cabExportMode.value !== before) updateCabStatus();
+}
+applyCabDerivativeVisibility();
 
 function renderTone3000ApiKeyLinkRow() {
   const row = document.createElement("div");

@@ -1703,6 +1703,12 @@ def _parse_cab_params(data: dict, pair_sample_rate: int):
     return get_prepared_cab_ir(cab_path, pair_sample_rate)
 
 
+# Downloads of an embedded-cabinet (Sequential) NAM, a possible future NAM
+# specification, are refused unless experimental architectures are enabled.
+EMBEDDED_DISABLED_MESSAGE = ("the embedded-cabinet NAM is an experimental NAM architecture and is disabled "
+                             "(Settings > Advanced > Enable experimental NAM architectures)")
+
+
 def _resolve_cab_design(data: dict, pair_sample_rate: int):
     """Build a `CabDesign` for provenance/freezing from generate-request
     params, or None if no cab is selected. Mirrors _parse_cab_params but
@@ -2762,6 +2768,8 @@ def api_local_training_download():
     training = manifest.get("training") or {}
     requested_artifact = request.args.get("artifact", "head")
     if requested_artifact == "embedded":
+        if not experimental_architectures_enabled():
+            return jsonify({"error": EMBEDDED_DISABLED_MESSAGE}), 409
         embedded = training.get("embedded_artifact") or {}
         if embedded.get("state") != "validated":
             return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
@@ -3178,6 +3186,8 @@ def api_kaggle_job_download(job_id: str):
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
     artifact = request.args.get("artifact", "head")
     if artifact == "embedded":
+        if not experimental_architectures_enabled():
+            return jsonify({"error": EMBEDDED_DISABLED_MESSAGE}), 409
         embedded = job.embedded_artifact or {}
         if embedded.get("state") != "validated":
             return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409

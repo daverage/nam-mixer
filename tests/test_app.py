@@ -1856,3 +1856,20 @@ def test_shutdown_endpoint_needs_the_shells_token(client, monkeypatch):
     assert stopped == [] and exited == []
     resp = client.post("/api/shutdown", headers={"X-NAM-Mixer-Shutdown-Token": "s3cret-token"})
     assert resp.status_code == 200 and stopped == [1] and exited == [1]
+
+
+@pytest.mark.parametrize("enabled, status", [(False, 409), (True, 200)])
+def test_embedded_nam_download_requires_experimental_architectures(client, tmp_path, monkeypatch, enabled, status):
+    a2_dir = tmp_path / "a2"; (a2_dir / "d1").mkdir(parents=True)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true" if enabled else "false")
+    sequential = a2_dir / "d1" / "model-with-cab.nam"; sequential.write_text("{}")
+    head = a2_dir / "d1" / "model.nam"; head.write_text("{}")
+    (a2_dir / "d1" / "training_manifest.json").write_text(jsonlib.dumps({"training": {
+        "output_nam_path": str(head),
+        "embedded_artifact": {"state": "validated", "artifacts": {"sequential_nam_path": str(sequential)}}}}))
+    resp = client.get("/api/local_training/download?design_id=d1&artifact=embedded")
+    assert resp.status_code == status
+    if not enabled:
+        assert "experimental" in resp.get_json()["error"]

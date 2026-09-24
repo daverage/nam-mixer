@@ -426,12 +426,11 @@
         </label>
         <label class="field-label" for="cab-export-mode">Final cabinet export</label>
         <select id="cab-export-mode" disabled>
-          <option value="none">Head-only NAM only</option>
-          <option value="embedded" id="cab-export-option-embedded" hidden>Create both — tested head NAM + exact embedded-cab NAM</option>
-          <option value="learned" hidden>Legacy learned-cab target</option>
+          <option value="none">Amp only — no cabinet in the NAM</option>
+          <option value="learned" id="cab-export-option-learned">Learned cab — train the cabinet into the NAM</option>
+          <option value="embedded" id="cab-export-option-embedded">Create both — tested head NAM + exact embedded-cab NAM (experimental)</option>
         </select>
-        <div class="info" id="cab-export-mode-info">The main A2 is always trained and tested without the cabinet. Advanced users can enable “Create both” in Settings.</div>
-        <div class="info" id="cab-export-experimental-hint">“Create both” is an advanced experimental export. Enable it under Settings &gt; Advanced &gt; “Enable experimental NAM architectures”.</div>
+        <div class="info" id="cab-export-mode-info">The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.</div>
         <div class="info" id="cab-export-compatibility-hint" hidden>The cabinet version uses NAM Sequential/Linear and may not load in players that accept only A2 architectures. The tested head-only NAM is always provided separately.</div>
 
         <label class="field-label" for="cab-display-name">Cabinet display name <span class="hint">(shown in the exported model's name)</span></label>
