@@ -383,3 +383,78 @@ def test_cg_embedded_cab_needs_experimental_architectures_but_learned_does_not(c
     learned = cab_client.post(f"/api/cg/projects/{pid}/generate", json={"cab_path": cab_client.cab_path, "cab_export_mode": "learned"})
     assert "job_id" in learned.get_json(), learned.get_json()
     _wait(cab_client, learned)
+
+
+# ---- Stage 4: validation and downloads through the routes
+
+def _trained_project(c, tmp_path, generate_payload=None):
+    """Captures -> analysis -> plan -> training files -> a 'trained' NAM recorded in the manifest (as the local trainer does)."""
+    pid = c.post("/api/cg/projects", json={"name": "Amp X", "amp": "X"}).get_json()["project"]["id"]
+    c.post(f"/api/cg/projects/{pid}/captures", data={"files": [(io.BytesIO(_nam_bytes(g)), f"x-G{g}.nam") for g in (1, 2, 3, 4, 5, 6)]},
+           content_type="multipart/form-data")
+    assert _wait(c, c.post(f"/api/cg/projects/{pid}/analyse"))["state"] == "done"
+    c.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": [1, 3, 6], "anchors": "fc"})
+    j = _wait(c, c.post(f"/api/cg/projects/{pid}/generate", json={"model_name": "Amp X FC", **(generate_payload or {})}))
+    assert j["state"] == "done", j["error"]
+    did = c.get(f"/api/cg/projects/{pid}").get_json()["bundle"]["design_id"]
+    nam = tmp_path / "trained.nam"; nam.write_bytes(_nam_bytes(3))
+    mp = tmp_path / "a2" / did / "training_manifest.json"
+    m = json.loads(mp.read_text()); m["training"] = {"output_nam_path": str(nam)}; mp.write_text(json.dumps(m))
+    return pid, mp, nam
+
+
+@pytest.fixture()
+def fake_validation(monkeypatch):
+    import hybrid.continuous_gain.validation as cgv
+
+    def fake_load(path):
+        return types.SimpleNamespace(raw=json.loads(Path(path).read_text()), input_level_dbu=None, path=Path(path))
+    fake_render = lambda m, x, sr, **k: amp_render(m.raw["metadata"]["gain_param"] * 1.5)(x)  # noqa: E731
+    for module in (cg_routes, cgv):
+        monkeypatch.setattr(module, "load_nam", fake_load)
+    monkeypatch.setattr(cgv, "render", fake_render)
+    monkeypatch.setattr(cg_routes, "load_reference_di", lambda name: synth_di(name, 3.0))
+
+
+@pytest.mark.parametrize("learned_cab", [False, True])
+def test_validation_route_runs_every_check_and_reports_a_learned_cab(cab_client, tmp_path, monkeypatch, fake_validation, learned_cab):
+    payload = {"cab_path": cab_client.cab_path, "cab_export_mode": "learned", "cab_display_name": "Test Cab"} if learned_cab else {}
+    pid, mp, nam = _trained_project(cab_client, tmp_path, payload)
+    assert json.loads(mp.read_text())["cab"]["baked"] is learned_cab
+
+    j = _wait(cab_client, cab_client.post(f"/api/cg/projects/{pid}/validate"))
+    assert j["state"] == "done", j["error"]
+    v = cab_client.get(f"/api/cg/projects/{pid}").get_json()["validation"]
+    assert v["model"]["sha256"] == hashlib.sha256(nam.read_bytes()).hexdigest()
+    assert v["compatibility"]["standard_nam"] is True and v["safety"]["finite"] is True
+    assert {r["position"] for r in v["progression"]["positions"]} == {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}
+    assert {r["role"] for r in v["progression"]["positions"]} == {"training", "reference"}
+    assert v["blocks_export"] is False and v["learned_cab"] is learned_cab and ("cab_note" in v) is learned_cab
+    assert cab_client.get(f"/api/cg/projects/{pid}/audition/sweep.wav").status_code == 200
+    assert cab_client.get(f"/api/cg/projects/{pid}/audition/..%2Fproject.json").status_code == 404
+
+
+def test_nam_download_route_serves_the_tested_nam_and_gates_the_embedded_one(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    pid, mp, nam = _trained_project(client, tmp_path)
+    stem = json.loads(mp.read_text())["artifact_stem"]
+
+    head = client.get(f"/api/cg/projects/{pid}/nam/download")
+    assert head.status_code == 200 and head.data == nam.read_bytes()
+    assert f'filename={stem}.nam' in head.headers["Content-Disposition"]
+    assert client.get(f"/api/cg/projects/{pid}/nam/download?artifact=other").status_code == 400
+
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "false")
+    refused = client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab")
+    assert refused.status_code == 409 and "experimental" in refused.get_json()["error"]
+
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true")
+    assert client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab").status_code == 409     # nothing validated yet
+    sequential = tmp_path / "with-cab.nam"
+    m = json.loads(mp.read_text())
+    m["training"]["embedded_artifact"] = {"state": "validated", "artifacts": {"sequential_nam_path": str(sequential)}}
+    mp.write_text(json.dumps(m))
+    assert client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab").status_code == 404     # recorded but missing on disk
+    sequential.write_text("{}")
+    cab = client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab")
+    assert cab.status_code == 200 and f"filename={stem}-with-cab.nam" in cab.headers["Content-Disposition"]
