@@ -256,16 +256,13 @@ separate commit.
         the app and the Sequential packager; the test-only routine is replaced
         and the cloud copy is parity-checked across a 12-case matrix (daed998).
         App names are unchanged, and historical baked-cab exports (which
-        contain the cabinet) keep `[Learned Cab]`. **Open naming questions
-        (labels kept as they are):**
-        1. `[Amp Only]` means "no NAM Mixer cabinet stage". If the source
-           captures are full-rig (`gear_type` amp_cab), the model does contain
-           a cabinet, and the export's `gear_type: amp` is also wrong.
-        2. Continuous Gain without a cab gets no suffix, while the other modes
-           get `[Amp Only]` for the same kind of content.
-        3. The embedded mode's downloadable head is amp-only but unsuffixed,
-           only so the package name built from it doesn't double up (the two
-           could be decoupled).
+        contain the cabinet) keep `[Learned Cab]`. **User decisions applied
+        (1e58fdd):** full-rig source captures → `[Full Rig]` + gear_type
+        `amp_cab`; Continuous Gain follows the same rule; the embedded
+        mode's head download is labelled `[Amp Only]`/`[Full Rig]`, and the
+        package is named from the base name. CLAUDE.md documents the rule.
+        Download filenames (`<stem>.nam`, `<stem>-with-cab.nam`) are
+        unchanged.
       - CG `_shift`/`_db` helpers are copied across bundle/validation/probe
         (a consolidation refactor; could go with #10).
       - `stage()` still writes the legacy 'uploading' state (the UI labels it
@@ -332,3 +329,4 @@ separate commit.
 - 2026-09-23: modes #5, #8 and #9 done; #7 implemented as opt-in v2, stopped for the listening review; #10 deferred. 709 passed, 12 skipped.
 - 2026-09-24: Phase 3 group 3 done (training, Continuous Gain, services). 755 passed, 12 skipped. Next: group 4 (Flask layer, JS, desktop, cloud, native, scripts); #7 still awaits the listening review; #10 deferred.
 - 2026-09-24: #3 embedded tolerance measured on the real renderer (unchanged, cce0aba); #2 export naming unified (daed998) with three open naming questions; #10 still deferred. 770 passed, 12 skipped.
+- 2026-09-24: Export names and gear_type now state the audio content in every mode (1e58fdd). 780 passed, 12 skipped.
