@@ -215,3 +215,43 @@ def test_embedded_completion_never_validates_when_nothing_is_compared(monkeypatc
                                         validation_input=ir_path)
     assert result["state"] == "failed" and "warm-up" in result["error"]
     assert "download_available" not in result
+
+
+_REPO = Path(__file__).resolve().parent.parent
+_REAL_A2 = _REPO / "docs" / "history" / "Continuous Gain" / "phase4e" / "models" / "jcm800_P4E_B_s0.nam"
+_REAL_IR = _REPO / "assets" / "nam_models" / "V30 LL 4FB 4x12 SM57 1.00in 0.0in SA73.wav"
+
+
+def _sequential_renderer_available() -> bool:
+    from hybrid.core.render import NamRenderError, find_sequential_nam_render_exe
+    try:
+        find_sequential_nam_render_exe()
+        return True
+    except NamRenderError:
+        return False
+
+
+@pytest.mark.skipif(not (_REAL_A2.is_file() and _REAL_IR.is_file() and _sequential_renderer_available()),
+                    reason="needs the built native/nam_render (Sequential-capable) and the committed A2/IR fixtures")
+@pytest.mark.parametrize("final_scalar", [1.0, 10 ** (-4 / 20)])
+def test_real_embedded_package_with_a_long_ir_validates_inside_the_tolerance(tmp_path, final_scalar):
+    """A real A2 head + the real 24001-tap V30 IR through the real Sequential
+    renderer: measured max error ~3e-7, well inside the 3e-6 check (a 0.01 dB
+    scalar error alone is ~7e-4)."""
+    import shutil
+    import soundfile as sf
+
+    head_path = tmp_path / "trained-a2.nam"
+    shutil.copyfile(_REAL_A2, head_path)
+    ir_path = tmp_path / "cab.wav"
+    shutil.copyfile(_REAL_IR, ir_path)
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    manifest = {"cab": CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256,
+                                  export_mode=EXPORT_MODE_EMBEDDED).to_dict()}
+    dry, sr = sf.read(_REPO / "assets" / "di" / "moderate_brit.wav", dtype="float32")
+    validation_input = tmp_path / "input.wav"
+    sf.write(validation_input, dry[: 3 * sr], sr, subtype="FLOAT")
+    result = complete_embedded_artifact(manifest, head_path, tmp_path / "out", sample_rate=48000,
+                                        final_scalar=final_scalar, validation_input=validation_input)
+    assert result["state"] == "validated", result.get("error")
+    assert result["package_max_abs_error"] < 1e-6
