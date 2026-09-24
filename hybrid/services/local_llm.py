@@ -255,7 +255,7 @@ class _BlendRecipe(_ResponseModel):
 class _HybridRecipe(_ResponseModel):
     mode: Literal["hybrid"]
     switchKnob: float = Field(ge=0, le=10)
-    width: float = Field(ge=1, le=24)
+    width: float = Field(ge=2, le=18)  # the UI transition slider's range; out of range -> one repair retry
     explanation: str
 
     @field_validator("switchKnob", "width", mode="before")

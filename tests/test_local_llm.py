@@ -734,3 +734,16 @@ def test_converse_rejects_recipe_with_backwards_switch_knob_narrative(monkeypatc
 
     with pytest.raises(local_llm.LocalLlmError, match="incorrectly described"):
         local_llm.converse("make a punk tone", opener=fake_open, require_recipe=True)
+
+
+@pytest.mark.parametrize("width", [1, 1.9, 18.5, 24])
+def test_hybrid_width_outside_the_ui_slider_range_is_rejected(width):
+    """The transition slider is 2-18 dB; a wider/narrower value would be
+    silently clamped by the UI while the explanation still quoted it."""
+    with pytest.raises(local_llm.LocalLlmError, match="invalid width"):
+        local_llm._recipe_from_json({"mode": "hybrid", "switchKnob": 4, "width": width, "explanation": "x"})
+
+
+@pytest.mark.parametrize("width", [2, 9.5, 18])
+def test_hybrid_width_inside_the_ui_slider_range_is_accepted(width):
+    assert local_llm._recipe_from_json({"mode": "hybrid", "switchKnob": 4, "width": width, "explanation": "x"}).width == width
