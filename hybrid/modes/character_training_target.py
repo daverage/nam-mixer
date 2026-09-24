@@ -15,7 +15,7 @@ from ..core.envelope import bounded_envelope_max_history_ms
 from ..core.input_profiles import db_to_amplitude
 from ..core.nam_loader import load_nam
 from ..training.nam_provenance import source_metadata_fields as _source_metadata_fields
-from ..core.render import render
+from ..core.render import SLIM_FULL, render
 from ..core.safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
 from .training_target import (
     A2_TARGET_PEAK_CEILING_DBFS, TargetSafetyReport, TrainingBundle, TrainingInputError,
@@ -225,7 +225,7 @@ def check_export_low_level_response(manifest: dict, nam_path, input_path, sample
 def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int) -> "dict | None":
     """Backward-compatible Full-variant entry point for existing callers."""
     return check_export_low_level_response(
-        manifest, nam_path, input_path, sample_rate, variant="full", slim=0.0,
+        manifest, nam_path, input_path, sample_rate, variant="full", slim=SLIM_FULL,
     )
 
 

@@ -27,7 +27,7 @@ from hybrid.modes.design import freeze_design
 from hybrid.modes.fixed_blend import build_fixed_blend, freeze_blend_design
 from hybrid.core.nam_loader import load_nam
 from hybrid.core.pipeline import build_hybrid, render_pair
-from hybrid.core.render import NamRenderError, find_nam_render_exe, render
+from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
 from hybrid.training.validation import compute_esr_metrics, render_reference_hybrid
 
 REPORT_SCHEMA_VERSION = 2
@@ -209,7 +209,7 @@ def run(
         for export_path in export_paths:
             model = load_nam(export_path)
             variants = {}
-            for label, slim in (("full", 0.0), ("lite", 1.0)):
+            for label, slim in (("full", SLIM_FULL), ("lite", SLIM_LITE)):
                 try:
                     candidate = render(model, dry, sample_rate, slim=slim)
                     variants[label] = {"audio": _audio_check(candidate, len(dry)),

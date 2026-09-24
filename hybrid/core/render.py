@@ -40,6 +40,17 @@ _NAM_RENDER_EXE_CANDIDATES = (
 )
 
 
+# NAMCore slimmable-size values for a packed A2 (SlimmableContainer) export.
+# ContainerModel::_get_index_for_slimmable_size picks the FIRST submodel whose
+# max_value is greater than the requested size; A2 exports list the small
+# (Lite, 3-channel, max_value 0.5) submodel first and the large (Full,
+# 8-channel, max_value 1.0) one last. So 0.0 selects Lite and 1.0 falls
+# through to Full -- the same model NAMCore uses when no size is given.
+# Verified by rendering each extracted submodel (tests/test_render.py).
+SLIM_FULL = 1.0
+SLIM_LITE = 0.0
+
+
 class NamRenderError(RuntimeError):
     """Raised when the native nam_render tool can't be found or fails to run."""
 
@@ -106,9 +117,9 @@ def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | N
     - `slim`: optional NAMCore "slimmable size" in [0.0, 1.0] -- only
       meaningful for models built as a `SlimmableContainer`/slimmable WaveNet
       (e.g. an A2 packed model's Full/Lite submodels), forwarded to the
-      native tool's `--slim` flag verbatim (0.0 is the largest/"Full"
-      submodel, 1.0 the smallest/"Lite" one -- see
-      native/nam_render/build/_deps/namcore-src/NAM/wavenet/slimmable.cpp).
+      native tool's `--slim` flag verbatim. Use SLIM_FULL (1.0) / SLIM_LITE
+      (0.0) rather than literals -- see their definition for NAMCore's
+      selection rule (native/nam_render/build/_deps/namcore-src/NAM/container.cpp).
       Left as `None` (the default, no flag passed) for ordinary
       non-slimmable models -- this is purely additive, existing callers are
       unaffected. docs/history/phase3.md section 20.

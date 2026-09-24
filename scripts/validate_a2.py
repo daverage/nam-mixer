@@ -42,6 +42,7 @@ from hybrid.modes.design import HybridDesign  # noqa: E402
 from hybrid.modes.fixed_blend import BlendDesign  # noqa: E402
 from hybrid.modes.character_blend import CharacterBlendDesign  # noqa: E402
 from hybrid.core.input_profiles import db_to_amplitude  # noqa: E402
+from hybrid.core.render import SLIM_FULL, SLIM_LITE  # noqa: E402
 from hybrid.core.safety import check_audio  # noqa: E402
 from hybrid.training.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character, render_trained_a2  # noqa: E402
 
@@ -86,9 +87,9 @@ def run_validation(
             gained = (dry * db_to_amplitude(gain_db)).astype(np.float32)
 
             ref = render_teacher(design, gained, sr)
-            full = render_trained_a2(a2_nam_path, gained, sr, slim=0.0)
+            full = render_trained_a2(a2_nam_path, gained, sr, slim=SLIM_FULL)
             try:
-                lite = render_trained_a2(a2_nam_path, gained, sr, slim=1.0)
+                lite = render_trained_a2(a2_nam_path, gained, sr, slim=SLIM_LITE)
                 lite_ok = True
             except Exception as exc:  # noqa: BLE001 -- Lite may not be supported by every export
                 print(f"WARNING: Lite render failed for {di_stem}/{label}: {exc}")

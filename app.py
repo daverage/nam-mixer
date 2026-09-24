@@ -91,7 +91,7 @@ from hybrid.services.research import tone3000_model_download, tone3000_models, t
 from hybrid.core.nam_loader import load_nam
 from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
 from hybrid.core.pipeline import RenderedPair, amp_input_peak_warnings, build_hybrid, render_pair
-from hybrid.core.render import NamRenderError, find_nam_render_exe, render
+from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
 from hybrid.core.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
 from hybrid.services.update_check import UpdateCheckError, check_for_update
 from hybrid.core.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
@@ -1902,7 +1902,7 @@ def api_create_comparison():
 
     try:
         teacher = render_processed_reference(design, manifest, dry, sample_rate).hybrid
-        full = render_trained_a2(model_path, dry, sample_rate, slim=0.0)
+        full = render_trained_a2(model_path, dry, sample_rate, slim=SLIM_FULL)
     except Exception as exc:
         logger.exception("Failed to build teacher/Full comparison")
         return jsonify({"error": f"comparison render failed: {exc}", "code": "comparison_render_failed"}), 422
@@ -1917,7 +1917,7 @@ def api_create_comparison():
     }]
     lite_error = None
     try:
-        lite = render_trained_a2(model_path, dry, sample_rate, slim=1.0)[:n].astype(np.float32)
+        lite = render_trained_a2(model_path, dry, sample_rate, slim=SLIM_LITE)[:n].astype(np.float32)
         if len(lite) != n or not np.all(np.isfinite(lite)):
             raise ValueError("Lite render produced empty or non-finite audio")
         channels.append(lite)

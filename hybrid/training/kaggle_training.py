@@ -50,7 +50,7 @@ from ..modes.character_training_target import check_export_low_level_response
 from .embedded_completion import complete_embedded_artifact
 from ..core.nam_loader import load_nam
 from ..paths import REPO_ROOT
-from ..core.render import NamRenderError, render
+from ..core.render import SLIM_FULL, SLIM_LITE, NamRenderError, render
 from .validation import compute_esr_metrics
 
 ACCELERATOR = "NvidiaTeslaT4"
@@ -1388,7 +1388,7 @@ def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_
 
     report: dict = {"sha256": _sha256_file(nam_path), "sample_rate": sr}
 
-    for label, slim in (("full", 0.0), ("lite", 1.0)):
+    for label, slim in (("full", SLIM_FULL), ("lite", SLIM_LITE)):
         try:
             rendered = render(model, input_audio, sr, slim=slim)
         except NamRenderError as exc:
@@ -1401,7 +1401,7 @@ def validate_downloaded_model(nam_path: Path, training_input_path: Path, target_
 
     low_level_response_checks = {}
     if manifest is not None:
-        for label, slim in (("full", 0.0), ("lite", 1.0)):
+        for label, slim in (("full", SLIM_FULL), ("lite", SLIM_LITE)):
             try:
                 result = check_export_low_level_response(
                     manifest, nam_path, training_input_path, sr, variant=label, slim=slim,

@@ -20,6 +20,7 @@ import pytest
 import soundfile as sf
 
 import app as app_module
+from hybrid.core.render import SLIM_FULL, SLIM_LITE
 import hybrid.modes.blend_training_target as blend_training_target
 import hybrid.core.pipeline as pipeline
 import hybrid.modes.training_target as training_target
@@ -1270,7 +1271,7 @@ def test_comparison_builds_synchronised_teacher_full_lite_stems(client, tmp_path
     monkeypatch.setattr(app_module, "render_processed_reference", lambda design, manifest, dry, sr: SimpleNamespace(hybrid=dry * 2.0))
     def fake_model(path, dry, sr, slim=None):
         seen.append((Path(path), slim, float(dry[0])))
-        return dry * (2.0 if slim == 0.0 else 1.5)
+        return dry * (2.0 if slim == SLIM_FULL else 1.5)
     monkeypatch.setattr(app_module, "render_trained_a2", fake_model)
 
     response = client.post("/api/comparison", json={
@@ -1282,7 +1283,7 @@ def test_comparison_builds_synchronised_teacher_full_lite_stems(client, tmp_path
     assert data["actual_output_levels"] is True
     assert [variant["id"] for variant in data["variants"]] == ["teacher", "full", "lite"]
     assert data["variants"][1]["metrics"]["raw_esr"] == pytest.approx(0.0)
-    assert [entry[1] for entry in seen] == [0.0, 1.0]
+    assert [entry[1] for entry in seen] == [SLIM_FULL, SLIM_LITE]
     assert all(entry[0] == model for entry in seen)
     audio_response = client.get(data["audio_url"])
     audio, sample_rate = sf.read(io.BytesIO(audio_response.data), dtype="float32", always_2d=True)
@@ -1331,7 +1332,7 @@ def test_comparison_cache_identity_changes_with_gain_and_lite_can_be_unavailable
     _comparison_bundle(tmp_path, monkeypatch)
     monkeypatch.setattr(app_module, "render_processed_reference", lambda design, manifest, dry, sr: SimpleNamespace(hybrid=dry))
     def fake_model(path, dry, sr, slim=None):
-        if slim == 1.0:
+        if slim == SLIM_LITE:
             raise RuntimeError("export has no Lite branch")
         return dry
     monkeypatch.setattr(app_module, "render_trained_a2", fake_model)

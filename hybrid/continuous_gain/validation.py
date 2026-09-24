@@ -23,7 +23,7 @@ import numpy as np
 from .parallel import pmap
 from .probe import SR, features, load_reference_di
 from ..core.nam_loader import load_nam
-from ..core.render import NamRenderError, render
+from ..core.render import SLIM_FULL, SLIM_LITE, NamRenderError, render
 from ..training.validation import compute_esr_metrics
 
 HELD_OUT_DIS = ("moderate_brit", "clean_mayer", "bass_rollin")
@@ -54,7 +54,7 @@ def check_compatibility(nam_path: Path, validation_input: np.ndarray) -> dict:
     out = {"architecture": raw.get("architecture"), "version": raw.get("version"), "sample_rate": raw.get("sample_rate"),
            "top_level_keys": sorted(raw), "metadata_keys": sorted((raw.get("metadata") or {}).keys())}
     model = load_nam(nam_path)
-    for label, slim in (("full", 0.0), ("lite", 1.0)):
+    for label, slim in (("full", SLIM_FULL), ("lite", SLIM_LITE)):
         try:
             y = render(model, validation_input, SR, slim=slim)
             ok = y.ndim == 1 and len(y) == len(validation_input) and bool(np.all(np.isfinite(y)))

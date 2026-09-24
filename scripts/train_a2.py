@@ -70,7 +70,7 @@ from hybrid.core.receptive_field import (  # noqa: E402
     assert_required_history_fits,
     compute_source_nam_receptive_field,
 )
-from hybrid.core.render import NamRenderError, render  # noqa: E402
+from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, render  # noqa: E402
 from hybrid.modes.metadata import suggested_nam_filename  # noqa: E402
 from hybrid.core.nam_loader import load_nam  # noqa: E402
 from hybrid.training.validation import compute_esr_metrics  # noqa: E402
@@ -584,7 +584,7 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
         raise TrainingAbort(f"input sample rate {sr} != expected {expected_sample_rate}")
 
     try:
-        rendered = render(model, input_audio, sr, slim=(1.0 if slim else 0.0))
+        rendered = render(model, input_audio, sr, slim=(SLIM_LITE if slim else SLIM_FULL))
     except NamRenderError as exc:
         raise TrainingAbort(f"NAMCore failed to render the exported model ({nam_path}): {exc}") from exc
 
@@ -599,7 +599,7 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
     return {"path": str(nam_path), "sample_rate": sr, "frame_count": len(rendered), "rendered": rendered}
 
 
-def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float = 0.0) -> "dict | None":
+def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float = SLIM_FULL) -> "dict | None":
     """Thin wrapper over `hybrid.modes.character_training_target.check_full_low_
     level_response` (docs/history/blend-mode-fixes.md, Phases 10-11) that also prints
     a verdict line -- the actual sweep/comparison logic is shared with
@@ -682,7 +682,7 @@ def main(argv=None) -> int:
         full_metrics = compare_to_target(full_result["rendered"], target_path)
         low_level_response_checks = {}
         full_quiet = check_full_low_level_response(
-            manifest, nam_path, input_path, sample_rate, variant="full", slim=0.0,
+            manifest, nam_path, input_path, sample_rate, variant="full", slim=SLIM_FULL,
         )
         if full_quiet is not None:
             low_level_response_checks["full"] = full_quiet
@@ -694,7 +694,7 @@ def main(argv=None) -> int:
             lite_metrics = compare_to_target(lite_result["rendered"], target_path)
             lite_validation = {"rendered_ok": True, "metrics": lite_metrics}
             lite_quiet = check_full_low_level_response(
-                manifest, nam_path, input_path, sample_rate, variant="lite", slim=1.0,
+                manifest, nam_path, input_path, sample_rate, variant="lite", slim=SLIM_LITE,
             )
             if lite_quiet is not None:
                 low_level_response_checks["lite"] = lite_quiet
