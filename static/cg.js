@@ -12,7 +12,14 @@
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
   // Rough elapsed-time estimates -- real measurements from this project's own end-to-end runs (parallel capture
   // rendering + a per-capture probe cache, see hybrid/continuous_gain/parallel.py), not a guarantee: "usually", not exact.
-  const estimateSeconds = (count) => 20 + count * 2.6;      // ~20s fixed (timing/dither audit) + ~2.6s/capture, measured on 19 captures
+  // Measured time per step: a fixed part plus a per-capture part. The one
+  // place to update when a step gets faster or slower.
+  const STEP_TIMING = {
+    analyse: { fixed: 20, perCapture: 2.6 },   // timing/dither audit + per-capture probes, measured on 19 captures
+    generate: { fixed: 20, perCapture: 4 },    // training audio through each selected capture
+    validate: { fixed: 15, perCapture: 3 },    // comparisons + audition sweep
+  };
+  const estimateSeconds = (step, count) => STEP_TIMING[step].fixed + count * STEP_TIMING[step].perCapture;
   const formatDuration = (seconds) => seconds < 90 ? `about ${Math.max(10, Math.round(seconds / 10) * 10)} seconds` : `about ${Math.round(seconds / 60)} minutes`;
   const say = (t, bad) => setStatus(t || "", Boolean(bad));       // the app-wide status line (app.js), not a second message area
 
@@ -100,7 +107,7 @@
         S.stage = 1;
         await load(projectId);
         const st = S.data.project;
-        S.stage = S.data.training && S.data.training.trained ? 4 : S.data.bundle ? 3 : S.data.plan ? 2 : S.data.analysis ? 2 : 1;
+        S.stage = S.data.training && S.data.training.trained ? 4 : S.data.bundle ? 3 : (S.data.plan || S.data.analysis) ? 2 : 1;
         render();
         say(`Opened ${st.name}.`);
       } catch (e) { say(`Could not open this project: ${e.message}. Its working files are not on this computer (a session file carries the trained model, not the captures).`, true); }
@@ -199,8 +206,8 @@
       (caps.length ? table(["File", "Physical gain position", "Audit", ""], rows) : `<p class="info">No captures yet.</p>`)
       + `<p class="info">${esc(d.check.summary)}</p>${issues ? `<ul class="cg-issues">${issues}</ul>` : ""}
         <button type="button" class="btn btn-primary btn-block" id="cg-analyse" ${d.check.ready && !S.job ? "" : "disabled"}>Analyse captures</button>
-        <p class="info">Runs each capture through the native renderer, in parallel (usually ${formatDuration(estimateSeconds(d.check.count))} for ${d.check.count} captures on this computer). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
-      `<span class="cost-badge cost-badge-expensive">⚡ ${formatDuration(estimateSeconds(d.check.count))}</span>`);
+        <p class="info">Runs each capture through the native renderer, in parallel (usually ${formatDuration(estimateSeconds("analyse", d.check.count))} for ${d.check.count} captures on this computer). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
+      `<span class="cost-badge cost-badge-expensive">⚡ ${formatDuration(estimateSeconds("analyse", d.check.count))}</span>`);
     return cols(setup, main);
   }
   function bindStage1() {
@@ -331,7 +338,7 @@
         <input class="file-input" id="cg-cab-name" maxlength="80" value="${esc(S.cabDisplayName)}" ${S.cab ? "" : "disabled"} placeholder="e.g. Modern Boutique 4x12">
         <p class="info">Training and validation use the head-only signal. Afterward NAM Mixer derives a separate head + cabinet NAM. The cabinet version uses NAM Sequential/Linear and may not load in A2-only players.</p>
         <button type="button" class="btn btn-primary btn-block" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Recreate training files" : "Create training files"}</button>
-        <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(20 + p.selected.length * 4)}.</p>
+        <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(estimateSeconds("generate", p.selected.length))}.</p>
         ${stale ? `<p class="info"><strong>The plan changed since these files were created — recreate them before training.</strong></p>` : ""}${jobBox()}
         ${b && t && t.core ? `<p class="info">Design <code>${esc(b.design_id)}</code><br>input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code> · target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code><br>output scale ${fmt(t.core.output_scale_c, 4)} — set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB.</p>` : ""}`);
     const train = b && !stale ? card("Train", `<div id="cg-train-slot"></div>${t && t.trained ? `<p class="info">${badge("instant", "trained")} <code>${esc(t.output_nam_path.split("/").pop())}</code></p><button type="button" class="btn btn-primary btn-block" id="cg-goto4">Continue to Test &amp; export</button>` : ""}`) : "";
@@ -393,7 +400,7 @@
     const cabReady = d.training.embedded_artifact && d.training.embedded_artifact.state === "validated";
     const actions = card("Test & export", `
         <button type="button" class="btn btn-secondary btn-block" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>
-        <p class="info">Usually ${formatDuration(15 + (d.plan ? d.plan.selected.length * 3 : 12))} -- renders comparisons and the audition sweep, in parallel.</p>
+        <p class="info">Usually ${formatDuration(estimateSeconds("validate", d.plan ? d.plan.selected.length : 4))} -- renders comparisons and the audition sweep, in parallel.</p>
         <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download>Download tested head-only NAM</a>
         ${cabReady ? `<a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=cab" download>Download NAM with embedded cabinet</a>` : ""}
         <a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download>Download provenance package</a>

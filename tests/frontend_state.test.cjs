@@ -421,3 +421,16 @@ test('a stale coverage response cannot overwrite a newer one', async () => {
   await older;
   assert.equal(sandbox.coverageEmpty.hidden, true);   // the stale "no active playing" did not take over
 });
+
+test('Continuous Gain step estimates come from one timing table and keep their measured values', () => {
+  const cg = fs.readFileSync(path.join(__dirname, '../static/cg.js'), 'utf8');
+  const start = cg.indexOf('  const STEP_TIMING = {');
+  const end = cg.indexOf('  const formatDuration', start);
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(cg.slice(start, end) + '\nthis.estimateSeconds = estimateSeconds;', sandbox);
+  assert.equal(sandbox.estimateSeconds('analyse', 19), 20 + 19 * 2.6);   // the previous inline formulas
+  assert.equal(sandbox.estimateSeconds('generate', 5), 20 + 5 * 4);
+  assert.equal(sandbox.estimateSeconds('validate', 4), 15 + 12);
+  assert.doesNotMatch(cg, /formatDuration\(\d+ \+/);                    // no inline formula left
+});
