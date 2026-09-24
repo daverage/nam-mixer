@@ -19,7 +19,7 @@ import subprocess
 import threading
 from typing import Optional
 
-RECOMMENDED_LOCAL_MODEL = "gemma4:e4b"
+from .local_llm import RECOMMENDED_LOCAL_MODEL  # one definition, shared with the Settings page
 
 _lock = threading.Lock()
 _state: dict = {"status": "idle", "model": None, "error": None, "log_tail": ""}
@@ -37,7 +37,9 @@ def _run(model: str) -> None:
     try:
         process = subprocess.Popen(
             ["ollama", "pull", model],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            # Decode progress output as UTF-8 regardless of the OS locale, and
+            # never let an undecodable byte kill the reader thread.
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         )
         tail_lines: list[str] = []
         for line in process.stdout or []:
@@ -52,10 +54,10 @@ def _run(model: str) -> None:
             else:
                 _state["status"] = "error"
                 _state["error"] = f"ollama pull exited with code {returncode}"
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 -- anything else would leave status stuck at "running" forever
         with _lock:
             _state["status"] = "error"
-            _state["error"] = str(exc)
+            _state["error"] = str(exc) or type(exc).__name__
 
 
 def start_pull(model: Optional[str] = None) -> dict:
