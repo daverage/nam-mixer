@@ -195,7 +195,7 @@ def test_validation_report_separates_completion_quality_and_unavailable_checks()
         "lite_render": "failed", "lite_quality": "unavailable",
         "full_quiet_playing": "not_applicable", "lite_quiet_playing": "not_applicable",
     }
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["policy"]["max_raw_esr"] == 0.25
 
 

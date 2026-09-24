@@ -2775,7 +2775,10 @@ function validationSummaryHtml(report) {
     return `<div><strong>${escapeHtml(check.id).replaceAll("_", " ")} — ${escapeHtml(check.state)}</strong><br><span>${escapeHtml(check.reason || "")}</span>${metrics}</div>`;
   }).join("");
   const cabinet = report.cabinet?.note ? `<div><strong>Cabinet:</strong> ${escapeHtml(report.cabinet.note)}</div>` : "";
-  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
+  // Reports before schema 3 rendered "Full" and "Lite" with the slim values swapped.
+  const swapped = Number(report.schema_version) < 3
+    ? `<br><small>This report was made by an older version that measured Full and Lite the wrong way round: its Full results are the Lite model's, and vice versa.</small>` : "";
+  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}${swapped}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
 }
 
 function renderLocalDownloadResult(designId, validationReport = null, downloadFilename = "model.nam", embeddedArtifact = null) {

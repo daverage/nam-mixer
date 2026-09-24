@@ -364,3 +364,12 @@ test('renderer readiness distinguishes missing state and recovers on retry', asy
   assert.equal(sandbox.renderStatus.textContent, 'Renderer ready.');
   assert.equal(retry.hidden, true);
 });
+
+test('validation reports made before the Full/Lite fix are flagged', () => {
+  const sandbox = { escapeHtml: (value) => String(value ?? '') };  // the real one needs the DOM
+  vm.createContext(sandbox);
+  vm.runInContext(section('function validationSummaryHtml(', 'function renderLocalDownloadResult('), sandbox);
+  const report = { state: 'passed', summary: 'ok', checks: [] };
+  assert.match(sandbox.validationSummaryHtml({ ...report, schema_version: 2 }), /wrong way round/);
+  assert.doesNotMatch(sandbox.validationSummaryHtml({ ...report, schema_version: 3 }), /wrong way round/);
+});

@@ -30,7 +30,7 @@ from hybrid.core.pipeline import build_hybrid, render_pair
 from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
 from hybrid.training.validation import compute_esr_metrics, render_reference_hybrid
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3  # 3: correct Full/Lite slim selection (see hybrid/training/validation_report.py)
 
 
 class PrerequisiteUnavailable(RuntimeError):

@@ -4,7 +4,10 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-VALIDATION_REPORT_SCHEMA_VERSION = 2
+# 3: the "full"/"lite" variants are rendered with the correct NAMCore slim
+# selection (1e48510). Reports with schema_version 2 or earlier were rendered
+# with Full and Lite swapped; the UI flags them.
+VALIDATION_REPORT_SCHEMA_VERSION = 3
 VALIDATION_POLICY_VERSION = 1
 DEFAULT_VALIDATION_POLICY = {
     "max_raw_esr": 0.25,
