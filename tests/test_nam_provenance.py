@@ -67,10 +67,13 @@ def test_app_export_name_is_the_shared_rule_for_every_export_mode():
     from hybrid.training.a2_training_settings import user_metadata_kwargs
     from tests.test_a2_training_settings import EXPORT_NAME_CASES
 
-    for _label, manifest, expected in EXPORT_NAME_CASES:
+    for _label, manifest, expected, gear_type in EXPORT_NAME_CASES:
         assert prov.export_model_name(manifest) == expected == user_metadata_kwargs(manifest)["name"]
+        assert prov.export_gear_type(manifest) == gear_type == user_metadata_kwargs(manifest)["gear_type"]
 
 
 def test_embedded_package_name():
     assert prov.embedded_package_name("Studio", "Boutique 4x12") == "Studio + Boutique 4x12 [Embedded Cab · Full]"
     assert prov.embedded_package_name(None, "  ") == "NAM Head + Cabinet [Embedded Cab · Full]"
+    # Built from the base name, never the head's suffixed name.
+    assert prov.embedded_package_name(prov.export_base_name({"model_name": "Studio"}), "v30.wav") == "Studio + v30.wav [Embedded Cab · Full]"

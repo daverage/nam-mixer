@@ -255,3 +255,20 @@ def test_real_embedded_package_with_a_long_ir_validates_inside_the_tolerance(tmp
                                         final_scalar=final_scalar, validation_input=validation_input)
     assert result["state"] == "validated", result.get("error")
     assert result["package_max_abs_error"] < 1e-6
+
+
+def test_embedded_package_is_named_from_the_base_name_not_the_suffixed_head(tmp_path):
+    """The head download is labelled '[Amp Only]'/'[Full Rig]'; the package with
+    the cabinet must not inherit that suffix."""
+    import soundfile as sf
+    head = _a2_head()
+    head["metadata"] = {"name": "Studio [Amp Only]"}
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(head))
+    ir_path = tmp_path / "v30.wav"; sf.write(ir_path, np.array([1., .25], dtype=np.float32), 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    cab = CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256, original_filename="v30.wav")
+    art = package_embedded_artifacts(head_path, tmp_path / "out", cab, sample_rate=48000, final_scalar=1.0, base_name="Studio")
+    metadata = json.loads(Path(art["sequential_nam_path"]).read_text())["metadata"]
+    assert metadata["name"] == "Studio + v30.wav [Embedded Cab · Full]"
+    assert metadata["gear_type"] == "amp_cab"
+    assert json.loads(head_path.read_text())["metadata"]["name"] == "Studio [Amp Only]"   # the head download is untouched

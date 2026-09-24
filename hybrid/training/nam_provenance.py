@@ -30,8 +30,12 @@ TONE_TYPES = frozenset({"clean", "overdrive", "crunch", "hi_gain", "fuzz"})
 # learned-cab, and embedded-cab export legible in ordinary NAM players
 # without the user needing to understand architecture/gear_type at all.
 SUFFIX_AMP_ONLY = "[Amp Only]"
+SUFFIX_FULL_RIG = "[Full Rig]"
 SUFFIX_LEARNED_CAB = "[Learned Cab]"
 SUFFIX_EMBEDDED_CAB = "[Embedded Cab · Full]"
+
+# NAM gear types whose capture already includes a cabinet ("full rig").
+CAB_GEAR_TYPES = frozenset({"amp_cab", "amp_pedal_cab"})
 
 
 def source_metadata_fields(model: NamModel) -> dict:
@@ -103,43 +107,66 @@ def default_model_base_name(manifest: dict) -> str:
     return f"Hybrid {amp_a_name} -> {amp_b_name}"
 
 
+def source_gear_types(manifest: dict) -> list:
+    """The source captures' recorded gear_type values: amp_a/amp_b for the
+    design modes, `sources` for Continuous Gain. None where a source's .nam
+    didn't record one."""
+    if manifest.get("mode") == "continuous_gain":
+        return [s.get("gear_type") for s in manifest.get("sources") or [] if isinstance(s, dict)]
+    return [(manifest.get(k) or {}).get("gear_type") for k in ("amp_a", "amp_b")]
+
+
+def sources_include_cab(manifest: dict) -> bool:
+    """True if any source is a full-rig capture, so the model contains a
+    cabinet response even without a NAM Mixer cab stage. A source that
+    didn't record its gear_type can't be known to include one."""
+    return any(g in CAB_GEAR_TYPES for g in source_gear_types(manifest))
+
+
+def export_base_name(manifest: dict) -> str:
+    """The user-entered model_name, or the source-derived default."""
+    return str(manifest.get("model_name") or "").strip() or default_model_base_name(manifest)
+
+
 def export_model_name(manifest: dict) -> str:
-    """The display name written into a trained A2 export's metadata -- the
-    one naming rule for every export mode, used by local training
+    """The display name written into a trained export's metadata (and so the
+    embedded mode's amp-only head download) -- one rule for every mode,
+    including Continuous Gain. Used by local training
     (a2_training_settings.user_metadata_kwargs) and mirrored literally by
-    cloud/kaggle/train_a2_cloud.py (parity-tested).
+    cloud/kaggle/train_a2_cloud.py (parity-tested). The suffix states what
+    the model's audio contains:
 
-    The base is the user-entered `model_name`, or the source-derived default.
-    The suffix states what the model's audio contains:
-
-    - "none" (no cab, or a preview-only cab that needs an external IR): the
-      model has no NAM Mixer cabinet stage -> "<base> [Amp Only]".
-      Continuous Gain keeps the plain base name (one amp's own gain range).
-    - "learned" (and historical records with only `baked: true`): the IR was
-      convolved into the training target, so the model learned amp + cabinet
-      -> "<base> + <cabinet> [Learned Cab]".
-    - "embedded": this trained head is amp-only; the packaged Sequential file
-      carries the cabinet and is named by embedded_package_name -> "<base>"
-      (a head suffix would double up inside the package name).
+    - learned cab (and historical records with only `baked: true`): the IR
+      was convolved into the training target -> "<base> + <cabinet> [Learned Cab]".
+    - no NAM Mixer cab stage (no cab, a preview-only cab that needs an
+      external IR, or the embedded mode's head): "<base> [Full Rig]" when any
+      source capture is a full rig (it contains a cabinet), else
+      "<base> [Amp Only]".
+    The embedded mode's packaged file is named by embedded_package_name.
 
     Only newly trained exports use this: a historical export keeps the name
     already written into its .nam, and its download filename comes from the
     manifest's artifact_filename (hybrid.modes.metadata.suggested_nam_filename).
     """
-    base_name = str(manifest.get("model_name") or "").strip() or default_model_base_name(manifest)
+    base_name = export_base_name(manifest)
     cab = manifest.get("cab") or {}
-    export_mode = cab_export_mode(cab)
-    if export_mode == "learned":
+    if cab_export_mode(cab) == "learned":
         return f"{base_name} + {cabinet_display_name(cab)} {SUFFIX_LEARNED_CAB}"
-    if export_mode == "embedded":
-        return base_name
-    if manifest.get("mode", "hybrid") == "continuous_gain":
-        return base_name
-    return f"{base_name} {SUFFIX_AMP_ONLY}"
+    return f"{base_name} {SUFFIX_FULL_RIG if sources_include_cab(manifest) else SUFFIX_AMP_ONLY}"
 
 
-def embedded_package_name(head_name: Optional[str], cabinet_name: Optional[str]) -> str:
-    """Name of the packaged Sequential (head + exact cabinet IR) export."""
-    head = head_name if isinstance(head_name, str) else "NAM Head"
+def export_gear_type(manifest: dict) -> str:
+    """NAM gear_type for the trained export: "amp_cab" when its audio
+    contains a cabinet (learned cab, or a full-rig source), else "amp".
+    The embedded package is always "amp_cab" (sequential_nam)."""
+    if cab_export_mode(manifest.get("cab")) == "learned" or sources_include_cab(manifest):
+        return "amp_cab"
+    return "amp"
+
+
+def embedded_package_name(base_name: Optional[str], cabinet_name: Optional[str]) -> str:
+    """Name of the packaged Sequential (head + exact cabinet IR) export, built
+    from the export's base name (not the head's suffixed name)."""
+    base = base_name.strip() if isinstance(base_name, str) and base_name.strip() else "NAM Head"
     cab = cabinet_name.strip() if isinstance(cabinet_name, str) and cabinet_name.strip() else "Cabinet"
-    return f"{head} + {cab} {SUFFIX_EMBEDDED_CAB}"
+    return f"{base} + {cab} {SUFFIX_EMBEDDED_CAB}"

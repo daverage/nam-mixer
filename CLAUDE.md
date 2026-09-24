@@ -61,6 +61,17 @@ has three tiers:**
   diverge). Only the CORE dependency exceeding the A2's receptive field
   still aborts.
 
+**Export names and metadata** (every mode, including Continuous Gain) come
+from `hybrid/training/nam_provenance.py`'s `export_model_name` /
+`export_gear_type` / `embedded_package_name`, and must state what the audio
+contains. `[Amp Only]` (gear_type `amp`) means no cabinet anywhere. Any
+full-rig source capture (gear_type `amp_cab`/`amp_pedal_cab`) gives
+`[Full Rig]` (`amp_cab`). A learned cab gives `+ <cab> [Learned Cab]`
+(`amp_cab`). With an embedded cab, the trained head is offered as its own
+download with the no-cab label, and the packaged model is
+`<base> + <cab> [Embedded Cab · Full]` (`amp_cab`). The cloud worker keeps a
+literal copy, which is parity-tested.
+
 Cumulative-energy diagnostics on the prepared IR (`PreparedCabIr.energy_99_
 /_999_/_9999_samples`, `energy_fraction_within`) report how much of a long
 IR is actually meaningful signal -- purely informational, never used to

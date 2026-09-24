@@ -449,17 +449,20 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     base_name = str(manifest.get("model_name") or "").strip() or name
 
+    # hybrid/training/nam_provenance.py export_model_name / export_gear_type.
+    if mode == "continuous_gain":
+        source_gear = [s.get("gear_type") for s in manifest.get("sources") or [] if isinstance(s, dict)]
+    else:
+        source_gear = [(manifest.get(k) or {}).get("gear_type") for k in ("amp_a", "amp_b")]
+    full_rig = any(g in ("amp_cab", "amp_pedal_cab") for g in source_gear)
     cab = manifest.get("cab") or {}
     export_mode = cab.get("export_mode") or ("learned" if cab.get("baked") else "none")
     if export_mode == "learned":
         cabinet_name = str(cab.get("display_name") or cab.get("original_filename") or "Cabinet").strip()
         model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
-    elif export_mode == "embedded":
-        model_name = base_name
-    elif mode == "continuous_gain":
-        model_name = base_name
     else:
-        model_name = f"{base_name} [Amp Only]"
+        model_name = f"{base_name} {'[Full Rig]' if full_rig else '[Amp Only]'}"
+    gear_type = "amp_cab" if export_mode == "learned" or full_rig else "amp"
 
     _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
     amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
@@ -468,6 +471,7 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     return {
         "name": model_name,
+        "gear_type": gear_type,
         "modeled_by": "NAM Mixer",
         "tone_type": tone_type,
         "input_level_dbu": input_level_dbu,
@@ -516,17 +520,18 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
     export_dir = output_dir / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
     # docs/history/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
-    # gear type when baking a cab, IF the installed package actually has one
+    # gear type when the export's audio contains a cabinet (learned cab or a
+    # full-rig source capture), IF the installed package actually has one
     # -- mirrors scripts/train_a2.py's _build_user_metadata, duplicated here
     # per this module's self-containment rule (see module docstring).
+    kwargs = user_metadata_kwargs(manifest)
     gear_type = GearType.AMP
-    if (manifest.get("cab") or {}).get("baked"):
+    if kwargs.pop("gear_type", "amp") == "amp_cab":  # learned cab, or a full-rig source capture
         for candidate_name in ("AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
             candidate = getattr(GearType, candidate_name, None)
             if candidate is not None:
                 gear_type = candidate
                 break
-    kwargs = user_metadata_kwargs(manifest)
     tone_type_name = kwargs.pop("tone_type", None)
     tone_type = getattr(ToneType, tone_type_name.upper(), None) if tone_type_name else None
     user_metadata = UserMetadata(gear_type=gear_type, tone_type=tone_type, **kwargs)

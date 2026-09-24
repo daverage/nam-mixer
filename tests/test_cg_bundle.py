@@ -107,3 +107,18 @@ def test_manifest_records_the_ceiling_the_recipe_actually_applied(tmp_path):
                       design={"kind": "x"}, receptive_field={"branch_samples": {"G1": 10}})
     assert json.loads(mp.read_text())["target"]["ceiling_dbfs"] == -3.0
     assert np.max(np.abs(b.target)) <= 10 ** (-3.0 / 20) + 1e-6
+
+
+def test_source_records_carry_each_captures_gear_type(tmp_path):
+    """So a Continuous Gain export of full-rig captures is labelled [Full Rig]/amp_cab."""
+    from hybrid.continuous_gain.bundle import source_records
+
+    paths = {}
+    for position, gear in ((1.0, "amp_cab"), (5.0, "amp_cab")):
+        path = tmp_path / f"g{position:g}.nam"
+        path.write_text(json.dumps({"architecture": "WaveNet", "config": {}, "weights": [], "sample_rate": 48000,
+                                    "metadata": {"gear_type": gear}}))
+        paths[position] = path
+    audit = {"captures": {"1": {"status": "VALID", "correction": None}, "5": {"status": "VALID", "correction": None}}}
+    recs = source_records([1.0, 5.0], paths, [-10.0, 10.0], make_chain([1.0, 5.0], [-10.0, 10.0]), audit)
+    assert [r["gear_type"] for r in recs] == ["amp_cab", "amp_cab"]

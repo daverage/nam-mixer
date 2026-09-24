@@ -195,17 +195,18 @@ def test_learned_cab_export_appends_cabinet_and_suffix():
     assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
-def test_embedded_cab_export_leaves_head_name_unsuffixed():
-    # The SlimmableContainer head isn't the final deliverable for an
-    # embedded export -- hybrid/training/sequential_nam.py's packaged Sequential
-    # file carries its own "[Embedded Cab · Full]" suffix instead.
+def test_embedded_cab_export_head_is_labelled_amp_only():
+    # The embedded mode offers the trained head as its own amp-only download;
+    # the packaged Sequential file is named separately from the base name
+    # (nam_provenance.embedded_package_name).
     manifest = {
         "model_name": "British American High Gain",
         "amp_a": {"filename": "Mesa.nam"},
         "amp_b": {"filename": "JCM800.nam"},
         "cab": {"export_mode": "embedded", "display_name": "Modern Boutique 4x12"},
     }
-    assert user_metadata_kwargs(manifest)["name"] == "British American High Gain"
+    assert user_metadata_kwargs(manifest)["name"] == "British American High Gain [Amp Only]"
+    assert user_metadata_kwargs(manifest)["gear_type"] == "amp"
 
 
 def test_tone_type_copied_only_when_sources_agree():
@@ -312,64 +313,76 @@ def test_cloud_worker_run_training_rejects_unknown_epoch_preset(tmp_path):
         cloud.run_training(bundle_dir, tmp_path / "out", quick=False, epoch_preset="ultra")
 
 
-# One row per export mode (and the historical shapes the app still reads).
-# The expected names are the app's current behaviour, which matches what each
-# export actually contains:
-#   none      -> no NAM Mixer cabinet stage in the model  -> "[Amp Only]"
-#   learned   -> the IR was convolved into the training target, so the model
-#                learned amp + cabinet                   -> "+ <cab> [Learned Cab]"
-#   embedded  -> the trained head is amp-only; the separate Sequential package
-#                (sequential_nam) carries the cabinet   -> head keeps the plain base name
-#   continuous_gain with no cab -> the plain base name (one amp's own gain range)
+# One row per export mode and source kind (and the historical shapes the app
+# still reads): the display name and NAM gear_type must state what the model's
+# audio contains -- see nam_provenance.export_model_name / export_gear_type.
 _A = {"filename": "JCM800.nam"}
 _B = {"filename": "Fender.nam"}
+_RIG_A = {"filename": "JCM800 rig.nam", "gear_type": "amp_cab"}
+_HEAD_B = {"filename": "Fender.nam", "gear_type": "amp"}
+_LEARNED = {"selected": True, "export_mode": "learned", "baked": True, "original_filename": "v30.wav"}
+_EMBEDDED = {"selected": True, "export_mode": "embedded", "baked": False, "original_filename": "v30.wav"}
 EXPORT_NAME_CASES = [
     ("amp only, hybrid",
      {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": {"selected": False, "export_mode": "none"}},
-     "Studio [Amp Only]"),
+     "Studio [Amp Only]", "amp"),
     ("amp only, preview cab needs an external IR",
      {"mode": "blend", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
       "cab": {"selected": True, "export_mode": "none", "baked": False, "original_filename": "v30.wav"}},
-     "Studio [Amp Only]"),
+     "Studio [Amp Only]", "amp"),
+    ("full-rig source, no NAM Mixer cab",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": _RIG_A, "amp_b": _HEAD_B, "cab": {"export_mode": "none"}},
+     "Studio [Full Rig]", "amp_cab"),
+    ("full-rig source, amp_pedal_cab",
+     {"mode": "character", "model_name": "Studio", "amp_a": {"filename": "a.nam", "gear_type": "amp_pedal_cab"}, "amp_b": _HEAD_B}, 
+     "Studio [Full Rig]", "amp_cab"),
+    ("source gear_type not recorded: cannot be known to include a cab",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": {"filename": "a.nam", "gear_type": None}, "amp_b": _B},
+     "Studio [Amp Only]", "amp"),
     ("learned cab, display name",
      {"mode": "character", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
-      "cab": {"selected": True, "export_mode": "learned", "baked": True, "display_name": "Boutique 4x12", "original_filename": "v30.wav"}},
-     "Studio + Boutique 4x12 [Learned Cab]"),
-    ("learned cab, filename only",
-     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
-      "cab": {"selected": True, "export_mode": "learned", "baked": True, "original_filename": "v30.wav"}},
-     "Studio + v30.wav [Learned Cab]"),
+      "cab": {**_LEARNED, "display_name": "Boutique 4x12"}},
+     "Studio + Boutique 4x12 [Learned Cab]", "amp_cab"),
+    ("learned cab, filename only", {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": _LEARNED},
+     "Studio + v30.wav [Learned Cab]", "amp_cab"),
     ("learned cab, no cabinet name recorded",
      {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": {"selected": True, "export_mode": "learned", "baked": True}},
-     "Studio + Cabinet [Learned Cab]"),
+     "Studio + Cabinet [Learned Cab]", "amp_cab"),
+    ("learned cab over a full-rig source", {"mode": "hybrid", "model_name": "Studio", "amp_a": _RIG_A, "amp_b": _HEAD_B, "cab": _LEARNED},
+     "Studio + v30.wav [Learned Cab]", "amp_cab"),
     ("historical baked cab without export_mode (contains the cabinet)",
      {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": {"selected": True, "baked": True, "original_filename": "v30.wav"}},
-     "Studio + v30.wav [Learned Cab]"),
-    ("embedded cab: amp-only head, package named separately",
-     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
-      "cab": {"selected": True, "export_mode": "embedded", "baked": False, "original_filename": "v30.wav"}},
-     "Studio"),
+     "Studio + v30.wav [Learned Cab]", "amp_cab"),
+    ("embedded cab: amp-only head download", {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": _EMBEDDED},
+     "Studio [Amp Only]", "amp"),
+    ("embedded cab: full-rig head download", {"mode": "hybrid", "model_name": "Studio", "amp_a": _RIG_A, "amp_b": _HEAD_B, "cab": _EMBEDDED},
+     "Studio [Full Rig]", "amp_cab"),
     ("continuous gain, no cab",
-     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "cab": {"selected": False, "export_mode": "none"}},
-     "JCM800 Gain"),
-    ("continuous gain, learned cab",
-     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "cab": {"selected": True, "export_mode": "learned", "baked": True, "original_filename": "v30.wav"}},
-     "JCM800 Gain + v30.wav [Learned Cab]"),
-    ("historical: no cab record, no model_name",
-     {"mode": "hybrid", "amp_a": _A, "amp_b": _B},
-     "Hybrid JCM800 -> Fender [Amp Only]"),
-    ("historical: blend without model_name",
-     {"mode": "blend", "amp_a": _A, "amp_b": _B, "design": {"mix_b": 0.25}},
-     "Blend JCM800 + Fender 75-25 [Amp Only]"),
-    ("historical: no mode, no source filenames",
-     {},
-     "Hybrid Amp A -> Amp B [Amp Only]"),
+     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "sources": [{"gear_type": "amp"}, {"gear_type": "amp"}],
+      "cab": {"selected": False, "export_mode": "none"}},
+     "JCM800 Gain [Amp Only]", "amp"),
+    ("continuous gain, full-rig captures",
+     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "sources": [{"gear_type": "amp_cab"}, {"gear_type": "amp_cab"}],
+      "cab": {"export_mode": "none"}},
+     "JCM800 Gain [Full Rig]", "amp_cab"),
+    ("continuous gain, learned cab", {"mode": "continuous_gain", "model_name": "JCM800 Gain", "cab": _LEARNED},
+     "JCM800 Gain + v30.wav [Learned Cab]", "amp_cab"),
+    ("continuous gain, embedded cab: head download",
+     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "sources": [{"gear_type": "amp"}], "cab": _EMBEDDED},
+     "JCM800 Gain [Amp Only]", "amp"),
+    ("historical: no cab record, no model_name", {"mode": "hybrid", "amp_a": _A, "amp_b": _B},
+     "Hybrid JCM800 -> Fender [Amp Only]", "amp"),
+    ("historical: blend without model_name", {"mode": "blend", "amp_a": _A, "amp_b": _B, "design": {"mix_b": 0.25}},
+     "Blend JCM800 + Fender 75-25 [Amp Only]", "amp"),
+    ("historical: continuous gain without sources' gear_type", {"mode": "continuous_gain", "cab": {"baked": False}},
+     "Continuous Gain [Amp Only]", "amp"),
+    ("historical: no mode, no source filenames", {}, "Hybrid Amp A -> Amp B [Amp Only]", "amp"),
 ]
 
 
-@pytest.mark.parametrize("label, manifest, expected", EXPORT_NAME_CASES, ids=[c[0] for c in EXPORT_NAME_CASES])
-def test_export_name_for_every_export_mode_local_and_cloud(label, manifest, expected):
+@pytest.mark.parametrize("label, manifest, expected, gear_type", EXPORT_NAME_CASES, ids=[c[0] for c in EXPORT_NAME_CASES])
+def test_export_name_for_every_export_mode_local_and_cloud(label, manifest, expected, gear_type):
     cloud = _load_cloud_module()
-    assert user_metadata_kwargs(manifest)["name"] == expected
-    assert cloud.user_metadata_kwargs(manifest)["name"] == expected
-
+    for kwargs in (user_metadata_kwargs(manifest), cloud.user_metadata_kwargs(manifest)):
+        assert kwargs["name"] == expected
+        assert kwargs["gear_type"] == gear_type

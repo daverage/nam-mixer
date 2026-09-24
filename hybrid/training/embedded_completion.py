@@ -6,6 +6,7 @@ from typing import Any
 
 from ..core.cab_ir import CabDesign
 from ..core.render import sequential_renderer_record
+from .nam_provenance import export_base_name
 from .sequential_nam import package_embedded_artifacts
 
 
@@ -33,7 +34,8 @@ def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Pa
     state: dict[str, Any] = {"state": "packaging", "experimental": True, "variant": "full_only"}
     try:
         artifacts = package_embedded_artifacts(head_nam_path, output_dir, CabDesign.from_dict(cab_data),
-                                               sample_rate=sample_rate, final_scalar=final_scalar)
+                                               sample_rate=sample_rate, final_scalar=final_scalar,
+                                               base_name=export_base_name(manifest))
         state.update({"state": "packaged", "artifacts": artifacts})
         # Explicitly establish the renderer before callers offer a download.
         state.update({"state": "validating", "renderer": sequential_renderer_record()})

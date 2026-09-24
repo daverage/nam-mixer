@@ -73,7 +73,7 @@ def _packaging_date() -> dict[str, int]:
 
 
 def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
-                         loudness: float | None) -> dict[str, Any]:
+                         loudness: float | None, base_name: str | None = None) -> dict[str, Any]:
     """Build host-facing metadata for the complete amp-and-cab result.
 
     The nested WaveNet remains byte-for-byte as exported.  Only calibration
@@ -91,7 +91,9 @@ def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
     gain = float(inherited_gain) if isinstance(inherited_gain, (int, float)) and np.isfinite(inherited_gain) else None
     return {
         "date": _packaging_date(),
-        "name": embedded_package_name(head_metadata.get("name"), cabinet_name),
+        # Named from the export's base name (the head's own name now carries
+        # an [Amp Only]/[Full Rig] suffix); older callers fall back to it.
+        "name": embedded_package_name(base_name or head_metadata.get("name"), cabinet_name),
         "modeled_by": "NAM Mixer",
         "gear_type": "amp_cab",
         "gear_make": None,
@@ -108,7 +110,7 @@ def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
 
 
 def build_embedded_sequential(head_model: dict[str, Any], prepared_taps: np.ndarray, *, sample_rate: int,
-                              final_scalar: float = 1.0, cabinet_name: str | None = None,
+                              final_scalar: float = 1.0, cabinet_name: str | None = None, base_name: str | None = None,
                               loudness: float | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return canonical v0.7 Sequential JSON and auditable package metadata.
 
@@ -139,7 +141,7 @@ def build_embedded_sequential(head_model: dict[str, Any], prepared_taps: np.ndar
     }
     sequential = {
         "version": "0.7.0",
-        "metadata": _sequential_metadata(full_head, cabinet_name, loudness),
+        "metadata": _sequential_metadata(full_head, cabinet_name, loudness, base_name),
         "architecture": "Sequential",
         "config": {"models": [full_head, linear]},
         "weights": [],
@@ -172,7 +174,8 @@ def package_embedded_sequential(head_nam_path: str | Path, destination: str | Pa
 
 
 def package_embedded_artifacts(head_nam_path: str | Path, output_dir: str | Path, cab: CabDesign, *,
-                               sample_rate: int, final_scalar: float, stem: str = "model") -> dict[str, Any]:
+                               sample_rate: int, final_scalar: float, stem: str = "model",
+                               base_name: str | None = None) -> dict[str, Any]:
     """Backend-neutral local/Kaggle completion step. The unmodified head is
     retained; the prepared, unscaled IR WAV is reusable; only the experimental
     Sequential NAM receives the final scalar in its Linear taps."""
@@ -197,7 +200,7 @@ def package_embedded_artifacts(head_nam_path: str | Path, output_dir: str | Path
             head = json.load(f)
         sequential, record = build_embedded_sequential(
             head, prepared.samples, sample_rate=sample_rate, final_scalar=final_scalar,
-            cabinet_name=cab.display_name or cab.original_filename,
+            cabinet_name=cab.display_name or cab.original_filename, base_name=base_name,
         )
         with open(nam_tmp, "w", encoding="utf-8") as f:
             json.dump(sequential, f, separators=(",", ":"), allow_nan=False)

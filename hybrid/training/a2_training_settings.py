@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .nam_provenance import export_model_name
+from .nam_provenance import export_gear_type, export_model_name
 
 
 @dataclass(frozen=True)
@@ -156,6 +156,9 @@ def user_metadata_kwargs(manifest: dict) -> dict:
 
     return {
         "name": model_name,
+        # Plain NAM gear_type string ("amp" / "amp_cab") for what the audio
+        # contains; callers map it onto the installed nam GearType enum.
+        "gear_type": export_gear_type(manifest),
         # This identifies the creator of the generated NAM.  Do not invent
         # a physical manufacturer/model for a synthetic hybrid; those remain
         # blank for the user to enter in the official metadata editor.

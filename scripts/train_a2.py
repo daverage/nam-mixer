@@ -404,13 +404,15 @@ def _build_user_metadata(manifest: dict):
     from nam.models.metadata import GearType, ToneType, UserMetadata
 
     # docs/history/blend-mode.md "METADATA / OUTPUT NAM": use an official amp+cab/rig
-    # gear type when baking a cab, IF the installed package actually has one
+    # gear type when the export's audio contains a cabinet (a learned cab, or a
+    # full-rig source capture -- nam_provenance.export_gear_type), IF the
+    # installed package actually has one
     # -- never invent an unsupported enum value. Checked dynamically against
     # whatever GearType members are ACTUALLY installed rather than hardcoding
     # a guessed name.
+    kwargs = user_metadata_kwargs(manifest)
     gear_type = GearType.AMP
-    cab = manifest.get("cab") or {}
-    if cab.get("baked"):
+    if kwargs.pop("gear_type", "amp") == "amp_cab":  # learned cab, or a full-rig source capture
         for candidate_name in ("AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
             candidate = getattr(GearType, candidate_name, None)
             if candidate is not None:
@@ -422,8 +424,8 @@ def _build_user_metadata(manifest: dict):
     # Shared with cloud/kaggle/train_a2_cloud.py -- see
     # hybrid/training/a2_training_settings.py's user_metadata_kwargs docstring. Only
     # the nam-specific enum (gear_type/tone_type) and output_level_dbu
-    # omissions live here; everything else is the shared plain-dict logic.
-    kwargs = user_metadata_kwargs(manifest)
+    # omissions live here; everything else is the shared plain-dict logic
+    # (`kwargs`, read above for gear_type).
 
     # tone_type comes back as a plain string (or None) from the shared
     # helper -- only set it when the installed package's ToneType enum
