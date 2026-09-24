@@ -42,8 +42,29 @@ KNOWN_LIMITS = [
 ]
 
 
+_FINISHED_JOB_TTL_S = 3600.0  # the UI polls a finished job once; don't keep results for the process lifetime
+
+# (path, size, mtime_ns) -> sha256: a trained NAM is hashed once, not on every project request.
+_FILE_SHA256: dict[tuple, str] = {}
+
+
+def _cached_sha256(path: Path) -> str:
+    st = path.stat()
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    sha = _FILE_SHA256.get(key)
+    if sha is None:
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        if len(_FILE_SHA256) > 256:
+            _FILE_SHA256.clear()
+        _FILE_SHA256[key] = sha
+    return sha
+
+
 def _job_start(project_id: str, kind: str, fn, after=None) -> dict:
     with _JOB_LOCK:
+        now = time.time()
+        for stale in [k for k, j in _JOBS.items() if j["state"] != "running" and now - j["started"] > _FINISHED_JOB_TTL_S]:
+            del _JOBS[stale]
         for j in _JOBS.values():
             if j["project_id"] == project_id and j["state"] == "running":
                 raise CgProjectError(f"a {j['kind']} job is already running for this project")
@@ -203,18 +224,21 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             nam = Path(tr["output_nam_path"])
             model_key = (str(nam), nam.stat().st_mtime_ns)
             manifest = json.loads((a2_output_dir / bundle["design_id"] / "training_manifest.json").read_text(encoding="utf-8"))
-            raw = nam.read_bytes()
-            session["artifact"] = {"filename": (manifest.get("artifact_filename") or nam.name), "nam_base64": base64.b64encode(raw).decode("ascii")}
             rep = trained_validation_report(manifest, bundle["design_id"])
-            if rep and rep.get("model_sha256") == hashlib.sha256(raw).hexdigest():
+            if rep and rep.get("model_sha256") == _cached_sha256(nam):
                 session["validationReport"] = rep            # restored only when it belongs to this exact NAM (the Sessions rule)
+            # The NAM bytes are only read and encoded when the record will actually be written (see sync_session).
+            session["artifact"] = {"filename": (manifest.get("artifact_filename") or nam.name), "nam_path": str(nam)}
         return session, (json.dumps(session["settings"], sort_keys=True), session["name"], session["designId"], model_key, bool(session.get("validationReport")))
 
     def sync_session(p: CgProject) -> None:
         try:
             session, key = build_session(p)
             if _written.get(session["id"]) == key:
-                return
+                return  # unchanged: the NAM is never read or encoded
+            artifact = session.get("artifact")
+            if artifact:
+                artifact["nam_base64"] = base64.b64encode(Path(artifact.pop("nam_path")).read_bytes()).decode("ascii")
             session["savedAt"] = datetime.now(timezone.utc).isoformat()
             store_session(session)
             _written[session["id"]] = key
@@ -361,7 +385,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         try:
             val = json.loads(p.validation_file.read_text(encoding="utf-8"))
             st, nam_path, _manifest = trained_model(p)
-            sha = __import__("hashlib").sha256(nam_path.read_bytes()).hexdigest()
+            sha = _cached_sha256(nam_path)
         except (CgProjectError, OSError, ValueError):
             return None
         if val.get("design_id") != st["bundle"]["design_id"] or (val.get("model") or {}).get("sha256") != sha:

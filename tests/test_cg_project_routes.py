@@ -200,6 +200,20 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     assert [r for r in client.session_records if r["id"] == pid][-1]["validationReport"] == good
     n_before = len(client.session_records); client.get(f"/api/cg/projects/{pid}"); client.get(f"/api/cg/projects/{pid}")
     assert len(client.session_records) == n_before                    # unchanged state does not rewrite the record
+    hashed = []
+    real_sha256 = hashlib.sha256
+    def counting_sha256(data=b"", *a, **k):
+        if len(data) == len(nam.read_bytes()):
+            hashed.append(1)
+        return real_sha256(data, *a, **k)
+    import routes.continuous_gain as cg_mod
+    cg_mod.hashlib.sha256 = counting_sha256
+    try:
+        for _ in range(3):
+            client.get(f"/api/cg/projects/{pid}")
+    finally:
+        cg_mod.hashlib.sha256 = real_sha256
+    assert hashed == []                                                # the unchanged NAM is not re-read and re-hashed per request
     m["training"]["validation_report"] = {"model_sha256": "0" * 64}; mp.write_text(json.dumps(m)); client.get(f"/api/cg/projects/{pid}")
     assert "validationReport" not in [r for r in client.session_records if r["id"] == pid][-1]        # a report for a different NAM is never attached
     z = client.get(f"/api/cg/projects/{pid}/export")                # export is never gated on validation or listening
