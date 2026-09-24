@@ -20,7 +20,32 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-struct BackendProcess(Mutex<Option<Child>>);
+/// The backend child (None until started in the background), its port, and
+/// the per-launch token its /api/shutdown endpoint requires.
+struct Backend {
+    child: Mutex<Option<Child>>,
+    port: u16,
+    shutdown_token: String,
+}
+
+/// An unguessable per-launch token: std's RandomState keys are seeded from
+/// the OS random source.
+fn shutdown_token() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    (0..4)
+        .map(|i| {
+            let mut hasher = RandomState::new().build_hasher();
+            hasher.write_u128(nanos ^ (i as u128));
+            hasher.write_u32(std::process::id());
+            format!("{:016x}", hasher.finish())
+        })
+        .collect()
+}
 
 // A native confirm command (tauri-plugin-dialog's blocking_show(), called
 // from an async command the same way the save commands below call
@@ -193,7 +218,7 @@ fn path_from_env_output(stdout: &str) -> Option<String> {
 // stable directory instead of a fresh temp-extraction path on every launch.
 // Bundling the whole folder as a resource and spawning the exe inside it
 // directly sidesteps that mismatch entirely.
-fn bundled_backend_exe(app: &tauri::App) -> Option<std::path::PathBuf> {
+fn bundled_backend_exe(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     let exe_name = if cfg!(windows) { "nam-mixer-backend.exe" } else { "nam-mixer-backend" };
     let candidate = app
         .path()
@@ -211,8 +236,8 @@ fn bundled_backend_exe(app: &tauri::App) -> Option<std::path::PathBuf> {
 // Either way this is a REAL SEPARATE process, never asked to relaunch this
 // GUI executable itself (that relaunch-loop bug is what killed the
 // previous pywebview-based desktop app -- see docs/history/).
-fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Child {
-    let mut command = match bundled_backend_exe(app) {
+fn spawn_backend(bundled_exe: Option<std::path::PathBuf>, port: u16, data_dir: &std::path::Path, token: &str) -> Child {
+    let mut command = match bundled_exe {
         Some(exe) => {
             let mut cmd = Command::new(&exe);
             let exe_dir = exe.parent().unwrap();
@@ -249,6 +274,7 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
         .env("PORT", port.to_string())
         .env("NAM_MIXER_DATA_DIR", data_dir)
         .env("NAM_MIXER_ENV_FILE", data_dir.join(".env"))
+        .env("NAM_MIXER_SHUTDOWN_TOKEN", token)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
@@ -257,12 +283,14 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
 
 /// Ok once /api/health answers; Err with the reason if the backend exits
 /// first (reported at once rather than after the full timeout) or times out.
-fn wait_for_health(port: u16, timeout: Duration, child: &mut Child) -> Result<(), String> {
+fn wait_for_health(port: u16, timeout: Duration, child: &Mutex<Option<Child>>) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/api/health");
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!("The local backend exited during startup ({status})."));
+        match child.lock().unwrap().as_mut().map(|c| c.try_wait()) {
+            Some(Ok(Some(status))) => return Err(format!("The local backend exited during startup ({status}).")),
+            None => return Err("The app is quitting.".to_string()), // taken by the quit handler
+            _ => {}
         }
         if let Ok(resp) = ureq::get(&url).timeout(Duration::from_millis(500)).call() {
             if resp.status() == 200 {
@@ -274,22 +302,47 @@ fn wait_for_health(port: u16, timeout: Duration, child: &mut Child) -> Result<()
     Err(format!("The local backend did not become ready within {} seconds.", timeout.as_secs()))
 }
 
-/// Ask the backend to exit (SIGTERM lets it stop its own local-training
-/// subprocess, which runs in a separate session), then force it if needed.
-fn stop_backend(mut child: Child) {
+fn exited_within(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
+/// Stop the backend cleanly so it can stop its own local-training subprocess
+/// (a separate process group/session that would otherwise outlive it): the
+/// token-protected /api/shutdown works on every OS; SIGTERM is the unix
+/// fallback; a hard kill is the last resort.
+fn stop_backend(mut child: Child, port: u16, token: &str) {
+    let _ = ureq::post(&format!("http://127.0.0.1:{port}/api/shutdown"))
+        .set("X-NAM-Mixer-Shutdown-Token", token)
+        .timeout(Duration::from_secs(3))
+        .call();
+    if exited_within(&mut child, Duration::from_secs(5)) {
+        return;
+    }
     #[cfg(unix)]
     {
         let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            if let Ok(Some(_)) = child.try_wait() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        if exited_within(&mut child, Duration::from_secs(3)) {
+            return;
         }
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+fn startup_error_url(reason: &str) -> String {
+    format!(
+        "data:text/html,{}",
+        percent_encode(&format!(
+            "<html><body style=\"font-family:sans-serif;padding:2rem\"><h1>NAM Mixer could not start</h1><p>{reason} Quit and try again.</p></body></html>"
+        ))
+    )
 }
 
 fn percent_encode(text: &str) -> String {
@@ -305,46 +358,52 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![save_file_from_url, save_bytes, open_external_url])
-        .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = find_free_port();
+            let token = shutdown_token();
+            app.manage(Backend { child: Mutex::new(None), port, shutdown_token: token.clone() });
             // A real per-OS user data directory (e.g. ~/Library/Application
             // Support/com.nammixer.desktop on macOS) -- NEVER the bundle's
             // own (read-only, ephemeral-on-reinstall) directory. app.py
             // already creates this path itself (WORK_DIR.mkdir(...)) once
             // told about it via NAM_MIXER_DATA_DIR.
             let data_dir = app.path().app_data_dir().expect("failed to resolve app data dir");
-            let mut child = spawn_backend(app, port, &data_dir);
-            let ready = wait_for_health(port, Duration::from_secs(30), &mut child);
-            *app.state::<BackendProcess>().0.lock().unwrap() = Some(child);
-            let url = match ready {
-                Ok(()) => format!("http://127.0.0.1:{port}/"),
-                // A blank about: page looks like a frozen launch and gives
-                // the user no recovery path. Keep the failure in the same
-                // window and make it explicit instead.
-                Err(reason) => format!(
-                    "data:text/html,{}",
-                    percent_encode(&format!(
-                        "<html><body style=\"font-family:sans-serif;padding:2rem\"><h1>NAM Mixer could not start</h1><p>{reason} Quit and try again.</p></body></html>"
-                    ))
-                ),
-            };
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
+
+            // Show the window at once on the bundled "Starting" page, then do
+            // the slow parts (shell PATH lookup, backend start -- the first
+            // launch after installing can take ~40 s while macOS checks the
+            // bundled libraries) off the main thread and navigate when ready.
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("NAM Mixer")
                 .inner_size(1280.0, 860.0)
                 .build()?;
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let child = spawn_backend(bundled_backend_exe(&handle), port, &data_dir, &token);
+                let backend = handle.state::<Backend>();
+                *backend.child.lock().unwrap() = Some(child);
+                let url = match wait_for_health(port, Duration::from_secs(120), &backend.child) {
+                    Ok(()) => format!("http://127.0.0.1:{port}/"),
+                    // A blank page looks like a frozen launch; say what happened.
+                    Err(reason) => startup_error_url(&reason),
+                };
+                if let (Some(window), Ok(parsed)) = (handle.get_webview_window("main"), url.parse()) {
+                    let _ = window.navigate(parsed);
+                }
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building NAM Mixer desktop shell")
         .run(|app_handle, event| {
             // Covers every quit path (window close, Cmd+Q, dock quit) --
-            // whichever fires first kills the backend exactly once.
+            // whichever fires first stops the backend exactly once.
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-                let state = app_handle.state::<BackendProcess>();
-                let taken = state.0.lock().unwrap().take();
-                if let Some(child) = taken {
-                    stop_backend(child);
+                if let Some(backend) = app_handle.try_state::<Backend>() {
+                    let taken = backend.child.lock().unwrap().take();
+                    if let Some(child) = taken {
+                        stop_backend(child, backend.port, &backend.shutdown_token);
+                    }
                 }
             }
         });
@@ -362,6 +421,14 @@ mod tests {
         let fish = "PATH=/opt/homebrew/bin:/usr/bin\nfish_greeting=hi\n";
         assert_eq!(path_from_env_output(fish).as_deref(), Some("/opt/homebrew/bin:/usr/bin"));
         assert_eq!(path_from_env_output("no path here\n"), None);
+    }
+
+    #[test]
+    fn shutdown_tokens_are_long_and_unique() {
+        let (a, b) = (shutdown_token(), shutdown_token());
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
     }
 
     #[test]

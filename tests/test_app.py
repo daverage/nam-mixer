@@ -1833,3 +1833,26 @@ def test_backend_exit_stops_a_running_local_training(monkeypatch):
     with pytest.raises(SystemExit):
         app_module._exit_on_sigterm(15, None)
 
+
+
+def test_shutdown_endpoint_needs_the_shells_token(client, monkeypatch):
+    stopped, exited = [], []
+    monkeypatch.setattr(app_module, "_stop_local_training_on_exit", lambda: stopped.append(1))
+
+    class ImmediateTimer:
+        def __init__(self, _delay, fn):
+            self.fn = fn
+        def start(self):
+            self.fn()
+
+    monkeypatch.setattr(app_module.threading, "Timer", ImmediateTimer)
+    monkeypatch.setattr(app_module, "_exit_process", lambda: exited.append(1))
+
+    monkeypatch.delenv("NAM_MIXER_SHUTDOWN_TOKEN", raising=False)
+    assert client.post("/api/shutdown").status_code == 404          # source runs: no shutdown endpoint
+    monkeypatch.setenv("NAM_MIXER_SHUTDOWN_TOKEN", "s3cret-token")
+    assert client.post("/api/shutdown").status_code == 403
+    assert client.post("/api/shutdown", headers={"X-NAM-Mixer-Shutdown-Token": "wrong"}).status_code == 403
+    assert stopped == [] and exited == []
+    resp = client.post("/api/shutdown", headers={"X-NAM-Mixer-Shutdown-Token": "s3cret-token"})
+    assert resp.status_code == 200 and stopped == [1] and exited == [1]

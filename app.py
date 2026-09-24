@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -3352,6 +3353,29 @@ def _stop_local_training_on_exit() -> None:
 
 def _exit_on_sigterm(_signum, _frame) -> None:
     raise SystemExit(0)  # runs atexit handlers, unlike the default SIGTERM action
+
+
+def _exit_process() -> None:
+    os._exit(0)
+
+
+@app.post("/api/shutdown")
+def api_shutdown():
+    """Clean shutdown for the desktop shell on quit, on every OS (Windows has no
+    SIGTERM): stop local training, which runs in its own process group and
+    would otherwise outlive the backend, then exit. Only enabled when the
+    shell passed NAM_MIXER_SHUTDOWN_TOKEN, and only for a request carrying it
+    in a custom header (a web page can't send one cross-origin without a CORS
+    preflight, and doesn't know the token)."""
+    expected = os.environ.get("NAM_MIXER_SHUTDOWN_TOKEN", "")
+    if not expected:
+        return jsonify({"error": "not found"}), 404
+    supplied = request.headers.get("X-NAM-Mixer-Shutdown-Token", "")
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return jsonify({"error": "forbidden"}), 403
+    _stop_local_training_on_exit()
+    threading.Timer(0.2, _exit_process).start()  # let this response go out first
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
