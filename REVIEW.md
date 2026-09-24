@@ -360,4 +360,4 @@ separate commit.
 - 2026-09-24: #3 embedded tolerance measured on the real renderer (unchanged, cce0aba); #2 export naming unified (daed998) with three open naming questions; #10 still deferred. 770 passed, 12 skipped.
 - 2026-09-24: Export names and gear_type now state the audio content in every mode (1e58fdd). 780 passed, 12 skipped.
 - 2026-09-24: #7 done: user heard no real difference, so Character analysis v2 is now the default. 781 passed, 12 skipped. Remaining: group 4 review; #10 (deferred).
-\n- 2026-09-24: Phase 3 group 4 done (Flask, frontend, desktop/packaging/native, cloud/scripts). 790 passed, 12 skipped; JS 20/20; Rust tests 2/2. Remaining: #10 (deferred) and the final `/code-review ultra`.\n
+- 2026-09-24: Phase 3 group 4 done (Flask, frontend, desktop/packaging/native, cloud/scripts). 790 passed, 12 skipped; JS 20/20; Rust tests 2/2. Remaining: #10 (deferred) and the final `/code-review ultra`.
