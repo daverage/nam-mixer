@@ -282,8 +282,7 @@ separate commit.
       - ~~CG `_shift`/`_db` helpers copied across bundle/validation/probe~~:
         now `core.input_profiles.db_to_amplitude` and
         `audit.apply_alignment_shift` (83a0e35).
-      - `stage()` still writes the legacy 'uploading' state (the UI labels it
-        correctly, so it's cosmetic).
+      - ~~`stage()` still writes the legacy 'uploading' state~~ (b648e0d).
 - [x] 4. The Flask layer, frontend, desktop/packaging/native, cloud/scripts: reviewed
       2026-09-24 as four parallel reviews (~40 findings). Fixed:
       - Flask: live render sources swept after 30 min (3434fc6); stale CG
@@ -395,7 +394,8 @@ separate commit.
   1. The final `/code-review ultra` on this branch (user-triggered), then merge to master.
   2. A coverage report: pytest-cov/coverage aren't installed in either venv, so it hasn't been run.
   3. The desktop window/shutdown flow (d0bff7a) is covered by Rust tests but hasn't been launched by hand, including a Windows quit with local training running.
-  4. Minor: `test_cg_reproduction.py`'s skip reason still says "~11 minutes per amp"; it now takes about a minute.
-  5. Minor: CG `stage()` still writes the legacy 'uploading' state (cosmetic).
-  6. Minor: the pre-existing ruff import-order warnings in `hybrid/continuous_gain/`.
+  4. ~~Minor: the CG reproduction skip reason~~: it was right (the training audio is 11.6 minutes; the earlier note misread it as run time). It now states both, and the docstrings name `hybrid/continuous_gain/` (898e7d5).
+  5. ~~Minor: `stage()` writes the undeclared 'uploading' state~~: this is the Kaggle job manager, not CG. The job now stays 'preparing' until the upload starts, and the UI keeps the legacy label for old job.json files (b648e0d).
+  6. ~~Minor: ruff import-order warnings in `hybrid/continuous_gain/`~~: sorted, import order only (d251316).
   7. The 12 skips are environment-gated (real renders/models, training env, CG audio): run them before a release.
+- 2026-09-24: Minor items 4-6 done (898e7d5, b648e0d, d251316). 809 passed, 12 skipped in both venvs; JS 21/21; CG audio reproduction 6/6. Next: manual desktop check by the user, then `/code-review ultra`.
