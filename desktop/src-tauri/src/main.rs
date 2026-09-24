@@ -1,3 +1,6 @@
+// Release builds on Windows are GUI apps: no console window beside the UI.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // NAM Mixer desktop shell.
 //
 // This is a thin Tauri wrapper, not a reimplementation: it starts the
@@ -84,10 +87,16 @@ fn open_external_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err("only http(s) URLs can be opened this way".to_string());
     }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("URL contains whitespace or control characters".to_string());
+    }
     let result = if cfg!(target_os = "macos") {
         Command::new("open").arg(&url).status()
     } else if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", "start", "", &url]).status()
+        // Never `cmd /C start`: cmd treats & | ^ % in the URL as shell syntax,
+        // so a link could run another command. FileProtocolHandler receives
+        // the URL as a plain argument.
+        Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()
     } else {
         Command::new("xdg-open").arg(&url).status()
     };
@@ -135,8 +144,11 @@ fn repo_root() -> std::path::PathBuf {
 // covers Kaggle CLI discovery, not just Python version detection.
 fn user_shell_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    // `env` prints the exported PATH colon-joined in every shell (fish's
+    // "$PATH" would be space-separated), and taking the last PATH= line
+    // ignores anything the user's rc files print first.
     let mut child = Command::new(&shell)
-        .args(["-ilc", "printf '%s' \"$PATH\""])
+        .args(["-ilc", "env"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -154,8 +166,7 @@ fn user_shell_path() -> Option<String> {
                 }
                 let mut stdout = String::new();
                 child.stdout.take()?.read_to_string(&mut stdout).ok()?;
-                let path = stdout.trim().to_string();
-                return (!path.is_empty()).then_some(path);
+                return path_from_env_output(&stdout);
             }
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -164,6 +175,13 @@ fn user_shell_path() -> Option<String> {
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     }
+}
+
+/// The PATH value from `env` output: the last `PATH=` line, so text printed
+/// by the user's rc files before it is ignored.
+fn path_from_env_output(stdout: &str) -> Option<String> {
+    let path = stdout.lines().rev().find_map(|line| line.strip_prefix("PATH="))?.trim().to_string();
+    (!path.is_empty()).then_some(path)
 }
 
 // The bundled backend (packaging/backend/nam_mixer_backend.spec, built with
@@ -221,6 +239,12 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
     if let Some(path) = user_shell_path() {
         command.env("PATH", path);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW); // the console backend gets no window of its own
+    }
     command
         .env("PORT", port.to_string())
         .env("NAM_MIXER_DATA_DIR", data_dir)
@@ -231,18 +255,50 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
         .expect("failed to start the NAM Mixer backend (is python3 on PATH? -- see NAM_MIXER_PYTHON)")
 }
 
-fn wait_for_health(port: u16, timeout: Duration) -> bool {
+/// Ok once /api/health answers; Err with the reason if the backend exits
+/// first (reported at once rather than after the full timeout) or times out.
+fn wait_for_health(port: u16, timeout: Duration, child: &mut Child) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/api/health");
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("The local backend exited during startup ({status})."));
+        }
         if let Ok(resp) = ureq::get(&url).timeout(Duration::from_millis(500)).call() {
             if resp.status() == 200 {
-                return true;
+                return Ok(());
             }
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    false
+    Err(format!("The local backend did not become ready within {} seconds.", timeout.as_secs()))
+}
+
+/// Ask the backend to exit (SIGTERM lets it stop its own local-training
+/// subprocess, which runs in a separate session), then force it if needed.
+fn stop_backend(mut child: Child) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = child.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 fn main() {
@@ -258,17 +314,20 @@ fn main() {
             // already creates this path itself (WORK_DIR.mkdir(...)) once
             // told about it via NAM_MIXER_DATA_DIR.
             let data_dir = app.path().app_data_dir().expect("failed to resolve app data dir");
-            let child = spawn_backend(app, port, &data_dir);
+            let mut child = spawn_backend(app, port, &data_dir);
+            let ready = wait_for_health(port, Duration::from_secs(30), &mut child);
             *app.state::<BackendProcess>().0.lock().unwrap() = Some(child);
-
-            let ready = wait_for_health(port, Duration::from_secs(30));
-            let url = if ready {
-                format!("http://127.0.0.1:{port}/")
-            } else {
+            let url = match ready {
+                Ok(()) => format!("http://127.0.0.1:{port}/"),
                 // A blank about: page looks like a frozen launch and gives
                 // the user no recovery path. Keep the failure in the same
                 // window and make it explicit instead.
-                "data:text/html,%3Chtml%3E%3Cbody%20style=%22font-family:sans-serif;padding:2rem%22%3E%3Ch1%3ENAM%20Mixer%20could%20not%20start%3C%2Fh1%3E%3Cp%3EThe%20local%20backend%20did%20not%20become%20ready%20within%2030%20seconds.%20Quit%20and%20try%20again.%3C%2Fp%3E%3C%2Fbody%3E%3C%2Fhtml%3E".to_string()
+                Err(reason) => format!(
+                    "data:text/html,{}",
+                    percent_encode(&format!(
+                        "<html><body style=\"font-family:sans-serif;padding:2rem\"><h1>NAM Mixer could not start</h1><p>{reason} Quit and try again.</p></body></html>"
+                    ))
+                ),
             };
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
                 .title("NAM Mixer")
@@ -284,9 +343,32 @@ fn main() {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<BackendProcess>();
                 let taken = state.0.lock().unwrap().take();
-                if let Some(mut child) = taken {
-                    let _ = child.kill();
+                if let Some(child) = taken {
+                    stop_backend(child);
                 }
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_comes_from_env_output_even_after_rc_file_greetings() {
+        let zsh = "Welcome back!\nHOME=/Users/x\nPATH=/opt/homebrew/bin:/usr/bin:/bin\nSHELL=/bin/zsh\n";
+        assert_eq!(path_from_env_output(zsh).as_deref(), Some("/opt/homebrew/bin:/usr/bin:/bin"));
+        // fish exports PATH colon-joined through `env` too
+        let fish = "PATH=/opt/homebrew/bin:/usr/bin\nfish_greeting=hi\n";
+        assert_eq!(path_from_env_output(fish).as_deref(), Some("/opt/homebrew/bin:/usr/bin"));
+        assert_eq!(path_from_env_output("no path here\n"), None);
+    }
+
+    #[test]
+    fn startup_error_page_is_fully_encoded() {
+        let encoded = percent_encode("<p>exited (exit status: 1). Quit</p>");
+        assert!(!encoded.contains('<') && !encoded.contains(' ') && !encoded.contains('('));
+        assert!(encoded.starts_with("%3Cp%3Eexited"));
+    }
+}
+

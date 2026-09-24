@@ -3340,7 +3340,26 @@ register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, trai
                    cab_upload_dir=CAB_UPLOAD_DIR, store_session=_store_session_record)
 
 
+def _stop_local_training_on_exit() -> None:
+    """Local setup/training runs in its own process session, so it would outlive
+    this backend. Stop it when the backend is asked to exit (the desktop shell
+    sends SIGTERM on quit)."""
+    try:
+        _local_training_manager.cancel()
+    except RuntimeError:
+        pass  # nothing running
+
+
+def _exit_on_sigterm(_signum, _frame) -> None:
+    raise SystemExit(0)  # runs atexit handlers, unlike the default SIGTERM action
+
+
 if __name__ == "__main__":
+    import atexit
+    import signal
+
+    atexit.register(_stop_local_training_on_exit)
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     # One-time startup housekeeping: work/render_sources accumulates a copy for every render/preview, most of which never
     # become part of a saved bundle and so are never released by any user action (see _sweep_orphaned_render_sources's
     # docstring) -- sweep the backlog once per launch. Deliberately NOT at module import time: tests import this module

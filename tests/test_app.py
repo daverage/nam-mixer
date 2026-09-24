@@ -1809,3 +1809,27 @@ def test_backend_bundle_spec_includes_the_kaggle_worker_and_excludes_personal_ca
     assert '"cloud" / "kaggle" / "train_a2_cloud.py"' in spec and "training_support/cloud/kaggle" in spec
     assert '"assets" / "nam_models"), "assets/nam_models"' not in spec
     assert "raise SystemExit" in spec   # no renderer, no bundle
+
+
+def test_backend_exit_stops_a_running_local_training(monkeypatch):
+    """The desktop shell SIGTERMs the backend on quit; local training runs in its
+    own session, so the backend must stop it on the way out."""
+    stopped = []
+
+    class Manager:
+        def cancel(self):
+            stopped.append(True)
+
+    monkeypatch.setattr(app_module, "_local_training_manager", Manager())
+    app_module._stop_local_training_on_exit()
+    assert stopped == [True]
+
+    class Idle:
+        def cancel(self):
+            raise RuntimeError("No local setup or training process is running.")
+
+    monkeypatch.setattr(app_module, "_local_training_manager", Idle())
+    app_module._stop_local_training_on_exit()   # nothing running: no error
+    with pytest.raises(SystemExit):
+        app_module._exit_on_sigterm(15, None)
+
