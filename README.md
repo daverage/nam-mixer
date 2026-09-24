@@ -386,22 +386,25 @@ inference; the already-rendered `RenderedPair` (`hybrid/core/pipeline.py`) is
 reused by whichever mode you're auditioning.
 
 A third, mode-independent stage — **Cabinet IR** (`hybrid/core/cab_ir.py`) — sits
-AFTER the amp combination in any mode. Preview is independent of training:
-all A2 training and validation uses the head-only target. When an IR is
-selected, the export choices are:
+AFTER the amp combination in any mode, and in the Continuous Gain workflow.
+Preview is independent of training. When an IR is selected, the choices are:
 
-- **No cabinet**: train/export the conventional head-only A2. A selected IR
-  remains a reusable preview/bundle artifact, not part of the target.
-- **Create both** (`embedded`, advanced): retain the tested conventional head-only A2
-  and derive a second NAM containing an explicitly extracted Full WaveNet
-  followed by canonical Linear FIR taps in a NAM **Sequential** model. The
-  prepared IR WAV is also retained. The two artifacts are offered as clearly
-  separate head-only and `-with-cab.nam` downloads. This option is hidden by
-  default; enable *Settings → Advanced → Enable experimental NAM architectures*
-  before selecting it.
-
-Older saved designs that use the legacy `learned` mode remain readable, but
-the current UI no longer applies the cabinet to the training target.
+- **Amp only** (`none`): train/export an amp-only A2. The IR is only for
+  previewing; load it in your player for the cabinet (exact, and swappable).
+- **Learned cab** (`learned`, the supported way to put a cab in a NAM): the
+  training material is played through the amps and then the cabinet IR, like
+  a NAM player feeding an IR loader, and the result is the training target.
+  The cabinet is fixed into the trained NAM, which makes it a full-rig capture
+  (`[Learned Cab]`, gear type `amp_cab`). One NAM is trained, tested with the
+  cabinet on both sides, and downloaded. It is an approximation: see
+  "Baked cabinet" below.
+- **Create both** (`embedded`, experimental, for a possible future NAM
+  specification): retain the tested amp-only A2 and derive a second NAM
+  containing an explicitly extracted Full WaveNet followed by canonical Linear
+  FIR taps in a NAM **Sequential** model, offered as a separate
+  `-with-cab.nam` download. It is unavailable everywhere (generation,
+  packaging after training, downloads) unless *Settings → Advanced → Enable
+  experimental NAM architectures* is on.
 
 The cabinet output folds the recorded post-cab safety scalar into the Linear
 weights and is downloadable only after validation using the bundled,
@@ -683,9 +686,11 @@ checkout doesn't require hunting for each setup button individually.
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
 - **Advanced → Enable experimental NAM architectures** — off by default.
-  Turning it on reveals **Create both**, which exports the tested head-only
-  NAM plus an exact Sequential Embedded cabinet derivative. Leave it off for
-  ordinary use unless you specifically need the advanced export.
+  Turning it on reveals **Create both**, which exports the tested amp-only
+  NAM plus an exact Sequential Embedded cabinet derivative for a possible
+  future NAM specification; players that accept only A2 may reject it. With
+  it off, that export is never generated, packaged or offered for download.
+  The supported way to put a cabinet in a NAM is **Learned cab**.
 Settings are saved to the source checkout's own `.env` file — never uploaded
 anywhere.
 

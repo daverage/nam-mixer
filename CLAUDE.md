@@ -31,6 +31,14 @@ amp combination in every mode: ordinary causal FIR convolution,
 optionally preview-only or "baked" into the generated A2 target via the same
 `apply_cab_ir` function on the COMPLETE prepared IR (never shortened) in
 both cases.
+Learned cab (`export_mode: "learned"`, "baked") is the supported way to put a
+cab in a NAM, in the Builder AND Continuous Gain (where it is applied per
+training segment and CG validation compares through the same IR): one
+training, a full-rig capture. The embedded (Sequential) export is for a
+possible future NAM spec and is unavailable everywhere -- generation (Builder
+and CG routes), `complete_embedded_artifact` after training, and all
+embedded downloads -- unless `experimental_architectures_enabled()`. WebKit
+ignores `hidden` on `<option>`, so the UI removes unavailable options.
 
 **Receptive-field policy (`hybrid.core.receptive_field.combine_required_history`)
 has three tiers:**
