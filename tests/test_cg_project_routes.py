@@ -30,7 +30,8 @@ def _nam_bytes(gain, sr=48000):
 def fake_backend(monkeypatch):
     def fake_load(path):
         raw = json.loads(Path(path).read_text())
-        return types.SimpleNamespace(raw=raw, input_level_dbu=None, path=Path(path))
+        return types.SimpleNamespace(raw=raw, input_level_dbu=None, path=Path(path),
+                                     gear_type=(raw.get("metadata") or {}).get("gear_type"))   # as NamModel.gear_type
     monkeypatch.setattr(cgp, "load_nam", fake_load)
     monkeypatch.setattr(cgp, "render", lambda m, x, sr, **k: amp_render(m.raw["metadata"]["gain_param"] * 1.5)(x))
     monkeypatch.setattr(cgp, "load_reference_di", lambda name: synth_di(name, 3.0))
@@ -408,7 +409,8 @@ def fake_validation(monkeypatch):
     import hybrid.continuous_gain.validation as cgv
 
     def fake_load(path):
-        return types.SimpleNamespace(raw=json.loads(Path(path).read_text()), input_level_dbu=None, path=Path(path))
+        raw = json.loads(Path(path).read_text())
+        return types.SimpleNamespace(raw=raw, input_level_dbu=None, path=Path(path), gear_type=(raw.get("metadata") or {}).get("gear_type"))
     fake_render = lambda m, x, sr, **k: amp_render(m.raw["metadata"]["gain_param"] * 1.5)(x)  # noqa: E731
     for module in (cg_routes, cgv):
         monkeypatch.setattr(module, "load_nam", fake_load)

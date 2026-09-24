@@ -122,3 +122,21 @@ def test_source_records_carry_each_captures_gear_type(tmp_path):
     audit = {"captures": {"1": {"status": "VALID", "correction": None}, "5": {"status": "VALID", "correction": None}}}
     recs = source_records([1.0, 5.0], paths, [-10.0, 10.0], make_chain([1.0, 5.0], [-10.0, 10.0]), audit)
     assert [r["gear_type"] for r in recs] == ["amp_cab", "amp_cab"]
+
+
+def test_source_records_use_already_loaded_captures_instead_of_reloading(monkeypatch, tmp_path):
+    import types
+
+    import hybrid.continuous_gain.bundle as bundle_mod
+    from hybrid.continuous_gain.bundle import make_chain, source_records
+
+    def no_reload(path):
+        raise AssertionError(f"reloaded {path}")
+    monkeypatch.setattr(bundle_mod, "load_nam", no_reload)
+    paths = {}
+    for p in (1.0, 5.0):
+        paths[p] = tmp_path / f"G{p:g}.nam"; paths[p].write_bytes(b"{}")
+    audit = {"captures": {f"{p:g}": {"status": "verified", "correction": None, "evidence": {}} for p in paths}}
+    models = {1.0: types.SimpleNamespace(gear_type="amp"), 5.0: types.SimpleNamespace(gear_type="amp_cab")}
+    recs = source_records([1.0, 5.0], paths, [-10.0, 10.0], make_chain([1.0, 5.0], [-10.0, 10.0]), audit, models)
+    assert [r["gear_type"] for r in recs] == ["amp", "amp_cab"]

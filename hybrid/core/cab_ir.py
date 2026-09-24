@@ -354,7 +354,8 @@ class CabDesign:
     original_filename: Optional[str] = None
     # User-editable label shown in a learned/embedded export's name (e.g.
     # "Modern Boutique 4x12") -- the only cabinet field a user may edit; see
-    # hybrid/training/nam_provenance.py's build_export_name. Falls back to
+    # hybrid/training/nam_provenance.py's cabinet_display_name and
+    # export_model_name. Falls back to
     # `original_filename` when blank, never auto-derived from IR content.
     display_name: Optional[str] = None
     sha256: Optional[str] = None

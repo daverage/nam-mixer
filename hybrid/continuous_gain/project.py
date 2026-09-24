@@ -320,7 +320,7 @@ class CgProject:
                                       {"mode": plan["mode"], "k_star": plan["k_star"], "fallback": plan["fallback"], "coverage": plan["coverage"], "warnings": plan["warnings"]},
                                       plan["mapping"])
         design.update({"project_id": st["id"], "amp": st["amp"], "channel": st["channel"], "output_gain_recommendation_db": built.reduction_db, "training_material": excitation})
-        srcs = source_records(positions, paths, anchors, chain, an["audit"])
+        srcs = source_records(positions, paths, anchors, chain, an["audit"], models)
         rf = receptive_field_record(positions, models, bounded_envelope_max_history_samples(SR), cab=cab)
         output_gain = {"mode": "continuous_gain_scale", "applied_gain_db": -built.reduction_db}
         if cab is not None and cab.export_mode == "embedded":

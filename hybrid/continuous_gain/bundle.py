@@ -158,13 +158,15 @@ def write_bundle(out_dir: Path, built: BuiltAudio, chain: GainChain, anchors_db:
     return out_dir / "training_manifest.json"
 
 
-def source_records(positions: list[float], paths: dict[float, Path], anchors_db: list[float], chain: GainChain, audit: dict) -> list[dict]:
+def source_records(positions: list[float], paths: dict[float, Path], anchors_db: list[float], chain: GainChain, audit: dict,
+                   models: dict | None = None) -> list[dict]:
+    """`models` are the already-loaded captures by position, when the caller has them (else each is loaded)."""
     recs = []
     for k, p in enumerate(positions):
         a = audit["captures"][f"{p:g}"]
         recs.append({"position": p, "filename": Path(paths[p]).name, "path": str(paths[p]), "sha256": sha256_file(Path(paths[p])),
                      # Whether this capture is a full rig (includes a cabinet) -- see nam_provenance.export_gear_type.
-                     "gear_type": load_nam(paths[p]).gear_type,
+                     "gear_type": (models[p] if models is not None else load_nam(paths[p])).gear_type,
                      "anchor_input_gain_db": anchors_db[k], "chain_level_db": chain.levels_db[k], "audit_status": a["status"],
                      "alignment_shift_samples": alignment_shift(a)})
     return recs
