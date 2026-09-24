@@ -20,12 +20,46 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-/// The backend child (None until started in the background), its port, and
-/// the per-launch token its /api/shutdown endpoint requires.
+/// The backend child (None until started in the background), its port, the
+/// per-launch token its /api/shutdown endpoint requires, and the background
+/// start-up step (joined on quit if it has not registered the child yet).
 struct Backend {
-    child: Mutex<Option<Child>>,
+    child: Mutex<BackendSlot>,
     port: u16,
     shutdown_token: String,
+    startup: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+/// The child and whether the app is quitting, behind ONE lock, so a quit
+/// during start-up can never miss a child that is being registered.
+#[derive(Default)]
+struct BackendSlot {
+    child: Option<Child>,
+    quitting: bool,
+}
+
+impl BackendSlot {
+    /// Store a freshly started child, unless the app is already quitting:
+    /// then it is handed back and the caller must stop it.
+    fn register(slot: &Mutex<BackendSlot>, child: Child) -> Option<Child> {
+        let mut guard = slot.lock().unwrap();
+        if guard.quitting {
+            return Some(child);
+        }
+        guard.child = Some(child);
+        None
+    }
+
+    /// Mark the app as quitting and take whatever child is registered.
+    fn begin_quit(slot: &Mutex<BackendSlot>) -> Option<Child> {
+        let mut guard = slot.lock().unwrap();
+        guard.quitting = true;
+        guard.child.take()
+    }
+
+    fn quitting(slot: &Mutex<BackendSlot>) -> bool {
+        slot.lock().unwrap().quitting
+    }
 }
 
 /// An unguessable per-launch token: std's RandomState keys are seeded from
@@ -283,11 +317,11 @@ fn spawn_backend(bundled_exe: Option<std::path::PathBuf>, port: u16, data_dir: &
 
 /// Ok once /api/health answers; Err with the reason if the backend exits
 /// first (reported at once rather than after the full timeout) or times out.
-fn wait_for_health(port: u16, timeout: Duration, child: &Mutex<Option<Child>>) -> Result<(), String> {
+fn wait_for_health(port: u16, timeout: Duration, child: &Mutex<BackendSlot>) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/api/health");
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        match child.lock().unwrap().as_mut().map(|c| c.try_wait()) {
+        match child.lock().unwrap().child.as_mut().map(|c| c.try_wait()) {
             Some(Ok(Some(status))) => return Err(format!("The local backend exited during startup ({status}).")),
             None => return Err("The app is quitting.".to_string()), // taken by the quit handler
             _ => {}
@@ -361,7 +395,8 @@ fn main() {
         .setup(|app| {
             let port = find_free_port();
             let token = shutdown_token();
-            app.manage(Backend { child: Mutex::new(None), port, shutdown_token: token.clone() });
+            app.manage(Backend { child: Mutex::new(BackendSlot::default()), port, shutdown_token: token.clone(),
+                                 startup: Mutex::new(None) });
             // A real per-OS user data directory (e.g. ~/Library/Application
             // Support/com.nammixer.desktop on macOS) -- NEVER the bundle's
             // own (read-only, ephemeral-on-reinstall) directory. app.py
@@ -378,19 +413,34 @@ fn main() {
                 .inner_size(1280.0, 860.0)
                 .build()?;
             let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let child = spawn_backend(bundled_backend_exe(&handle), port, &data_dir, &token);
+            let startup = std::thread::spawn(move || {
                 let backend = handle.state::<Backend>();
-                *backend.child.lock().unwrap() = Some(child);
-                let url = match wait_for_health(port, Duration::from_secs(120), &backend.child) {
-                    Ok(()) => format!("http://127.0.0.1:{port}/"),
-                    // A blank page looks like a frozen launch; say what happened.
-                    Err(reason) => startup_error_url(&reason),
-                };
-                if let (Some(window), Ok(parsed)) = (handle.get_webview_window("main"), url.parse()) {
-                    let _ = window.navigate(parsed);
+                if BackendSlot::quitting(&backend.child) {
+                    return; // quit before the backend was even started
                 }
+                let child = spawn_backend(bundled_backend_exe(&handle), port, &data_dir, &token);
+                if let Some(child) = BackendSlot::register(&backend.child, child) {
+                    // The app started quitting while this child was being
+                    // started; the quit handler is waiting for this thread.
+                    stop_backend(child, port, &token);
+                    return;
+                }
+                // Waiting for health and navigating can take a while, and the
+                // quit handler never needs to wait for it: run it separately.
+                let handle = handle.clone();
+                std::thread::spawn(move || {
+                    let backend = handle.state::<Backend>();
+                    let url = match wait_for_health(port, Duration::from_secs(120), &backend.child) {
+                        Ok(()) => format!("http://127.0.0.1:{port}/"),
+                        // A blank page looks like a frozen launch; say what happened.
+                        Err(reason) => startup_error_url(&reason),
+                    };
+                    if let (Some(window), Ok(parsed)) = (handle.get_webview_window("main"), url.parse()) {
+                        let _ = window.navigate(parsed);
+                    }
+                });
             });
+            *app.state::<Backend>().startup.lock().unwrap() = Some(startup);
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -400,9 +450,13 @@ fn main() {
             // whichever fires first stops the backend exactly once.
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 if let Some(backend) = app_handle.try_state::<Backend>() {
-                    let taken = backend.child.lock().unwrap().take();
-                    if let Some(child) = taken {
+                    if let Some(child) = BackendSlot::begin_quit(&backend.child) {
                         stop_backend(child, backend.port, &backend.shutdown_token);
+                    } else if let Some(startup) = backend.startup.lock().unwrap().take() {
+                        // Quit during start-up: that thread either never
+                        // starts the backend or stops the one it started
+                        // (bounded by the shell PATH lookup, ~5 s).
+                        let _ = startup.join();
                     }
                 }
             }
@@ -412,6 +466,33 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn sleeper() -> Child {
+        Command::new("sleep").arg("30").spawn().expect("spawn sleep")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_registered_before_quit_is_handed_to_the_quit_handler() {
+        let slot = Mutex::new(BackendSlot::default());
+        assert!(BackendSlot::register(&slot, sleeper()).is_none());
+        let mut child = BackendSlot::begin_quit(&slot).expect("quit must take the registered child");
+        assert!(BackendSlot::quitting(&slot));
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_started_after_quit_began_is_handed_back_to_be_stopped() {
+        let slot = Mutex::new(BackendSlot::default());
+        assert!(BackendSlot::begin_quit(&slot).is_none()); // quit wins the race: nothing registered yet
+        let mut returned = BackendSlot::register(&slot, sleeper()).expect("must not be stored once quitting");
+        assert!(slot.lock().unwrap().child.is_none());
+        returned.kill().unwrap();
+        returned.wait().unwrap();
+    }
 
     #[test]
     fn path_comes_from_env_output_even_after_rc_file_greetings() {
