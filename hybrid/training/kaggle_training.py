@@ -527,6 +527,24 @@ _KERNEL_STATUS_MAP = {
 }
 
 
+def _kernel_status_token(raw: str) -> str:
+    """The status word from `kernels status` output ('<user>/<slug> has status
+    "KernelWorkerStatus.COMPLETE"' -> 'complete'), never the kernel ref: a
+    username such as 'running-man' must not read as a status. Falls back to
+    the whole text for output without that shape."""
+    match = re.search(r'has status\s+"?([\w.]+)"?', raw or "")
+    token = match.group(1) if match else (raw or "")
+    return token.rsplit(".", 1)[-1].strip().lower()
+
+
+def _map_kernel_status(raw: str) -> str:
+    token = _kernel_status_token(raw)
+    for key, value in _KERNEL_STATUS_MAP.items():
+        if key.lower() in token:
+            return value
+    return "running"
+
+
 @dataclass
 class KaggleJob:
     job_id: str
@@ -1110,12 +1128,7 @@ class KaggleJobManager:
 
         raw = result.combined.strip()
         job.raw_kernel_status = raw
-        mapped = "running"
-        for key, value in _KERNEL_STATUS_MAP.items():
-            if key.lower() in raw.lower():
-                mapped = value
-                break
-        job.state = mapped
+        job.state = _map_kernel_status(raw)
         save_job(self.a2_output_dir, job)
 
         if job.state == "downloading":
@@ -1307,7 +1320,7 @@ class KaggleJobManager:
 
         status_result = self.cli.kernels_status(job.kernel_ref)
         raw = status_result.combined.strip()
-        if not status_result.ok or "complete" not in raw.lower():
+        if not status_result.ok or _kernel_status_token(raw) != "complete":
             raise KaggleTrainingError(
                 f"cannot recover: Kaggle kernel {job.kernel_ref} is not reporting a completed status "
                 f"(status: {raw or 'no response'}) -- this only recovers a job whose training genuinely finished"

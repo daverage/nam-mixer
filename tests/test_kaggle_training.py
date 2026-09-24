@@ -1734,3 +1734,16 @@ def test_unverified_kernel_is_recorded_and_deleted_by_cleanup(tmp_path, bundle_d
     deletes = [c for c in calls if c[1:3] == ["kernels", "delete"]]
     assert deletes and job.unverified_kernel_ref in deletes[0]
 
+
+@pytest.mark.parametrize("raw, expected", [
+    ('running-man/hybrid-a2-x has status "KernelWorkerStatus.COMPLETE"', "downloading"),
+    ('queued-queen/hybrid-a2-x has status "KernelWorkerStatus.ERROR"', "failed"),
+    ('someone/complete-kernel has status "KernelWorkerStatus.RUNNING"', "running"),
+    ('someone/x has status "KernelWorkerStatus.QUEUED"', "queued"),
+    ("complete", "downloading"),                      # bare status text still understood
+])
+def test_kernel_status_comes_from_the_status_word_not_the_kernel_ref(raw, expected):
+    from hybrid.training.kaggle_training import _map_kernel_status
+
+    assert _map_kernel_status(raw) == expected
+
