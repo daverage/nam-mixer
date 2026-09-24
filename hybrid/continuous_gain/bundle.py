@@ -83,6 +83,7 @@ class BuiltAudio:
     output_scale_c: float
     train_offsets_db: list[float]
     val_offsets_db: list[float]
+    ceiling_dbfs: float = CEILING_DBFS   # the peak ceiling actually applied (recipe.ceiling_dbfs)
 
 
 def build_training_audio(chain: GainChain, render_fn: Callable[[float, np.ndarray], np.ndarray], shifts: dict[float, int],
@@ -113,7 +114,7 @@ def build_training_audio(chain: GainChain, render_fn: Callable[[float, np.ndarra
     Xc, Yc = np.concatenate(X), np.concatenate(Y)
     Yc, red_db = apply_peak_ceiling(Yc[:], recipe.ceiling_dbfs)
     return BuiltAudio(Xc, Yc.astype(np.float32), seg, train_stop, float(red_db), float(10 ** (-red_db / 20)) if red_db else 1.0,
-                      list(recipe.train_offsets_db), list(recipe.val_offsets_db))
+                      list(recipe.train_offsets_db), list(recipe.val_offsets_db), float(recipe.ceiling_dbfs))
 
 
 def make_chain(positions: list[float], anchors_db: list[float], reference_db: float = REFERENCE_DB) -> GainChain:
@@ -150,7 +151,7 @@ def write_bundle(out_dir: Path, built: BuiltAudio, chain: GainChain, anchors_db:
                            "train_stop_samples": built.train_stop,
                            "description": "official NAM input + DI segments at level offsets (train), held-out DI (validation, at the end)"},
         "target": {"final_sha256": sha256_file(out_dir / "hybrid_target.wav"), "output_scale_c": built.output_scale_c,
-                   "peak_ceiling_gain_reduction_db": built.reduction_db, "ceiling_dbfs": CEILING_DBFS,
+                   "peak_ceiling_gain_reduction_db": built.reduction_db, "ceiling_dbfs": built.ceiling_dbfs,
                    "combination": "level-driven chain blend of the real captures (hybrid.continuous_gain.multi_blend), one fixed peak-ceiling gain, no limiter"},
         "design": design, "sources": sources, "receptive_field": receptive_field,
         "cab": cab.to_dict() if cab else {"selected": False, "baked": False, "export_mode": "none"},

@@ -97,3 +97,13 @@ def test_written_bundle_is_a_standard_a2_bundle_with_a_declared_custom_split(tmp
 def test_apply_peak_ceiling_semantics_the_bundle_relies_on():
     y, red = apply_peak_ceiling(np.array([0.0, 2.0, -1.0]), -0.2)
     assert red > 0 and np.max(np.abs(y)) == pytest.approx(10 ** (-0.2 / 20))
+
+
+def test_manifest_records_the_ceiling_the_recipe_actually_applied(tmp_path):
+    chain = make_chain(POS, ANCH)
+    custom = FcRecipe(**{**TINY.__dict__, "ceiling_dbfs": -3.0})
+    b = build_training_audio(chain, _renderers(), {}, _official(), _di, custom)
+    mp = write_bundle(tmp_path / "d", b, chain, ANCH, {}, sources=[], model_name="M", artifact_stem="M",
+                      design={"kind": "x"}, receptive_field={"branch_samples": {"G1": 10}})
+    assert json.loads(mp.read_text())["target"]["ceiling_dbfs"] == -3.0
+    assert np.max(np.abs(b.target)) <= 10 ** (-3.0 / 20) + 1e-6
