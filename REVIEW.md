@@ -239,15 +239,33 @@ separate commit.
         cancel race (481d614); logs (286f00b); unexpected validation errors
         (6f71205).
       **Not changed, for the user to decide:**
-      - Embedded-package tolerance 3e-6 (absolute) may be too tight for long
-        real IRs near 0 dBFS (float32 NAMCore vs fftconvolve). Plausible but
-        unproven here: the Sequential renderer isn't configured on this
-        machine.
-      - `nam_provenance.build_export_name`/`export_name_suffix` are test-only
-        and have diverged from the production naming in
-        `a2_training_settings.user_metadata_kwargs` and `sequential_nam`
-        (e.g. legacy baked cab: '[Learned Cab]' vs '[Amp Only]'). Which one
-        is canonical? `_TONE_TYPES` is also copied three times.
+      - ~~Embedded-package tolerance 3e-6~~: **measured on the real Sequential
+        renderer** (the bundled nam_render, NAMCore 2563c0f, supports it)
+        (cce0aba). Check: max |Sequential(dry) − IR*(Full head(dry))·scalar|
+        after the derived warm-up ≤ 3e-6. Correct packages (identity, 2-tap,
+        real 24001-tap V30, 1 s synthetic, hot IR; scalar 1.0 and −4 dB; DI at
+        0/+12 dB; peaks up to 1.11): 0–3.0e-7 (≈2.7e-7 of the peak, i.e. float32
+        rounding). Deliberate faults: 0.01 dB scalar 7.5e-4, IR cut at 99.9%
+        energy 2.9e-2, IR one sample late 0.25. The threshold separates them
+        by more than 10× either side, so it's **unchanged**.
+        `scripts/measure_embedded_tolerance.py` plus a real-renderer
+        regression test. Not measured: output peaks far above 0 dBFS, where
+        float32 error grows with the peak.
+      - ~~Export naming divergence~~: one rule per export mode in
+        `nam_provenance.export_model_name` / `embedded_package_name`, used by
+        the app and the Sequential packager; the test-only routine is replaced
+        and the cloud copy is parity-checked across a 12-case matrix (daed998).
+        App names are unchanged, and historical baked-cab exports (which
+        contain the cabinet) keep `[Learned Cab]`. **Open naming questions
+        (labels kept as they are):**
+        1. `[Amp Only]` means "no NAM Mixer cabinet stage". If the source
+           captures are full-rig (`gear_type` amp_cab), the model does contain
+           a cabinet, and the export's `gear_type: amp` is also wrong.
+        2. Continuous Gain without a cab gets no suffix, while the other modes
+           get `[Amp Only]` for the same kind of content.
+        3. The embedded mode's downloadable head is amp-only but unsuffixed,
+           only so the package name built from it doesn't double up (the two
+           could be decoupled).
       - CG `_shift`/`_db` helpers are copied across bundle/validation/probe
         (a consolidation refactor; could go with #10).
       - `stage()` still writes the legacy 'uploading' state (the UI labels it
@@ -313,3 +331,4 @@ separate commit.
 - 2026-09-23: Phase 3 group 2 (`hybrid/modes/`) done, see the checklist. 694 passed, 12 skipped.
 - 2026-09-23: modes #5, #8 and #9 done; #7 implemented as opt-in v2, stopped for the listening review; #10 deferred. 709 passed, 12 skipped.
 - 2026-09-24: Phase 3 group 3 done (training, Continuous Gain, services). 755 passed, 12 skipped. Next: group 4 (Flask layer, JS, desktop, cloud, native, scripts); #7 still awaits the listening review; #10 deferred.
+- 2026-09-24: #3 embedded tolerance measured on the real renderer (unchanged, cce0aba); #2 export naming unified (daed998) with three open naming questions; #10 still deferred. 770 passed, 12 skipped.
