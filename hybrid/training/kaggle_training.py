@@ -1208,28 +1208,34 @@ class KaggleJobManager:
     def _tail_log_path(self, job: KaggleJob) -> Path:
         return _job_dir(self.a2_output_dir, job.design_id, job.job_id) / "logs" / "kaggle.log"
 
+    def _kernel_log_path(self, job: KaggleJob) -> Path:
+        return self._tail_log_path(job).with_name("kernel.log")
+
     def fetch_logs(self, job: KaggleJob) -> str:
-        if job.kernel_ref is None:
-            return ""
-        result = self.cli.kernels_logs(job.kernel_ref)
-        text = result.combined
-        log_path = self._tail_log_path(job)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(text)
-            if text and not text.endswith("\n"):
-                f.write("\n")
+        """Local log (upload/verify progress) plus the latest remote kernel log.
+
+        Before a kernel exists only the local log has anything to show.
+        `kernels logs` returns the WHOLE remote log each time, so it replaces
+        kernel.log rather than being appended to kaggle.log on every poll.
+        """
+        if job.kernel_ref is not None:
+            result = self.cli.kernels_logs(job.kernel_ref)
+            text = result.combined
+            if result.ok and text:
+                path = self._kernel_log_path(job)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         return self._read_log_tail(job)
 
     def read_log_tail(self, job: KaggleJob, n: int = LOG_TAIL_LINES) -> str:
         return self._read_log_tail(job, n)
 
     def _read_log_tail(self, job: KaggleJob, n: int = LOG_TAIL_LINES) -> str:
-        log_path = self._tail_log_path(job)
-        if not log_path.is_file():
-            return ""
-        with open(log_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        lines: list[str] = []
+        for log_path in (self._tail_log_path(job), self._kernel_log_path(job)):
+            if log_path.is_file():
+                with open(log_path, "r", encoding="utf-8") as f:
+                    lines.extend(f.readlines())
         return "".join(lines[-n:])
 
     @staticmethod

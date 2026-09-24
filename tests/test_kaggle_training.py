@@ -1787,3 +1787,17 @@ def test_cancelled_submission_stops_and_never_pushes_a_kernel(tmp_path, bundle_d
     saved = load_job(tmp_path, "mydesign", job.job_id)
     assert saved.state == "failed" and saved.error.startswith("Cancelled")
 
+
+def test_logs_show_upload_progress_before_the_kernel_and_never_duplicate_remote_logs(tmp_path, monkeypatch):
+    remote = "epoch 1\nepoch 2\n"
+    cli, _ = make_cli(monkeypatch, responses=lambda argv: FakeCompleted(0, remote if argv[1:3] == ["kernels", "logs"] else "", ""))
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="log1", design_id="mydesign", state="uploading_dataset")
+    manager._append_log(job, "upload 50%")
+    assert "upload 50%" in manager.fetch_logs(job)          # no kernel yet: local progress, not ""
+
+    job.kernel_ref = "testuser/k"
+    for _ in range(3):
+        tail = manager.fetch_logs(job)
+    assert tail.count("epoch 2") == 1 and "upload 50%" in tail
+
