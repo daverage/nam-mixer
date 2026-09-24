@@ -654,6 +654,10 @@ class KaggleTrainingError(RuntimeError):
     a generic 'Training failed'."""
 
 
+class JobCancelledError(KaggleTrainingError):
+    """Raised inside the submission pipeline once cancel_active() has run."""
+
+
 class KaggleJobManager:
     def __init__(
         self,
@@ -677,6 +681,13 @@ class KaggleJobManager:
             REPO_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py"
         )
         self._status_json_supported: Optional[bool] = None
+        # In-process bookkeeping (this manager is one app-lifetime instance):
+        # jobs with a live submission pipeline, jobs being downloaded/
+        # validated by some poll, and jobs cancelled while submitting.
+        self._live_lock = threading.Lock()
+        self._submitting: set[str] = set()
+        self._downloading: set[str] = set()
+        self._cancelled: set[str] = set()
 
     # -- status -------------------------------------------------------
 
@@ -732,7 +743,7 @@ class KaggleJobManager:
         shutil.copyfile(cloud_script, kernel_staging / cloud_script.name)
 
         job.state = "uploading"
-        save_job(self.a2_output_dir, job)
+        self._save_submission(job)
         return dataset_staging, kernel_staging
 
     def create_dataset(self, job: KaggleJob, staging_dir: Path) -> None:
@@ -747,7 +758,7 @@ class KaggleJobManager:
         if not username:
             job.state = "failed"
             job.error = "could not determine the authenticated Kaggle username (required to create a private dataset)"
-            save_job(self.a2_output_dir, job)
+            self._save_submission(job)
             raise KaggleTrainingError(job.error)
         dataset_ref = f"{username}/{slug}"
 
@@ -761,7 +772,7 @@ class KaggleJobManager:
         # that this may run for a while, not that anything has gone wrong.
         job.dataset_ref = dataset_ref
         job.state = "uploading_dataset"
-        save_job(self.a2_output_dir, job)
+        self._save_submission(job)
 
         dataset_metadata = {
             "title": slug,
@@ -782,7 +793,7 @@ class KaggleJobManager:
                 f"dataset upload {'timed out' if timed_out else 'failed'}: "
                 f"{result.stderr.strip() or result.stdout.strip()[-500:]}"
             )
-            save_job(self.a2_output_dir, job)
+            self._save_submission(job)
             raise KaggleTrainingError(job.error)
 
         job.upload_completed_at = time.time()
@@ -796,12 +807,12 @@ class KaggleJobManager:
         # a bounded settling window for that eventual consistency -- before
         # ever creating a kernel against it.
         job.state = "verifying_dataset"
-        save_job(self.a2_output_dir, job)
+        self._save_submission(job)
         ok, error = self.verify_dataset_payload(dataset_ref, staging_dir, job=job)
         if not ok:
             job.state = "failed"
             job.error = error
-            save_job(self.a2_output_dir, job)
+            self._save_submission(job)
             raise KaggleTrainingError(job.error)
 
     def verify_dataset_payload(
@@ -844,7 +855,7 @@ class KaggleJobManager:
                     dataset_ready = True
                     if job is not None and job.dataset_ready_at is None:
                         job.dataset_ready_at = time.time()
-                        save_job(self.a2_output_dir, job)
+                        self._save_submission(job)
                     self._log_verify_attempt(job, attempt, "dataset status ready")
                 else:
                     reason = (
@@ -870,7 +881,7 @@ class KaggleJobManager:
                         ))
                         if job is not None:
                             job.dataset_verified_at = time.time()
-                            save_job(self.a2_output_dir, job)
+                            self._save_submission(job)
                     return ok, error
                 reason = "remote file listing not available yet (empty)"
             else:
@@ -932,12 +943,21 @@ class KaggleJobManager:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(text if text.endswith("\n") else text + "\n")
 
+    def _save_submission(self, job: KaggleJob) -> None:
+        """save_job for the submission pipeline: once the job is cancelled,
+        stop the pipeline instead of overwriting the cancelled record."""
+        with self._live_lock:
+            cancelled = job.job_id in self._cancelled
+        if cancelled:
+            raise JobCancelledError(f"job {job.job_id} was cancelled")
+        save_job(self.a2_output_dir, job)
+
     def create_kernel(self, job: KaggleJob, staging_dir: Path) -> None:
         if job.dataset_ref is None:
             raise KaggleTrainingError("cannot create kernel before a dataset exists for this job")
 
         job.state = "creating_kernel"
-        save_job(self.a2_output_dir, job)
+        self._save_submission(job)
 
         # Kaggle requires kernel-metadata.json's "id" to be
         # "<username>/<slug>" too -- a bare slug silently resolves to
@@ -950,7 +970,7 @@ class KaggleJobManager:
         if not username:
             job.state = "failed"
             job.error = "could not determine the authenticated Kaggle username (required to create a private kernel)"
-            save_job(self.a2_output_dir, job)
+            self._save_submission(job)
             raise KaggleTrainingError(job.error)
         kernel_ref = f"{username}/{kernel_slug}"
 
@@ -970,11 +990,21 @@ class KaggleJobManager:
         }
         _atomic_write_json(staging_dir / "kernel-metadata.json", kernel_metadata)
 
+        with self._live_lock:
+            if job.job_id in self._cancelled:
+                raise JobCancelledError(f"job {job.job_id} was cancelled before its kernel was pushed")
         result = self.cli.kernels_push(staging_dir, accelerator=job.accelerator)
+        with self._live_lock:
+            cancelled_during_push = job.job_id in self._cancelled
+        if cancelled_during_push:
+            # cancel_active() ran without knowing about this kernel: remove it.
+            if result.ok:
+                self.cli.kernels_delete(kernel_ref)
+            raise JobCancelledError(f"job {job.job_id} was cancelled while its kernel was being pushed")
         if not result.ok:
             job.state = "failed"
             job.error = f"kernel push failed: {result.stderr.strip() or result.stdout.strip()}"
-            save_job(self.a2_output_dir, job)
+            self._save_submission(job)
             raise KaggleTrainingError(job.error)
 
         # `kernels push` exiting 0 is NOT sufficient evidence the kernel
@@ -985,7 +1015,7 @@ class KaggleJobManager:
         # diagnosis (we never delete them here).
         job.unverified_kernel_ref = kernel_ref
         job.state = "verifying_kernel"
-        save_job(self.a2_output_dir, job)
+        self._save_submission(job)
         if not self._verify_kernel_exists(kernel_ref):
             job.state = "failed"
             job.error = (
@@ -993,13 +1023,13 @@ class KaggleJobManager:
                 f"({kernel_ref}) after {self.kernel_verify_attempts} attempts -- the dataset "
                 f"({job.dataset_ref}) and staging directory are preserved for diagnosis"
             )
-            save_job(self.a2_output_dir, job)
+            self._save_submission(job)
             raise KaggleTrainingError(job.error)
 
         job.kernel_ref = kernel_ref
         job.unverified_kernel_ref = None
         job.state = "queued"
-        save_job(self.a2_output_dir, job)
+        self._save_submission(job)
 
     def _verify_kernel_exists(self, kernel_ref: str) -> bool:
         for attempt in range(self.kernel_verify_attempts):
@@ -1037,6 +1067,8 @@ class KaggleJobManager:
 
         job = KaggleJob(job_id=uuid.uuid4().hex[:12], design_id=design_id, epoch_preset=epoch_preset)
         save_job(self.a2_output_dir, job)
+        with self._live_lock:
+            self._submitting.add(job.job_id)
         return job
 
     def _run_pipeline(self, job: KaggleJob, bundle_dir: Path) -> None:
@@ -1048,6 +1080,8 @@ class KaggleJobManager:
             dataset_staging, kernel_staging = self.stage(job, bundle_dir)
             self.create_dataset(job, dataset_staging)
             self.create_kernel(job, kernel_staging)
+        except JobCancelledError:
+            raise  # cancel_active() already recorded the outcome
         except KaggleTrainingError as exc:
             # Some steps (e.g. stage()'s missing-file checks) raise without
             # recording the failure; never leave the job looking in progress.
@@ -1056,6 +1090,9 @@ class KaggleJobManager:
                 job.error = str(exc)
                 save_job(self.a2_output_dir, job)
             raise
+        finally:
+            with self._live_lock:
+                self._submitting.discard(job.job_id)
 
     def submit(self, design_id: str, bundle_dir: Path, epoch_preset: str = DEFAULT_EPOCH_PRESET) -> KaggleJob:
         """Synchronous end-to-end submission -- blocks for the entire
@@ -1085,6 +1122,9 @@ class KaggleJobManager:
             except KaggleTrainingError:
                 pass  # already persisted (state=="failed" + job.error) by the failing step
             except Exception as exc:  # noqa: BLE001 -- a background thread's exception has nowhere else to go
+                with self._live_lock:
+                    if job.job_id in self._cancelled:
+                        return
                 job.state = "failed"
                 job.error = f"unexpected error during Kaggle submission: {exc}"
                 save_job(self.a2_output_dir, job)
@@ -1095,8 +1135,25 @@ class KaggleJobManager:
     # -- polling ----------------------------------------------------------
 
     def refresh(self, job: KaggleJob) -> KaggleJob:
-        if job.state in TERMINAL_STATES or job.kernel_ref is None:
+        if job.state in TERMINAL_STATES:
             return job
+        if job.kernel_ref is None:
+            with self._live_lock:
+                still_submitting = job.job_id in self._submitting
+            if not still_submitting:
+                # No kernel yet and no submission running in this app: it was
+                # interrupted (app restart, dead thread) and can never finish.
+                job.state = "failed"
+                job.error = (
+                    "submission was interrupted before the Kaggle kernel was created (the app restarted or "
+                    "the upload stopped) -- submit again"
+                    + (f"; the uploaded dataset {job.dataset_ref} is kept for cleanup" if job.dataset_ref else "")
+                )
+                save_job(self.a2_output_dir, job)
+            return job
+        with self._live_lock:
+            if job.job_id in self._downloading:
+                return job  # another poll is downloading/validating this job right now
 
         if "/" not in job.kernel_ref:
             # Migration path for a job stuck by the pre-fix version, which
@@ -1132,8 +1189,21 @@ class KaggleJobManager:
         save_job(self.a2_output_dir, job)
 
         if job.state == "downloading":
-            self._download_and_validate(job)
+            self._download_once(job)
         return job
+
+    def _download_once(self, job: KaggleJob) -> None:
+        """_download_and_validate, but never twice at once for the same job:
+        a second download would rmtree the first one's output mid-render."""
+        with self._live_lock:
+            if job.job_id in self._downloading:
+                return
+            self._downloading.add(job.job_id)
+        try:
+            self._download_and_validate(job)
+        finally:
+            with self._live_lock:
+                self._downloading.discard(job.job_id)
 
     def _tail_log_path(self, job: KaggleJob) -> Path:
         return _job_dir(self.a2_output_dir, job.design_id, job.job_id) / "logs" / "kaggle.log"
@@ -1326,11 +1396,14 @@ class KaggleJobManager:
                 f"(status: {raw or 'no response'}) -- this only recovers a job whose training genuinely finished"
             )
 
+        with self._live_lock:
+            if job.job_id in self._downloading:
+                raise KaggleTrainingError("this job's output is already being downloaded")
         job.raw_kernel_status = raw
         job.error = None
         job.state = "downloading"
         save_job(self.a2_output_dir, job)
-        self._download_and_validate(job)
+        self._download_once(job)
         return job
 
     # -- cleanup ------------------------------------------------------
@@ -1373,6 +1446,8 @@ class KaggleJobManager:
         """
         if job.state in TERMINAL_STATES:
             raise KaggleTrainingError(f"job is already finished (state={job.state}); use cleanup() instead")
+        with self._live_lock:
+            self._cancelled.add(job.job_id)  # stops a live submission pipeline at its next step
         errors = []
         if job.dataset_ref:
             result = self.cli.datasets_delete(job.dataset_ref)

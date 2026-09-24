@@ -1747,3 +1747,43 @@ def test_kernel_status_comes_from_the_status_word_not_the_kernel_ref(raw, expect
 
     assert _map_kernel_status(raw) == expected
 
+
+def test_job_orphaned_before_its_kernel_existed_fails_instead_of_blocking(tmp_path, monkeypatch):
+    """After an app restart nothing is still submitting a 'uploading_dataset'
+    job with no kernel; it must fail rather than block the design forever."""
+    cli, _ = make_cli(monkeypatch)
+    job = KaggleJob(job_id="orphan1", design_id="mydesign", state="uploading_dataset", dataset_ref="testuser/ds")
+    save_job(tmp_path, job)
+    fresh_manager = KaggleJobManager(tmp_path, cli=cli)
+    refreshed = fresh_manager.refresh(load_job(tmp_path, "mydesign", "orphan1"))
+    assert refreshed.state == "failed" and "interrupted" in refreshed.error and "testuser/ds" in refreshed.error
+
+
+def test_job_still_submitting_in_this_process_is_not_treated_as_orphaned(tmp_path, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    job.state = "uploading_dataset"
+    assert manager.refresh(job).state == "uploading_dataset"
+
+
+def test_poll_during_a_running_download_does_not_start_another(tmp_path, monkeypatch):
+    cli, calls = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="dl1", design_id="mydesign", state="validating", kernel_ref="testuser/k")
+    manager._downloading.add(job.job_id)
+    assert manager.refresh(job).state == "validating"
+    assert not [c for c in calls if c[1:3] in (["kernels", "status"], ["kernels", "output"])]
+
+
+def test_cancelled_submission_stops_and_never_pushes_a_kernel(tmp_path, bundle_dir, monkeypatch):
+    cli, calls = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    manager.cancel_active(KaggleJob.from_dict(job.to_dict()))   # e.g. the owning session was deleted
+    with pytest.raises(KaggleTrainingError, match="cancelled"):
+        manager._run_pipeline(job, bundle_dir)
+    assert not [c for c in calls if c[1:3] == ["kernels", "push"]]
+    saved = load_job(tmp_path, "mydesign", job.job_id)
+    assert saved.state == "failed" and saved.error.startswith("Cancelled")
+
