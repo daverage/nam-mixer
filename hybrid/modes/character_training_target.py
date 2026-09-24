@@ -14,12 +14,13 @@ from .character_blend import CharacterBlendDesign, LowLevelResponseCheck, build_
 from ..core.envelope import bounded_envelope_max_history_ms
 from ..core.input_profiles import db_to_amplitude
 from ..core.nam_loader import load_nam
-from ..training.nam_provenance import source_metadata_fields as _source_metadata_fields
 from ..core.render import SLIM_FULL, render
-from ..core.safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
+from ..core.safety import apply_output_gain, apply_peak_ceiling, check_audio
 from .training_target import (
     A2_TARGET_PEAK_CEILING_DBFS, TargetSafetyReport, TrainingBundle, TrainingInputError,
-    _git_commit, _sha256_file, compute_receptive_field_record, embedded_final_scalar, maybe_bake_cab, validate_training_input,
+    _git_commit, _sha256_file, compute_receptive_field_record, maybe_bake_cab,
+    apply_design_output_gain, design_output_gain_record, manifest_amp_record, manifest_calibration_record,
+    manifest_target_record, manifest_training_input_record, validate_training_input,
 )
 from ..training.validation_report import DEFAULT_VALIDATION_POLICY
 
@@ -232,13 +233,13 @@ def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_r
 def build_character_training_manifest(design, amp_a, amp_b, amp_a_sha256, amp_b_sha256, calibration, training_input, safety, receptive_field, warnings, low_level_response: LowLevelResponseCheck, output_gain: "dict | None" = None):
     return {
         "hybrid_builder_version": HYBRID_BUILDER_VERSION, "git_commit": _git_commit(), "mode": "character",
-        "amp_a": {"filename": Path(design.amp_a_path).name, "path": design.amp_a_path, "sha256": amp_a_sha256, "architecture": amp_a.architecture, "sample_rate": amp_a.sample_rate, "input_level_dbu": amp_a.input_level_dbu, **_source_metadata_fields(amp_a)},
-        "amp_b": {"filename": Path(design.amp_b_path).name, "path": design.amp_b_path, "sha256": amp_b_sha256, "architecture": amp_b.architecture, "sample_rate": amp_b.sample_rate, "input_level_dbu": amp_b.input_level_dbu, **_source_metadata_fields(amp_b)},
+        "amp_a": manifest_amp_record(design.amp_a_path, amp_a, amp_a_sha256, include_output_level=False),
+        "amp_b": manifest_amp_record(design.amp_b_path, amp_b, amp_b_sha256, include_output_level=False),
         "design": design.to_dict(),
         "character_analysis": {"version": 2, "teacher_semantics_version": design.teacher_semantics_version, "amp_a_sha256": design.amp_a_sha256 or amp_a_sha256, "amp_b_sha256": design.amp_b_sha256 or amp_b_sha256, "analysis_a": design.analysis_a, "analysis_b": design.analysis_b, "tone_mix_b": design.tone_mix_b, "feel_mix_b": design.feel_mix_b, "drive_mix_b": design.drive_mix_b, "drive_curve": {"low": design.drive_low_mix_b, "mid": design.drive_mid_mix_b, "high": design.drive_high_mix_b}},
-        "calibration": {"requested_mode": design.calibration_mode, "effective_mode": "auto" if calibration.applied else "raw", "reference_input_level_dbu": calibration.reference_input_level_dbu, "amp_a_compensation_db": calibration.amp_a_gain_db, "amp_b_compensation_db": calibration.amp_b_gain_db, "applied": calibration.applied, "warning": calibration.warning},
-        "training_input": {"path": training_input.path, "sample_rate": training_input.sample_rate, "frame_count": training_input.frame_count, "sha256": training_input.sha256, "md5": training_input.md5, "detected_version": training_input.detected_version},
-        "target": {"raw_sha256": safety.raw_sha256, "final_sha256": safety.final_sha256, "peak_before_safety_dbfs": safety.raw_peak_dbfs, "peak_after_safety_dbfs": safety.final_peak_dbfs, "global_safety_gain_reduction_db": safety.gain_reduction_db, "preview_limiter_used": False, "synthetic_latency_samples": 0},
+        "calibration": manifest_calibration_record(design, calibration),
+        "training_input": manifest_training_input_record(training_input),
+        "target": manifest_target_record(safety),
         "training": {"status": "not yet run -- Character Blend defaults to high_def (120 epochs)", "recommended_epoch_preset": "high_def"},
         "cab": design.cab.to_dict() if design.cab else {"selected": False},
         "output_gain": output_gain or {"mode": design.output_gain_mode, "applied_gain_db": 0.0},
@@ -280,14 +281,9 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
     if len(target_raw) != len(official_input): raise TrainingInputError("generated Character Blend target is not sample-aligned with training input")
     target_raw = maybe_bake_cab(target_raw, design.cab, input_info.sample_rate)
 
-    # Shared post-combination output gain -- see hybrid.modes.design.HybridDesign's
-    # output_gain_mode/manual_output_gain_db docstring.
-    if design.output_gain_mode == "manual":
-        output_gain_db = design.manual_output_gain_db
-        output_gain_peak_before_dbfs = check_audio(target_raw).peak_dbfs
-    else:
-        output_gain_db, output_gain_peak_before_dbfs = compute_auto_output_gain_db(target_raw, target_peak_dbfs)
-    target_raw = apply_output_gain(target_raw, output_gain_db)
+    # Shared post-combination output gain, BEFORE the safety ceiling below.
+    target_raw, output_gain_db, output_gain_peak_before_dbfs = apply_design_output_gain(
+        target_raw, design, target_peak_dbfs)
 
     check = check_audio(target_raw)
     if check.has_nan_or_inf: raise TrainingInputError("generated Character Blend target contains NaN/Inf -- aborting")
@@ -313,15 +309,8 @@ def generate_character_training_bundle(design: CharacterBlendDesign, official_in
             "Character processing extends beyond the standard A2 receptive field. Training will continue as an "
             "approximation; validate the Full and Lite exports against the frozen teacher and by listening."
         )
-    output_gain_record = {
-        "mode": design.output_gain_mode,
-        "requested_manual_gain_db": design.manual_output_gain_db if design.output_gain_mode == "manual" else None,
-        "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
-        "applied_gain_db": output_gain_db,
-    }
-    if design.cab is not None and design.cab.export_mode == "embedded":
-        _, output_gain_record["embedded_final"] = embedded_final_scalar(
-            target_final, design.cab, input_info.sample_rate, target_peak_dbfs)
+    output_gain_record = design_output_gain_record(
+        design, output_gain_db, output_gain_peak_before_dbfs, target_final, input_info.sample_rate, target_peak_dbfs)
     manifest = build_character_training_manifest(design, amp_a, amp_b, a_sha, b_sha, calibration, input_info, safety, receptive, warnings, low_level_response, output_gain=output_gain_record)
     validation_reference.update({
         "input_excerpt_path": reference_out.name,

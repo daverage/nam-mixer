@@ -245,6 +245,74 @@ def _hybrid_metadata_dict(design: HybridDesign) -> dict:
     return d
 
 
+# Manifest sections shared by the Hybrid, Blend and Character generators.
+# Each mode's own sections (design, character analysis, training note) stay
+# in its own builder.
+
+def manifest_amp_record(path: str, model: NamModel, sha256: str, *, include_output_level: bool = True) -> dict:
+    record = {
+        "filename": Path(path).name,
+        "path": path,
+        "sha256": sha256,
+        "architecture": model.architecture,
+        "sample_rate": model.sample_rate,
+        "input_level_dbu": model.input_level_dbu,
+    }
+    # Character Blend manifests have never recorded output_level_dbu.
+    if include_output_level:
+        record["output_level_dbu"] = model.output_level_dbu
+    return {**record, **_source_metadata_fields(model)}
+
+
+def manifest_calibration_record(design, calibration: CalibrationResult) -> dict:
+    return {
+        "requested_mode": design.calibration_mode,
+        "effective_mode": "auto" if calibration.applied else "raw",
+        "reference_input_level_dbu": calibration.reference_input_level_dbu,
+        "amp_a_compensation_db": calibration.amp_a_gain_db,
+        "amp_b_compensation_db": calibration.amp_b_gain_db,
+        "applied": calibration.applied,
+        "warning": calibration.warning,
+    }
+
+
+def manifest_training_input_record(training_input: TrainingInputInfo) -> dict:
+    return {
+        "path": training_input.path,
+        "sample_rate": training_input.sample_rate,
+        "frame_count": training_input.frame_count,
+        "sha256": training_input.sha256,
+        "md5": training_input.md5,
+        "detected_version": training_input.detected_version,
+    }
+
+
+def manifest_target_record(safety: "TargetSafetyReport") -> dict:
+    return {
+        "raw_sha256": safety.raw_sha256,
+        "final_sha256": safety.final_sha256,
+        "peak_before_safety_dbfs": safety.raw_peak_dbfs,
+        "peak_after_safety_dbfs": safety.final_peak_dbfs,
+        "global_safety_gain_reduction_db": safety.gain_reduction_db,
+        "preview_limiter_used": False,
+        "synthetic_latency_samples": 0,
+    }
+
+
+def manifest_untrained_record() -> dict:
+    """The Hybrid/Blend ``training`` section before scripts/train_a2.py fills it."""
+    return {
+        "status": "not yet run -- see scripts/train_a2.py",
+        "neural_amp_modeler_version": None,
+        "torch_version": None,
+        "pytorch_lightning_version": None,
+        "python_version": None,
+        "a2_config_identifier": None,
+        "training_settings": None,
+        "device": None,
+    }
+
+
 def build_training_manifest(
     design: HybridDesign,
     amp_a: NamModel,
@@ -265,26 +333,8 @@ def build_training_manifest(
         "hybrid_builder_version": HYBRID_BUILDER_VERSION,
         "git_commit": _git_commit(),
         "mode": "hybrid",
-        "amp_a": {
-            "filename": Path(design.amp_a_path).name,
-            "path": design.amp_a_path,
-            "sha256": amp_a_sha256,
-            "architecture": amp_a.architecture,
-            "sample_rate": amp_a.sample_rate,
-            "input_level_dbu": amp_a.input_level_dbu,
-            "output_level_dbu": amp_a.output_level_dbu,
-            **_source_metadata_fields(amp_a),
-        },
-        "amp_b": {
-            "filename": Path(design.amp_b_path).name,
-            "path": design.amp_b_path,
-            "sha256": amp_b_sha256,
-            "architecture": amp_b.architecture,
-            "sample_rate": amp_b.sample_rate,
-            "input_level_dbu": amp_b.input_level_dbu,
-            "output_level_dbu": amp_b.output_level_dbu,
-            **_source_metadata_fields(amp_b),
-        },
+        "amp_a": manifest_amp_record(design.amp_a_path, amp_a, amp_a_sha256),
+        "amp_b": manifest_amp_record(design.amp_b_path, amp_b, amp_b_sha256),
         "design": {
             "instrument_type": design.instrument_type,
             "design_reference_profile_id": design.design_reference_profile_id,
@@ -308,42 +358,10 @@ def build_training_manifest(
             "amp_a_input_gain_db": design.amp_a_input_gain_db,
             "amp_b_input_gain_db": design.amp_b_input_gain_db,
         },
-        "calibration": {
-            "requested_mode": design.calibration_mode,
-            "effective_mode": "auto" if calibration.applied else "raw",
-            "reference_input_level_dbu": calibration.reference_input_level_dbu,
-            "amp_a_compensation_db": calibration.amp_a_gain_db,
-            "amp_b_compensation_db": calibration.amp_b_gain_db,
-            "applied": calibration.applied,
-            "warning": calibration.warning,
-        },
-        "training_input": {
-            "path": training_input.path,
-            "sample_rate": training_input.sample_rate,
-            "frame_count": training_input.frame_count,
-            "sha256": training_input.sha256,
-            "md5": training_input.md5,
-            "detected_version": training_input.detected_version,
-        },
-        "target": {
-            "raw_sha256": safety.raw_sha256,
-            "final_sha256": safety.final_sha256,
-            "peak_before_safety_dbfs": safety.raw_peak_dbfs,
-            "peak_after_safety_dbfs": safety.final_peak_dbfs,
-            "global_safety_gain_reduction_db": safety.gain_reduction_db,
-            "preview_limiter_used": False,
-            "synthetic_latency_samples": 0,
-        },
-        "training": training_env or {
-            "status": "not yet run -- see scripts/train_a2.py",
-            "neural_amp_modeler_version": None,
-            "torch_version": None,
-            "pytorch_lightning_version": None,
-            "python_version": None,
-            "a2_config_identifier": None,
-            "training_settings": None,
-            "device": None,
-        },
+        "calibration": manifest_calibration_record(design, calibration),
+        "training_input": manifest_training_input_record(training_input),
+        "target": manifest_target_record(safety),
+        "training": training_env or manifest_untrained_record(),
         "cab": design.cab.to_dict() if design.cab else {"selected": False},
         "output_gain": output_gain or {"mode": design.output_gain_mode, "applied_gain_db": 0.0},
         "receptive_field": receptive_field,
@@ -371,6 +389,40 @@ def maybe_bake_cab(audio: np.ndarray, cab: Optional[CabDesign], sample_rate: int
         return apply_cab_ir(audio, prepared)
     except CabIrError as exc:
         raise TrainingInputError(f"failed to bake cabinet IR into training target: {exc}") from exc
+
+
+def apply_design_output_gain(audio: np.ndarray, design, target_peak_dbfs: float) -> tuple[np.ndarray, float, float]:
+    """Shared post-combination output gain for the design-mode generators
+    (see hybrid.modes.design.HybridDesign's output_gain_mode/
+    manual_output_gain_db docstring). "auto" is computed fresh against THIS
+    target audio's peak -- not frozen from preview -- since it's this file's
+    real headroom that matters. Callers run it BEFORE the safety ceiling,
+    which still has final say: an over-generous manual gain gets
+    safety-reduced like any other hot signal, never silently clipped.
+
+    Returns (gained_audio, applied_gain_db, peak_before_gain_dbfs)."""
+    if design.output_gain_mode == "manual":
+        gain_db = design.manual_output_gain_db
+        peak_before_dbfs = check_audio(audio).peak_dbfs
+    else:
+        gain_db, peak_before_dbfs = compute_auto_output_gain_db(audio, target_peak_dbfs)
+    return apply_output_gain(audio, gain_db), gain_db, peak_before_dbfs
+
+
+def design_output_gain_record(design, applied_gain_db: float, peak_before_dbfs: float, final_target: np.ndarray,
+                              sample_rate: int, target_peak_dbfs: float) -> dict:
+    """The manifest's ``output_gain`` section for the design-mode generators,
+    plus ``embedded_final`` (derived from the final, post-ceiling target)
+    when the cab is exported embedded."""
+    record = {
+        "mode": design.output_gain_mode,
+        "requested_manual_gain_db": design.manual_output_gain_db if design.output_gain_mode == "manual" else None,
+        "peak_before_output_gain_dbfs": peak_before_dbfs,
+        "applied_gain_db": applied_gain_db,
+    }
+    if design.cab is not None and design.cab.export_mode == "embedded":
+        _, record["embedded_final"] = embedded_final_scalar(final_target, design.cab, sample_rate, target_peak_dbfs)
+    return record
 
 
 def embedded_final_scalar(head_target: np.ndarray, cab: Optional[CabDesign], sample_rate: int,
@@ -650,19 +702,9 @@ def generate_training_bundle(
     # existing no-cab Hybrid output exactly.
     hybrid_raw = maybe_bake_cab(hybrid_raw, design.cab, input_info.sample_rate)
 
-    # Shared post-combination output gain (see hybrid.modes.design.HybridDesign's
-    # output_gain_mode/manual_output_gain_db docstring): "auto" is computed
-    # fresh here against THIS actual target audio's peak -- not frozen from
-    # preview -- since it's this file's real headroom that matters. Runs
-    # BEFORE the safety ceiling below, which still has final say: an
-    # over-generous manual gain gets safety-reduced back down exactly like
-    # any other hot signal would, never silently clipped.
-    if design.output_gain_mode == "manual":
-        output_gain_db = design.manual_output_gain_db
-        output_gain_peak_before_dbfs = check_audio(hybrid_raw).peak_dbfs
-    else:
-        output_gain_db, output_gain_peak_before_dbfs = compute_auto_output_gain_db(hybrid_raw, target_peak_dbfs)
-    hybrid_raw = apply_output_gain(hybrid_raw, output_gain_db)
+    # Shared post-combination output gain, BEFORE the safety ceiling below.
+    hybrid_raw, output_gain_db, output_gain_peak_before_dbfs = apply_design_output_gain(
+        hybrid_raw, design, target_peak_dbfs)
 
     receptive_field = compute_receptive_field_record(
         "hybrid", amp_a, amp_b, input_info.sample_rate, design.cab,
@@ -712,16 +754,8 @@ def generate_training_bundle(
     with open(metadata_out, "w", encoding="utf-8") as f:
         json.dump(_hybrid_metadata_dict(design), f, indent=2)
 
-    output_gain_record = {
-        "mode": design.output_gain_mode,
-        "requested_manual_gain_db": design.manual_output_gain_db if design.output_gain_mode == "manual" else None,
-        "peak_before_output_gain_dbfs": output_gain_peak_before_dbfs,
-        "applied_gain_db": output_gain_db,
-    }
-    embedded_record = None
-    if design.cab is not None and design.cab.export_mode == "embedded":
-        scalar, embedded_record = embedded_final_scalar(hybrid_final, design.cab, input_info.sample_rate, target_peak_dbfs)
-        output_gain_record["embedded_final"] = embedded_record
+    output_gain_record = design_output_gain_record(
+        design, output_gain_db, output_gain_peak_before_dbfs, hybrid_final, input_info.sample_rate, target_peak_dbfs)
 
     manifest = build_training_manifest(
         design=design, amp_a=amp_a, amp_b=amp_b,
