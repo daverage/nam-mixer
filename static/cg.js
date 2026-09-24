@@ -52,10 +52,10 @@
   let loadSeq = 0;
   async function load(id) {
     const changedProject = S.id !== id;
-    S.id = id;
     const mine = ++loadSeq;
     const data = await api(`/api/cg/projects/${id}`);
     if (mine !== loadSeq) return;            // a newer load (e.g. the project the user just created) superseded this response
+    S.id = id;                               // only once it loaded: a failed open must not retarget the project on screen
     S.data = data;
     if (changedProject) {
       const cab = data.bundle && data.bundle.cab;
@@ -112,28 +112,37 @@
   });
 
   // ---------- jobs
+  // A job belongs to the project that started it (pid): its follow-up actions
+  // always target that project, even if the user has opened another one since.
   async function runJob(startPath, payload, after) {
+    const pid = S.id;
     try {
       const j = await api(startPath, { method: "POST", json: payload || {} });
-      S.job = { id: j.job_id, message: "starting", log: [] };
+      S.job = { id: j.job_id, pid, message: "starting", log: [] };
       render();
       clearInterval(S.pollTimer);
-      S.pollTimer = setInterval(async () => {
+      let busy = false;                      // a slow tick must not overlap the next one and finish the job twice
+      const timer = S.pollTimer = setInterval(async () => {
+        if (busy) return;
+        busy = true;
         try {
           const st = await api(`/api/cg/jobs/${j.job_id}`);
-          S.job = { id: j.job_id, message: st.message, log: st.log, elapsed: st.elapsed };
           if (st.state !== "running") {
-            clearInterval(S.pollTimer);
+            clearInterval(timer);
             const failed = st.state === "error";
-            S.job = null;
-            await load(S.id);
-            if (failed) say(st.error || "The job failed", true); else if (after) await after(st);
-          } else { const el = document.getElementById("cg-job-log"); if (el) { el.textContent = st.log.join("\n"); el.scrollTop = el.scrollHeight; } const m = document.getElementById("cg-job-msg"); if (m) m.textContent = `${st.message} (${Math.round(st.elapsed)} s)`; }
-        } catch (e) { clearInterval(S.pollTimer); say(e.message, true); }
+            if (S.job && S.job.id === j.job_id) S.job = null;
+            if (S.id === pid) await load(pid);
+            if (failed) say(st.error || "The job failed", true); else if (after) await after(st, pid);
+          } else {
+            S.job = { id: j.job_id, pid, message: st.message, log: st.log, elapsed: st.elapsed };
+            const el = document.getElementById("cg-job-log"); if (el) { el.textContent = st.log.join("\n"); el.scrollTop = el.scrollHeight; } const m = document.getElementById("cg-job-msg"); if (m) m.textContent = `${st.message} (${Math.round(st.elapsed)} s)`;
+          }
+        } catch (e) { clearInterval(timer); say(e.message, true); }
+        finally { busy = false; }
       }, 1500);
     } catch (e) { say(e.message, true); }
   }
-  const jobBox = () => S.job ? `<div class="training-activity-card" aria-live="polite"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details" open><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
+  const jobBox = () => S.job && S.job.pid === S.id ? `<div class="training-activity-card" aria-live="polite"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details" open><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
 
   // ---------- charts (inline SVG, theme variables)
   function chart({ xs, series, xLabel, yLabel, height = 220, width = 460, xTicks, shade = [], points = [] }) {
@@ -213,7 +222,10 @@
       try { S.data = await api(`/api/cg/projects/${S.id}/captures/${encodeURIComponent(el.dataset.cgRemove)}`, { method: "DELETE" }); render(); } catch (e) { say(e.message, true); }
     }));
     const an = document.getElementById("cg-analyse");
-    if (an) an.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/analyse`, {}, async () => { await api(`/api/cg/projects/${S.id}/plan`, { method: "POST", json: { mode: "automatic", anchors: "fc" } }); await load(S.id); S.stage = 2; render(); }));
+    if (an) an.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/analyse`, {}, async (_st, pid) => {
+      await api(`/api/cg/projects/${pid}/plan`, { method: "POST", json: { mode: "automatic", anchors: "fc" } });
+      if (S.id === pid) { await load(pid); S.stage = 2; render(); }
+    }));
   }
   const val = (id) => (document.getElementById(id) || {}).value || "";
 
@@ -356,7 +368,7 @@
       model_name: val("cg-model-name"),
       cab_path: S.cabEnabled && S.cab ? S.cab.path : null,
       cab_display_name: S.cabDisplayName,
-    }, async () => { say("Training files created."); render(); }));
+    }, async (_st, pid) => { if (S.id === pid) { say("Training files created."); render(); } }));
     const g4 = document.getElementById("cg-goto4"); if (g4) g4.addEventListener("click", () => { S.stage = 4; render(); });
     // The Kaggle / local training UI is the Builder's own section (app.js), hosted here for this design.
     const slot = document.getElementById("cg-train-slot");
@@ -368,7 +380,9 @@
   }
   // The hosted section announces completion; reload so the project shows the trained model.
   document.addEventListener("nam:training-complete", (e) => {
-    if (S.data && S.data.bundle && S.data.bundle.design_id === e.detail.designId && !(S.data.training && S.data.training.trained)) load(S.id);
+    if (S.data && S.data.bundle && S.data.bundle.design_id === e.detail.designId && !(S.data.training && S.data.training.trained)) {
+      load(S.id).catch((err) => say(`Training finished, but the project could not be reloaded: ${err.message}`, true));
+    }
   });
 
   // ---------- Stage 4
@@ -405,7 +419,7 @@
   function bindStage4() {
     const d = S.data; if (!d) return;
     const v = document.getElementById("cg-validate");
-    if (v) v.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/validate`, {}, async () => { say("Validation complete."); render(); }));
+    if (v) v.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/validate`, {}, async (_st, pid) => { if (S.id === pid) { say("Validation complete."); render(); } }));
     const sel = document.getElementById("cg-cmp");
     if (sel && d.validation) {
       const show = () => { const c = d.validation.audition.comparisons[Number(sel.value)]; document.getElementById("cg-cmp-pair").innerHTML = `<div><strong>Trained model</strong><audio controls preload="none" src="/api/cg/projects/${S.id}/audition/${c.model}"></audio></div><div><strong>Original capture G${c.position}</strong><audio controls preload="none" src="/api/cg/projects/${S.id}/audition/${c.original}"></audio></div>`; };
@@ -419,7 +433,7 @@
     if (S.trainHost) S.trainHost.remove();          // keep the borrowed section alive while the body is rebuilt
     document.querySelectorAll(".cg-tab").forEach((b) => b.classList.toggle("active", Number(b.dataset.cgStage) === S.stage));
     const hint = document.getElementById("cg-hint"); if (hint) hint.textContent = HINTS[S.stage] || "";
-    if (!S.data) { body.innerHTML = `${card("Continuous Gain", `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`)}</div>`; return; }
+    if (!S.data) { body.innerHTML = `${card("Continuous Gain", `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`)}`; return; }
     body.innerHTML = [stage1, stage2, stage3, stage4][S.stage - 1]();
     [bindStage1, bindStage2, bindStage3, bindStage4][S.stage - 1]();
   }

@@ -373,3 +373,28 @@ test('validation reports made before the Full/Lite fix are flagged', () => {
   assert.match(sandbox.validationSummaryHtml({ ...report, schema_version: 2 }), /wrong way round/);
   assert.doesNotMatch(sandbox.validationSummaryHtml({ ...report, schema_version: 3 }), /wrong way round/);
 });
+
+test('a Continuous Gain job finishing after the user opened another project acts on its own project', async () => {
+  const cg = fs.readFileSync(path.join(__dirname, '../static/cg.js'), 'utf8');
+  const start = cg.indexOf('  async function runJob(');
+  const end = cg.indexOf('  const jobBox', start);
+  assert.ok(start > 0 && end > start);
+  const loads = [];
+  let tick = null;
+  const sandbox = {
+    S: { id: 'A', job: null, pollTimer: null },
+    api: async (url) => (url === '/start' ? { job_id: 'j1' } : { state: 'done', log: [], message: '', elapsed: 1 }),
+    render: () => {}, say: () => {},
+    load: async (id) => { loads.push(id); },
+    setInterval: (fn) => { tick = fn; return 1; }, clearInterval: () => {},
+    document: { getElementById: () => null },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(cg.slice(start, end) + '\nthis.runJob = runJob;', sandbox);
+  let afterPid = null;
+  await sandbox.runJob('/start', {}, async (_st, pid) => { afterPid = pid; });
+  sandbox.S.id = 'B';                          // the user opens project B while A's job runs
+  await tick();
+  assert.equal(afterPid, 'A');                 // the follow-up targets A, not B
+  assert.deepEqual(loads, []);                 // B's screen is not reloaded with A's result
+});
