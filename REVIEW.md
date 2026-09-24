@@ -264,7 +264,39 @@ separate commit.
         (a consolidation refactor; could go with #10).
       - `stage()` still writes the legacy 'uploading' state (the UI labels it
         correctly, so it's cosmetic).
-- [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
+- [x] 4. The Flask layer, frontend, desktop/packaging/native, cloud/scripts: reviewed
+      2026-09-24 as four parallel reviews (~40 findings). Fixed:
+      - Flask: live render sources swept after 30 min (3434fc6); stale CG
+        validation shown for a new model (96b4097); torn analysis-cache
+        writes (760022b); JSON errors and a string `custom` plan (5c7ff83);
+        Character analyses re-hashed per slider move, a perf regression from
+        2d09f87 (1eab756).
+      - Frontend: CG jobs acting on whichever project was open, overlapping
+        polls, failed open retargeting edits (b83a394); crossover label vs
+        clamped value, out-of-order coverage, calibration text, the archived
+        doc link in a warning (815c52d).
+      - Desktop/packaging/native: Kaggle worker missing from the packaged
+        app, personal captures bundled, renderer-less bundles, training venv
+        inside the app bundle (197c371); Windows `cmd /C start` link
+        injection, quit leaving training running, fish/greeting PATH, instant
+        crash report, Windows console (d670f03); unchecked final WAV write
+        (225cda0).
+      - Cloud/scripts (mostly about my own recent changes): Full rendered
+        with no `--slim` flag, so plain exports don't abort training
+        (b5118b7); report schema 3, and older swapped Full/Lite reports are
+        flagged in the UI (2cef180); no doubled package label, and
+        amp_pedal_cab kept (da88cca); one shared tolerance constant and a
+        measurement-script tidy-up (25d4c2c).
+      **Not changed (for the user):**
+      - The CG project GET re-reads/encodes/hashes the trained NAM for the
+        Sessions sync on every request (perf); `_JOBS` keeps finished job
+        results for the process lifetime.
+      - cg.js keeps three separately maintained timing formulas.
+      - The desktop shell still blocks its main thread for up to ~35 s
+        before the first window. A crash is now reported at once, but there's
+        no splash window yet.
+      - Windows quit is still a hard kill: there's no SIGTERM to let the
+        backend stop local training.
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
 - [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
 
@@ -328,3 +360,4 @@ separate commit.
 - 2026-09-24: #3 embedded tolerance measured on the real renderer (unchanged, cce0aba); #2 export naming unified (daed998) with three open naming questions; #10 still deferred. 770 passed, 12 skipped.
 - 2026-09-24: Export names and gear_type now state the audio content in every mode (1e58fdd). 780 passed, 12 skipped.
 - 2026-09-24: #7 done: user heard no real difference, so Character analysis v2 is now the default. 781 passed, 12 skipped. Remaining: group 4 review; #10 (deferred).
+\n- 2026-09-24: Phase 3 group 4 done (Flask, frontend, desktop/packaging/native, cloud/scripts). 790 passed, 12 skipped; JS 20/20; Rust tests 2/2. Remaining: #10 (deferred) and the final `/code-review ultra`.\n
