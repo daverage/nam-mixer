@@ -324,16 +324,17 @@ def _load_local_llm_env() -> None:
 
 
 def _setting(name: str, default: str = "", legacy: str | None = None) -> str:
-    """Read a provider-neutral setting first, then its local-only alias."""
-    if name in os.environ:
-        return os.environ[name].strip()
-    value = _read_env_value(name).strip()
-    if value:
-        return value
-    if legacy:
-        if legacy in os.environ:
-            return os.environ[legacy].strip()
-        return _read_env_value(legacy).strip()
+    """Read a provider-neutral setting first, then its local-only alias.
+
+    Each name is read from the environment, then `.env`
+    (env_file.read_env_value). An empty inherited variable counts as unset,
+    so it can't hide a saved `.env` value, the legacy alias or the default.
+    """
+    for candidate in (name, legacy):
+        if candidate:
+            value = _read_env_value(candidate).strip()
+            if value:
+                return value
     return default
 
 

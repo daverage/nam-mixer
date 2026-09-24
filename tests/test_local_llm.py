@@ -747,3 +747,21 @@ def test_hybrid_width_outside_the_ui_slider_range_is_rejected(width):
 @pytest.mark.parametrize("width", [2, 9.5, 18])
 def test_hybrid_width_inside_the_ui_slider_range_is_accepted(width):
     assert local_llm._recipe_from_json({"mode": "hybrid", "switchKnob": 4, "width": width, "explanation": "x"}).width == width
+
+
+def test_empty_inherited_variable_does_not_mask_the_saved_env_value(tmp_path, monkeypatch):
+    """A launcher exporting NAM_MIXER_AI_PROVIDER='' must not hide the provider saved in .env."""
+    env = tmp_path / ".env"
+    env.write_text("NAM_MIXER_AI_PROVIDER=custom\n", encoding="utf-8")
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env))
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "")
+    assert local_llm._setting("NAM_MIXER_AI_PROVIDER", "local") == "custom"
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    assert local_llm._setting("NAM_MIXER_AI_PROVIDER", "local") == "cloudflare"   # a real value still wins
+
+
+def test_empty_variables_fall_back_to_the_default(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "")
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
+    assert local_llm._setting("NAM_MIXER_AI_MODEL", "fallback", legacy="NAM_MIXER_LOCAL_LLM_MODEL") == "fallback"
+
