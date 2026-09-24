@@ -91,7 +91,7 @@ teacher. Always listen to and validate exported models.
 - [Settings](#settings) — configuring the renderer, AI providers, and TONE3000 from the app itself
 - [Current status and limitations](#current-status-and-limitations)
 - [Safety: training target vs. live preview](#safety-training-target-vs-live-preview)
-- [Project layout](#project-layout) · [NAM Tools](#nam-tools-output-volume-and-metadata)
+- [Project layout](#project-layout) · [NAM Tools](#nam-tools-volume-metadata-and-cabinet-embedding)
 - [License and attribution](#license-and-attribution)
 
 ## What this is
@@ -874,30 +874,38 @@ converts a single existing NAM model to Valeton hardware's CLO format; this
 project builds new hybrid NAM training material out of two existing NAM
 models. Nothing here depends on NAMtoClo at runtime.
 
-## NAM Tools: output volume and metadata
+## NAM Tools: volume, metadata, and cabinet embedding
 
-The **Tools** tab can open a NAM from your computer or select the latest model
-generated locally by this app. It always creates a new download and never
-overwrites the source file.
+The **Tools** tab has three tools for an existing NAM capture: **Output
+volume**, **Metadata**, and **Cab Embed**. To start, choose a `.nam` file in
+Tools; selecting it opens it automatically. Or choose **Use latest generated
+NAM** to work on the most recent locally generated model. Once it is open,
+choose the tool you need. Volume and metadata edits produce a new downloadable
+NAM, and Cab Embed either starts a new training job or produces an exact
+Sequential package. The source NAM is never overwritten.
 
-The output-volume tool applies `10 ** (dB / 20)` to the recognised final audio
-`head_scale`. `head_scale` is the output scale after the model has generated
+### Output volume
+
+The output-volume tool changes the recognised final audio `head_scale` by
+`10 ** (dB / 20)`. `head_scale` controls output after the model has generated
 its signal, so this changes output level without retraining or changing the
 learned tone, distortion, dynamics, or input response. It also updates each
 available `metadata.loudness` by the same dB amount. It deliberately does not
-change `metadata.gain`: that describes separate metadata/calibration intent,
-not the final output scale.
+change `metadata.gain`, which describes separate metadata/calibration intent.
 
 Modern A2 `SlimmableContainer` NAMs have one final audio model per submodel;
 the tool edits only `config.submodels[*].model.config.head_scale`. Older
 single-model files are supported only when their root `config.head_scale` is
 present. Unknown layouts are refused rather than guessed. Before saving, a
 recursive JSON diff must match exactly the approved output-scale and loudness
-paths; weights and every other model field are therefore unchanged.
+paths, so weights and every other model field stay unchanged.
 
-Examples: enter `+3`, `+6`, or `-6` in the Output volume field. A +6 dB change
-uses a multiplier of approximately `1.995262`; -6 dB uses `0.501187`. Boosts
-above +12 dB are allowed but may clip in a host or target hardware.
+The slider starts at the model's measured loudness and sets the desired final
+level. For example, moving from -20 dB to -17 dB applies a +3 dB change. A +6
+dB change uses a multiplier of approximately `1.995262`; -6 dB uses
+`0.501187`. Boosts above +12 dB are allowed but may clip in a host or target
+hardware. The volume tool is unavailable when the capture has no measured
+loudness or no recognised output scale.
 
 The same safe operation is available from a terminal:
 
@@ -907,12 +915,27 @@ python3 scripts/nam_volume.py Mesa_Boogie.nam +6 --dry-run
 python3 scripts/nam_volume.py Mesa_Boogie.nam -6 --output Mesa_Boogie_quieter.nam
 ```
 
-The metadata editor loads and can safely change every official NAM A2
-UserMetadata field: name, modeled-by, gear type/make/model, tone type, and
-input/output dBu. Export date, trainer details, and measured loudness remain
-untouched; use the Output volume slider for loudness. New NAMs identify their
-creator as `NAM Mixer`; physical gear make/model and tone metadata are left
-blank until the user can provide factual values.
+### Metadata
+
+The metadata editor changes descriptive fields only: **name**, **modeled by**,
+**gear make**, **gear model**, and **tone type**. It does not edit weights or
+technical facts such as gear type and calibration. Export date, trainer
+details, and measured loudness remain untouched; use Output volume to change
+loudness. New NAMs identify their creator as `NAM Mixer`; gear make/model and
+tone type are left blank unless the user supplies factual values.
+
+### Cab Embed
+
+**Cab Embed** adds a selected cabinet IR to one existing NAM capture. The
+default **Learn into a new A2 NAM** path renders the official NAM training
+input through the source capture and frozen cabinet IR, then hands the normal
+bundle to the same local or Kaggle trainer used by the Builder. It preserves
+the source capture's input calibration and tone type, records both source and
+IR hashes, and exports an `amp_cab` model. For supported A2
+`SlimmableContainer` sources, **Exact Sequential embed** is also available
+when experimental architectures are enabled. It appends the prepared IR as a
+Linear stage without retraining and is immediate, but may not load in players
+that do not support Sequential NAMs.
 
 ## License and attribution
 

@@ -61,6 +61,70 @@ test('conversation export includes optional structured AI and research debug', (
   assert.match(debug, /Authorization headers are excluded/);
 });
 
+test('choosing a Tools NAM opens it immediately without a second confirmation', async () => {
+  const calls = [];
+  class FakeFormData {
+    append(name, value) { this.entry = [name, value]; }
+  }
+  const sandbox = {
+    trainingIsActive: () => false,
+    toolInfo: {},
+    toolSourceCard: { classList: { toggle() {} } },
+    toolChooseFileButton: {},
+    toolGeneratedButton: {},
+    FormData: FakeFormData,
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true, json: async () => ({ path: '/uploads/amp.nam' }) };
+    },
+    setToolNam: async (data, label) => { sandbox.opened = { data, label }; },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function setToolSourceBusy(', 'toolChooseFileButton.addEventListener'), sandbox);
+
+  const file = { name: 'amp.nam' };
+  await sandbox.openToolNamFile(file);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/nam/upload');
+  assert.deepEqual(calls[0].options.body.entry, ['file', file]);
+  assert.deepEqual(sandbox.opened, { data: { path: '/uploads/amp.nam' }, label: 'amp.nam' });
+});
+
+test('Tools results appear inline with a calm collapsed validation note', () => {
+  function element(tagName = 'div') {
+    return {
+      tagName, children: [], className: '', textContent: '',
+      classList: { add() {}, remove() {} },
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+      addEventListener() {},
+      scrollIntoView() {},
+    };
+  }
+  const resultEl = element();
+  resultEl.hidden = true;
+  const sandbox = {
+    document: { createElement: tagName => element(tagName) },
+    desktopSaveLabel: value => value,
+    triggerFileDownload() {},
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function showToolResult(', 'function updateToolVolumeReadout()'), sandbox);
+
+  sandbox.showToolResult({
+    filename: 'edited.nam', download_url: '/download/edited.nam',
+    changed_paths: ['metadata.name'], validation_report_invalidated: true,
+  }, resultEl);
+
+  assert.equal(resultEl.hidden, false);
+  assert.equal(resultEl.children[0].textContent, 'New NAM ready');
+  assert.equal(resultEl.children[2].textContent, 'Download edited.nam');
+  assert.equal(resultEl.children[3].tagName, 'details');
+  assert.equal(resultEl.children[3].children[0].textContent, 'About validation reports');
+  assert.doesNotMatch(source, /This edited NAM has different bytes from its source/);
+});
+
 test('cancelled comparison permits a retry and old completion cannot unlock the new request', async () => {
   const requests = [];
   const sandbox = {

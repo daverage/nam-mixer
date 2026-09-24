@@ -22,6 +22,7 @@ import soundfile as sf
 import app as app_module
 from hybrid.core.render import SLIM_FULL, SLIM_LITE
 import hybrid.modes.blend_training_target as blend_training_target
+import hybrid.modes.cab_embed_training_target as cab_embed_training_target
 import hybrid.core.pipeline as pipeline
 import hybrid.modes.training_target as training_target
 
@@ -37,6 +38,7 @@ def identity_render(monkeypatch):
     monkeypatch.setattr(pipeline, "render", fake_render)
     monkeypatch.setattr(training_target, "render", fake_render)
     monkeypatch.setattr(blend_training_target, "render", fake_render)
+    monkeypatch.setattr(cab_embed_training_target, "render", fake_render)
     # Bypass the official-V3-file MD5 check for synthetic training-input
     # fixtures in these tests -- we don't ship the real ~27MB official file.
     monkeypatch.setattr(training_target, "_md5_file", lambda path: training_target.OFFICIAL_V3_INPUT_MD5)
@@ -929,6 +931,38 @@ def test_nam_volume_tool_writes_only_a_new_validated_file(client, tmp_path):
     assert edited["config"]["submodels"][0]["model"]["config"]["weights"] == [1]
 
 
+def test_nam_volume_validation_ignores_json_object_key_order(client, tmp_path):
+    source = tmp_path / "MetadataFirst.nam"
+    source.write_text(jsonlib.dumps({
+        "architecture": "SlimmableContainer",
+        # Some real exporters put metadata before config. The approved paths
+        # are identical after saving even though their traversal order differs.
+        "metadata": {"loudness": -20.5, "name": "Metadata First"},
+        "config": {"submodels": [{
+            "model": {
+                "metadata": {"loudness": -20.5},
+                "config": {"head_scale": 0.01, "weights": [1]},
+            },
+        }]},
+    }))
+    uploaded = client.post(
+        "/api/nam/upload",
+        data={"file": (io.BytesIO(source.read_bytes()), source.name)},
+    ).get_json()
+
+    response = client.post(
+        "/api/nam/tools/volume",
+        json={"path": uploaded["path"], "db_change": 3},
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert set(response.get_json()["changed_paths"]) == {
+        "metadata.loudness",
+        "config.submodels[0].model.metadata.loudness",
+        "config.submodels[0].model.config.head_scale",
+    }
+
+
 def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
     source = tmp_path / "Meta.nam"
     _write_tool_nam(source)
@@ -1501,6 +1535,68 @@ def test_cab_upload_accepts_valid_ir(client, tmp_path):
     data = resp.get_json()
     assert data["original_sample_rate"] == 48000
     assert "path" in data
+
+
+def test_nam_tool_learned_cab_creates_shared_training_bundle(client, isolated_training_paths, tmp_path, monkeypatch):
+    training_path, a2_dir = isolated_training_paths
+    _write_training_wav(training_path)
+    nam_dir = tmp_path / "uploaded_nam"
+    nam_dir.mkdir()
+    monkeypatch.setattr(app_module, "NAM_UPLOAD_DIR", nam_dir)
+    source = nam_dir / "source.nam"
+    source.write_text(jsonlib.dumps({
+        "architecture": "Test", "config": {}, "sample_rate": 48000,
+        "metadata": {"name": "Source Amp", "tone_type": "clean", "input_level_dbu": -12.0},
+    }))
+    ir_path = tmp_path / "cab.wav"
+    sf.write(ir_path, np.array([0.75, 0.25], dtype=np.float32), 48000, subtype="FLOAT")
+
+    response = client.post("/api/nam/tools/cab-embed", json={
+        "path": str(source), "cab_path": str(ir_path), "mode": "learned",
+        "model_name": "Source Amp Studio", "cab_display_name": "Studio 2x12",
+    })
+
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json()
+    manifest = jsonlib.loads(Path(data["manifest_path"]).read_text())
+    assert data["design_id"] == "Source_Amp_Studio"
+    assert manifest["mode"] == "cab_embed"
+    assert manifest["amp_a"]["filename"] == "source.nam"
+    assert manifest["cab"]["export_mode"] == "learned"
+    assert manifest["cab"]["display_name"] == "Studio 2x12"
+    assert manifest["artifact_filename"] == "Source_Amp_Studio.nam"
+    assert (a2_dir / data["design_id"] / "hybrid_target.wav").is_file()
+
+
+def test_nam_tool_exact_cab_embed_packages_supported_a2(client, tmp_path, monkeypatch):
+    nam_dir = tmp_path / "uploaded_nam"
+    tool_dir = tmp_path / "nam_tools"
+    nam_dir.mkdir()
+    tool_dir.mkdir()
+    monkeypatch.setattr(app_module, "NAM_UPLOAD_DIR", nam_dir)
+    monkeypatch.setattr(app_module, "NAM_TOOL_OUTPUT_DIR", tool_dir)
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "settings.env"))
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true")
+    source = nam_dir / "source.nam"
+    wave = {"version": "0.7.0", "architecture": "WaveNet", "config": {}, "weights": [1], "sample_rate": 48000}
+    source.write_text(jsonlib.dumps({
+        "version": "0.7.0", "architecture": "SlimmableContainer", "sample_rate": 48000,
+        "config": {"submodels": [{"max_value": 1.0, "model": wave}]}, "weights": [],
+    }))
+    ir_path = tmp_path / "cab.wav"
+    sf.write(ir_path, np.array([1.0, -0.25], dtype=np.float32), 48000, subtype="FLOAT")
+
+    response = client.post("/api/nam/tools/cab-embed", json={
+        "path": str(source), "cab_path": str(ir_path), "mode": "embedded",
+        "model_name": "Source Amp", "cab_display_name": "Exact Cab",
+    })
+
+    assert response.status_code == 200, response.get_json()
+    data = response.get_json()
+    packaged = jsonlib.loads((tool_dir / data["filename"]).read_text())
+    assert packaged["architecture"] == "Sequential"
+    assert [child["architecture"] for child in packaged["config"]["models"]] == ["WaveNet", "Linear"]
+    assert data["prepared_ir_tap_count"] == 2
 
 
 def test_preview_with_cab_applies_same_ir_to_a_result_and_b(client, tmp_path):

@@ -118,14 +118,110 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
 }
 .design-mode-tabs .mode-tab.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .design-mode-picker .mode-description { margin: 0.7rem 0 0; max-width: none; }
-.nam-tools { max-width: 1100px; margin: 0 auto 1.25rem; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 1.1rem 1.25rem; }
+.nam-tools {
+  max-width: 1100px;
+  margin: 0 auto 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--panel) 96%, var(--accent) 4%), var(--panel) 28rem);
+  box-shadow: var(--shadow);
+}
 .tools-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
-.tools-heading h2 { margin: 0; color: var(--text); font-size: 1rem; text-transform: none; letter-spacing: normal; }
-.tool-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
-.tools-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
-.tools-grid h3 { margin: 0; font-size: 0.9rem; }
+.tools-heading h2 { margin: 0; color: var(--text); font-size: 1.15rem; text-transform: none; letter-spacing: normal; }
+.tools-intro { padding: 1.6rem 0 1.25rem; }
+.tools-intro-copy { max-width: 43rem; }
+.tools-intro-copy h3 { margin: 0; font-size: clamp(1.35rem, 3vw, 2rem); letter-spacing: -0.025em; }
+.tools-intro-copy p { margin: 0.65rem 0 0; color: var(--text-muted); font-size: 0.92rem; line-height: 1.55; }
+.tool-capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1.25rem; }
+.tool-capability {
+  display: flex;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 3%);
+}
+.tool-capability-icon, .tool-card-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.tool-capability strong { display: block; margin: 0.1rem 0 0.25rem; font-size: 0.86rem; }
+.tool-capability div > span { display: block; color: var(--text-muted); font-size: 0.76rem; line-height: 1.4; }
+.tool-source-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 5%);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.tool-step-marker {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.tool-source-content { min-width: 0; }
+.tool-source-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.tool-source-heading h3, .tools-workspace-heading h3, .tool-card-heading h3 { margin: 0; color: var(--text); font-size: 1rem; }
+.tool-source-heading p, .tools-workspace-heading p { margin: 0.3rem 0 0; color: var(--text-muted); font-size: 0.82rem; line-height: 1.45; }
+.tool-safety-badge {
+  flex: none;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.tool-source-options { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 0.8rem; align-items: stretch; margin-top: 0.9rem; }
+.tool-source-option { display: flex; flex-direction: column; align-items: flex-start; padding: 0.85rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.tool-source-option strong { font-size: 0.85rem; }
+.tool-source-option > span { flex: 1; margin: 0.25rem 0 0.7rem; color: var(--text-muted); font-size: 0.76rem; line-height: 1.4; }
+.tool-source-option .btn { margin: 0; }
+.tool-source-divider { display: flex; align-items: center; color: var(--text-muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+.tool-source-status { margin-top: 0.75rem; padding: 0.6rem 0.7rem; border-radius: 7px; background: var(--track); color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; }
+.tool-source-card.is-loading .tool-source-status { color: var(--accent); }
+.tool-source-card.is-loaded { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--panel) 95%, var(--accent) 3%); }
+.tool-source-card.is-loaded .tool-source-status { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--text); font-weight: 650; }
+.nam-tools.has-source .tools-intro { display: none; }
+.nam-tools.has-source .tool-source-card { margin-top: 1rem; }
+.tools-workspace-heading { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.9rem; margin: 1.3rem 0 0.8rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
+.tools-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+.tool-card { min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent); }
+.tool-card-heading { display: flex; align-items: center; gap: 0.7rem; }
+.tool-card-heading .eyebrow { margin-bottom: 0.1rem; }
+.tool-card > .info { min-height: 3.45rem; margin: 0.65rem 0 0.8rem; line-height: 1.45; }
 .tools-grid .btn { margin-top: 0.85rem; }
+.tool-cab-embed { margin-top: 0.85rem; }
+.tool-cab-embed > .btn { margin-top: 0.85rem; }
 .tool-result { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; background: var(--track); font-size: 0.82rem; line-height: 1.5; }
+.tool-inline-result { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--panel) 92%, var(--accent) 5%); }
+.tool-inline-result.is-error { border-color: color-mix(in srgb, var(--danger) 48%, var(--border)); border-left-color: var(--danger); background: color-mix(in srgb, var(--panel) 94%, var(--danger) 6%); color: var(--danger); }
+.tool-result-title { display: block; margin-bottom: 0.2rem; font-size: 0.9rem; }
+.tool-inline-result > .btn { margin: 0.7rem 0 0; }
+.tool-validation-details { margin-top: 0.65rem; color: var(--text-muted); font-size: 0.76rem; }
+.tool-validation-details summary { color: var(--text-muted); cursor: pointer; font-weight: 650; }
+.tool-validation-details p { margin: 0.4rem 0 0; line-height: 1.45; }
 .tool-advanced { margin: 0.6rem 0; }
 .tool-advanced summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
 .tool-advanced .field-label { margin-top: 0.6rem; }
@@ -133,7 +229,20 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
 .tool-readonly-list { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; margin: 0; font-size: 0.82rem; }
 .tool-readonly-list dt { color: var(--text-muted); }
 .tool-readonly-list dd { margin: 0; color: var(--text); }
-@media (max-width: 620px) { .tools-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .tool-capability-grid, .tools-grid { grid-template-columns: 1fr; }
+  .tool-source-options { grid-template-columns: 1fr; }
+  .tool-source-divider { justify-content: center; }
+  .tool-source-heading { display: block; }
+  .tool-safety-badge { display: inline-block; margin-top: 0.65rem; }
+  .tool-card > .info { min-height: 0; }
+}
+@media (max-width: 480px) {
+  .nam-tools { padding: 1rem; }
+  .tool-source-card { grid-template-columns: 1fr; }
+  .tool-step-marker { width: 1.7rem; height: 1.7rem; }
+  .tool-source-option .btn { width: 100%; }
+}
 
 .tone-wizard {
   max-width: 1100px;

@@ -51,6 +51,7 @@ from hybrid.modes.character_analysis import (
 )
 from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
 from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
+from hybrid.modes.cab_embed_training_target import CabEmbedDesign, generate_cab_embed_training_bundle
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.core.coverage import (
@@ -91,6 +92,7 @@ from hybrid.services.ollama_pull import (
 from hybrid.services.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
 from hybrid.core.nam_loader import load_nam
 from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
+from hybrid.training.sequential_nam import SequentialNamError, package_embedded_artifacts
 from hybrid.core.pipeline import RenderedPair, amp_input_peak_warnings, build_hybrid, render_pair
 from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
 from hybrid.core.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
@@ -1540,7 +1542,11 @@ def _write_checked_nam(original: dict, edited: dict, expected_paths: list[str], 
     save_nam(edited, output)
     try:
         persisted = load_nam_json(output)
-        if compare_changes(original, persisted) != expected_paths:
+        # JSON object order is semantically irrelevant. Real NAM exporters do
+        # not all write top-level metadata/config keys in the same order, so
+        # compare the complete path lists canonically while still rejecting
+        # any missing, extra, or duplicated change.
+        if sorted(compare_changes(original, persisted)) != sorted(expected_paths):
             raise NamToolError("saved file failed the approved-path validation")
     except Exception:
         output.unlink(missing_ok=True)
@@ -1604,6 +1610,99 @@ def api_nam_tool_metadata():
     return jsonify({"filename": output.name, "download_url": f"/api/nam/tools/download/{output.name}",
                     "changed_paths": expected_paths, "source_sha256": _sha256_path(source),
                     "output_sha256": _sha256_path(output), "validation_report_invalidated": True})
+
+
+@app.route("/api/nam/tools/cab-embed", methods=["POST"])
+def api_nam_tool_cab_embed():
+    """Create a learned-cab A2 bundle or an exact experimental Sequential NAM.
+
+    The learned path writes the normal ``work/a2/<design_id>`` contract, so
+    the shared local/Kaggle training UI can take over unchanged. The exact
+    path is immediate and retains the source NAM as the first stage.
+    """
+    data = request.get_json(force=True)
+    mode = str(data.get("mode") or "learned")
+    if mode not in ("learned", "embedded"):
+        return jsonify({"error": "mode must be 'learned' or 'embedded'"}), 400
+    try:
+        source_path = _tool_source_path(str(data.get("path", "")))
+        source = load_nam(source_path)
+        if source.sample_rate is None:
+            raise ValueError("source NAM does not declare a sample rate")
+        cab_data = {**data, "cab_export_mode": mode, "cab_preview_enabled": False}
+        cab = _resolve_cab_design(cab_data, int(source.sample_rate))
+        if cab is None:
+            raise ValueError("choose a cabinet IR first")
+
+        requested_name = str(data.get("model_name") or source.name or source_path.stem).strip()
+        if not requested_name:
+            requested_name = source_path.stem
+        if len(requested_name) > 100:
+            raise ValueError("model_name must be 100 characters or fewer")
+
+        if mode == "embedded":
+            if not experimental_architectures_enabled():
+                raise ValueError(
+                    "Exact embed is experimental. Enable experimental NAM architectures in Settings > Advanced."
+                )
+            stem = (secure_filename(f"{source_path.stem}_{cab.display_name or cab.original_filename or 'cab'}") or "cab_embed")[:180]
+            artifacts = package_embedded_artifacts(
+                source_path, NAM_TOOL_OUTPUT_DIR, cab,
+                sample_rate=int(source.sample_rate), final_scalar=1.0,
+                stem=stem, base_name=requested_name,
+            )
+            output = Path(artifacts["sequential_nam_path"])
+            source_warning = _source_cabinet_warning(str(source_path), cab=cab)
+            compatibility_warning = (
+                "Exact cabinet embedding uses experimental NAM Sequential/Linear and may not load in all NAM players."
+            )
+            return jsonify({
+                "mode": mode,
+                "filename": output.name,
+                "download_url": f"/api/nam/tools/download/{output.name}",
+                "source_sha256": _sha256_path(source_path),
+                "output_sha256": _sha256_path(output),
+                "prepared_ir_tap_count": artifacts["prepared_ir_tap_count"],
+                "warning": " ".join(part for part in (compatibility_warning, source_warning) if part),
+            })
+
+        if not TRAINING_INPUT_PATH.is_file():
+            raise ValueError("the official NAM training input is missing")
+        design_id = secure_filename(requested_name) or "cab-embed"
+        base_design_id = design_id
+        suffix = 2
+        while (A2_OUTPUT_DIR / design_id / "training_manifest.json").is_file():
+            design_id = f"{base_design_id}-{suffix}"
+            suffix += 1
+        bundle_dir = A2_OUTPUT_DIR / design_id
+        design = CabEmbedDesign(str(source_path), cab, requested_name)
+        bundle = generate_cab_embed_training_bundle(design, TRAINING_INPUT_PATH, bundle_dir)
+        bundle.manifest["artifact_stem"] = design_id
+        bundle.manifest["artifact_filename"] = f"{design_id}.nam"
+        warning = _source_cabinet_warning(str(source_path), cab=cab)
+        if warning:
+            bundle.warnings.append(warning)
+            bundle.manifest["warnings"].append(warning)
+        bundle.training_manifest_path.write_text(json.dumps(bundle.manifest, indent=2), encoding="utf-8")
+        return jsonify({
+            "mode": mode,
+            "design_id": design_id,
+            "model_name": requested_name,
+            "download_filename": f"{design_id}.nam",
+            "bundle_dir": str(bundle.bundle_dir),
+            "manifest_path": str(bundle.training_manifest_path),
+            "target_path": str(bundle.hybrid_target_path),
+            "cab_summary": cab.to_dict(),
+            "safety_report": {
+                "raw_peak_dbfs": bundle.safety.raw_peak_dbfs,
+                "final_peak_dbfs": bundle.safety.final_peak_dbfs,
+                "gain_reduction_db": bundle.safety.gain_reduction_db,
+            },
+            "warnings": bundle.warnings,
+            "default_epoch_preset": DEFAULT_EPOCH_PRESET,
+        })
+    except (CabIrError, NamToolError, SequentialNamError, TrainingInputError, OSError, TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.route("/api/nam/tools/download/<filename>", methods=["GET"])
@@ -1733,6 +1832,8 @@ def _resolve_cab_design(data: dict, pair_sample_rate: int):
     threshold = float(data.get("cab_leading_silence_threshold_db", -40.0))
     prepared = get_prepared_cab_ir(cab_path, pair_sample_rate, threshold, preparation_mode)
     display_name = str(data.get("cab_display_name") or "").strip() or None
+    if display_name is not None and len(display_name) > 80:
+        raise ValueError("cab_display_name must be 80 characters or fewer")
     return cab_design_from_prepared(
         prepared, original_filename=Path(cab_path).name, preview_enabled=preview_enabled,
         export_mode=export_mode, preparation_mode=preparation_mode,

@@ -163,6 +163,28 @@ def test_check_receptive_field_uses_max_across_envelope_and_amp_branches(tmp_pat
     assert result["hard_required_samples"] == amp_b_rf
 
 
+def test_check_receptive_field_cab_embed_uses_its_single_source(tmp_path, monkeypatch, capsys):
+    source = _write_nam_with_config(tmp_path / "source.nam", [5], [4])
+    manifest = {
+        "mode": "cab_embed",
+        "amp_a": {"path": str(source)},
+    }
+    captured = {}
+
+    def fake_assert_fits(samples, sample_rate, margin_fraction=0.0):
+        captured["samples"] = samples
+        return type("R", (), {"receptive_field_samples": samples + 1, "submodel_names": ["fake"]})()
+
+    monkeypatch.setattr(train_a2, "assert_required_history_fits", fake_assert_fits)
+
+    result = train_a2.check_receptive_field(manifest, 48000)
+
+    expected = train_a2.compute_source_nam_receptive_field(train_a2.load_nam(source))
+    assert captured["samples"] == expected
+    assert result["branch_samples"] == {"Source": expected}
+    assert "amp_b.path" not in capsys.readouterr().out
+
+
 def test_check_receptive_field_character_uses_recorded_teacher_branches(tmp_path, monkeypatch):
     amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
     amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])

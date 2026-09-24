@@ -104,6 +104,8 @@ def default_model_base_name(manifest: dict) -> str:
         return f"Character Blend {amp_a_name} + {amp_b_name}"
     if mode == "continuous_gain":
         return "Continuous Gain"
+    if mode == "cab_embed":
+        return amp_a_name
     return f"Hybrid {amp_a_name} -> {amp_b_name}"
 
 

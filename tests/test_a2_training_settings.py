@@ -195,6 +195,20 @@ def test_learned_cab_export_appends_cabinet_and_suffix():
     assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
+def test_cab_embed_preserves_single_source_calibration_and_tone_type():
+    manifest = {
+        "mode": "cab_embed", "model_name": "Studio Amp",
+        "amp_a": {"filename": "Source.nam", "input_level_dbu": -12.0, "tone_type": "clean"},
+        "calibration": {"applied": False},
+        "cab": {"export_mode": "learned", "display_name": "Studio 2x12"},
+    }
+    assert user_metadata_kwargs(manifest) == {
+        "name": "Studio Amp + Studio 2x12 [Learned Cab]",
+        "gear_type": "amp_cab", "modeled_by": "NAM Mixer",
+        "tone_type": "clean", "input_level_dbu": -12.0,
+    }
+
+
 def test_embedded_cab_export_head_is_labelled_amp_only():
     # The embedded mode offers the trained head as its own amp-only download;
     # the packaged Sequential file is named separately from the base name
@@ -232,6 +246,10 @@ def test_cloud_worker_export_naming_matches_shared_helper():
          "cab": {"export_mode": "learned", "display_name": "Cab"}},
         {"model_name": "X", "amp_a": {"filename": "A.nam"}, "amp_b": {"filename": "B.nam"},
          "cab": {"export_mode": "embedded", "display_name": "Cab"}},
+        {"mode": "cab_embed", "model_name": "X",
+         "amp_a": {"filename": "A.nam", "input_level_dbu": -12.0, "tone_type": "clean"},
+         "calibration": {"applied": False},
+         "cab": {"export_mode": "learned", "display_name": "Cab"}},
     ):
         assert cloud.user_metadata_kwargs(manifest) == user_metadata_kwargs(manifest)
 

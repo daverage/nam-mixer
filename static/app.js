@@ -2716,6 +2716,7 @@ const comparisonUnavailableNote = document.getElementById("comparison-unavailabl
 let comparisonRequestGeneration = 0;
 let comparisonPlayback = null;
 let comparisonData = null;
+let trainingHostAllowsComparison = true;
 
 function stopModelComparison(invalidateRequest = false) {
   if (invalidateRequest) {
@@ -2738,7 +2739,7 @@ function invalidateModelComparison(message = "") {
 }
 
 function syncComparisonPanel() {
-  comparisonPanel.hidden = !(completedNamArtifact && lastDesignId);
+  comparisonPanel.hidden = !(trainingHostAllowsComparison && completedNamArtifact && lastDesignId);
   // Training and validation always belong to the head-only A2. A selected
   // cabinet produces an additional exact derivative, so this comparison
   // remains both available and unambiguous.
@@ -3800,14 +3801,46 @@ const settingsTab = document.getElementById("tab-settings");
 const settingsPanel = document.getElementById("settings-panel");
 const toolEditors = document.getElementById("tool-editors");
 const toolInfo = document.getElementById("tool-nam-info");
-const toolResult = document.getElementById("tool-result");
+const toolSourceCard = document.getElementById("tool-source-card");
+const toolNamFileInput = document.getElementById("tool-nam-file");
+const toolChooseFileButton = document.getElementById("btn-tool-choose-file");
+const toolGeneratedButton = document.getElementById("btn-tool-generated");
+const toolVolumeResult = document.getElementById("tool-volume-result");
+const toolMetadataResult = document.getElementById("tool-metadata-result");
 let toolNamPath = null;
 let originalToolMetadata = {};
 let toolLoudnessDb = null;
+let toolExactCabEmbedSupported = false;
+let toolCabPath = null;
+let toolCabDesignId = null;
 const toolVolumeSlider = document.getElementById("tool-volume-slider");
+const toolVolumeButton = document.getElementById("btn-tool-volume");
 const toolVolumeValue = document.getElementById("tool-volume-value");
 const toolVolumeBaseline = document.getElementById("tool-volume-baseline");
 const toolCalibrationStatus = document.getElementById("tool-calibration-status");
+const toolCabMode = document.getElementById("tool-cab-mode");
+const toolCabModeEmbedded = document.getElementById("tool-cab-mode-embedded");
+const toolCabModeInfo = document.getElementById("tool-cab-mode-info");
+const toolCabInfo = document.getElementById("tool-cab-info");
+const toolCabResult = document.getElementById("tool-cab-result");
+const toolCabTrainingHost = document.getElementById("tool-cab-training-host");
+
+function syncToolCabMode() {
+  const exactAvailable = toolExactCabEmbedSupported && experimentalArchitecturesEnabled();
+  toolCabModeEmbedded.disabled = !exactAvailable;
+  if (!exactAvailable && toolCabMode.value === "embedded") toolCabMode.value = "learned";
+  const exactReason = !toolExactCabEmbedSupported
+    ? "Exact mode requires a conventional A2 SlimmableContainer source; learned mode works with any source the renderer supports."
+    : !experimentalArchitecturesEnabled()
+      ? "Enable experimental NAM architectures in Settings > Advanced to use exact mode."
+      : "Exact mode appends the cabinet as a Linear stage without retraining, but player support is limited.";
+  toolCabModeInfo.textContent = toolCabMode.value === "embedded"
+    ? exactReason
+    : `The selected NAM will render the official training signal, then the cabinet will be convolved into the target. ${exactReason}`;
+  document.getElementById("btn-tool-cab-embed").textContent = toolCabMode.value === "embedded"
+    ? "Create exact embedded-cab NAM"
+    : "Create learned-cab training files";
+}
 
 function setBuilderTabActive(active) {
   builderTab.classList.toggle("active", active);
@@ -3838,6 +3871,11 @@ function setToolsOpen(open) {
   toolsTab.classList.toggle("active", open);
   toolsTab.setAttribute("aria-pressed", open ? "true" : "false");
   setBuilderTabActive(!open);
+  if (open && toolCabDesignId) {
+    window.namTrainingHost?.attach(toolCabTrainingHost, toolCabDesignId, { allowComparison: false });
+  } else if (!open && !trainingIsActive()) {
+    window.namTrainingHost?.detach();
+  }
 }
 function setSessionsOpen(open) {
   sessionsPanel.hidden = !open;
@@ -3947,28 +3985,55 @@ function setBuilderOpen() {
   setTone3000Open(false);
   setSettingsOpen(false);
 }
-function showToolResult(data) {
-  toolResult.hidden = false;
-  toolResult.replaceChildren();
+function showToolResult(data, resultEl) {
+  resultEl.hidden = false;
+  resultEl.classList.remove("is-error");
+  resultEl.replaceChildren();
+  const title = document.createElement("strong");
+  title.className = "tool-result-title";
+  title.textContent = "New NAM ready";
   const changed = document.createElement("div");
-  changed.textContent = `Validated changes: ${data.changed_paths.join(", ")}`;
+  const changeCount = data.changed_paths.length;
+  changed.textContent = changeCount
+    ? `${changeCount} requested ${changeCount === 1 ? "field was" : "fields were"} changed and safety-checked.`
+    : "No model values needed changing; a clean copy was created.";
   const link = document.createElement("button"); link.type = "button"; link.className = "btn btn-primary"; link.textContent = desktopSaveLabel(`Download ${data.filename}`);
   link.addEventListener("click", () => triggerFileDownload(data.download_url, data.filename));
-  toolResult.append(changed, link);
+  resultEl.append(title, changed, link);
   if (data.validation_report_invalidated) {
-    const validation = document.createElement("div");
-    validation.className = "warning-box";
-    validation.textContent = "This edited NAM has different bytes from its source. Any earlier validation report does not apply; validate the edited export separately.";
-    toolResult.append(validation);
+    const validation = document.createElement("details");
+    validation.className = "tool-validation-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "About validation reports";
+    const explanation = document.createElement("p");
+    explanation.textContent = "The original NAM is untouched. Validation reports belong to the exact file they were created for, so a report for the source stays with the source. Validate this new copy separately only if you need a report for it.";
+    validation.append(summary, explanation);
+    resultEl.append(validation);
   }
-  if (data.warning) { const warning = document.createElement("div"); warning.className = "warning-box"; warning.textContent = data.warning; toolResult.append(warning); }
+  if (data.warning) { const warning = document.createElement("div"); warning.className = "warning-box"; warning.textContent = data.warning; resultEl.append(warning); }
+  resultEl.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+}
+
+function showToolError(resultEl, message) {
+  resultEl.hidden = false;
+  resultEl.classList.add("is-error");
+  resultEl.textContent = `Could not create the NAM: ${message}`;
+  resultEl.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
 }
 function updateToolVolumeReadout() { toolVolumeValue.textContent = `${Number(toolVolumeSlider.value).toFixed(1)} dB`; }
 async function setToolNam(data, label) {
+  if (toolCabDesignId && !trainingIsActive()) {
+    window.namTrainingHost?.detach();
+  }
+  toolCabDesignId = null;
+  toolCabResult.hidden = true;
+  toolVolumeResult.hidden = true;
+  toolMetadataResult.hidden = true;
   const response = await fetch("/api/nam/tools/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: data.path }) });
   const inspection = await response.json();
   if (!response.ok) { toolInfo.textContent = `Error: ${inspection.error}`; return; }
   toolNamPath = inspection.path;
+  toolExactCabEmbedSupported = Boolean(inspection.exact_cab_embed_supported);
   originalToolMetadata = inspection.metadata || {};
   toolLoudnessDb = Number.isFinite(inspection.loudness_db) ? inspection.loudness_db : null;
   const fieldMap = {
@@ -4007,20 +4072,26 @@ async function setToolNam(data, label) {
     // only the volume slider (which needs a recognised head_scale) is
     // unavailable for this file.
     toolVolumeSlider.disabled = true;
+    toolVolumeButton.disabled = true;
     toolVolumeBaseline.textContent = "Volume adjustment isn't supported for this NAM's architecture "
       + `(${inspection.architecture || "unknown"}). The metadata editor below still works normally.`;
   } else if (toolLoudnessDb !== null) {
     toolVolumeSlider.value = Math.max(Number(toolVolumeSlider.min), Math.min(Number(toolVolumeSlider.max), toolLoudnessDb));
     toolVolumeSlider.disabled = false;
+    toolVolumeButton.disabled = false;
     toolVolumeBaseline.textContent = `Current measured loudness: ${toolLoudnessDb.toFixed(1)} dB. Drag to choose the final level.`;
   } else {
     toolVolumeSlider.disabled = true;
+    toolVolumeButton.disabled = true;
     toolVolumeBaseline.textContent = "This NAM has no measured loudness metadata, so an absolute output slider cannot be set safely.";
   }
   updateToolVolumeReadout();
   toolEditors.hidden = false;
-  toolInfo.textContent = `${label} — ${inspection.architecture || "NAM"}; ${inspection.head_scales.length} recognised output scale${inspection.head_scales.length === 1 ? "" : "s"}.`;
-  toolResult.hidden = true;
+  toolsPanel.classList.add("has-source");
+  toolSourceCard.classList.add("is-loaded");
+  toolInfo.textContent = `Ready: ${label} — ${inspection.architecture || "NAM"}; ${inspection.head_scales.length} recognised output scale${inspection.head_scales.length === 1 ? "" : "s"}. Choose a tool below.`;
+  document.getElementById("tool-cab-model-name").value = originalToolMetadata.name || inspection.filename.replace(/\.nam$/i, "");
+  syncToolCabMode();
 }
 toolsTab.addEventListener("click", () => setToolsOpen(true));
 document.getElementById("btn-close-tools").addEventListener("click", () => setToolsOpen(false));
@@ -4052,6 +4123,7 @@ async function loadSettings() {
     if (!response.ok) throw new Error(data.error || "failed to load settings");
     settingsFields = data.settings || [];
     renderSettings();
+    syncToolCabMode();
     setSettingsDirty(false);
     settingsStatus.textContent = "";
   } catch (err) {
@@ -4806,31 +4878,84 @@ aiAssistantTab.addEventListener("click", () => {
 document.getElementById("btn-close-ai-assistant").addEventListener("click", () => setAiAssistantOpen(false));
 wizardTab.addEventListener("click", () => setWizardOpen(true));
 document.getElementById("btn-close-wizard").addEventListener("click", () => setWizardOpen(false));
-document.getElementById("btn-tool-upload").addEventListener("click", async () => {
-  const file = document.getElementById("tool-nam-file").files[0];
-  if (!file) { toolInfo.textContent = "Choose a .nam file first."; return; }
-  const form = new FormData(); form.append("file", file);
-  const response = await fetch("/api/nam/upload", { method: "POST", body: form });
-  const data = await response.json();
-  if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
-  await setToolNam(data, file.name);
+function setToolSourceBusy(busy) {
+  toolSourceCard.classList.toggle("is-loading", busy);
+  toolChooseFileButton.disabled = busy;
+  toolGeneratedButton.disabled = busy;
+}
+
+async function openToolNamFile(file) {
+  if (!file) return;
+  if (trainingIsActive()) {
+    toolInfo.textContent = "Wait for the active training job to finish before changing the source NAM.";
+    return;
+  }
+  setToolSourceBusy(true);
+  toolInfo.textContent = `Opening ${file.name}…`;
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/api/nam/upload", { method: "POST", body: form });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "NAM upload failed");
+    await setToolNam(data, file.name);
+  } catch (error) {
+    toolInfo.textContent = `Could not open ${file.name}: ${error.message || error}`;
+  } finally {
+    setToolSourceBusy(false);
+  }
+}
+
+toolChooseFileButton.addEventListener("click", () => {
+  if (trainingIsActive()) {
+    toolInfo.textContent = "Wait for the active training job to finish before changing the source NAM.";
+    return;
+  }
+  toolNamFileInput.value = "";
+  toolNamFileInput.click();
 });
-document.getElementById("btn-tool-generated").addEventListener("click", async () => {
-  const response = await fetch("/api/nam/tools/generated"); const data = await response.json();
-  if (!response.ok || !data.path) { toolInfo.textContent = data.error || "No locally generated NAM is available yet."; return; }
-  const inspect = await fetch("/api/nam/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: data.path }) });
-  const summary = await inspect.json();
-  if (!inspect.ok) { toolInfo.textContent = `Error: ${summary.error}`; return; }
-  await setToolNam({ ...summary, path: data.path }, data.filename);
+toolNamFileInput.addEventListener("change", () => {
+  openToolNamFile(toolNamFileInput.files[0]);
+});
+toolGeneratedButton.addEventListener("click", async () => {
+  if (trainingIsActive()) { toolInfo.textContent = "Wait for the active training job to finish before changing the source NAM."; return; }
+  setToolSourceBusy(true);
+  toolInfo.textContent = "Looking for the latest generated NAM…";
+  try {
+    const response = await fetch("/api/nam/tools/generated");
+    const data = await response.json();
+    if (!response.ok || !data.path) throw new Error(data.error || "No locally generated NAM is available yet.");
+    const inspect = await fetch("/api/nam/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: data.path }) });
+    const summary = await inspect.json();
+    if (!inspect.ok) throw new Error(summary.error || "Could not inspect the generated NAM");
+    await setToolNam({ ...summary, path: data.path }, data.filename);
+  } catch (error) {
+    toolInfo.textContent = error.message || String(error);
+  } finally {
+    setToolSourceBusy(false);
+  }
 });
 toolVolumeSlider.addEventListener("input", updateToolVolumeReadout);
-document.getElementById("btn-tool-volume").addEventListener("click", async () => {
-  if (!toolNamPath || toolLoudnessDb === null) { toolInfo.textContent = "This NAM needs measured loudness metadata for the absolute output slider."; return; }
-  const db_change = Number(toolVolumeSlider.value) - toolLoudnessDb;
-  const response = await fetch("/api/nam/tools/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath, db_change }) });
-  const data = await response.json();
-  if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
-  showToolResult(data);
+toolVolumeButton.addEventListener("click", async () => {
+  if (!toolNamPath || toolLoudnessDb === null) {
+    showToolError(toolVolumeResult, "This NAM needs measured loudness metadata for the output slider.");
+    return;
+  }
+  toolVolumeButton.disabled = true;
+  toolVolumeResult.hidden = false;
+  toolVolumeResult.classList.remove("is-error");
+  toolVolumeResult.textContent = "Creating and safety-checking the new NAM…";
+  try {
+    const db_change = Number(toolVolumeSlider.value) - toolLoudnessDb;
+    const response = await fetch("/api/nam/tools/volume", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath, db_change }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "volume change failed");
+    showToolResult(data, toolVolumeResult);
+  } catch (error) {
+    showToolError(toolVolumeResult, error.message || error);
+  } finally {
+    toolVolumeButton.disabled = false;
+  }
 });
 document.getElementById("btn-tool-metadata").addEventListener("click", async () => {
   if (!toolNamPath) return;
@@ -4845,11 +4970,111 @@ document.getElementById("btn-tool-metadata").addEventListener("click", async () 
     const previous = originalToolMetadata[key] ?? "";
     if (value !== previous) metadata[key] = value === "" ? null : value;
   });
-  if (!Object.keys(metadata).length) { toolInfo.textContent = "Enter at least one metadata field."; return; }
-  const response = await fetch("/api/nam/tools/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath, metadata }) });
-  const data = await response.json();
-  if (!response.ok) { toolInfo.textContent = `Error: ${data.error}`; return; }
-  showToolResult(data);
+  if (!Object.keys(metadata).length) {
+    showToolError(toolMetadataResult, "Change at least one metadata field first.");
+    return;
+  }
+  const button = document.getElementById("btn-tool-metadata");
+  button.disabled = true;
+  toolMetadataResult.hidden = false;
+  toolMetadataResult.classList.remove("is-error");
+  toolMetadataResult.textContent = "Creating and safety-checking the new NAM…";
+  try {
+    const response = await fetch("/api/nam/tools/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath, metadata }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "metadata edit failed");
+    showToolResult(data, toolMetadataResult);
+  } catch (error) {
+    showToolError(toolMetadataResult, error.message || error);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("tool-cab-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  toolCabPath = null;
+  toolCabInfo.textContent = `Checking ${file.name}…`;
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const response = await fetch("/api/cab/upload", { method: "POST", body: form });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "cabinet upload failed");
+    toolCabPath = data.path;
+    if (!document.getElementById("tool-cab-display-name").value.trim()) {
+      document.getElementById("tool-cab-display-name").value = file.name.replace(/\.wav$/i, "");
+    }
+    toolCabInfo.textContent = `Ready: ${file.name} · ${data.prepared_frame_count} prepared taps at ${data.prepared_sample_rate / 1000} kHz.`;
+  } catch (err) {
+    toolCabInfo.textContent = `Cabinet error: ${err.message || err}`;
+  }
+});
+
+toolCabMode.addEventListener("change", syncToolCabMode);
+
+document.getElementById("btn-tool-cab-embed").addEventListener("click", async () => {
+  if (!toolNamPath) { toolInfo.textContent = "Open a NAM first."; return; }
+  if (!toolCabPath) { toolCabInfo.textContent = "Choose a valid cabinet IR first."; return; }
+  const button = document.getElementById("btn-tool-cab-embed");
+  button.disabled = true;
+  toolCabResult.hidden = false;
+  toolCabResult.textContent = toolCabMode.value === "embedded"
+    ? "Creating the exact Sequential cabinet package…"
+    : "Rendering the official training input through the NAM and cabinet…";
+  try {
+    const response = await fetch("/api/nam/tools/cab-embed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: toolNamPath,
+        cab_path: toolCabPath,
+        mode: toolCabMode.value,
+        model_name: document.getElementById("tool-cab-model-name").value.trim(),
+        cab_display_name: document.getElementById("tool-cab-display-name").value.trim(),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "cab embed failed");
+    toolCabResult.replaceChildren();
+    if (data.mode === "embedded") {
+      toolCabDesignId = null;
+      if (!trainingIsActive()) window.namTrainingHost?.detach();
+      const summary = document.createElement("div");
+      summary.textContent = `Exact cabinet package ready (${data.prepared_ir_tap_count} FIR taps).`;
+      const warning = document.createElement("div");
+      warning.className = "warning-box";
+      warning.textContent = data.warning;
+      const download = document.createElement("button");
+      download.type = "button";
+      download.className = "btn btn-primary";
+      download.textContent = desktopSaveLabel(`Download ${data.filename}`);
+      download.addEventListener("click", () => triggerFileDownload(data.download_url, data.filename));
+      toolCabResult.append(summary, warning, download);
+    } else {
+      toolCabDesignId = data.design_id;
+      const summary = document.createElement("div");
+      summary.textContent = `Training files are ready for ${data.model_name}. Choose model detail and a training backend below.`;
+      toolCabResult.append(summary);
+      (data.warnings || []).forEach((message) => {
+        const warning = document.createElement("div");
+        warning.className = "warning-box";
+        warning.textContent = message;
+        toolCabResult.append(warning);
+      });
+      if (!window.namTrainingHost.attach(toolCabTrainingHost, data.design_id, { allowComparison: false })) {
+        throw new Error("another training job is active; wait for it to finish, then try again");
+      }
+      document.getElementById("a2-training-section").hidden = false;
+      document.getElementById("a2-preset-standard").checked = true;
+      updateTrainingTimeEstimate();
+    }
+  } catch (err) {
+    toolCabResult.textContent = `Cab embed failed: ${err.message || err}`;
+  } finally {
+    button.disabled = false;
+  }
 });
 
 // --- "Check for updates" (Settings) -- manual only, never automatic (see /api/update/check's docstring). ---
@@ -4905,38 +5130,60 @@ const trainingHost = (() => {
   let home = null;
   let saved = null;
   let hostedDesign = null;
+  let retainedDesign = null;
+  let retainedState = null;
+  const captureState = () => ({
+    lastDesignId, completedNamArtifact, completedValidationReport,
+    activeSessionId, activeSessionName, activeSessionGenerated,
+  });
+  const restoreState = (state) => {
+    ({ lastDesignId, completedNamArtifact, completedValidationReport,
+      activeSessionId, activeSessionName, activeSessionGenerated } = state);
+  };
   return {
-    attach(hostEl, designId) {
+    attach(hostEl, designId, options = {}) {
+      const allowComparison = options.allowComparison !== false;
       if (hostedDesign === designId) {
+        trainingHostAllowsComparison = allowComparison;
         if (section.parentElement !== hostEl) hostEl.appendChild(section);
         syncTrainingControls();
+        syncComparisonPanel();
         return true;
       }
       if (trainingIsActive() && lastDesignId !== designId) return false;
       if (!hostedDesign) {
-        home = { parent: section.parentElement, next: section.nextSibling };
-        saved = { lastDesignId, completedNamArtifact, completedValidationReport, activeSessionId, activeSessionName, activeSessionGenerated };
+        home ||= { parent: section.parentElement, next: section.nextSibling };
+        saved = captureState();
       }
       hostedDesign = designId;
-      lastDesignId = designId;
-      completedNamArtifact = null;
-      completedValidationReport = null;
-      activeSessionId = null;
-      activeSessionName = null;
-      activeSessionGenerated = false;
+      trainingHostAllowsComparison = allowComparison;
+      if (retainedDesign === designId && retainedState) {
+        restoreState(retainedState);
+      } else {
+        lastDesignId = designId;
+        completedNamArtifact = null;
+        completedValidationReport = null;
+        activeSessionId = null;
+        activeSessionName = null;
+        activeSessionGenerated = false;
+      }
       hostEl.appendChild(section);
       kaggleResultEl.hidden = true;
       localResultEl.hidden = true;
       syncTrainingControls();
       refreshKaggleStatus();
       refreshLocalTraining();
+      syncComparisonPanel();
       return true;
     },
     detach() {
       if (!hostedDesign) return;
+      retainedDesign = hostedDesign;
+      retainedState = captureState();
       home.parent.insertBefore(section, home.next);
-      ({ lastDesignId, completedNamArtifact, completedValidationReport, activeSessionId, activeSessionName, activeSessionGenerated } = saved);
+      restoreState(saved);
       hostedDesign = null;
+      trainingHostAllowsComparison = true;
       syncTrainingControls();
       syncComparisonPanel();
     },

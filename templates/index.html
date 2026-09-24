@@ -50,22 +50,78 @@
   </nav>
 
   <section id="nam-tools-panel" class="nam-tools" hidden aria-labelledby="nam-tools-title">
-    <div class="tools-heading"><div><div class="eyebrow">Safe file editing</div><h2 id="nam-tools-title">NAM Tools</h2></div><button type="button" id="btn-close-tools" class="btn btn-secondary btn-small">Back to builder</button></div>
-    <p class="info">Open a NAM or use the latest locally generated model. All edits create a new file; the source is never overwritten.</p>
-    <label class="field-label" for="tool-nam-file">NAM file</label>
-    <input type="file" id="tool-nam-file" accept=".nam" class="file-input">
-    <div class="tool-actions"><button type="button" id="btn-tool-upload" class="btn btn-secondary">Open NAM</button><button type="button" id="btn-tool-generated" class="btn btn-secondary">Use latest generated NAM</button></div>
-    <div id="tool-nam-info" class="info" aria-live="polite">Choose a file to start.</div>
+    <div class="tools-heading">
+      <div><div class="eyebrow">NAM utilities</div><h2 id="nam-tools-title">Tools</h2></div>
+      <button type="button" id="btn-close-tools" class="btn btn-secondary btn-small">Back to builder</button>
+    </div>
+
+    <div id="tool-intro" class="tools-intro">
+      <div class="tools-intro-copy">
+        <h3>Fine-tune an existing NAM capture</h3>
+        <p>Choose one capture, then adjust its output, tidy its metadata, or add a cabinet. Every tool creates a new file—the original NAM is never overwritten.</p>
+      </div>
+      <div class="tool-capability-grid" aria-label="Available NAM tools">
+        <article class="tool-capability">
+          <span class="tool-capability-icon" aria-hidden="true">dB</span>
+          <div><strong>Output volume</strong><span>Set a safer or more consistent output level without retraining.</span></div>
+        </article>
+        <article class="tool-capability">
+          <span class="tool-capability-icon" aria-hidden="true">Aa</span>
+          <div><strong>Metadata</strong><span>Update the name, maker, model, and tone description.</span></div>
+        </article>
+        <article class="tool-capability">
+          <span class="tool-capability-icon" aria-hidden="true">IR</span>
+          <div><strong>Cab Embed</strong><span>Learn a cabinet into a new A2 NAM or create an exact experimental embed.</span></div>
+        </article>
+      </div>
+    </div>
+
+    <section id="tool-source-card" class="tool-source-card" aria-labelledby="tool-source-title">
+      <div class="tool-step-marker" aria-hidden="true">1</div>
+      <div class="tool-source-content">
+        <div class="tool-source-heading">
+          <div>
+            <div class="eyebrow">Get started</div>
+            <h3 id="tool-source-title">Choose the NAM you want to work on</h3>
+            <p>Select a file from your computer—it opens automatically—or continue with the most recent NAM created in this app.</p>
+          </div>
+          <span class="tool-safety-badge">Source stays unchanged</span>
+        </div>
+        <div class="tool-source-options">
+          <div class="tool-source-option">
+            <strong>From your computer</strong>
+            <span>Choose any <code>.nam</code> capture. No extra Open step is needed.</span>
+            <input type="file" id="tool-nam-file" accept=".nam" class="visually-hidden">
+            <button type="button" id="btn-tool-choose-file" class="btn btn-primary">Choose NAM file</button>
+          </div>
+          <div class="tool-source-divider" aria-hidden="true"><span>or</span></div>
+          <div class="tool-source-option">
+            <strong>From this project</strong>
+            <span>Continue with the latest NAM produced by local training.</span>
+            <button type="button" id="btn-tool-generated" class="btn btn-secondary">Use latest generated NAM</button>
+          </div>
+        </div>
+        <div id="tool-nam-info" class="tool-source-status" aria-live="polite">No NAM opened yet. Choose one of the two options above.</div>
+      </div>
+    </section>
+
     <div id="tool-editors" hidden>
+      <div class="tools-workspace-heading">
+        <div class="tool-step-marker" aria-hidden="true">2</div>
+        <div><div class="eyebrow">NAM ready</div><h3>Choose what you want to change</h3><p>Each action creates a separate new NAM from the source above.</p></div>
+      </div>
       <div class="tools-grid">
-        <section>
-          <h3>Output volume</h3><p class="info">The slider begins at this model's current measured loudness. It changes only recognised final-output <code>head_scale</code> values and loudness metadata, never <code>metadata.gain</code>, weights, or input behaviour.</p>
+        <section class="tool-card">
+          <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">dB</span><div><div class="eyebrow">Level</div><h3>Output volume</h3></div></div>
+          <p class="info">Set this capture's final output level. This changes recognised output scaling and loudness metadata, not its tone, weights, or input behaviour.</p>
           <label class="field-label" for="tool-volume-slider">Target output loudness <span id="tool-volume-value" class="value-chip">—</span></label><input id="tool-volume-slider" type="range" min="-60" max="12" step="0.1" value="0" class="slider" disabled>
           <div id="tool-volume-baseline" class="info"></div>
           <button type="button" id="btn-tool-volume" class="btn btn-primary">Create volume-adjusted NAM</button>
+          <div id="tool-volume-result" class="tool-result tool-inline-result" hidden aria-live="polite"></div>
         </section>
-        <section>
-          <h3>Metadata editor</h3><p class="info">Edits descriptive NAM metadata only. Facts about what was actually built -- architecture, gear type, calibration -- are shown read-only below and can't be changed here; they must come from the actual export/measurement.</p>
+        <section class="tool-card">
+          <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">Aa</span><div><div class="eyebrow">Details</div><h3>Metadata editor</h3></div></div>
+          <p class="info">Edit descriptive information only. Architecture, gear type, and calibration remain read-only because they describe how the capture was actually made.</p>
           <label class="field-label" for="tool-meta-name">Name</label><input id="tool-meta-name" class="select-input" placeholder="Optional model name">
           <label class="field-label" for="tool-meta-modeled-by">Modeled by</label><input id="tool-meta-modeled-by" class="select-input">
           <label class="field-label" for="tool-meta-tone-type">Tone type</label><select id="tool-meta-tone-type" class="select-input"><option value="">Not specified</option><option value="clean">Clean</option><option value="overdrive">Overdrive</option><option value="crunch">Crunch</option><option value="hi_gain">High gain</option><option value="fuzz">Fuzz</option></select>
@@ -77,13 +133,33 @@
           </details>
 
           <button type="button" id="btn-tool-metadata" class="btn btn-primary">Create metadata-edited NAM</button>
+          <div id="tool-metadata-result" class="tool-result tool-inline-result" hidden aria-live="polite"></div>
 
           <h4 class="tool-readonly-heading">Export information <span class="hint">(read-only)</span></h4>
           <dl id="tool-export-info" class="tool-readonly-list"></dl>
           <div id="tool-calibration-status" class="info" aria-live="polite"></div>
         </section>
       </div>
-      <div id="tool-result" class="tool-result" hidden aria-live="polite"></div>
+      <section class="tool-card tool-cab-embed">
+        <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">IR</span><div><div class="eyebrow">Cabinet</div><h3>Cab Embed</h3></div></div>
+        <p class="info">Add a cabinet to this capture. Learned mode trains a new broadly compatible A2; exact mode is instant but uses experimental Sequential/Linear support.</p>
+        <label class="field-label" for="tool-cab-file">Cabinet IR (WAV)</label>
+        <input type="file" id="tool-cab-file" accept=".wav" class="file-input">
+        <div id="tool-cab-info" class="info" aria-live="polite">Choose a cabinet IR.</div>
+        <label class="field-label" for="tool-cab-mode">Cabinet method</label>
+        <select id="tool-cab-mode" class="select-input">
+          <option value="learned">Learn into a new A2 NAM — compatible, requires training</option>
+          <option value="embedded" id="tool-cab-mode-embedded">Exact Sequential embed — instant, experimental</option>
+        </select>
+        <div id="tool-cab-mode-info" class="info">The selected NAM will render the official training signal, then the cabinet will be convolved into the target.</div>
+        <label class="field-label" for="tool-cab-model-name">Model name</label>
+        <input type="text" id="tool-cab-model-name" class="select-input" maxlength="100" placeholder="Defaults to the source NAM name">
+        <label class="field-label" for="tool-cab-display-name">Cabinet display name</label>
+        <input type="text" id="tool-cab-display-name" class="select-input" maxlength="80" placeholder="Defaults to the IR filename">
+        <button type="button" id="btn-tool-cab-embed" class="btn btn-primary btn-block">Create learned-cab training files</button>
+        <div id="tool-cab-result" class="tool-result" hidden aria-live="polite"></div>
+        <div id="tool-cab-training-host"></div>
+      </section>
     </div>
   </section>
 

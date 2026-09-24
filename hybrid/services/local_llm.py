@@ -1061,8 +1061,9 @@ pack with a specific NAM file. When research lacks named amp evidence, say so.
             "generic three-mode sales pitch. For an OVERVIEW only, cover Builder "
             "source selection (A/B, guitar/bass profile, per-amp gain, optional cab "
             "IR), modes, level matching, output, Amp A/Hybrid/Amp B preview and test "
-            "gain, 'Check quiet playing', session save/import/export, NAM Tools (safe "
-            "volume/metadata edits, not weights), Wizard, TONE3000 search/downloads, "
+            "gain, 'Check quiet playing', session save/import/export, NAM Tools "
+            "(output volume, descriptive metadata, and learned or exact Sequential "
+            "Cab Embed), Wizard, TONE3000 search/downloads, "
             "and A2 generation if available. Source or input preparation changes need "
             "a new render; blend/cab/level/preview are instant.\n"
         )

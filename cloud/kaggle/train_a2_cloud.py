@@ -433,7 +433,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     amp_a_name = Path(manifest.get("amp_a", {}).get("filename", "Amp A")).stem
     amp_b_name = Path(manifest.get("amp_b", {}).get("filename", "Amp B")).stem
     calibration = manifest.get("calibration", {})
-    input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
+    input_level_dbu = ((manifest.get("amp_a") or {}).get("input_level_dbu") if manifest.get("mode") == "cab_embed"
+                       else calibration.get("reference_input_level_dbu") if calibration.get("applied") else None)
 
     mode = manifest.get("mode", "hybrid")
     if mode == "blend":
@@ -444,6 +445,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         name = f"Character Blend {amp_a_name} + {amp_b_name}"
     elif mode == "continuous_gain":
         name = "Continuous Gain"
+    elif mode == "cab_embed":
+        name = amp_a_name
     else:
         name = f"Hybrid {amp_a_name} -> {amp_b_name}"
 
@@ -470,7 +473,10 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
     amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
     amp_b_tone = manifest.get("amp_b", {}).get("tone_type")
-    tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
+    if mode == "cab_embed":
+        tone_type = amp_a_tone if amp_a_tone in _tone_types else None
+    else:
+        tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
 
     return {
         "name": model_name,

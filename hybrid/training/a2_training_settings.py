@@ -140,10 +140,13 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     """
     calibration = manifest.get("calibration", {})
 
-    # Only report input_level_dbu when calibration was genuinely applied to
-    # BOTH source models -- never invent one for a Raw-fallback pair
-    # (docs/history/phase3.md section 9).
-    input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
+    # A cab-embed student receives the source capture's input unchanged, so
+    # its input calibration remains the source's own calibration. Mixed modes
+    # only report a level when calibration was genuinely applied to both amps.
+    if manifest.get("mode") == "cab_embed":
+        input_level_dbu = (manifest.get("amp_a") or {}).get("input_level_dbu")
+    else:
+        input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
 
     # One naming rule per export mode -- see nam_provenance.export_model_name.
     model_name = export_model_name(manifest)
@@ -154,7 +157,10 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
     amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
     amp_b_tone = manifest.get("amp_b", {}).get("tone_type")
-    tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
+    if manifest.get("mode") == "cab_embed":
+        tone_type = amp_a_tone if amp_a_tone in _tone_types else None
+    else:
+        tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
 
     return {
         "name": model_name,

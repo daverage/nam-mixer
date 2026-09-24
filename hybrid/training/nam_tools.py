@@ -120,8 +120,20 @@ def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(value, (int, float)):
                     loudness_values.append(value)
         loudness = sum(loudness_values) / len(loudness_values) if loudness_values else None
+    exact_cab_embed_supported = False
+    exact_cab_embed_reason = None
+    try:
+        from .sequential_nam import SequentialNamError, extract_full_a2_child
+
+        extract_full_a2_child(data)
+        exact_cab_embed_supported = True
+    except SequentialNamError as exc:
+        exact_cab_embed_reason = str(exc)
     return {
         "architecture": data.get("architecture"),
+        "sample_rate": data.get("sample_rate"),
+        "exact_cab_embed_supported": exact_cab_embed_supported,
+        "exact_cab_embed_reason": exact_cab_embed_reason,
         "metadata": {key: metadata.get(key) for key in EDITABLE_METADATA_FIELDS if key in metadata},
         "read_only_metadata": {key: metadata.get(key) for key in READ_ONLY_METADATA_FIELDS if key in metadata},
         "head_scales": scales,

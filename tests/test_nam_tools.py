@@ -67,6 +67,15 @@ def test_editor_reports_current_loudness_and_standard_metadata():
     assert details["calibration"] == {"input_level_dbu": 12.0, "output_level_dbu": -3.0, "status": "Calibrated NAM"}
 
 
+def test_editor_reports_exact_cab_embed_capability_for_a2():
+    source = slimmable(1)
+    source["sample_rate"] = 48000
+    source["config"]["submodels"][0]["model"].update({"architecture": "WaveNet", "sample_rate": 48000})
+    details = describe_nam_tools(source)
+    assert details["exact_cab_embed_supported"] is True
+    assert details["exact_cab_embed_reason"] is None
+
+
 def test_describe_nam_tools_still_works_for_unsupported_volume_architecture():
     # Regression test: an embedded-cab export's top-level architecture is
     # "Sequential" (hybrid/training/sequential_nam.py) -- find_output_scalers()
@@ -108,4 +117,3 @@ def test_zero_db_volume_change_is_a_no_op():
     data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [], "metadata": {"loudness": -12.0}}
     result, paths, multiplier = apply_volume_change(data, 0.0)
     assert result == data and paths == [] and multiplier == 1.0
-

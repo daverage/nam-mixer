@@ -251,7 +251,8 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
             return {}
         branch_samples["envelope"] = int(round(max_history_ms / 1000.0 * sample_rate))
 
-    for label, key in (("Amp A", "amp_a"), ("Amp B", "amp_b")) if mode != "continuous_gain" else ():
+    source_keys = (("Source", "amp_a"),) if mode == "cab_embed" else (("Amp A", "amp_a"), ("Amp B", "amp_b"))
+    for label, key in source_keys if mode != "continuous_gain" else ():
         amp_path = manifest.get(key, {}).get("path")
         if not amp_path:
             print(f"WARNING: manifest has no {key}.path -- skipping {label}'s receptive-field check.")
