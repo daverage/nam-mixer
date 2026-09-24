@@ -182,7 +182,9 @@ def audit_captures(gains: list[float], probes: dict[float, dict], metadata: dict
         res["captures"][key(g)] = {"status": status, "evidence": ev, "correction": corr,
                                    "original": {"onset": float(onset[i]), "noise_db": float(noise[i]), "music_rms_db": float(rms[i]),
                                                 "metadata_loudness": None if np.isnan(loud[i]) else float(loud[i])},
-                                   "corrected": ({"onset": med_on, "noise_db": float(noise[i]), "music_rms_db": float(rms[i])} if corr else None), "dither_esr": esr}
+                                   "corrected": ({"onset": med_on, "noise_db": float(noise[i]), "music_rms_db": float(rms[i])}
+                                                 if corr and "samples" in corr else None),  # only an APPLIED timing correction
+                                   "dither_esr": esr}
     return res
 
 

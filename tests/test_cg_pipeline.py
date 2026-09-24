@@ -56,6 +56,10 @@ def test_a_verified_timing_offset_is_corrected_and_the_shift_realigns_it():
     audit = audit_captures(GAINS, probes, meta, lambda g, x: renders[g](x), _load_di)
     a = audit["captures"]["3"]
     assert a["status"] == "CORRECTED" and a["correction"]["samples"] == -40
+    assert a["corrected"] is not None
+    # A 'corrected' record means a correction was applied, never just suggested.
+    assert all((c["corrected"] is not None) == bool(c["correction"] and "samples" in c["correction"])
+               for c in audit["captures"].values())
     sh = alignment_shift(a)
     x = _load_di("clean_smooth")
     y = renders[3.0](x)
