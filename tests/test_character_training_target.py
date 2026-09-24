@@ -216,3 +216,46 @@ def test_modified_reference_excerpt_hash_cannot_pass(tmp_path):
     )
     assert result["state"] == "unavailable"
     assert result["pass"] is None
+
+
+def _write_calibrated_nam(path, input_level_dbu, output_level_dbu):
+    raw = {"architecture": "WaveNet", "sample_rate": 48000.0}
+    if input_level_dbu is not None:
+        raw["input_level_dbu"] = input_level_dbu
+    if output_level_dbu is not None:
+        raw["output_level_dbu"] = output_level_dbu
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("levels_a, levels_b", [
+    ((12.0, -3.5), (8.0, 2.25)),     # both calibrated, different output levels
+    ((12.0, -3.5), (None, None)),    # Amp B has no calibration metadata
+])
+def test_character_manifest_records_each_source_amps_output_level(tmp_path, levels_a, levels_b):
+    amp_a = _write_calibrated_nam(tmp_path / "a.nam", *levels_a)
+    amp_b = _write_calibrated_nam(tmp_path / "b.nam", *levels_b)
+    bundle = generate_character_training_bundle(_design(amp_a, amp_b), _write_training_input(tmp_path / "input.wav"),
+                                                tmp_path / "out")
+
+    on_disk = json.loads((bundle.bundle_dir / "training_manifest.json").read_text(encoding="utf-8"))
+    for manifest in (bundle.manifest, on_disk):
+        assert manifest["amp_a"]["input_level_dbu"] == levels_a[0]
+        assert manifest["amp_a"]["output_level_dbu"] == levels_a[1]
+        assert manifest["amp_b"]["input_level_dbu"] == levels_b[0]
+        assert manifest["amp_b"]["output_level_dbu"] == levels_b[1]
+
+
+def test_historical_character_manifest_without_output_level_still_loads_as_a_session(tmp_path):
+    import app
+
+    amp_a = _write_calibrated_nam(tmp_path / "a.nam", 12.0, -3.5)
+    amp_b = _write_calibrated_nam(tmp_path / "b.nam", 8.0, 2.25)
+    bundle = generate_character_training_bundle(_design(amp_a, amp_b), _write_training_input(tmp_path / "input.wav"),
+                                                tmp_path / "out")
+    historical = json.loads(json.dumps(bundle.manifest))
+    for key in ("amp_a", "amp_b"):
+        del historical[key]["output_level_dbu"]
+
+    assert app._session_from_manifest(historical, bundle.bundle_dir) == app._session_from_manifest(
+        bundle.manifest, bundle.bundle_dir)

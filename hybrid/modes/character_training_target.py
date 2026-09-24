@@ -233,8 +233,8 @@ def check_full_low_level_response(manifest: dict, nam_path, input_path, sample_r
 def build_character_training_manifest(design, amp_a, amp_b, amp_a_sha256, amp_b_sha256, calibration, training_input, safety, receptive_field, warnings, low_level_response: LowLevelResponseCheck, output_gain: "dict | None" = None):
     return {
         "hybrid_builder_version": HYBRID_BUILDER_VERSION, "git_commit": _git_commit(), "mode": "character",
-        "amp_a": manifest_amp_record(design.amp_a_path, amp_a, amp_a_sha256, include_output_level=False),
-        "amp_b": manifest_amp_record(design.amp_b_path, amp_b, amp_b_sha256, include_output_level=False),
+        "amp_a": manifest_amp_record(design.amp_a_path, amp_a, amp_a_sha256),
+        "amp_b": manifest_amp_record(design.amp_b_path, amp_b, amp_b_sha256),
         "design": design.to_dict(),
         "character_analysis": {"version": 2, "teacher_semantics_version": design.teacher_semantics_version, "amp_a_sha256": design.amp_a_sha256 or amp_a_sha256, "amp_b_sha256": design.amp_b_sha256 or amp_b_sha256, "analysis_a": design.analysis_a, "analysis_b": design.analysis_b, "tone_mix_b": design.tone_mix_b, "feel_mix_b": design.feel_mix_b, "drive_mix_b": design.drive_mix_b, "drive_curve": {"low": design.drive_low_mix_b, "mid": design.drive_mid_mix_b, "high": design.drive_high_mix_b}},
         "calibration": manifest_calibration_record(design, calibration),

@@ -249,19 +249,20 @@ def _hybrid_metadata_dict(design: HybridDesign) -> dict:
 # Each mode's own sections (design, character analysis, training note) stay
 # in its own builder.
 
-def manifest_amp_record(path: str, model: NamModel, sha256: str, *, include_output_level: bool = True) -> dict:
-    record = {
+def manifest_amp_record(path: str, model: NamModel, sha256: str) -> dict:
+    """One source amp's manifest record, with the capture's own calibration
+    metadata. Character Blend manifests written before 2026-09-24 have no
+    ``output_level_dbu`` here; readers must treat it as optional."""
+    return {
         "filename": Path(path).name,
         "path": path,
         "sha256": sha256,
         "architecture": model.architecture,
         "sample_rate": model.sample_rate,
         "input_level_dbu": model.input_level_dbu,
+        "output_level_dbu": model.output_level_dbu,
+        **_source_metadata_fields(model),
     }
-    # Character Blend manifests have never recorded output_level_dbu.
-    if include_output_level:
-        record["output_level_dbu"] = model.output_level_dbu
-    return {**record, **_source_metadata_fields(model)}
 
 
 def manifest_calibration_record(design, calibration: CalibrationResult) -> dict:
