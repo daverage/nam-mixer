@@ -604,7 +604,7 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
 
 
 def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float | None = SLIM_FULL) -> "dict | None":
-    """Thin wrapper over `hybrid.modes.character_training_target.check_full_low_
+    """Thin wrapper over `hybrid.modes.character_training_target.check_export_low_
     level_response` (docs/history/blend-mode-fixes.md, Phases 10-11) that also prints
     a verdict line -- the actual sweep/comparison logic is shared with
     `hybrid.training.kaggle_training.validate_downloaded_model` so both local and

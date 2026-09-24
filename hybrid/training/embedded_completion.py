@@ -10,6 +10,13 @@ from .nam_provenance import export_base_name
 from .sequential_nam import package_embedded_artifacts
 
 
+# Max |Sequential(dry) - IR*(Full head(dry))*scalar| after the warm-up. Measured
+# on the real Sequential renderer (scripts/measure_embedded_tolerance.py):
+# correct packages <= 3.0e-7, the smallest deliberate fault (a 0.01 dB scalar
+# error) 7.5e-4.
+EMBEDDED_PACKAGE_MAX_ABS_ERROR = 3e-6
+
+
 def _sequential_warmup_samples(path: str | Path) -> int:
     """Mirror the canonical A2 WaveNet + Linear prewarm calculation used by
     the native compatibility gate; never use a fixed arbitrary exclusion."""
@@ -63,7 +70,7 @@ def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Pa
         # Package identity is strict after startup; native gate establishes
         # the exact derived-history policy for supported A2 structures.
         error = float(np.max(np.abs(actual[warmup:] - expected[warmup:])))
-        if error > 3e-6:
+        if error > EMBEDDED_PACKAGE_MAX_ABS_ERROR:
             raise ValueError(f"embedded Sequential package mismatch after warm-up: {error:g}")
         state.update({"state": "validated", "package_max_abs_error": error, "warmup_samples": warmup,
                       "download_available": True})
