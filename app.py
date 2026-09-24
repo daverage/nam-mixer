@@ -2223,27 +2223,50 @@ def _parse_character_params(data: dict):
     }
 
 
+# render_id -> (analysis_a, analysis_b). A render_id identifies the rendered
+# audio exactly, so repeat requests for the same render (every Character
+# slider move, the low-level check, the wizard) skip all hashing/analysis.
+_character_analysis_memo: dict[str, tuple] = {}
+_CHARACTER_ANALYSIS_MEMO_SIZE = 4
+
+
+def _character_analyses(pair: RenderedPair) -> tuple:
+    """Per-amp Character analyses of the current render, measured against what
+    the amps were actually driven by (profiled_dry, see build_character_blend).
+    Memoised per render_id; on a miss the content-keyed disk cache is checked
+    before analysing (it survives restarts and re-renders of identical audio)."""
+    snapshot = _request_render_snapshot()
+    render_id = snapshot.get("render_id")
+    cached = _character_analysis_memo.get(render_id)
+    if cached is not None:
+        return cached
+    config = CharacterAnalysisConfig()
+    cache_dir = WORK_DIR / "character_analysis"
+    hashes = snapshot.get("source_hashes") or {}  # sha256 of the retained .nam copies
+    dry = pair.profiled_dry
+    analyses = []
+    for amp_hash, rendered in ((hashes.get("amp_a") or "", pair.amp_a), (hashes.get("amp_b") or "", pair.amp_b)):
+        key = analysis_cache_key(amp_hash, dry, rendered) if amp_hash else ""
+        analysis = load_cached_analysis(cache_dir, key, config) if key else None
+        if analysis is None:
+            analysis = analyse_rendered_audio(dry, rendered, pair.sample_rate, config, amp_hash)
+            if key:
+                store_cached_analysis(cache_dir, analysis, config, key)
+        analyses.append(analysis)
+    result = tuple(analyses)
+    if render_id:
+        while len(_character_analysis_memo) >= _CHARACTER_ANALYSIS_MEMO_SIZE:
+            _character_analysis_memo.pop(next(iter(_character_analysis_memo)))
+        _character_analysis_memo[render_id] = result
+    return result
+
+
 def _build_character_result(pair: RenderedPair, data: dict):
     params = _parse_character_params(data)
     # Preview analysis is intentionally derived from this already-auditioned
     # pair.  The frozen analysis is then reused by official target generation.
     design = CharacterBlendDesign(amp_a_path="", amp_b_path="", **params)
-    config = CharacterAnalysisConfig()
-    cache_dir = WORK_DIR / "character_analysis"
-    a_path, b_path = _request_render_snapshot()["amp_a_path"], _request_render_snapshot()["amp_b_path"]
-    a_hash, b_hash = (sha256_file(a_path) if a_path else ""), (sha256_file(b_path) if b_path else "")
-    # Measured against what the amps were actually driven by (see build_character_blend).
-    dry = pair.profiled_dry
-    a_key = analysis_cache_key(a_hash, dry, pair.amp_a) if a_hash else ""
-    b_key = analysis_cache_key(b_hash, dry, pair.amp_b) if b_hash else ""
-    analysis_a = load_cached_analysis(cache_dir, a_key, config) if a_key else None
-    analysis_b = load_cached_analysis(cache_dir, b_key, config) if b_key else None
-    if analysis_a is None:
-        analysis_a = analyse_rendered_audio(dry, pair.amp_a, pair.sample_rate, config, a_hash)
-        if a_key: store_cached_analysis(cache_dir, analysis_a, config, a_key)
-    if analysis_b is None:
-        analysis_b = analyse_rendered_audio(dry, pair.amp_b, pair.sample_rate, config, b_hash)
-        if b_key: store_cached_analysis(cache_dir, analysis_b, config, b_key)
+    analysis_a, analysis_b = _character_analyses(pair)
     return build_character_blend(pair, design, analysis_a=analysis_a, analysis_b=analysis_b), params
 
 
@@ -2261,13 +2284,14 @@ def api_character_low_level_check():
         return jsonify({"error": "Render and audition an amp pair first (POST /api/render_pair)."}), 400
     data = request.get_json(force=True)
     try:
-        result, params = _build_character_result(pair, data)
+        params = _parse_character_params(data)
     except (TypeError, ValueError):
         return jsonify({"error": "character tone/feel/drive controls must be numbers"}), 400
+    analysis_a, analysis_b = _character_analyses(pair)  # no throwaway full-DI teacher render
     design = CharacterBlendDesign(
         amp_a_path="", amp_b_path="",
-        analysis_a=json.loads(json.dumps(result.analysis_a.to_dict())),
-        analysis_b=json.loads(json.dumps(result.analysis_b.to_dict())),
+        analysis_a=json.loads(json.dumps(analysis_a.to_dict())),
+        analysis_b=json.loads(json.dumps(analysis_b.to_dict())),
         **params,
     )
     reference = pair.profiled_dry[: int(pair.sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS)]
@@ -2311,10 +2335,7 @@ def api_wizard_insight():
     pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
-    config = CharacterAnalysisConfig()
-    analysis_a = analyse_rendered_audio(pair.profiled_dry, pair.amp_a, pair.sample_rate, config)
-    analysis_b = analyse_rendered_audio(pair.profiled_dry, pair.amp_b, pair.sample_rate, config)
-    return jsonify(summarise_amp_pair(analysis_a, analysis_b))
+    return jsonify(summarise_amp_pair(*_character_analyses(pair)))
 
 
 @app.post("/api/wizard/insight")

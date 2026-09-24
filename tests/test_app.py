@@ -1772,3 +1772,24 @@ def test_character_low_level_check_reports_renderer_failure_as_json(client, tmp_
     monkeypatch.setattr(app_module, "render", failing_render)
     resp = client.post("/api/character/low_level_check", json={"render_id": _current_render_id()})
     assert resp.status_code == 500 and "model failed to load" in resp.get_json()["error"]
+
+
+def test_character_analyses_are_computed_once_per_render(client, tmp_path, monkeypatch):
+    """The wizard, the low-level check and Character previews for one render
+    share one analysis per amp: no re-hashing or re-analysis per request."""
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path / "work")
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+    monkeypatch.setattr(app_module, "render", lambda model, audio, sr, **k: np.asarray(audio, dtype=np.float32).copy())
+    calls = []
+    real = app_module.analyse_rendered_audio
+    monkeypatch.setattr(app_module, "analyse_rendered_audio", lambda *a, **k: calls.append(1) or real(*a, **k))
+    rid = _current_render_id()
+    assert client.post("/api/wizard/insight", json={"render_id": rid}).status_code == 200
+    first = len(calls)
+    assert 1 <= first <= 2   # at most once per amp (identical fake amps share the disk cache entry)
+    assert client.post("/api/wizard/insight", json={"render_id": rid}).status_code == 200
+    assert client.post("/api/character/low_level_check", json={"render_id": rid}).status_code == 200
+    assert len(calls) == first   # later requests for the same render analyse nothing
