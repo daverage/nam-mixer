@@ -1364,6 +1364,12 @@ def _referenced_render_sources() -> set[Path]:
     always safe to sweep. Continuous Gain bundles render straight from the project's own captures/ and never touch this
     directory at all."""
     refs: set[Path] = set()
+    # The live render is still in use (preview, low-level check, generate) even
+    # if no bundle names its sources yet.
+    snapshot = _rendered_pair_cache.get("snapshot") or {}
+    for p in (snapshot.get("amp_a_path"), snapshot.get("amp_b_path"), *(snapshot.get("source_paths") or {}).values()):
+        if isinstance(p, str) and p:
+            refs.add(Path(p).resolve())
     for manifest_path in A2_OUTPUT_DIR.glob("*/training_manifest.json"):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

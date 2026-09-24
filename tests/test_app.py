@@ -1732,3 +1732,19 @@ def test_character_low_level_check_applies_per_amp_input_gain(client, tmp_path, 
     assert peaks["a.nam"] and len(peaks["a.nam"]) == len(peaks["b.nam"])
     for peak_a, peak_b in zip(peaks["a.nam"], peaks["b.nam"]):
         assert peak_b == pytest.approx(peak_a * 10 ** (-12.0 / 20.0), rel=1e-4)
+
+
+def test_render_sources_sweep_keeps_the_live_renders_sources(tmp_path, monkeypatch):
+    """A render auditioned for longer than the grace period is still in use:
+    deleting any session must not sweep the amp copies it will generate from."""
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path / "a2")
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path)
+    rs = tmp_path / "render_sources"; rs.mkdir()
+    amp_a = rs / "aaa111" / "amp-a.nam"; amp_a.parent.mkdir(); amp_a.write_text("{}")
+    amp_b = rs / "bbb222" / "amp-b.nam"; amp_b.parent.mkdir(); amp_b.write_text("{}")
+    for f in (amp_a, amp_b):
+        _age(f.parent, 4000); _age(f, 4000)
+    monkeypatch.setitem(app_module._rendered_pair_cache, "snapshot",
+                        {"amp_a_path": str(amp_a), "amp_b_path": str(amp_b), "source_paths": {}})
+    assert app_module._sweep_orphaned_render_sources() == []
+    assert amp_a.exists() and amp_b.exists()
