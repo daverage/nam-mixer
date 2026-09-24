@@ -333,12 +333,12 @@ separate commit.
 
 ### Rules to check in every group
 
-- [ ] The envelope must stay causal.
-- [ ] `apply_peak_ceiling` is for training targets; `preview_safety_limiter` is for preview only.
-- [ ] The cheap reblend path must never re-run NAM inference.
-- [ ] `dry_gain_db` must never be wired to a user-facing control.
-- [ ] The local and cloud receptive-field checks must stay the same (the parity test covers this).
-- [ ] Kaggle credentials must never be logged.
+- [x] The envelope must stay causal. `tests/test_envelope.py::test_envelope_is_causal_future_independent` (2026-09-24).
+- [x] `apply_peak_ceiling` is for training targets; `preview_safety_limiter` is for preview only. The limiter has one call site, `app.api_preview`; the peak ceiling is used only by the four target generators and the embedded-final scalar (2026-09-24).
+- [x] The cheap reblend path must never re-run NAM inference. An AST check of `build_hybrid`, `build_fixed_blend` and `build_character_blend` finds no render/load call (`analyse_rendered_audio` is pure numpy); `test_blend_stage_routes_never_require_a_fresh_render` (2026-09-24).
+- [x] `dry_gain_db` must never be wired to a user-facing control. Outside `pipeline.py` it appears only in comments (2026-09-24).
+- [x] The local and cloud receptive-field checks must stay the same. `tests/test_receptive_field_parity.py` 4/4 (2026-09-24).
+- [x] Kaggle credentials must never be logged. No `shell=True`, no credential print/log/response; the `_redact` tests and the settings secret tests pass (2026-09-24).
 
 ---
 
@@ -393,10 +393,11 @@ separate commit.
 - 2026-09-24 FINAL STATUS: Phases 0-3 and follow-ups #2, #3, #5, #7, #8, #9, #10 done. Still to investigate/do:
   1. The final `/code-review ultra` on this branch (user-triggered), then merge to master.
   2. A coverage report: pytest-cov/coverage aren't installed in either venv, so it hasn't been run.
-  3. The desktop window/shutdown flow (d0bff7a) is covered by Rust tests but hasn't been launched by hand, including a Windows quit with local training running.
+  3. ~~The desktop window/shutdown flow~~: the user checked it on macOS on 2026-09-24. It looks good and works, and quitting stops the Python backend. Still untested by hand: a Windows quit with local training running.
   4. ~~Minor: the CG reproduction skip reason~~: it was right (the training audio is 11.6 minutes; the earlier note misread it as run time). It now states both, and the docstrings name `hybrid/continuous_gain/` (898e7d5).
   5. ~~Minor: `stage()` writes the undeclared 'uploading' state~~: this is the Kaggle job manager, not CG. The job now stays 'preparing' until the upload starts, and the UI keeps the legacy label for old job.json files (b648e0d).
   6. ~~Minor: ruff import-order warnings in `hybrid/continuous_gain/`~~: sorted, import order only (d251316).
   7. The 12 skips are environment-gated (real renders/models, training env, CG audio): run them before a release.
 - 2026-09-24: Minor items 4-6 done (898e7d5, b648e0d, d251316). 809 passed, 12 skipped in both venvs; JS 21/21; CG audio reproduction 6/6. Next: manual desktop check by the user, then `/code-review ultra`.
 - 2026-09-24: Cab export fixes found by the user in the desktop app (4025807, 5e7e259, 8e04b53). The Builder cab upload crashed (a missing JS function, a pre-review bug), and the embedded option showed because WebKit ignores hidden <option>. Learned cab is now the supported method in the Builder AND CG (one training, a full-rig capture, validated through the same IR). Embedded (a possible future spec) is refused everywhere unless experimental architectures are enabled. 817 passed, 12 skipped (both venvs); JS 21/21; CG frozen reproduction 6/6. Mac app rebuilt.
+- 2026-09-24: UI: the cabinet is chosen and heard in the listening card; the Finish card keeps only what is trained. Every checkbox is now a switch row (4a51628; checked in light, dark and at phone width with headless Chrome). The user checked the desktop app on macOS: it works, and quitting stops Python. All six invariants re-verified against the current code (see the checklist). Remaining: coverage report (needs pytest-cov, awaiting the user's OK), the Windows quit check, `/code-review ultra`, merge.
