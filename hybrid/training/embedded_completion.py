@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.cab_ir import CabDesign
-from ..core.render import NamRenderError, sequential_renderer_record
+from ..core.render import sequential_renderer_record
 from .sequential_nam import package_embedded_artifacts
 
 
@@ -53,15 +53,18 @@ def complete_embedded_artifact(manifest: dict[str, Any], head_nam_path: str | Pa
         expected = apply_cab_ir(head, get_frozen_prepared_cab_ir(CabDesign.from_dict(cab_data), sample_rate)) * final_scalar
         actual = render(load_nam(artifacts["sequential_nam_path"]), dry, sample_rate,
                         executable=find_sequential_nam_render_exe())
-        warmup = min(len(actual), _sequential_warmup_samples(artifacts["sequential_nam_path"]))
+        warmup = _sequential_warmup_samples(artifacts["sequential_nam_path"])
+        if len(actual) <= warmup:
+            # Nothing would be compared: never report that as "validated".
+            raise ValueError(f"embedded validation input ({len(actual)} samples) is not longer than the "
+                             f"{warmup}-sample warm-up, so the package could not be checked")
         # Package identity is strict after startup; native gate establishes
         # the exact derived-history policy for supported A2 structures.
-        error = float(np.max(np.abs(actual[warmup:] - expected[warmup:]))) if len(actual) > warmup else 0.0
+        error = float(np.max(np.abs(actual[warmup:] - expected[warmup:])))
         if error > 3e-6:
             raise ValueError(f"embedded Sequential package mismatch after warm-up: {error:g}")
         state.update({"state": "validated", "package_max_abs_error": error, "warmup_samples": warmup,
                       "download_available": True})
-        # Rendering/metric validation is backend-specific until the current
         return state
-    except (OSError, ValueError, NamRenderError) as exc:
-        return {"state": "failed", "experimental": True, "variant": "full_only", "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 -- never let the optional package fail the caller's valid head
+        return {"state": "failed", "experimental": True, "variant": "full_only", "error": str(exc) or type(exc).__name__}

@@ -177,3 +177,41 @@ def test_embedded_completion_missing_renderer_preserves_head_and_reports_failed(
                                         final_scalar=1.0, validation_input=ir_path)
     assert result["state"] == "failed"
     assert head_path.is_file()
+
+
+def _embedded_manifest(tmp_path):
+    import soundfile as sf
+    ir_path = tmp_path / "source.wav"; sf.write(ir_path, np.array([1., .25], dtype=np.float32), 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    return {"cab": CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256,
+                             export_mode=EXPORT_MODE_EMBEDDED).to_dict()}, ir_path
+
+
+def test_embedded_completion_reports_unexpected_errors_instead_of_raising(monkeypatch, tmp_path):
+    """E.g. a Sequential child without 'layers' (KeyError) must not escape into
+    the trainer, which has already produced a valid head."""
+    manifest, _ = _embedded_manifest(tmp_path)
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(_a2_head()))
+
+    def broken(*_a, **_k):
+        raise KeyError("layers")
+
+    monkeypatch.setattr("hybrid.training.embedded_completion.package_embedded_artifacts", broken)
+    result = complete_embedded_artifact(manifest, head_path, tmp_path, sample_rate=48000, final_scalar=1.0)
+    assert result["state"] == "failed" and "layers" in result["error"]
+    assert head_path.is_file()
+
+
+def test_embedded_completion_never_validates_when_nothing_is_compared(monkeypatch, tmp_path):
+    manifest, ir_path = _embedded_manifest(tmp_path)   # a 2-sample validation input
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(_a2_head()))
+    monkeypatch.setattr("hybrid.training.embedded_completion.package_embedded_artifacts",
+                        lambda *a, **k: {"sequential_nam_path": str(head_path)})
+    monkeypatch.setattr("hybrid.training.embedded_completion.sequential_renderer_record", lambda: {"ok": True})
+    monkeypatch.setattr("hybrid.training.embedded_completion._sequential_warmup_samples", lambda path: 1000)
+    monkeypatch.setattr("hybrid.core.render.render", lambda model, audio, sr, **kw: np.asarray(audio, dtype=np.float32))
+    monkeypatch.setattr("hybrid.core.render.find_sequential_nam_render_exe", lambda: Path("/tmp/seq"))
+    result = complete_embedded_artifact(manifest, head_path, tmp_path, sample_rate=48000, final_scalar=1.0,
+                                        validation_input=ir_path)
+    assert result["state"] == "failed" and "warm-up" in result["error"]
+    assert "download_available" not in result
