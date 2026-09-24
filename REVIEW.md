@@ -201,10 +201,20 @@ separate commit.
         is now the **default** after the user's listening review found no
         audible preference (see the commit after 401abfa). Frozen v1 designs
         keep their stored analyses.
-      - (10) Duplicated bundle generators: deferred until the above is
-        settled. When done, keep each mode's format-specific behaviour, add
-        before/after manifest + target regression tests, and document any
-        intentional manifest correction separately.
+      - ~~(10) Duplicated bundle generators~~: done as behaviour-preserving
+        cleanup. 1661a06 added golden snapshots
+        (`tests/test_bundle_generator_snapshots.py`), recorded from the
+        pre-refactor code: 15 Hybrid/Blend/Character cases across
+        manual/auto output gain and no/learned/embedded cab, comparing
+        manifests and decoded targets. 508d5d1 moved in the shared
+        output-gain stage and record and the common manifest sections;
+        Blend now reuses HYBRID_BUILDER_VERSION. The goldens and the
+        manifest key order are unchanged. Kept as-is on purpose: each
+        mode's own sections, Character's `training` note, and CG's own
+        output-gain record. **Open (would be a manifest correction, not
+        done):** Character amp records have never included
+        `output_level_dbu`, while Hybrid/Blend do. Adding it is a separate
+        documented change with its own snapshot update, only if wanted.
 - [x] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`: reviewed
       2026-09-24 in three parts (the first attempts hit the usage limit and
       then stalled twice, so training was split into kaggle_training.py and
@@ -260,8 +270,9 @@ separate commit.
         package is named from the base name. CLAUDE.md documents the rule.
         Download filenames (`<stem>.nam`, `<stem>-with-cab.nam`) are
         unchanged.
-      - CG `_shift`/`_db` helpers are copied across bundle/validation/probe
-        (a consolidation refactor; could go with #10).
+      - ~~CG `_shift`/`_db` helpers copied across bundle/validation/probe~~:
+        now `core.input_profiles.db_to_amplitude` and
+        `audit.apply_alignment_shift` (83a0e35).
       - `stage()` still writes the legacy 'uploading' state (the UI labels it
         correctly, so it's cosmetic).
 - [x] 4. The Flask layer, frontend, desktop/packaging/native, cloud/scripts: reviewed
@@ -365,3 +376,4 @@ separate commit.
 - 2026-09-24: #7 done: user heard no real difference, so Character analysis v2 is now the default. 781 passed, 12 skipped. Remaining: group 4 review; #10 (deferred).
 - 2026-09-24: Phase 3 group 4 done (Flask, frontend, desktop/packaging/native, cloud/scripts). 790 passed, 12 skipped; JS 20/20; Rust tests 2/2. Remaining: #10 (deferred) and the final `/code-review ultra`.
 - 2026-09-24: Follow-ups: CG request speed, desktop splash startup, cross-platform clean shutdown. 791 passed, 12 skipped; Rust 3/3.
+- 2026-09-24: #10 done as behaviour-preserving cleanup, guarded by golden bundle snapshots (1661a06, 508d5d1, 83a0e35). 806 passed, 12 skipped. Open: whether Character manifests should gain amp `output_level_dbu` (separate correction). Remaining: final `/code-review ultra` (user-triggered).
