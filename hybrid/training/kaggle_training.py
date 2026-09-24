@@ -717,6 +717,7 @@ class KaggleJobManager:
         worker script, and the private KERNEL push never re-uploads the
         training data it already gets via `dataset_sources` -- see
         docs/history/kaggle_training.md."""
+        self._raise_if_cancelled(job, "before it was staged")
         job_dir = _job_dir(self.a2_output_dir, job.design_id, job.job_id)
         dataset_staging = job_dir / "dataset_staging"
         kernel_staging = job_dir / "kernel_staging"
@@ -945,6 +946,12 @@ class KaggleJobManager:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(text if text.endswith("\n") else text + "\n")
 
+    def _raise_if_cancelled(self, job: KaggleJob, when: str) -> None:
+        with self._live_lock:
+            cancelled = job.job_id in self._cancelled
+        if cancelled:
+            raise JobCancelledError(f"job {job.job_id} was cancelled {when}")
+
     def _save_submission(self, job: KaggleJob) -> None:
         """save_job for the submission pipeline: once the job is cancelled,
         stop the pipeline instead of overwriting the cancelled record."""
@@ -996,13 +1003,20 @@ class KaggleJobManager:
             if job.job_id in self._cancelled:
                 raise JobCancelledError(f"job {job.job_id} was cancelled before its kernel was pushed")
         result = self.cli.kernels_push(staging_dir, accelerator=job.accelerator)
-        with self._live_lock:
-            cancelled_during_push = job.job_id in self._cancelled
-        if cancelled_during_push:
-            # cancel_active() ran without knowing about this kernel: remove it.
+        try:
+            self._raise_if_cancelled(job, "while its kernel was being pushed")
+            self._record_pushed_kernel(job, result, kernel_ref)
+        except JobCancelledError:
+            # cancel_active() works from the job as saved on disk, so it may not
+            # have known about this kernel yet (the ref is persisted only after
+            # the push): whenever a cancel stops the pipeline after a
+            # successful push, delete the kernel here. A second delete of a
+            # kernel cancel_active() already removed just fails harmlessly.
             if result.ok:
                 self.cli.kernels_delete(kernel_ref)
-            raise JobCancelledError(f"job {job.job_id} was cancelled while its kernel was being pushed")
+            raise
+
+    def _record_pushed_kernel(self, job: KaggleJob, result: "CliResult", kernel_ref: str) -> None:
         if not result.ok:
             job.state = "failed"
             job.error = f"kernel push failed: {result.stderr.strip() or result.stdout.strip()}"
@@ -1087,6 +1101,13 @@ class KaggleJobManager:
         except KaggleTrainingError as exc:
             # Some steps (e.g. stage()'s missing-file checks) raise without
             # recording the failure; never leave the job looking in progress.
+            # A cancelled job keeps cancel_active()'s record: its bundle may
+            # have been deleted under the running step, which then fails for
+            # that reason, not a real one.
+            with self._live_lock:
+                cancelled = job.job_id in self._cancelled
+            if cancelled:
+                raise JobCancelledError(f"job {job.job_id} was cancelled") from exc
             if job.state != "failed":
                 job.state = "failed"
                 job.error = str(exc)

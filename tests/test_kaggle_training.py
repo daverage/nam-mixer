@@ -1822,3 +1822,55 @@ def test_unexpected_validation_error_is_a_recorded_failure_not_a_stuck_job(monke
     assert saved.state == "failed" and "Format not recognised" in saved.error
     assert Path(saved.output_nam_path).is_file()
 
+
+
+def test_a_cancel_between_push_and_recording_the_kernel_still_deletes_it(tmp_path, bundle_dir, monkeypatch):
+    """Ultrareview race: cancel_active() reads the job from disk, where the pushed kernel's ref is not yet
+    recorded, so it cannot delete it; the pipeline must then delete the kernel it pushed."""
+    cli, calls = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    real_check = manager._raise_if_cancelled
+
+    def check_then_cancel(j, when):
+        real_check(j, when)
+        if when == "while its kernel was being pushed":      # the check passed; the cancel lands right after it
+            on_disk = load_job(tmp_path, "mydesign", j.job_id)
+            assert on_disk.kernel_ref is None and on_disk.unverified_kernel_ref is None
+            manager.cancel_active(on_disk)
+    monkeypatch.setattr(manager, "_raise_if_cancelled", check_then_cancel)
+
+    with pytest.raises(KaggleTrainingError, match="cancelled"):
+        manager._run_pipeline(job, bundle_dir)
+    pushed = [c for c in calls if c[1:3] == ["kernels", "push"]]
+    deleted = [c for c in calls if c[1:3] == ["kernels", "delete"]]
+    assert len(pushed) == 1 and len(deleted) == 1 and deleted[0][3].startswith("testuser/")
+    saved = load_job(tmp_path, "mydesign", job.job_id)
+    assert saved.state == "failed" and saved.error.startswith("Cancelled")
+
+
+def test_a_step_failing_because_its_job_was_cancelled_keeps_the_cancelled_record(tmp_path, bundle_dir, monkeypatch):
+    """e.g. the owning session is deleted mid-staging: its bundle disappears and staging fails because of that."""
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+
+    def stage_after_cancel(j, _bundle_dir):
+        manager.cancel_active(load_job(tmp_path, "mydesign", j.job_id))
+        raise KaggleTrainingError("training bundle is missing required file: input.wav")
+    monkeypatch.setattr(manager, "stage", stage_after_cancel)
+
+    with pytest.raises(kaggle_training.JobCancelledError):
+        manager._run_pipeline(job, bundle_dir)
+    saved = load_job(tmp_path, "mydesign", job.job_id)
+    assert saved.error.startswith("Cancelled") and "missing required file" not in saved.error
+
+
+def test_staging_a_cancelled_job_writes_nothing(tmp_path, bundle_dir, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    manager.cancel_active(load_job(tmp_path, "mydesign", job.job_id))
+    with pytest.raises(kaggle_training.JobCancelledError):
+        manager.stage(job, bundle_dir)
+    assert not (kaggle_training._job_dir(tmp_path, "mydesign", job.job_id) / "dataset_staging").exists()
