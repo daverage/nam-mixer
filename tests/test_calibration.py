@@ -1,4 +1,4 @@
-from hybrid.calibration import input_calibration_gain_db, resolve_calibration
+from hybrid.core.calibration import input_calibration_gain_db, resolve_calibration
 
 
 def test_official_compensation_formula():

@@ -364,3 +364,73 @@ test('renderer readiness distinguishes missing state and recovers on retry', asy
   assert.equal(sandbox.renderStatus.textContent, 'Renderer ready.');
   assert.equal(retry.hidden, true);
 });
+
+test('validation reports made before the Full/Lite fix are flagged', () => {
+  const sandbox = { escapeHtml: (value) => String(value ?? '') };  // the real one needs the DOM
+  vm.createContext(sandbox);
+  vm.runInContext(section('function validationSummaryHtml(', 'function renderLocalDownloadResult('), sandbox);
+  const report = { state: 'passed', summary: 'ok', checks: [] };
+  assert.match(sandbox.validationSummaryHtml({ ...report, schema_version: 2 }), /wrong way round/);
+  assert.doesNotMatch(sandbox.validationSummaryHtml({ ...report, schema_version: 3 }), /wrong way round/);
+});
+
+test('a Continuous Gain job finishing after the user opened another project acts on its own project', async () => {
+  const cg = fs.readFileSync(path.join(__dirname, '../static/cg.js'), 'utf8');
+  const start = cg.indexOf('  async function runJob(');
+  const end = cg.indexOf('  const jobBox', start);
+  assert.ok(start > 0 && end > start);
+  const loads = [];
+  let tick = null;
+  const sandbox = {
+    S: { id: 'A', job: null, pollTimer: null },
+    api: async (url) => (url === '/start' ? { job_id: 'j1' } : { state: 'done', log: [], message: '', elapsed: 1 }),
+    render: () => {}, say: () => {},
+    load: async (id) => { loads.push(id); },
+    setInterval: (fn) => { tick = fn; return 1; }, clearInterval: () => {},
+    document: { getElementById: () => null },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(cg.slice(start, end) + '\nthis.runJob = runJob;', sandbox);
+  let afterPid = null;
+  await sandbox.runJob('/start', {}, async (_st, pid) => { afterPid = pid; });
+  sandbox.S.id = 'B';                          // the user opens project B while A's job runs
+  await tick();
+  assert.equal(afterPid, 'A');                 // the follow-up targets A, not B
+  assert.deepEqual(loads, []);                 // B's screen is not reloaded with A's result
+});
+
+test('a stale coverage response cannot overwrite a newer one', async () => {
+  const el = () => ({ hidden: false, textContent: '', innerHTML: '', value: '0', classList: { add() {} }, appendChild() {} });
+  const pending = [];
+  const sandbox = {
+    havePair: true, activeRenderId: 'r1',
+    crossoverSlider: el(), transitionSlider: el(), customGainSlider: el(), profileSelect: el(),
+    coverageTbody: el(), coverageTable: el(), coverageEmpty: el(), coverageWarning: el(),
+    instrumentSelect: el(),
+    document: { createElement: () => el() },
+    fetch: () => new Promise((resolve) => pending.push(resolve)),
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('let coverageRequestSeq = 0;', '// ---- Journey chart'), sandbox);
+  const older = sandbox.updateCoverage();
+  const newer = sandbox.updateCoverage();
+  const response = (activeSignal) => ({ ok: true, json: async () => ({ coverage: [], active_signal: activeSignal, reachability_warning: null }) });
+  pending[1](response(true));            // the newer request answers first...
+  await newer;
+  pending[0](response(false));           // ...then the stale one (e.g. an earlier, silent DI)
+  await older;
+  assert.equal(sandbox.coverageEmpty.hidden, true);   // the stale "no active playing" did not take over
+});
+
+test('Continuous Gain step estimates come from one timing table and keep their measured values', () => {
+  const cg = fs.readFileSync(path.join(__dirname, '../static/cg.js'), 'utf8');
+  const start = cg.indexOf('  const STEP_TIMING = {');
+  const end = cg.indexOf('  const formatDuration', start);
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(cg.slice(start, end) + '\nthis.estimateSeconds = estimateSeconds;', sandbox);
+  assert.equal(sandbox.estimateSeconds('analyse', 19), 20 + 19 * 2.6);   // the previous inline formulas
+  assert.equal(sandbox.estimateSeconds('generate', 5), 20 + 5 * 4);
+  assert.equal(sandbox.estimateSeconds('validate', 4), 15 + 12);
+  assert.doesNotMatch(cg, /formatDuration\(\d+ \+/);                    // no inline formula left
+});

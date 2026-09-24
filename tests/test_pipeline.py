@@ -1,7 +1,7 @@
 import numpy as np
 
-from hybrid.envelope import rms_envelope_db
-from hybrid.pipeline import RenderedPair, build_hybrid
+from hybrid.core.envelope import rms_envelope_db
+from hybrid.core.pipeline import RenderedPair, build_hybrid
 
 
 def _synthetic_pair(n=10000, sample_rate=48000):

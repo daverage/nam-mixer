@@ -1,0 +1,2683 @@
+{
+ "blend-auto-embedded": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "baked": false,
+    "display_name": "Test 4x12",
+    "energy_9999_ms": null,
+    "energy_9999_samples": null,
+    "energy_999_ms": null,
+    "energy_999_samples": null,
+    "energy_99_ms": null,
+    "energy_99_samples": null,
+    "export_mode": "embedded",
+    "fir_history_samples": null,
+    "ir_working_path": "<TMP>/cab.wav",
+    "leading_samples_trimmed": null,
+    "leading_silence_threshold_db": -40.0,
+    "original_channels": null,
+    "original_filename": "cab.wav",
+    "original_frame_count": null,
+    "original_sample_rate": null,
+    "preparation_mode": "trim_initial_silence",
+    "prepared_duration_ms": null,
+    "prepared_frame_count": null,
+    "prepared_sample_rate": null,
+    "preview_enabled": false,
+    "selected": true,
+    "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "mix_a": 0.65,
+    "mix_b": 0.35,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "blend",
+   "output_gain": {
+    "applied_gain_db": 10.428799985,
+    "embedded_final": {
+     "final_composite_reference_peak_dbfs": 4.922629747,
+     "final_linear_scalar": 0.554457819,
+     "head_training_target_gain": 1.0,
+     "safety_reduction_db": 5.122629747
+    },
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -10.628799985,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": null
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "embedded",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": -40.0,
+     "preparation_mode": "trim_initial_silence",
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "blend",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "blend-auto-learned": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):e779ee63254232aa1729ca5fbc8ec3dcc9e217051343cf1405ce674d0556ac06",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):e779ee63254232aa1729ca5fbc8ec3dcc9e217051343cf1405ce674d0556ac06",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "baked": true,
+    "display_name": "Test 4x12",
+    "energy_9999_ms": null,
+    "energy_9999_samples": null,
+    "energy_999_ms": null,
+    "energy_999_samples": null,
+    "energy_99_ms": null,
+    "energy_99_samples": null,
+    "export_mode": "learned",
+    "fir_history_samples": null,
+    "ir_working_path": "<TMP>/cab.wav",
+    "leading_samples_trimmed": null,
+    "leading_silence_threshold_db": -40.0,
+    "original_channels": null,
+    "original_filename": "cab.wav",
+    "original_frame_count": null,
+    "original_sample_rate": null,
+    "preparation_mode": "trim_initial_silence",
+    "prepared_duration_ms": null,
+    "prepared_frame_count": null,
+    "prepared_sample_rate": null,
+    "preview_enabled": false,
+    "selected": true,
+    "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "mix_a": 0.65,
+    "mix_b": 0.35,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "blend",
+   "output_gain": {
+    "applied_gain_db": 5.306169358,
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -5.506169358,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": null
+    },
+    "cab": {
+     "baked": true,
+     "export_mode": "learned",
+     "fir_history_samples": 3,
+     "fir_length_samples": 4,
+     "leading_silence_threshold_db": -40.0,
+     "preparation_mode": "trim_initial_silence",
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "cab_fir_serial_samples": 3,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "blend",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):e779ee63254232aa1729ca5fbc8ec3dcc9e217051343cf1405ce674d0556ac06>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):e779ee63254232aa1729ca5fbc8ec3dcc9e217051343cf1405ce674d0556ac06>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "blend-auto-nocab": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "mix_a": 0.65,
+    "mix_b": 0.35,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "blend",
+   "output_gain": {
+    "applied_gain_db": 10.428799985,
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -10.628799985,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": null
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "blend",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):ecae0a3832db9dcad034dd5395fd80a9f35ac036a815acfbfbe2f1a9ccf6b938>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "blend-manual+3-nocab": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):b713f78bc0821de4ce73ccf4347f133f51b66a8449c854c48817e0b9f2cda42b",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):b713f78bc0821de4ce73ccf4347f133f51b66a8449c854c48817e0b9f2cda42b",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "mix_a": 0.65,
+    "mix_b": 0.35,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "blend",
+   "output_gain": {
+    "applied_gain_db": 3.0,
+    "mode": "manual",
+    "peak_before_output_gain_dbfs": -10.628799985,
+    "requested_manual_gain_db": 3.0
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": null
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "blend",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):b713f78bc0821de4ce73ccf4347f133f51b66a8449c854c48817e0b9f2cda42b>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -7.628799671,
+    "peak_before_safety_dbfs": -7.628799671,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):b713f78bc0821de4ce73ccf4347f133f51b66a8449c854c48817e0b9f2cda42b>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "blend-manual0-nocab": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):3163962b376069b7cd9036ba73668a0f5307c170755079626173d6710444fd2d",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):3163962b376069b7cd9036ba73668a0f5307c170755079626173d6710444fd2d",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "mix_a": 0.65,
+    "mix_b": 0.35,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "blend",
+   "output_gain": {
+    "applied_gain_db": 0.0,
+    "mode": "manual",
+    "peak_before_output_gain_dbfs": -10.628799985,
+    "requested_manual_gain_db": 0.0
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": null
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "blend",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):3163962b376069b7cd9036ba73668a0f5307c170755079626173d6710444fd2d>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -10.628799985,
+    "peak_before_safety_dbfs": -10.628799985,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):3163962b376069b7cd9036ba73668a0f5307c170755079626173d6710444fd2d>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "character-auto-embedded": {
+  "files": {
+   "export_validation_reference_input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01",
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "baked": false,
+    "display_name": "Test 4x12",
+    "energy_9999_ms": null,
+    "energy_9999_samples": null,
+    "energy_999_ms": null,
+    "energy_999_samples": null,
+    "energy_99_ms": null,
+    "energy_99_samples": null,
+    "export_mode": "embedded",
+    "fir_history_samples": null,
+    "ir_working_path": "<TMP>/cab.wav",
+    "leading_samples_trimmed": null,
+    "leading_silence_threshold_db": -40.0,
+    "original_channels": null,
+    "original_filename": "cab.wav",
+    "original_frame_count": null,
+    "original_sample_rate": null,
+    "preparation_mode": "trim_initial_silence",
+    "prepared_duration_ms": null,
+    "prepared_frame_count": null,
+    "prepared_sample_rate": null,
+    "preview_enabled": false,
+    "selected": true,
+    "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "character_analysis": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "analysis_a": null,
+    "analysis_b": null,
+    "drive_curve": {
+     "high": null,
+     "low": null,
+     "mid": null
+    },
+    "drive_mix_b": 0.5,
+    "feel_mix_b": 0.4,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6,
+    "version": 2
+   },
+   "design": {
+    "amp_a_calibration_gain_db": 0.0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_a_input_level_dbu": null,
+    "amp_a_path": "<TMP>/a.nam",
+    "amp_a_sha256": "",
+    "amp_b_calibration_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "amp_b_input_level_dbu": null,
+    "amp_b_path": "<TMP>/b.nam",
+    "amp_b_sha256": "",
+    "analysis_a": null,
+    "analysis_b": null,
+    "analysis_config": null,
+    "cab": {
+     "baked": false,
+     "display_name": "Test 4x12",
+     "energy_9999_ms": null,
+     "energy_9999_samples": null,
+     "energy_999_ms": null,
+     "energy_999_samples": null,
+     "energy_99_ms": null,
+     "energy_99_samples": null,
+     "export_mode": "embedded",
+     "fir_history_samples": null,
+     "ir_working_path": "<TMP>/cab.wav",
+     "leading_samples_trimmed": null,
+     "leading_silence_threshold_db": -40.0,
+     "original_channels": null,
+     "original_filename": "cab.wav",
+     "original_frame_count": null,
+     "original_sample_rate": null,
+     "preparation_mode": "trim_initial_silence",
+     "prepared_duration_ms": null,
+     "prepared_frame_count": null,
+     "prepared_sample_rate": null,
+     "preview_enabled": false,
+     "selected": true,
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "calibration_applied": false,
+    "calibration_effective_mode": "raw",
+    "calibration_mode": "raw",
+    "calibration_warning": null,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "drive_high_mix_b": null,
+    "drive_low_mix_b": null,
+    "drive_mid_mix_b": null,
+    "drive_mix_b": 0.5,
+    "envelope_max_history_ms": 80.0,
+    "envelope_smoothing_ms": 40.0,
+    "eq_correction_limit_db": 4.0,
+    "feel_mix_b": 0.4,
+    "instrument_type": "guitar",
+    "manual_output_gain_db": 0.0,
+    "mode": "character",
+    "output_gain_mode": "auto",
+    "reference_input_level_dbu": 12.0,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6
+   },
+   "export_validation_reference": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "cab_baked": false,
+    "cab_sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>",
+    "frame_count": 48000,
+    "frame_start": 0,
+    "input_excerpt_path": "export_validation_reference_input.wav",
+    "input_excerpt_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "input_gain_db": {
+     "amp_a": 0.0,
+     "amp_b": 0.0
+    },
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "output_gain_db": 10.435975307,
+    "peak_reduction_db": 0.0,
+    "processing_version": "character-export-reference-v2",
+    "sample_rate": 48000,
+    "schema_version": 2,
+    "score_frame_count": 36000,
+    "score_frame_start": 12000,
+    "source_training_input_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "teacher_output_rms_dbfs": [
+     -4.887727918,
+     -10.767790079,
+     -16.737110801,
+     -22.729352134,
+     -28.727401191,
+     -34.726911423,
+     -40.726787341
+    ],
+    "teacher_semantics_version": 3,
+    "validation_policy": {
+     "max_absolute_level_error_db": 6.0,
+     "max_extra_quiet_attenuation_db": 6.0,
+     "max_gain_normalized_esr": 0.15,
+     "max_raw_esr": 0.25,
+     "max_response_shape_error_db": 3.0,
+     "silence_floor_dbfs": -100.0
+    },
+    "warmup_policy": "render the complete saved excerpt, score only score_frame_start:score_frame_count"
+   },
+   "hybrid_builder_version": "character-blend-v2",
+   "low_level_response": {
+    "dead_zone_detected": false,
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "max_step_error_db": -0.000124142,
+    "ok": true,
+    "output_rms_dbfs": [
+     -15.316492917,
+     -21.196500585,
+     -27.165807368,
+     -33.158044906,
+     -39.156093009,
+     -45.155603001,
+     -51.155478859
+    ],
+    "warning": null
+   },
+   "mode": "character",
+   "output_gain": {
+    "applied_gain_db": 10.435975307,
+    "embedded_final": {
+     "final_composite_reference_peak_dbfs": 4.92145412,
+     "final_linear_scalar": 0.55453287,
+     "head_training_target_gain": 1.0,
+     "safety_reduction_db": 5.12145412
+    },
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -10.635975307,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "embedded",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": -40.0,
+     "preparation_mode": "trim_initial_silence",
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "character",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "recommended_epoch_preset": "high_def",
+    "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "character-auto-learned": {
+  "files": {
+   "export_validation_reference_input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01",
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):2bc95142dccf764d35171f4a50cc3b3b3e8a0647804ab23217b1ad3edaad62e4",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):2bc95142dccf764d35171f4a50cc3b3b3e8a0647804ab23217b1ad3edaad62e4",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "baked": true,
+    "display_name": "Test 4x12",
+    "energy_9999_ms": null,
+    "energy_9999_samples": null,
+    "energy_999_ms": null,
+    "energy_999_samples": null,
+    "energy_99_ms": null,
+    "energy_99_samples": null,
+    "export_mode": "learned",
+    "fir_history_samples": null,
+    "ir_working_path": "<TMP>/cab.wav",
+    "leading_samples_trimmed": null,
+    "leading_silence_threshold_db": -40.0,
+    "original_channels": null,
+    "original_filename": "cab.wav",
+    "original_frame_count": null,
+    "original_sample_rate": null,
+    "preparation_mode": "trim_initial_silence",
+    "prepared_duration_ms": null,
+    "prepared_frame_count": null,
+    "prepared_sample_rate": null,
+    "preview_enabled": false,
+    "selected": true,
+    "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "character_analysis": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "analysis_a": null,
+    "analysis_b": null,
+    "drive_curve": {
+     "high": null,
+     "low": null,
+     "mid": null
+    },
+    "drive_mix_b": 0.5,
+    "feel_mix_b": 0.4,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6,
+    "version": 2
+   },
+   "design": {
+    "amp_a_calibration_gain_db": 0.0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_a_input_level_dbu": null,
+    "amp_a_path": "<TMP>/a.nam",
+    "amp_a_sha256": "",
+    "amp_b_calibration_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "amp_b_input_level_dbu": null,
+    "amp_b_path": "<TMP>/b.nam",
+    "amp_b_sha256": "",
+    "analysis_a": null,
+    "analysis_b": null,
+    "analysis_config": null,
+    "cab": {
+     "baked": true,
+     "display_name": "Test 4x12",
+     "energy_9999_ms": null,
+     "energy_9999_samples": null,
+     "energy_999_ms": null,
+     "energy_999_samples": null,
+     "energy_99_ms": null,
+     "energy_99_samples": null,
+     "export_mode": "learned",
+     "fir_history_samples": null,
+     "ir_working_path": "<TMP>/cab.wav",
+     "leading_samples_trimmed": null,
+     "leading_silence_threshold_db": -40.0,
+     "original_channels": null,
+     "original_filename": "cab.wav",
+     "original_frame_count": null,
+     "original_sample_rate": null,
+     "preparation_mode": "trim_initial_silence",
+     "prepared_duration_ms": null,
+     "prepared_frame_count": null,
+     "prepared_sample_rate": null,
+     "preview_enabled": false,
+     "selected": true,
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "calibration_applied": false,
+    "calibration_effective_mode": "raw",
+    "calibration_mode": "raw",
+    "calibration_warning": null,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "drive_high_mix_b": null,
+    "drive_low_mix_b": null,
+    "drive_mid_mix_b": null,
+    "drive_mix_b": 0.5,
+    "envelope_max_history_ms": 80.0,
+    "envelope_smoothing_ms": 40.0,
+    "eq_correction_limit_db": 4.0,
+    "feel_mix_b": 0.4,
+    "instrument_type": "guitar",
+    "manual_output_gain_db": 0.0,
+    "mode": "character",
+    "output_gain_mode": "auto",
+    "reference_input_level_dbu": 12.0,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6
+   },
+   "export_validation_reference": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "cab_baked": true,
+    "cab_sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>",
+    "frame_count": 48000,
+    "frame_start": 0,
+    "input_excerpt_path": "export_validation_reference_input.wav",
+    "input_excerpt_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "input_gain_db": {
+     "amp_a": 0.0,
+     "amp_b": 0.0
+    },
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "output_gain_db": 5.314520196,
+    "peak_reduction_db": 0.0,
+    "processing_version": "character-export-reference-v2",
+    "sample_rate": 48000,
+    "schema_version": 2,
+    "score_frame_count": 36000,
+    "score_frame_start": 12000,
+    "source_training_input_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "teacher_output_rms_dbfs": [
+     -8.777089075,
+     -14.657123912,
+     -20.626435538,
+     -26.618676638,
+     -32.616725619,
+     -38.616235882,
+     -44.616111771
+    ],
+    "teacher_semantics_version": 3,
+    "validation_policy": {
+     "max_absolute_level_error_db": 6.0,
+     "max_extra_quiet_attenuation_db": 6.0,
+     "max_gain_normalized_esr": 0.15,
+     "max_raw_esr": 0.25,
+     "max_response_shape_error_db": 3.0,
+     "silence_floor_dbfs": -100.0
+    },
+    "warmup_policy": "render the complete saved excerpt, score only score_frame_start:score_frame_count"
+   },
+   "hybrid_builder_version": "character-blend-v2",
+   "low_level_response": {
+    "dead_zone_detected": false,
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "max_step_error_db": -0.000124142,
+    "ok": true,
+    "output_rms_dbfs": [
+     -15.316492917,
+     -21.196500585,
+     -27.165807368,
+     -33.158044906,
+     -39.156093009,
+     -45.155603001,
+     -51.155478859
+    ],
+    "warning": null
+   },
+   "mode": "character",
+   "output_gain": {
+    "applied_gain_db": 5.314520196,
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -5.514520196,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": true,
+     "export_mode": "learned",
+     "fir_history_samples": 3,
+     "fir_length_samples": 4,
+     "leading_silence_threshold_db": -40.0,
+     "preparation_mode": "trim_initial_silence",
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "cab_fir_serial_samples": 3,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "character",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):2bc95142dccf764d35171f4a50cc3b3b3e8a0647804ab23217b1ad3edaad62e4>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):2bc95142dccf764d35171f4a50cc3b3b3e8a0647804ab23217b1ad3edaad62e4>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "recommended_epoch_preset": "high_def",
+    "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "character-auto-nocab": {
+  "files": {
+   "export_validation_reference_input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01",
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "character_analysis": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "analysis_a": null,
+    "analysis_b": null,
+    "drive_curve": {
+     "high": null,
+     "low": null,
+     "mid": null
+    },
+    "drive_mix_b": 0.5,
+    "feel_mix_b": 0.4,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6,
+    "version": 2
+   },
+   "design": {
+    "amp_a_calibration_gain_db": 0.0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_a_input_level_dbu": null,
+    "amp_a_path": "<TMP>/a.nam",
+    "amp_a_sha256": "",
+    "amp_b_calibration_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "amp_b_input_level_dbu": null,
+    "amp_b_path": "<TMP>/b.nam",
+    "amp_b_sha256": "",
+    "analysis_a": null,
+    "analysis_b": null,
+    "analysis_config": null,
+    "cab": null,
+    "calibration_applied": false,
+    "calibration_effective_mode": "raw",
+    "calibration_mode": "raw",
+    "calibration_warning": null,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "drive_high_mix_b": null,
+    "drive_low_mix_b": null,
+    "drive_mid_mix_b": null,
+    "drive_mix_b": 0.5,
+    "envelope_max_history_ms": 80.0,
+    "envelope_smoothing_ms": 40.0,
+    "eq_correction_limit_db": 4.0,
+    "feel_mix_b": 0.4,
+    "instrument_type": "guitar",
+    "manual_output_gain_db": 0.0,
+    "mode": "character",
+    "output_gain_mode": "auto",
+    "reference_input_level_dbu": 12.0,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6
+   },
+   "export_validation_reference": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "cab_baked": false,
+    "cab_sha256": null,
+    "frame_count": 48000,
+    "frame_start": 0,
+    "input_excerpt_path": "export_validation_reference_input.wav",
+    "input_excerpt_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "input_gain_db": {
+     "amp_a": 0.0,
+     "amp_b": 0.0
+    },
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "output_gain_db": 10.435975307,
+    "peak_reduction_db": 0.0,
+    "processing_version": "character-export-reference-v2",
+    "sample_rate": 48000,
+    "schema_version": 2,
+    "score_frame_count": 36000,
+    "score_frame_start": 12000,
+    "source_training_input_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "teacher_output_rms_dbfs": [
+     -4.887727918,
+     -10.767790079,
+     -16.737110801,
+     -22.729352134,
+     -28.727401191,
+     -34.726911423,
+     -40.726787341
+    ],
+    "teacher_semantics_version": 3,
+    "validation_policy": {
+     "max_absolute_level_error_db": 6.0,
+     "max_extra_quiet_attenuation_db": 6.0,
+     "max_gain_normalized_esr": 0.15,
+     "max_raw_esr": 0.25,
+     "max_response_shape_error_db": 3.0,
+     "silence_floor_dbfs": -100.0
+    },
+    "warmup_policy": "render the complete saved excerpt, score only score_frame_start:score_frame_count"
+   },
+   "hybrid_builder_version": "character-blend-v2",
+   "low_level_response": {
+    "dead_zone_detected": false,
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "max_step_error_db": -0.000124142,
+    "ok": true,
+    "output_rms_dbfs": [
+     -15.316492917,
+     -21.196500585,
+     -27.165807368,
+     -33.158044906,
+     -39.156093009,
+     -45.155603001,
+     -51.155478859
+    ],
+    "warning": null
+   },
+   "mode": "character",
+   "output_gain": {
+    "applied_gain_db": 10.435975307,
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -10.635975307,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "character",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):a12db2acfe89a230aa118b2ad19ceef4809ddb92e22d1751759fb232425257d4>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "recommended_epoch_preset": "high_def",
+    "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "character-manual+3-nocab": {
+  "files": {
+   "export_validation_reference_input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01",
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):23ff8b1acbdd1b9554ad5147d49d2e30b39808afe14268733a501f4c0ca0e802",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):23ff8b1acbdd1b9554ad5147d49d2e30b39808afe14268733a501f4c0ca0e802",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "character_analysis": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "analysis_a": null,
+    "analysis_b": null,
+    "drive_curve": {
+     "high": null,
+     "low": null,
+     "mid": null
+    },
+    "drive_mix_b": 0.5,
+    "feel_mix_b": 0.4,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6,
+    "version": 2
+   },
+   "design": {
+    "amp_a_calibration_gain_db": 0.0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_a_input_level_dbu": null,
+    "amp_a_path": "<TMP>/a.nam",
+    "amp_a_sha256": "",
+    "amp_b_calibration_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "amp_b_input_level_dbu": null,
+    "amp_b_path": "<TMP>/b.nam",
+    "amp_b_sha256": "",
+    "analysis_a": null,
+    "analysis_b": null,
+    "analysis_config": null,
+    "cab": null,
+    "calibration_applied": false,
+    "calibration_effective_mode": "raw",
+    "calibration_mode": "raw",
+    "calibration_warning": null,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "drive_high_mix_b": null,
+    "drive_low_mix_b": null,
+    "drive_mid_mix_b": null,
+    "drive_mix_b": 0.5,
+    "envelope_max_history_ms": 80.0,
+    "envelope_smoothing_ms": 40.0,
+    "eq_correction_limit_db": 4.0,
+    "feel_mix_b": 0.4,
+    "instrument_type": "guitar",
+    "manual_output_gain_db": 3.0,
+    "mode": "character",
+    "output_gain_mode": "manual",
+    "reference_input_level_dbu": 12.0,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6
+   },
+   "export_validation_reference": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "cab_baked": false,
+    "cab_sha256": null,
+    "frame_count": 48000,
+    "frame_start": 0,
+    "input_excerpt_path": "export_validation_reference_input.wav",
+    "input_excerpt_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "input_gain_db": {
+     "amp_a": 0.0,
+     "amp_b": 0.0
+    },
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "output_gain_db": 3.0,
+    "peak_reduction_db": 0.0,
+    "processing_version": "character-export-reference-v2",
+    "sample_rate": 48000,
+    "schema_version": 2,
+    "score_frame_count": 36000,
+    "score_frame_start": 12000,
+    "source_training_input_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "teacher_output_rms_dbfs": [
+     -12.323703036,
+     -18.2037652,
+     -24.173085922,
+     -30.165327253,
+     -36.163376313,
+     -42.162886542,
+     -48.162762463
+    ],
+    "teacher_semantics_version": 3,
+    "validation_policy": {
+     "max_absolute_level_error_db": 6.0,
+     "max_extra_quiet_attenuation_db": 6.0,
+     "max_gain_normalized_esr": 0.15,
+     "max_raw_esr": 0.25,
+     "max_response_shape_error_db": 3.0,
+     "silence_floor_dbfs": -100.0
+    },
+    "warmup_policy": "render the complete saved excerpt, score only score_frame_start:score_frame_count"
+   },
+   "hybrid_builder_version": "character-blend-v2",
+   "low_level_response": {
+    "dead_zone_detected": false,
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "max_step_error_db": -0.000124142,
+    "ok": true,
+    "output_rms_dbfs": [
+     -15.316492917,
+     -21.196500585,
+     -27.165807368,
+     -33.158044906,
+     -39.156093009,
+     -45.155603001,
+     -51.155478859
+    ],
+    "warning": null
+   },
+   "mode": "character",
+   "output_gain": {
+    "applied_gain_db": 3.0,
+    "mode": "manual",
+    "peak_before_output_gain_dbfs": -10.635975307,
+    "requested_manual_gain_db": 3.0
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "character",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):23ff8b1acbdd1b9554ad5147d49d2e30b39808afe14268733a501f4c0ca0e802>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -7.63597488,
+    "peak_before_safety_dbfs": -7.63597488,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):23ff8b1acbdd1b9554ad5147d49d2e30b39808afe14268733a501f4c0ca0e802>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "recommended_epoch_preset": "high_def",
+    "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "character-manual0-nocab": {
+  "files": {
+   "export_validation_reference_input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01",
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):a48875cd348f6593b70061539aeacd1fb3fa1fd567de8fc52873cc1d1ab26c95",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):a48875cd348f6593b70061539aeacd1fb3fa1fd567de8fc52873cc1d1ab26c95",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "character_analysis": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "analysis_a": null,
+    "analysis_b": null,
+    "drive_curve": {
+     "high": null,
+     "low": null,
+     "mid": null
+    },
+    "drive_mix_b": 0.5,
+    "feel_mix_b": 0.4,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6,
+    "version": 2
+   },
+   "design": {
+    "amp_a_calibration_gain_db": 0.0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_a_input_level_dbu": null,
+    "amp_a_path": "<TMP>/a.nam",
+    "amp_a_sha256": "",
+    "amp_b_calibration_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "amp_b_input_level_dbu": null,
+    "amp_b_path": "<TMP>/b.nam",
+    "amp_b_sha256": "",
+    "analysis_a": null,
+    "analysis_b": null,
+    "analysis_config": null,
+    "cab": null,
+    "calibration_applied": false,
+    "calibration_effective_mode": "raw",
+    "calibration_mode": "raw",
+    "calibration_warning": null,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 0.0,
+    "design_reference_profile_id": "vintage_humbucker",
+    "drive_high_mix_b": null,
+    "drive_low_mix_b": null,
+    "drive_mid_mix_b": null,
+    "drive_mix_b": 0.5,
+    "envelope_max_history_ms": 80.0,
+    "envelope_smoothing_ms": 40.0,
+    "eq_correction_limit_db": 4.0,
+    "feel_mix_b": 0.4,
+    "instrument_type": "guitar",
+    "manual_output_gain_db": 0.0,
+    "mode": "character",
+    "output_gain_mode": "manual",
+    "reference_input_level_dbu": 12.0,
+    "teacher_semantics_version": 3,
+    "tone_mix_b": 0.6
+   },
+   "export_validation_reference": {
+    "amp_a_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "amp_b_sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "cab_baked": false,
+    "cab_sha256": null,
+    "frame_count": 48000,
+    "frame_start": 0,
+    "input_excerpt_path": "export_validation_reference_input.wav",
+    "input_excerpt_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "input_gain_db": {
+     "amp_a": 0.0,
+     "amp_b": 0.0
+    },
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "output_gain_db": 0.0,
+    "peak_reduction_db": 0.0,
+    "processing_version": "character-export-reference-v2",
+    "sample_rate": 48000,
+    "schema_version": 2,
+    "score_frame_count": 36000,
+    "score_frame_start": 12000,
+    "source_training_input_sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>",
+    "teacher_output_rms_dbfs": [
+     -15.323703225,
+     -21.203765386,
+     -27.173086107,
+     -33.165327441,
+     -39.163376498,
+     -45.16288673,
+     -51.162762647
+    ],
+    "teacher_semantics_version": 3,
+    "validation_policy": {
+     "max_absolute_level_error_db": 6.0,
+     "max_extra_quiet_attenuation_db": 6.0,
+     "max_gain_normalized_esr": 0.15,
+     "max_raw_esr": 0.25,
+     "max_response_shape_error_db": 3.0,
+     "silence_floor_dbfs": -100.0
+    },
+    "warmup_policy": "render the complete saved excerpt, score only score_frame_start:score_frame_count"
+   },
+   "hybrid_builder_version": "character-blend-v2",
+   "low_level_response": {
+    "dead_zone_detected": false,
+    "levels_db": [
+     0.0,
+     -6.0,
+     -12.0,
+     -18.0,
+     -24.0,
+     -30.0,
+     -36.0
+    ],
+    "max_step_error_db": -0.000124142,
+    "ok": true,
+    "output_rms_dbfs": [
+     -15.316492917,
+     -21.196500585,
+     -27.165807368,
+     -33.158044906,
+     -39.156093009,
+     -45.155603001,
+     -51.155478859
+    ],
+    "warning": null
+   },
+   "mode": "character",
+   "output_gain": {
+    "applied_gain_db": 0.0,
+    "mode": "manual",
+    "peak_before_output_gain_dbfs": -10.635975307,
+    "requested_manual_gain_db": 0.0
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "character",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):a48875cd348f6593b70061539aeacd1fb3fa1fd567de8fc52873cc1d1ab26c95>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -10.635975307,
+    "peak_before_safety_dbfs": -10.635975307,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):a48875cd348f6593b70061539aeacd1fb3fa1fd567de8fc52873cc1d1ab26c95>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "recommended_epoch_preset": "high_def",
+    "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "hybrid-auto-embedded": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "baked": false,
+    "display_name": "Test 4x12",
+    "energy_9999_ms": null,
+    "energy_9999_samples": null,
+    "energy_999_ms": null,
+    "energy_999_samples": null,
+    "energy_99_ms": null,
+    "energy_99_samples": null,
+    "export_mode": "embedded",
+    "fir_history_samples": null,
+    "ir_working_path": "<TMP>/cab.wav",
+    "leading_samples_trimmed": null,
+    "leading_silence_threshold_db": -40.0,
+    "original_channels": null,
+    "original_filename": "cab.wav",
+    "original_frame_count": null,
+    "original_sample_rate": null,
+    "preparation_mode": "trim_initial_silence",
+    "prepared_duration_ms": null,
+    "prepared_frame_count": null,
+    "prepared_sample_rate": null,
+    "preview_enabled": false,
+    "selected": true,
+    "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "blend_algorithm": "smoothstep-linear",
+    "crossover_dbfs": -20.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 1.0,
+    "design_reference_profile_id": "p90",
+    "envelope_algorithm": "bounded_causal_envelope_db",
+    "envelope_attack_avg_ms": 5.0,
+    "envelope_max_history_ms": 80.0,
+    "envelope_release_range_db": 60.0,
+    "envelope_release_window_ms": 55.0,
+    "envelope_rms_window_ms": 20.0,
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false,
+    "transition_width_db": 8.0
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "hybrid",
+   "output_gain": {
+    "applied_gain_db": 9.763970653,
+    "embedded_final": {
+     "final_composite_reference_peak_dbfs": 4.410863021,
+     "final_linear_scalar": 0.588107677,
+     "head_training_target_gain": 1.0,
+     "safety_reduction_db": 4.610863021
+    },
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -9.963970653,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "embedded",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": -40.0,
+     "preparation_mode": "trim_initial_silence",
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "hybrid",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "hybrid-auto-learned": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):171321e0e50e647d45978beb317c1aa019708145a8ee720e49b4c9ebce14d23d",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):171321e0e50e647d45978beb317c1aa019708145a8ee720e49b4c9ebce14d23d",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "baked": true,
+    "display_name": "Test 4x12",
+    "energy_9999_ms": null,
+    "energy_9999_samples": null,
+    "energy_999_ms": null,
+    "energy_999_samples": null,
+    "energy_99_ms": null,
+    "energy_99_samples": null,
+    "export_mode": "learned",
+    "fir_history_samples": null,
+    "ir_working_path": "<TMP>/cab.wav",
+    "leading_samples_trimmed": null,
+    "leading_silence_threshold_db": -40.0,
+    "original_channels": null,
+    "original_filename": "cab.wav",
+    "original_frame_count": null,
+    "original_sample_rate": null,
+    "preparation_mode": "trim_initial_silence",
+    "prepared_duration_ms": null,
+    "prepared_frame_count": null,
+    "prepared_sample_rate": null,
+    "preview_enabled": false,
+    "selected": true,
+    "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "blend_algorithm": "smoothstep-linear",
+    "crossover_dbfs": -20.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 1.0,
+    "design_reference_profile_id": "p90",
+    "envelope_algorithm": "bounded_causal_envelope_db",
+    "envelope_attack_avg_ms": 5.0,
+    "envelope_max_history_ms": 80.0,
+    "envelope_release_range_db": 60.0,
+    "envelope_release_window_ms": 55.0,
+    "envelope_rms_window_ms": 20.0,
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false,
+    "transition_width_db": 8.0
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "hybrid",
+   "output_gain": {
+    "applied_gain_db": 5.153108181,
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -5.353108181,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": true,
+     "export_mode": "learned",
+     "fir_history_samples": 3,
+     "fir_length_samples": 4,
+     "leading_silence_threshold_db": -40.0,
+     "preparation_mode": "trim_initial_silence",
+     "sha256": "<wav 48000:FLOAT:(4, 1):60f54c0d175bc30be5dd55b2197fb75aee501c9eebebbc70744af641fe300ce7>"
+    },
+    "cab_fir_serial_samples": 3,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "hybrid",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):171321e0e50e647d45978beb317c1aa019708145a8ee720e49b4c9ebce14d23d>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):171321e0e50e647d45978beb317c1aa019708145a8ee720e49b4c9ebce14d23d>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "hybrid-auto-nocab": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "blend_algorithm": "smoothstep-linear",
+    "crossover_dbfs": -20.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 1.0,
+    "design_reference_profile_id": "p90",
+    "envelope_algorithm": "bounded_causal_envelope_db",
+    "envelope_attack_avg_ms": 5.0,
+    "envelope_max_history_ms": 80.0,
+    "envelope_release_range_db": 60.0,
+    "envelope_release_window_ms": 55.0,
+    "envelope_rms_window_ms": 20.0,
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false,
+    "transition_width_db": 8.0
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "hybrid",
+   "output_gain": {
+    "applied_gain_db": 9.763970653,
+    "mode": "auto",
+    "peak_before_output_gain_dbfs": -9.963970653,
+    "requested_manual_gain_db": null
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "hybrid",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -0.2,
+    "peak_before_safety_dbfs": -0.2,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):33018e4b27afde1461bf6baa57b6e1306959227c3e631b287f6e77f6d95ab0dc>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "hybrid-manual+3-nocab": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):e10e8b56bc951c733ca3ccb70993f97f12fabcf93261ce09ad78aeb8f9444ef8",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):e10e8b56bc951c733ca3ccb70993f97f12fabcf93261ce09ad78aeb8f9444ef8",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "blend_algorithm": "smoothstep-linear",
+    "crossover_dbfs": -20.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 1.0,
+    "design_reference_profile_id": "p90",
+    "envelope_algorithm": "bounded_causal_envelope_db",
+    "envelope_attack_avg_ms": 5.0,
+    "envelope_max_history_ms": 80.0,
+    "envelope_release_range_db": 60.0,
+    "envelope_release_window_ms": 55.0,
+    "envelope_rms_window_ms": 20.0,
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false,
+    "transition_width_db": 8.0
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "hybrid",
+   "output_gain": {
+    "applied_gain_db": 3.0,
+    "mode": "manual",
+    "peak_before_output_gain_dbfs": -9.963970653,
+    "requested_manual_gain_db": 3.0
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "hybrid",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):e10e8b56bc951c733ca3ccb70993f97f12fabcf93261ce09ad78aeb8f9444ef8>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -6.963970653,
+    "peak_before_safety_dbfs": -6.963970653,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):e10e8b56bc951c733ca3ccb70993f97f12fabcf93261ce09ad78aeb8f9444ef8>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ },
+ "hybrid-manual0-nocab": {
+  "files": {
+   "hybrid_target.wav": "48000:FLOAT:(48000, 1):d458d43dab3eb5a73c510756b6a64dee8601c18a56318169afe4eef2c99c7b87",
+   "hybrid_target_raw.wav": "48000:FLOAT:(48000, 1):d458d43dab3eb5a73c510756b6a64dee8601c18a56318169afe4eef2c99c7b87",
+   "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
+  },
+  "manifest": {
+   "amp_a": {
+    "architecture": "WaveNet",
+    "filename": "a.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/a.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "amp_b": {
+    "architecture": "WaveNet",
+    "filename": "b.nam",
+    "gear_make": null,
+    "gear_model": null,
+    "gear_type": "amp",
+    "input_level_dbu": 12.0,
+    "modeled_by": null,
+    "name": null,
+    "output_level_dbu": 0.0,
+    "path": "<TMP>/b.nam",
+    "sample_rate": 48000.0,
+    "sha256": "db487e9e57a348583bbf40ae722e679ffdb99300123fbc0fdc26a0020a7ac7a3",
+    "tone_type": "clean"
+   },
+   "cab": {
+    "selected": false
+   },
+   "calibration": {
+    "amp_a_compensation_db": 0.0,
+    "amp_b_compensation_db": 0.0,
+    "applied": false,
+    "effective_mode": "raw",
+    "reference_input_level_dbu": 12.0,
+    "requested_mode": "raw",
+    "warning": null
+   },
+   "design": {
+    "alignment_enabled": false,
+    "alignment_offset_samples": 0,
+    "amp_a_input_gain_db": 0.0,
+    "amp_b_input_gain_db": 0.0,
+    "blend_algorithm": "smoothstep-linear",
+    "crossover_dbfs": -20.0,
+    "design_di_file": null,
+    "design_reference_profile_gain_db": 1.0,
+    "design_reference_profile_id": "p90",
+    "envelope_algorithm": "bounded_causal_envelope_db",
+    "envelope_attack_avg_ms": 5.0,
+    "envelope_max_history_ms": 80.0,
+    "envelope_release_range_db": 60.0,
+    "envelope_release_window_ms": 55.0,
+    "envelope_rms_window_ms": 20.0,
+    "frozen_effective_b_trim_db": -0.5,
+    "instrument_type": "guitar",
+    "manual_trim_db": 0.5,
+    "original_auto_trim_db": -1.0,
+    "pickup_profile_applied_to_training_input": false,
+    "transition_width_db": 8.0
+   },
+   "hybrid_builder_version": "phase3-a2-v1",
+   "mode": "hybrid",
+   "output_gain": {
+    "applied_gain_db": 0.0,
+    "mode": "manual",
+    "peak_before_output_gain_dbfs": -9.963970653,
+    "requested_manual_gain_db": 0.0
+   },
+   "receptive_field": {
+    "base_required_samples": null,
+    "branch_samples": {
+     "amp_a": null,
+     "amp_b": null,
+     "envelope": 3840
+    },
+    "cab": {
+     "baked": false,
+     "export_mode": "none",
+     "fir_history_samples": 0,
+     "fir_length_samples": null,
+     "leading_silence_threshold_db": null,
+     "preparation_mode": null,
+     "sha256": null
+    },
+    "cab_fir_serial_samples": 0,
+    "cab_requires_approximation": null,
+    "formal_total_required_samples": null,
+    "hard_required_samples": null,
+    "mode": "hybrid",
+    "total_required_samples": null,
+    "unavailable": "amp_a: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]; amp_b: WaveNet config has neither 'layers_configs' nor 'layers': keys=[]"
+   },
+   "target": {
+    "final_sha256": "<wav 48000:FLOAT:(48000, 1):d458d43dab3eb5a73c510756b6a64dee8601c18a56318169afe4eef2c99c7b87>",
+    "global_safety_gain_reduction_db": 0.0,
+    "peak_after_safety_dbfs": -9.963970653,
+    "peak_before_safety_dbfs": -9.963970653,
+    "preview_limiter_used": false,
+    "raw_sha256": "<wav 48000:FLOAT:(48000, 1):d458d43dab3eb5a73c510756b6a64dee8601c18a56318169afe4eef2c99c7b87>",
+    "synthetic_latency_samples": 0
+   },
+   "training": {
+    "a2_config_identifier": null,
+    "device": null,
+    "neural_amp_modeler_version": null,
+    "python_version": null,
+    "pytorch_lightning_version": null,
+    "status": "not yet run -- see scripts/train_a2.py",
+    "torch_version": null,
+    "training_settings": null
+   },
+   "training_input": {
+    "detected_version": "<pinned by test>",
+    "frame_count": 48000,
+    "md5": "36cd1af62985c2fac3e654333e36431e",
+    "path": "<TMP>/input.wav",
+    "sample_rate": 48000,
+    "sha256": "<wav 48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01>"
+   },
+   "warnings": []
+  }
+ }
+}

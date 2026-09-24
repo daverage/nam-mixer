@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hybrid.render import NamRenderError, find_nam_render_exe
+from hybrid.core.render import NamRenderError, find_nam_render_exe
 
 ROOT = Path(__file__).resolve().parent.parent
 AMP_A = ROOT / "assets/test_cabs/Clean_NoCab_Fender_Deluxe_Reverb_Head_2.nam"

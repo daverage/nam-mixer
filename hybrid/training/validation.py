@@ -1,0 +1,199 @@
+"""Held-out validation: compare the LIVE reference hybrid (two source NAMs +
+a locked HybridDesign) against a trained A2 export, on material the A2 never
+trained on -- docs/history/phase3.md sections 24-28.
+
+Deliberately independent of the training environment: rendering both the
+reference hybrid and the trained A2 export uses `hybrid.core.render.render()`
+(the native NAMCore tool), never torch/neural-amp-modeler, so this module
+(and scripts/validate_a2.py) runs fine in the normal Flask/runtime
+environment.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+
+from ..core.align import align_to_reference
+from ..modes.blend import CrossoverConfig, blend
+from ..core.calibration import resolve_calibration
+from ..modes.design import HybridDesign
+from ..modes.fixed_blend import BlendDesign, build_fixed_blend
+from ..modes.character_blend import CharacterBlendDesign, build_character_blend
+from ..core.envelope import BoundedEnvelopeConfig, bounded_causal_envelope_db
+from ..core.nam_loader import load_nam
+from ..core.render import render
+from ..core.cab_ir import apply_cab_ir, get_frozen_prepared_cab_ir, get_prepared_cab_ir
+from ..core.safety import apply_output_gain
+
+
+@dataclass
+class ReferenceHybridResult:
+    hybrid: np.ndarray
+    amp_a: np.ndarray
+    amp_b: np.ndarray
+    envelope_db: np.ndarray
+    alignment_offset_samples: int
+
+
+_DESIGN_FILES = {
+    "hybrid": ("hybrid_design.json", HybridDesign),
+    "blend": ("blend_design.json", BlendDesign),
+    "character": ("character_design.json", CharacterBlendDesign),
+}
+
+
+def load_frozen_design(bundle_dir: str | Path, manifest: dict):
+    """Load the exact design snapshot saved beside a training manifest.
+
+    A manifest intentionally contains a reporting-oriented subset of design
+    fields, so reconstructing a teacher from that subset could silently pick
+    modern defaults.  Comparisons therefore require the canonical frozen
+    design JSON written when the target was generated.
+    """
+    mode = manifest.get("mode", "hybrid")
+    try:
+        filename, design_type = _DESIGN_FILES[mode]
+    except KeyError as exc:
+        raise ValueError(f"unsupported saved design mode: {mode!r}") from exc
+    path = Path(bundle_dir) / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"saved {mode} design is unavailable: {path.name}")
+    design = design_type.read_json(path)
+    if design.mode != mode:
+        raise ValueError(f"saved design mode {design.mode!r} does not match manifest mode {mode!r}")
+    return design
+
+
+def render_processed_reference(design, manifest: dict, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Render the frozen teacher with the target's post-processing exactly once.
+
+    Source calibration and per-amp trims are part of the teacher functions.
+    The trained A2 receives neither.  A baked cab, the fixed generation-time
+    output gain, and the reduce-only target peak gain are then reproduced in
+    their original order so this is level-equivalent to the learned target.
+    """
+    mode = manifest.get("mode", getattr(design, "mode", "hybrid"))
+    renderer = {
+        "hybrid": render_reference_hybrid,
+        "blend": render_reference_blend,
+        "character": render_reference_character,
+    }.get(mode)
+    if renderer is None:
+        raise ValueError(f"unsupported saved design mode: {mode!r}")
+    result = renderer(design, dry, sample_rate)
+    processed = np.asarray(result.hybrid, dtype=np.float32)
+
+    cab = getattr(design, "cab", None)
+    if cab is not None and cab.requires_training_convolution:
+        # Legacy manifests created before frozen IR hashes remain readable;
+        # new/export-mode records always use the hash-checked path.
+        prepared = (get_frozen_prepared_cab_ir(cab, sample_rate) if cab.sha256
+                    else get_prepared_cab_ir(cab.ir_working_path, sample_rate))
+        processed = apply_cab_ir(processed, prepared)
+
+    output_gain_db = float((manifest.get("output_gain") or {}).get("applied_gain_db") or 0.0)
+    peak_reduction_db = float((manifest.get("target") or {}).get("global_safety_gain_reduction_db") or 0.0)
+    processed = apply_output_gain(processed, output_gain_db - peak_reduction_db).astype(np.float32)
+    return ReferenceHybridResult(
+        processed, result.amp_a, result.amp_b, result.envelope_db,
+        result.alignment_offset_samples,
+    )
+
+
+def _render_frozen_sources(design, dry: np.ndarray, sample_rate: int):
+    """Render the two source NAMs using a frozen design's calibration/trims."""
+    dry = np.asarray(dry, dtype=np.float32)
+    amp_a, amp_b = load_nam(design.amp_a_path), load_nam(design.amp_b_path)
+    calib = resolve_calibration(design.calibration_mode, design.reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu)
+    a = render(amp_a, (dry * (10.0 ** ((calib.amp_a_gain_db + design.amp_a_input_gain_db) / 20.0))).astype(np.float32), sample_rate)
+    b = render(amp_b, (dry * (10.0 ** ((calib.amp_b_gain_db + design.amp_b_input_gain_db) / 20.0))).astype(np.float32), sample_rate)
+    return dry, a, b
+
+
+def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Render the LIVE two-NAM reference hybrid for held-out validation,
+    reusing the frozen `design` exactly as auditioned -- same crossover,
+    transition, fixed B trim, calibration rule, and envelope config as
+    `hybrid.core.pipeline.render_pair`/`build_hybrid`, alignment OFF unless the
+    design says otherwise. `dry` may already have a real input-profile gain
+    applied by the caller (docs/history/phase3.md section 25 -- unlike target
+    generation, validation DOES apply real profile gains, as actual audio,
+    never the deprecated envelope-only `dry_gain_db`).
+    """
+    dry, amp_a_render, amp_b_render = _render_frozen_sources(design, dry, sample_rate)
+
+    envelope_config = BoundedEnvelopeConfig(
+        rms_window_ms=design.envelope_rms_window_ms,
+        attack_avg_ms=design.envelope_attack_avg_ms,
+        release_window_ms=design.envelope_release_window_ms,
+        release_range_db=design.envelope_release_range_db,
+    )
+    envelope_db = bounded_causal_envelope_db(dry, sample_rate, envelope_config)
+
+    amp_b_aligned, offset = align_to_reference(amp_a_render, amp_b_render, enabled=design.alignment_enabled)
+
+    config = CrossoverConfig(
+        crossover_dbfs=design.crossover_dbfs,
+        transition_width_db=design.transition_width_db,
+        amp_b_trim_db=design.effective_b_trim_db,
+    )
+    hybrid_audio, _t = blend(envelope_db, amp_a_render, amp_b_aligned, config)
+
+    return ReferenceHybridResult(
+        hybrid=hybrid_audio, amp_a=amp_a_render, amp_b=amp_b_aligned,
+        envelope_db=envelope_db, alignment_offset_samples=offset,
+    )
+
+
+def render_reference_blend(design: BlendDesign, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Frozen Parallel Blend teacher for held-out Full/Lite comparisons."""
+    dry, a, b = _render_frozen_sources(design, dry, sample_rate)
+    pair = SimpleNamespace(dry=dry, amp_a=a, amp_b=b, envelope_db=np.zeros(len(dry)), sample_rate=sample_rate)
+    result = build_fixed_blend(pair, mix_b=design.mix_b, auto_level=False, manual_b_trim_db=design.effective_b_trim_db)
+    return ReferenceHybridResult(result.blend, a, b, np.zeros(len(result.blend)), result.alignment_offset_samples)
+
+
+def render_reference_character(design: CharacterBlendDesign, dry: np.ndarray, sample_rate: int) -> ReferenceHybridResult:
+    """Frozen Character Blend teacher for held-out Full/Lite comparisons."""
+    dry, a, b = _render_frozen_sources(design, dry, sample_rate)
+    result = build_character_blend(SimpleNamespace(dry=dry, amp_a=a, amp_b=b, sample_rate=sample_rate), design)
+    return ReferenceHybridResult(result.blend, a, b, result.envelope_db, 0)
+
+
+def render_trained_a2(nam_path, dry: np.ndarray, sample_rate: int, slim: float | None = None) -> np.ndarray:
+    """Thin wrapper for rendering `dry` through a trained/exported A2 -- see
+    `hybrid.core.render.render`'s `slim` kwarg (SLIM_FULL, i.e. None = Full; SLIM_LITE = Lite)."""
+    model = load_nam(nam_path)
+    return render(model, np.asarray(dry, dtype=np.float32), sample_rate, slim=slim)
+
+
+def compute_esr_metrics(a: np.ndarray, b: np.ndarray) -> dict:
+    """raw ESR, gain-normalized ESR, RMS difference, peak difference between
+    two equal-purpose renders `a` (candidate) and `b` (reference) -- same
+    metrics scripts/train_a2.py's compare_to_target uses, factored out here
+    so held-out validation doesn't duplicate the math.
+    """
+    n = min(len(a), len(b))
+    x = np.asarray(a[:n], dtype=np.float64)
+    y = np.asarray(b[:n], dtype=np.float64)
+
+    err = x - y
+    esr = float(np.sum(err**2) / max(np.sum(y**2), 1e-12))
+
+    x_rms = np.sqrt(np.mean(x**2))
+    y_rms = np.sqrt(np.mean(y**2))
+    if y_rms > 1e-12:
+        x_normalized = x * (y_rms / max(x_rms, 1e-12))
+        gain_normalized_esr = float(np.sum((x_normalized - y) ** 2) / max(np.sum(y**2), 1e-12))
+    else:
+        gain_normalized_esr = float("nan")
+
+    return {
+        "raw_esr": esr,
+        "gain_normalized_esr": gain_normalized_esr,
+        "rms_difference": float(abs(x_rms - y_rms)),
+        "peak_difference": float(abs(np.max(np.abs(x)) - np.max(np.abs(y)))),
+    }

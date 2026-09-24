@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -36,59 +37,71 @@ from flask import Flask, Response, g, jsonify, render_template, request, send_fi
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
-from cg_routes import register_cg_routes
-from hybrid.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
-from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
-from hybrid.blend_training_target import generate_blend_training_bundle
-from hybrid.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio, load_cached_analysis, sha256_file, store_cached_analysis
-from hybrid.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
-from hybrid.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
-from hybrid.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
-from hybrid.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
-from hybrid.coverage import analyse_profile_coverage, envelope_percentiles, suggest_crossover_dbfs
-from hybrid.design import freeze_design
-from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
-from hybrid.settings import (
+from routes.continuous_gain import register_cg_routes
+from hybrid.training.a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
+from hybrid.modes.blend import DEFAULT_TRANSITION_WIDTH_DB, TRANSITION_WIDTH_PRESETS_DB
+from hybrid.modes.blend_training_target import generate_blend_training_bundle
+from hybrid.modes.character_analysis import (
+    CharacterAnalysisConfig,
+    analyse_rendered_audio,
+    analysis_cache_key,
+    load_cached_analysis,
+    sha256_file,
+    store_cached_analysis,
+)
+from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
+from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
+from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
+from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
+from hybrid.core.coverage import (
+    active_signal_mask,
+    analyse_profile_coverage,
+    envelope_percentiles,
+    suggest_crossover_dbfs,
+)
+from hybrid.modes.design import freeze_design
+from hybrid.modes.fixed_blend import build_fixed_blend, freeze_blend_design
+from hybrid.services.settings import (
     SettingsValidationError,
     experimental_architectures_enabled,
     get_settings as get_app_settings,
     save_settings as save_app_settings,
 )
-from hybrid.input_profiles import (
+from hybrid.core.input_profiles import (
     PROFILE_ORDER_BY_INSTRUMENT,
     PROFILES_BY_INSTRUMENT,
     db_to_amplitude,
     get_profile,
     resolve_profile_gain_db,
 )
-from hybrid.kaggle_training import (
+from hybrid.training.kaggle_training import (
     KaggleJobManager,
     KaggleTrainingError,
     find_active_job,
     load_job,
 )
-from hybrid.metadata import suggested_nam_filename
-from hybrid.local_training import LocalTrainingManager
-from hybrid.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, prompt_requests_recipe, status as local_llm_status, test_connection as test_ai_connection
-from hybrid.ollama_pull import (
+from hybrid.modes.metadata import suggested_nam_filename
+from hybrid.training.local_training import LocalTrainingManager
+from hybrid.services.local_llm import LocalConversationReply, LocalLlmError, available_models as available_ai_models, converse as converse_with_local_llm, prompt_requests_recipe, status as local_llm_status, test_connection as test_ai_connection
+from hybrid.services.ollama_pull import (
     OllamaPullError,
     get_pull_status as get_ollama_pull_status,
     start_pull as start_ollama_pull,
 )
-from hybrid.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
-from hybrid.nam_loader import load_nam
-from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
-from hybrid.pipeline import RenderedPair, build_hybrid, render_pair
-from hybrid.render import NamRenderError, find_nam_render_exe, render
-from hybrid.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
-from hybrid.update_check import UpdateCheckError, check_for_update
-from hybrid.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
-from hybrid.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
-from hybrid.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
-from hybrid.wizard import summarise_amp_pair
+from hybrid.services.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
+from hybrid.core.nam_loader import load_nam
+from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
+from hybrid.core.pipeline import RenderedPair, amp_input_peak_warnings, build_hybrid, render_pair
+from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
+from hybrid.core.render_bootstrap import NamRenderDownloadError, download_prebuilt_nam_render
+from hybrid.services.update_check import UpdateCheckError, check_for_update
+from hybrid.core.safety import apply_output_gain, compute_auto_output_gain_db, preview_safety_limiter
+from hybrid.modes.training_target import A2_TARGET_PEAK_CEILING_DBFS, TrainingInputError, generate_training_bundle, validate_training_input
+from hybrid.training.validation import compute_esr_metrics, load_frozen_design, render_processed_reference, render_trained_a2
+from hybrid.modes.wizard import summarise_amp_pair
 
 # Applying a hot profile to an already-normalized DI can push it over 0 dBFS.
-# We warn rather than silently clip or normalize -- see docs/INPUT_PROFILE_RESEARCH.md.
+# We warn rather than silently clip or normalize -- see docs/history/INPUT_PROFILE_RESEARCH.md.
 PEAK_WARNING_THRESHOLD_DBFS = 0.0
 
 logging.basicConfig(level=logging.INFO)
@@ -111,7 +124,7 @@ TRAINING_INPUT_DIR = WORK_DIR / "training_input"
 TRAINING_INPUT_DIR.mkdir(exist_ok=True)
 TRAINING_INPUT_PATH = TRAINING_INPUT_DIR / "input.wav"
 # The official NAM v3.0.0 training/reamp input (see
-# hybrid/training_target.py's OFFICIAL_V3_INPUT_MD5) ships with the app --
+# hybrid/modes/training_target.py's OFFICIAL_V3_INPUT_MD5) ships with the app --
 # assets/training/README.md documents its provenance/MD5 -- so training
 # works immediately without a manual upload first. This is a one-time local
 # file copy, never a network fetch: seeded once into the (gitignored,
@@ -130,6 +143,19 @@ SESSION_MODEL_DIR = SESSION_DIR / "models"
 SESSION_MODEL_DIR.mkdir(exist_ok=True)
 
 TRAINING_ROOT = Path(os.environ.get("NAM_MIXER_TRAINING_ROOT", str(BASE_DIR))).expanduser()
+
+
+def _training_venv_dir(training_root: Path, work_dir: Path, frozen: bool) -> Path:
+    """Where the ~1.4 GB local-training venv lives. From source it is the same
+    <repo>/.venv-a2 that scripts/setup_a2_env.sh/.ps1 create (README's manual
+    path), so the two never duplicate. In the packaged app training_root is
+    inside the installed bundle (read-only on Linux/Windows, and writing into
+    a signed macOS .app breaks its signature and is lost on update), so the
+    venv goes in the writable per-user data directory instead."""
+    return (work_dir / ".venv-a2") if frozen else (training_root / ".venv-a2")
+
+
+
 _kaggle_manager = KaggleJobManager(
     A2_OUTPUT_DIR,
     cloud_worker_path=TRAINING_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py",
@@ -137,12 +163,7 @@ _kaggle_manager = KaggleJobManager(
 _local_training_manager = LocalTrainingManager(
     TRAINING_ROOT,
     A2_OUTPUT_DIR,
-    # Deliberately the SAME location scripts/setup_a2_env.sh/.ps1 (README's
-    # documented manual path) creates by default -- not a separate work/
-    # copy. Two independent training venvs (each ~1.4GB with Torch) would
-    # otherwise exist for the exact same purpose depending on whether a user
-    # followed the README or clicked "Set up local training" in the app.
-    venv_dir=TRAINING_ROOT / ".venv-a2",
+    venv_dir=_training_venv_dir(TRAINING_ROOT, WORK_DIR, getattr(sys, "frozen", False)),
 )
 
 _kaggle_install_lock = threading.Lock()
@@ -324,7 +345,7 @@ def api_input_profiles():
 def api_settings_get():
     """Current values + UI metadata for every user-configurable setting.
 
-    See hybrid/settings.py -- lets anything normally set via `export FOO=bar`
+    See hybrid/services/settings.py -- lets anything normally set via `export FOO=bar`
     be configured from the browser instead.
     """
     return jsonify({"settings": get_app_settings()})
@@ -369,7 +390,7 @@ def api_local_llm_test():
 @app.post("/api/local_llm/pull")
 def api_local_llm_pull():
     """Start a background `ollama pull` of the recommended local model (or a
-    caller-specified one) -- see hybrid/ollama_pull.py. Any OpenAI-compatible
+    caller-specified one) -- see hybrid/services/ollama_pull.py. Any OpenAI-compatible
     local host works with the AI Assistant tab; this is just the one-click
     path for someone who doesn't already have a model running."""
     data = request.get_json(silent=True) or {}
@@ -817,7 +838,7 @@ def api_renderer_readiness():
 
 @app.route("/api/renderer/download", methods=["POST"])
 def api_renderer_download():
-    """Fetch a prebuilt nam_render binary for this OS -- see hybrid/render_bootstrap.py.
+    """Fetch a prebuilt nam_render binary for this OS -- see hybrid/core/render_bootstrap.py.
 
     Makes nam_render part of the app's own setup flow rather than a separate
     manual install/path the user has to go find.
@@ -831,7 +852,7 @@ def api_renderer_download():
 
 @app.get("/api/update/check")
 def api_update_check():
-    """Manual-only "is a newer version available?" check for the Settings page -- see hybrid/update_check.py.
+    """Manual-only "is a newer version available?" check for the Settings page -- see hybrid/services/update_check.py.
 
     Never called automatically: this is the app's one deliberate exception to "no network unless the user asks
     for it" (README's "Local-first & private"), and it stays that way by only ever running in response to this
@@ -958,7 +979,7 @@ def api_setup_status():
         llm_item["detail"] = "Optional -- not configured. Only needed for the AI Assistant tab's recipe suggestions; everything else (preview, design, generate, train) works fully without it."
     elif llm_provider != "local":
         # Cloudflare/custom providers have no local process to "reach" --
-        # status()'s `reachable` field is local-only (see hybrid/local_llm.py),
+        # status()'s `reachable` field is local-only (see hybrid/services/local_llm.py),
         # so "enabled" already means fully configured for these.
         llm_item["ready"] = True
         provider_label = "Cloudflare Workers AI" if llm_provider == "cloudflare" else "a custom AI provider"
@@ -1346,12 +1367,18 @@ def _referenced_upload_paths() -> set[Path]:
 
 def _referenced_render_sources() -> set[Path]:
     """Every work/render_sources file a REMAINING training bundle's manifest still points at (amp_a.path / amp_b.path -- the
-    only fields _retain_render_source's output is ever persisted into; see hybrid/training_target.py and its Blend/Character
+    only fields _retain_render_source's output is ever persisted into; see hybrid/modes/training_target.py and its Blend/Character
     counterparts). The DI copy retained for the same render is never written into a manifest (only its filename, for
     provenance), so a render_sources DI copy is never "referenced" once the render/preview that made it is over -- it is
     always safe to sweep. Continuous Gain bundles render straight from the project's own captures/ and never touch this
     directory at all."""
     refs: set[Path] = set()
+    # The live render is still in use (preview, low-level check, generate) even
+    # if no bundle names its sources yet.
+    snapshot = _rendered_pair_cache.get("snapshot") or {}
+    for p in (snapshot.get("amp_a_path"), snapshot.get("amp_b_path"), *(snapshot.get("source_paths") or {}).values()):
+        if isinstance(p, str) and p:
+            refs.add(Path(p).resolve())
     for manifest_path in A2_OUTPUT_DIR.glob("*/training_manifest.json"):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1416,7 +1443,6 @@ def _sweep_orphaned_render_sources(*, grace_seconds: float = 1800.0) -> list[str
     # when none of its files are referenced (in practice each folder holds one file).
     referenced_folders = {p.parent.resolve() for p in referenced_files}
     return _sweep_directory(root, referenced_folders, grace_seconds=grace_seconds, files_only=False)
-    return removed
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
@@ -1595,12 +1621,12 @@ def api_cab_upload():
     """Accept a cabinet IR WAV picked in the browser, save it under
     work/uploaded_cab/, and return its parsed metadata plus the server-side
     path used by /api/preview and /api/generate's cab params -- see
-    hybrid/cab_ir.py and docs/history/blend-mode.md "CAB UPLOAD / STORAGE".
+    hybrid/core/cab_ir.py and docs/history/blend-mode.md "CAB UPLOAD / STORAGE".
 
     Prepares the IR against the currently-rendered pair's sample rate (if
     any) purely to report prepared/trimmed info back to the UI -- this is
     NOT what gets used for the actual official-input bake at generation
-    time (hybrid.training_target.maybe_bake_cab re-prepares against the
+    time (hybrid.modes.training_target.maybe_bake_cab re-prepares against the
     training input's own sample rate; see that function's docstring for why
     the tap count can differ).
     """
@@ -1677,10 +1703,16 @@ def _parse_cab_params(data: dict, pair_sample_rate: int):
     return get_prepared_cab_ir(cab_path, pair_sample_rate)
 
 
+# Downloads of an embedded-cabinet (Sequential) NAM, a possible future NAM
+# specification, are refused unless experimental architectures are enabled.
+EMBEDDED_DISABLED_MESSAGE = ("the embedded-cabinet NAM is an experimental NAM architecture and is disabled "
+                             "(Settings > Advanced > Enable experimental NAM architectures)")
+
+
 def _resolve_cab_design(data: dict, pair_sample_rate: int):
     """Build a `CabDesign` for provenance/freezing from generate-request
     params, or None if no cab is selected. Mirrors _parse_cab_params but
-    also records `export_mode` -- see hybrid/cab_ir.py's CabDesign."""
+    also records `export_mode` -- see hybrid/core/cab_ir.py's CabDesign."""
     cab_path = data.get("cab_path")
     if not cab_path:
         return None
@@ -1733,8 +1765,8 @@ def _parse_output_gain_params(data: dict):
     """Shared post-combination output-gain parsing for /api/preview
     (source=hybrid/blend/character) and /api/generate. Mode-independent and
     applied AFTER the amp combination + cab (mirrors cab's own ordering) --
-    see hybrid/design.py's HybridDesign.output_gain_mode/manual_output_gain_db
-    and hybrid/safety.py's compute_auto_output_gain_db/apply_output_gain.
+    see hybrid/modes/design.py's HybridDesign.output_gain_mode/manual_output_gain_db
+    and hybrid/core/safety.py's compute_auto_output_gain_db/apply_output_gain.
     "auto" (the default) is not resolved to a number here -- it's computed
     downstream from the actual audio at the point it's applied, since that's
     what makes it "auto" (uses whatever headroom THIS signal actually has).
@@ -1891,7 +1923,7 @@ def api_create_comparison():
 
     try:
         teacher = render_processed_reference(design, manifest, dry, sample_rate).hybrid
-        full = render_trained_a2(model_path, dry, sample_rate, slim=0.0)
+        full = render_trained_a2(model_path, dry, sample_rate, slim=SLIM_FULL)
     except Exception as exc:
         logger.exception("Failed to build teacher/Full comparison")
         return jsonify({"error": f"comparison render failed: {exc}", "code": "comparison_render_failed"}), 422
@@ -1906,7 +1938,7 @@ def api_create_comparison():
     }]
     lite_error = None
     try:
-        lite = render_trained_a2(model_path, dry, sample_rate, slim=1.0)[:n].astype(np.float32)
+        lite = render_trained_a2(model_path, dry, sample_rate, slim=SLIM_LITE)[:n].astype(np.float32)
         if len(lite) != n or not np.all(np.isfinite(lite)):
             raise ValueError("Lite render produced empty or non-finite audio")
         channels.append(lite)
@@ -1968,7 +2000,7 @@ def api_render_pair():
     This is the EXPENSIVE step (runs NAM inference twice) -- the UI should
     call this only when Amp A, Amp B, the DI clip, or the INPUT PROFILE/
     CALIBRATION settings change (a profile changes the actual signal fed to
-    both NAMs -- see hybrid/pipeline.py), never on a crossover/transition/
+    both NAMs -- see hybrid/core/pipeline.py), never on a crossover/transition/
     trim slider move (that's /api/preview, against the cached RenderedPair
     below).
     """
@@ -2068,6 +2100,7 @@ def api_render_pair():
             "this combined profile + test gain would have clipped. Treat "
             "this as a stress test."
         )
+    warnings.extend(amp_input_peak_warnings(pair, PEAK_WARNING_THRESHOLD_DBFS))
 
     suggested_crossover = suggest_crossover_dbfs(pair.source_envelope_db)
 
@@ -2087,6 +2120,8 @@ def api_render_pair():
         "test_gain_db": test_gain_db,
 
         "input_peak_dbfs": pair.input_peak_dbfs,
+        "amp_a_input_peak_dbfs": pair.amp_a_input_peak_dbfs,
+        "amp_b_input_peak_dbfs": pair.amp_b_input_peak_dbfs,
 
         "calibration_mode": pair.calibration_mode,
         "calibration_applied": pair.calibration_applied,
@@ -2133,6 +2168,11 @@ def api_profile_coverage():
 
     instrument_type = data.get("instrument_type", pair.instrument_type)
     custom_gain_db = data.get("custom_input_gain_db")
+    if custom_gain_db is not None:
+        try:
+            custom_gain_db = float(custom_gain_db)
+        except (TypeError, ValueError):
+            return jsonify({"error": "custom_input_gain_db must be a number"}), 400
     profiles = PROFILES_BY_INSTRUMENT.get(instrument_type)
     order = PROFILE_ORDER_BY_INSTRUMENT.get(instrument_type)
     if profiles is None:
@@ -2170,13 +2210,14 @@ def api_profile_coverage():
     elif all_amp_b:
         reachability_warning = "Crossover is probably too low: the hybrid spends almost no time in Amp A."
 
-    return jsonify({"coverage": coverage, "reachability_warning": reachability_warning})
+    active_signal = bool(active_signal_mask(pair.source_envelope_db).any())
+    return jsonify({"coverage": coverage, "reachability_warning": reachability_warning, "active_signal": active_signal})
 
 
 def _parse_blend_params(data: dict):
     """Fixed Blend equivalent of _parse_hybrid_params -- mix_b/manual trim/
     auto_level only, no crossover/transition (Blend has no envelope, see
-    hybrid/fixed_blend.py)."""
+    hybrid/modes/fixed_blend.py)."""
     mix_b = max(0.0, min(1.0, float(data.get("mix_b", 0.5))))
     manual_b_trim_db = float(data.get("manual_b_trim_db", 0.0))
     auto_level = bool(data.get("auto_level", True))
@@ -2197,23 +2238,50 @@ def _parse_character_params(data: dict):
     }
 
 
+# render_id -> (analysis_a, analysis_b). A render_id identifies the rendered
+# audio exactly, so repeat requests for the same render (every Character
+# slider move, the low-level check, the wizard) skip all hashing/analysis.
+_character_analysis_memo: dict[str, tuple] = {}
+_CHARACTER_ANALYSIS_MEMO_SIZE = 4
+
+
+def _character_analyses(pair: RenderedPair) -> tuple:
+    """Per-amp Character analyses of the current render, measured against what
+    the amps were actually driven by (profiled_dry, see build_character_blend).
+    Memoised per render_id; on a miss the content-keyed disk cache is checked
+    before analysing (it survives restarts and re-renders of identical audio)."""
+    snapshot = _request_render_snapshot()
+    render_id = snapshot.get("render_id")
+    cached = _character_analysis_memo.get(render_id)
+    if cached is not None:
+        return cached
+    config = CharacterAnalysisConfig()
+    cache_dir = WORK_DIR / "character_analysis"
+    hashes = snapshot.get("source_hashes") or {}  # sha256 of the retained .nam copies
+    dry = pair.profiled_dry
+    analyses = []
+    for amp_hash, rendered in ((hashes.get("amp_a") or "", pair.amp_a), (hashes.get("amp_b") or "", pair.amp_b)):
+        key = analysis_cache_key(amp_hash, dry, rendered) if amp_hash else ""
+        analysis = load_cached_analysis(cache_dir, key, config) if key else None
+        if analysis is None:
+            analysis = analyse_rendered_audio(dry, rendered, pair.sample_rate, config, amp_hash)
+            if key:
+                store_cached_analysis(cache_dir, analysis, config, key)
+        analyses.append(analysis)
+    result = tuple(analyses)
+    if render_id:
+        while len(_character_analysis_memo) >= _CHARACTER_ANALYSIS_MEMO_SIZE:
+            _character_analysis_memo.pop(next(iter(_character_analysis_memo)))
+        _character_analysis_memo[render_id] = result
+    return result
+
+
 def _build_character_result(pair: RenderedPair, data: dict):
     params = _parse_character_params(data)
     # Preview analysis is intentionally derived from this already-auditioned
     # pair.  The frozen analysis is then reused by official target generation.
     design = CharacterBlendDesign(amp_a_path="", amp_b_path="", **params)
-    config = CharacterAnalysisConfig()
-    cache_dir = WORK_DIR / "character_analysis"
-    a_path, b_path = _request_render_snapshot()["amp_a_path"], _request_render_snapshot()["amp_b_path"]
-    a_hash, b_hash = (sha256_file(a_path) if a_path else ""), (sha256_file(b_path) if b_path else "")
-    analysis_a = load_cached_analysis(cache_dir, a_hash, config) if a_hash else None
-    analysis_b = load_cached_analysis(cache_dir, b_hash, config) if b_hash else None
-    if analysis_a is None:
-        analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config, a_hash)
-        if a_hash: store_cached_analysis(cache_dir, analysis_a)
-    if analysis_b is None:
-        analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config, b_hash)
-        if b_hash: store_cached_analysis(cache_dir, analysis_b)
+    analysis_a, analysis_b = _character_analyses(pair)
     return build_character_blend(pair, design, analysis_a=analysis_a, analysis_b=analysis_b), params
 
 
@@ -2231,27 +2299,35 @@ def api_character_low_level_check():
         return jsonify({"error": "Render and audition an amp pair first (POST /api/render_pair)."}), 400
     data = request.get_json(force=True)
     try:
-        result, params = _build_character_result(pair, data)
+        params = _parse_character_params(data)
     except (TypeError, ValueError):
         return jsonify({"error": "character tone/feel/drive controls must be numbers"}), 400
+    analysis_a, analysis_b = _character_analyses(pair)  # no throwaway full-DI teacher render
     design = CharacterBlendDesign(
         amp_a_path="", amp_b_path="",
-        analysis_a=json.loads(json.dumps(result.analysis_a.to_dict())),
-        analysis_b=json.loads(json.dumps(result.analysis_b.to_dict())),
+        analysis_a=json.loads(json.dumps(analysis_a.to_dict())),
+        analysis_b=json.loads(json.dumps(analysis_b.to_dict())),
         **params,
     )
     reference = pair.profiled_dry[: int(pair.sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS)]
     if len(reference) == 0:
         reference = pair.profiled_dry
-    amp_a, amp_b = load_nam(a_path), load_nam(b_path)
+    try:
+        amp_a, amp_b = load_nam(a_path), load_nam(b_path)
+    except (OSError, ValueError) as exc:
+        return jsonify({"error": f"could not load the rendered amp models: {exc}"}), 409
 
     def build_pair_at_gain(gain_db: float):
         scaled = (reference * db_to_amplitude(gain_db)).astype(np.float32)
-        a = render(amp_a, (scaled * db_to_amplitude(pair.amp_a_calibration_gain_db)).astype(np.float32), pair.sample_rate)
-        b = render(amp_b, (scaled * db_to_amplitude(pair.amp_b_calibration_gain_db)).astype(np.float32), pair.sample_rate)
+        # Same per-amp input as the bundle gate: calibration AND input trim.
+        a = render(amp_a, (scaled * db_to_amplitude(pair.amp_a_calibration_gain_db + pair.amp_a_input_gain_db)).astype(np.float32), pair.sample_rate)
+        b = render(amp_b, (scaled * db_to_amplitude(pair.amp_b_calibration_gain_db + pair.amp_b_input_gain_db)).astype(np.float32), pair.sample_rate)
         return SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=pair.sample_rate)
 
-    check = evaluate_low_level_response(build_pair_at_gain, design)
+    try:
+        check = evaluate_low_level_response(build_pair_at_gain, design)
+    except NamRenderError as exc:
+        return jsonify({"error": f"nam_render failed during the low-level check: {exc}"}), 500
     return jsonify({"low_level_response": check.to_dict()})
 
 
@@ -2274,10 +2350,7 @@ def api_wizard_insight():
     pair: RenderedPair | None = _request_render_snapshot()["pair"]
     if pair is None:
         return jsonify({"error": "Render the amp pair first (POST /api/render_pair)."}), 400
-    config = CharacterAnalysisConfig()
-    analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
-    analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
-    return jsonify(summarise_amp_pair(analysis_a, analysis_b))
+    return jsonify(summarise_amp_pair(*_character_analyses(pair)))
 
 
 @app.post("/api/wizard/insight")
@@ -2438,7 +2511,7 @@ def api_preview():
     Hybrid/Blend result (see docs/history/blend-mode.md "CAB PREVIEW SEMANTICS") so
     A/Result/B comparisons stay fair -- applied AFTER the amp combination,
     BEFORE preview_safety_limiter (playback safety net only -- never used on
-    a training target, see hybrid/safety.py).
+    a training target, see hybrid/core/safety.py).
     """
     data = request.get_json(force=True)
     snapshot, error = _require_render_snapshot(data)
@@ -2503,13 +2576,13 @@ def api_preview():
     except CabIrError as exc:
         return jsonify({"error": f"cab preview error: {exc}"}), 400
     if cab is not None:
-        from hybrid.cab_ir import apply_cab_ir
+        from hybrid.core.cab_ir import apply_cab_ir
         audio = apply_cab_ir(audio.astype("float32"), cab)
 
     # Shared post-combination output gain -- only for the combined result,
     # not raw Amp A/B auditioning (see _parse_output_gain_params). Applied
     # BEFORE preview_safety_limiter, matching the training-target ordering in
-    # hybrid/training_target.py so preview represents what generation will
+    # hybrid/modes/training_target.py so preview represents what generation will
     # actually do. preview_safety_limiter is a HARD CLIP (np.clip), not a
     # soft limiter -- an excessive manual gain distorts here rather than
     # just quietly compressing, so the response headers below let the UI
@@ -2583,7 +2656,7 @@ def api_live_blend_stems():
         # Convolution is linear, so applying the shared cabinet to both stems
         # before the browser's linear blend is exactly equivalent to applying
         # it to their blend afterwards.
-        from hybrid.cab_ir import apply_cab_ir
+        from hybrid.core.cab_ir import apply_cab_ir
         amp_a = apply_cab_ir(amp_a, cab)
         amp_b = apply_cab_ir(amp_b, cab)
 
@@ -2618,7 +2691,7 @@ def api_live_blend_stems():
 @app.route("/api/training_input/status", methods=["GET"])
 def api_training_input_status():
     """Whether an official NAM training input has been uploaded/is usable --
-    see docs/phase3.md section 7. Never falls back to a genre DI clip."""
+    see docs/history/phase3.md section 7. Never falls back to a genre DI clip."""
     if not TRAINING_INPUT_PATH.is_file():
         return jsonify({"ready": False, "path": str(TRAINING_INPUT_PATH), "error": "no official training input uploaded yet"})
     try:
@@ -2695,6 +2768,8 @@ def api_local_training_download():
     training = manifest.get("training") or {}
     requested_artifact = request.args.get("artifact", "head")
     if requested_artifact == "embedded":
+        if not experimental_architectures_enabled():
+            return jsonify({"error": EMBEDDED_DISABLED_MESSAGE}), 409
         embedded = training.get("embedded_artifact") or {}
         if embedded.get("state") != "validated":
             return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
@@ -2719,7 +2794,7 @@ def api_local_training_download():
 def api_training_input_upload():
     """Accept the official NAM training input WAV picked in the browser.
     Validated immediately (mono, 48 kHz, finite) -- an invalid file is
-    rejected and not saved, per docs/phase3.md section 7's "ABORT, do not
+    rejected and not saved, per docs/history/phase3.md section 7's "ABORT, do not
     bypass the check"."""
     upload = request.files.get("file")
     if upload is None or not upload.filename:
@@ -2746,8 +2821,8 @@ def api_generate():
     """Freeze the currently-auditioned design (Hybrid or Blend, `mode` in the
     request body, defaulting to "hybrid" for backward compatibility) and
     generate a real, reproducible A2 training bundle from it -- see
-    hybrid/design.py, hybrid/fixed_blend.py, hybrid/training_target.py, and
-    hybrid/blend_training_target.py. Requires a rendered/auditioned amp pair
+    hybrid/modes/design.py, hybrid/modes/fixed_blend.py, hybrid/modes/training_target.py, and
+    hybrid/modes/blend_training_target.py. Requires a rendered/auditioned amp pair
     (POST /api/render_pair) and an uploaded official NAM training input
     (POST /api/training_input/upload) -- never trains on the preview/genre DI.
     """
@@ -2931,7 +3006,7 @@ def api_generate():
 def _suggested_nam_filename(design_id: str) -> str:
     """Download filename for a trained A2 model -- reads the bundle's own
     training_manifest.json (already-recorded amp filenames/mode/mix) and
-    defers to hybrid.metadata.suggested_nam_filename so the naming logic
+    defers to hybrid.modes.metadata.suggested_nam_filename so the naming logic
     lives in one place shared with scripts/train_a2.py, rather than
     duplicated per caller. Falls back to `<design_id>.nam` if the manifest
     is missing/unreadable (e.g. a bundle generated before this existed)."""
@@ -2959,7 +3034,7 @@ def _job_dict_for_client(job) -> dict:
 @app.route("/api/kaggle/status", methods=["GET"])
 def api_kaggle_status():
     """CLI/auth/quota status plus the most recent job for a design, if any --
-    see hybrid/kaggle_training.py. Never raises for a missing/unauthenticated
+    see hybrid/training/kaggle_training.py. Never raises for a missing/unauthenticated
     CLI -- reports that plainly instead."""
     info = _kaggle_manager.status()
     with _kaggle_install_lock:
@@ -3010,7 +3085,7 @@ def api_kaggle_install():
 def api_kaggle_auth_start():
     """Starts `kaggle auth login` as a non-blocking background process --
     never a custom OAuth implementation, never reads/stores the resulting
-    credential (docs/kaggle_training.md)."""
+    credential (docs/history/kaggle_training.md)."""
     if not _kaggle_manager.cli.is_installed():
         return jsonify({"error": "Kaggle CLI is not installed. Run: pip install kaggle", "command": "pip install kaggle"}), 400
     started = _kaggle_manager.cli.launch_auth_login()
@@ -3033,7 +3108,7 @@ def api_kaggle_train():
     stage/upload/verify/kernel pipeline runs on a background thread
     (KaggleJobManager.submit_async), NOT inline in this request. A real
     production upload was observed taking several minutes under real
-    network conditions (see docs/kaggle_training.md); blocking this request
+    network conditions (see docs/history/kaggle_training.md); blocking this request
     for that long left the Flask dev server unresponsive with no way for
     the UI to show progress, and any interruption lost the job's state
     entirely. Poll GET /api/kaggle/jobs/<job_id> for progress.
@@ -3111,6 +3186,8 @@ def api_kaggle_job_download(job_id: str):
         return jsonify({"error": f"unknown job {job_id!r} for design {design_id!r}"}), 404
     artifact = request.args.get("artifact", "head")
     if artifact == "embedded":
+        if not experimental_architectures_enabled():
+            return jsonify({"error": EMBEDDED_DISABLED_MESSAGE}), 409
         embedded = job.embedded_artifact or {}
         if embedded.get("state") != "validated":
             return jsonify({"error": "experimental embedded artifact is not validated and is unavailable for download"}), 409
@@ -3230,7 +3307,7 @@ def api_health():
 def api_system_usage():
     """Polled by the footer's CPU/memory readout so a long local training
     run (which shows nothing per-epoch for minutes at a time otherwise --
-    see hybrid/local_training.py's _collect() docstring) has SOME visible
+    see hybrid/training/local_training.py's _collect() docstring) has SOME visible
     sign the machine is actually doing something, not silently stuck.
     GPU is best-effort: NVIDIA systems are queried through nvidia-smi when
     available. Apple Silicon has no nvidia-smi equivalent, but the kernel's
@@ -3274,7 +3351,49 @@ register_cg_routes(app, cg_dir=CG_PROJECT_DIR, a2_output_dir=A2_OUTPUT_DIR, trai
                    cab_upload_dir=CAB_UPLOAD_DIR, store_session=_store_session_record)
 
 
+def _stop_local_training_on_exit() -> None:
+    """Local setup/training runs in its own process session, so it would outlive
+    this backend. Stop it when the backend is asked to exit (the desktop shell
+    sends SIGTERM on quit)."""
+    try:
+        _local_training_manager.cancel()
+    except RuntimeError:
+        pass  # nothing running
+
+
+def _exit_on_sigterm(_signum, _frame) -> None:
+    raise SystemExit(0)  # runs atexit handlers, unlike the default SIGTERM action
+
+
+def _exit_process() -> None:
+    os._exit(0)
+
+
+@app.post("/api/shutdown")
+def api_shutdown():
+    """Clean shutdown for the desktop shell on quit, on every OS (Windows has no
+    SIGTERM): stop local training, which runs in its own process group and
+    would otherwise outlive the backend, then exit. Only enabled when the
+    shell passed NAM_MIXER_SHUTDOWN_TOKEN, and only for a request carrying it
+    in a custom header (a web page can't send one cross-origin without a CORS
+    preflight, and doesn't know the token)."""
+    expected = os.environ.get("NAM_MIXER_SHUTDOWN_TOKEN", "")
+    if not expected:
+        return jsonify({"error": "not found"}), 404
+    supplied = request.headers.get("X-NAM-Mixer-Shutdown-Token", "")
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return jsonify({"error": "forbidden"}), 403
+    _stop_local_training_on_exit()
+    threading.Timer(0.2, _exit_process).start()  # let this response go out first
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
+    import atexit
+    import signal
+
+    atexit.register(_stop_local_training_on_exit)
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     # One-time startup housekeeping: work/render_sources accumulates a copy for every render/preview, most of which never
     # become part of a saved bundle and so are never released by any user action (see _sweep_orphaned_render_sources's
     # docstring) -- sweep the backlog once per launch. Deliberately NOT at module import time: tests import this module

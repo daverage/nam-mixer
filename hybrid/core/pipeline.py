@@ -1,0 +1,271 @@
+"""Orchestration: the two operations the UI actually needs, kept separate
+because they have very different costs.
+
+`render_pair` is EXPENSIVE (runs NAM inference twice) and only needs to be
+called again when Amp A, Amp B, the DI, or the INPUT PROFILE/CALIBRATION
+changes (an input profile changes the actual signal fed to both NAMs, so it
+is a render-stage concern, not a blend-stage one -- see
+docs/history/INPUT_PROFILE_RESEARCH.md). `build_hybrid` is CHEAP (pure numpy) and is
+what should run on every crossover/transition/trim slider move -- see the
+module docstrings of blend.py/level_match.py/align.py for the individual
+steps this composes.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+import numpy as np
+
+from .align import align_to_reference
+from ..modes.blend import CrossoverConfig, blend
+from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU, resolve_calibration
+from .envelope import DEFAULT_BOUNDED_ENVELOPE_CONFIG, BoundedEnvelopeConfig, bounded_causal_envelope_db
+from .input_profiles import db_to_amplitude
+from .level_match import LevelMatchResult, compute_crossover_trim
+from .nam_loader import NamModel
+from .render import render
+
+
+def _peak_dbfs(audio: np.ndarray) -> float:
+    if len(audio) == 0:
+        return float("-inf")
+    peak = float(np.max(np.abs(audio)))
+    return 20.0 * np.log10(peak) if peak > 0 else float("-inf")
+
+
+@dataclass
+class RenderedPair:
+    dry: np.ndarray                 # original source DI, unmodified
+    profiled_dry: np.ndarray        # dry * input_profile_gain (before per-model calibration)
+    amp_a: np.ndarray
+    amp_b: np.ndarray
+    envelope_db: np.ndarray         # crossover envelope, derived from profiled_dry
+    source_envelope_db: np.ndarray  # envelope of the raw, un-profiled dry -- used by coverage analysis
+    sample_rate: int
+
+    instrument_type: str = "guitar"
+    input_profile_id: str = "vintage_humbucker"
+    input_profile_gain_db: float = 0.0
+    test_gain_db: float = 0.0
+
+    calibration_mode: str = "raw"
+    reference_input_level_dbu: float = DEFAULT_REFERENCE_INPUT_LEVEL_DBU
+    calibration_applied: bool = False
+
+    amp_a_model_input_level_dbu: Optional[float] = None
+    amp_b_model_input_level_dbu: Optional[float] = None
+    amp_a_calibration_gain_db: float = 0.0
+    amp_b_calibration_gain_db: float = 0.0
+
+    # Independent per-amp pre-render input trim -- unlike input_profile_gain_db
+    # (identical for both amps, simulates instrument/pickup) or calibration
+    # gain (derived from each .nam's own metadata), this lets amp A and amp B
+    # receive DIFFERENT signal levels even though the envelope-driven blend
+    # weight is identical for both. Needed because build_hybrid()/blend()
+    # never attenuate the audio actually fed to NAM inference -- they only
+    # choose which amp's already-rendered output dominates the mix -- so an
+    # amp with limited headroom will distort at exactly the loud moments the
+    # crossfade selects it, regardless of crossover tuning. Real, production
+    # control (unlike test_gain_db): IS applied during A2 generation, see
+    # hybrid/modes/design.py's HybridDesign/hybrid/modes/training_target.py.
+    amp_a_input_gain_db: float = 0.0
+    amp_b_input_gain_db: float = 0.0
+
+    input_peak_dbfs: float = float("-inf")
+    # Peak of what each NAM actually receives: profiled_dry plus that amp's
+    # calibration gain and input trim. input_peak_dbfs above is the common
+    # virtual-instrument signal before that per-amp split.
+    amp_a_input_peak_dbfs: float = float("-inf")
+    amp_b_input_peak_dbfs: float = float("-inf")
+    calibration_warning: Optional[str] = None
+
+
+def render_pair(
+    amp_a: NamModel,
+    amp_b: NamModel,
+    dry: np.ndarray,
+    sample_rate: int,
+    *,
+    instrument_type: str = "guitar",
+    input_profile_id: str = "vintage_humbucker",
+    input_profile_gain_db: float = 0.0,
+    test_gain_db: float = 0.0,
+    calibration_mode: str = "auto",
+    reference_input_level_dbu: float = DEFAULT_REFERENCE_INPUT_LEVEL_DBU,
+    amp_a_input_gain_db: float = 0.0,
+    amp_b_input_gain_db: float = 0.0,
+    envelope_config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
+) -> RenderedPair:
+    """Render `dry` through both amp models. The expensive step -- call again
+    whenever amp_a, amp_b, dry, the input profile, calibration, or test-gain
+    settings change; NOT on crossover/transition/trim slider moves.
+
+    `input_profile_gain_db` is applied to `dry` BEFORE both NAM inference and
+    crossover-envelope detection, so it represents a real change in how hard
+    the (virtual) instrument is driving the signal chain -- unlike the
+    deprecated test-only `dry_gain_db` on `build_hybrid`, which only shifted
+    the envelope used for blending and never touched the actual audio.
+
+    `test_gain_db` is a SEPARATE, additional real gain applied the same way
+    (before both NAM renders and envelope detection), for deliberately
+    stress-testing the crossfade beyond whatever level a given DI clip's own
+    performance happens to reach -- the DI is a convenience audition
+    recording, not something engineered to exercise the amp's full level
+    range (see README "Why the genre/style DI files are included"). Unlike
+    `input_profile_gain_db`, it does NOT represent an instrument/pickup
+    identity and is deliberately excluded from `hybrid.modes.design.HybridDesign`
+    provenance -- it is purely an audition aid. `source_envelope_db` (used
+    by the crossover-coverage table to explore hypothetical profiles) is
+    still computed from the fully raw, ungained `dry`, so dialing in a test
+    gain doesn't distort that separate analysis.
+
+    If `calibration_mode="auto"` and both models report a calibrated
+    `input_level_dbu`, an additional PER-MODEL calibration gain (the official
+    NAM plugin's `reference_input_level_dbu - model_input_level_dbu`
+    formula) is applied to what each individual model actually receives, so
+    two differently-calibrated `.nam` captures see the same virtual physical
+    input level. The crossover envelope is always derived from the
+    profile-adjusted signal BEFORE this per-model calibration split, so the
+    crossover stays linked to one common virtual guitar level rather than
+    either source model's own recording calibration.
+
+    `amp_a_input_gain_db`/`amp_b_input_gain_db` are an ADDITIONAL, independent
+    per-amp trim applied on top of calibration -- see `RenderedPair`'s field
+    docstring for why this exists (an amp with limited headroom otherwise
+    distorts at exactly the moments the crossfade picks it, no matter how
+    crossover/transition are tuned). The crossover envelope is still derived
+    from the common `profiled_dry` BEFORE this split, same as calibration.
+    """
+    dry = np.asarray(dry, dtype=np.float32)
+    profiled_dry = (dry * db_to_amplitude(input_profile_gain_db + test_gain_db)).astype(np.float32)
+
+    calib = resolve_calibration(
+        calibration_mode, reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu
+    )
+
+    amp_a_input = (profiled_dry * db_to_amplitude(calib.amp_a_gain_db + amp_a_input_gain_db)).astype(np.float32)
+    amp_b_input = (profiled_dry * db_to_amplitude(calib.amp_b_gain_db + amp_b_input_gain_db)).astype(np.float32)
+
+    amp_a_render = render(amp_a, amp_a_input, sample_rate)
+    amp_b_render = render(amp_b, amp_b_input, sample_rate)
+
+    envelope_db = bounded_causal_envelope_db(profiled_dry, sample_rate, envelope_config)
+    source_envelope_db = bounded_causal_envelope_db(dry, sample_rate, envelope_config)
+
+    return RenderedPair(
+        dry=dry,
+        profiled_dry=profiled_dry,
+        amp_a=amp_a_render,
+        amp_b=amp_b_render,
+        envelope_db=envelope_db,
+        source_envelope_db=source_envelope_db,
+        sample_rate=sample_rate,
+        instrument_type=instrument_type,
+        input_profile_id=input_profile_id,
+        input_profile_gain_db=input_profile_gain_db,
+        test_gain_db=test_gain_db,
+        calibration_mode=calib.mode,
+        reference_input_level_dbu=reference_input_level_dbu,
+        calibration_applied=calib.applied,
+        amp_a_model_input_level_dbu=calib.amp_a_model_input_level_dbu,
+        amp_b_model_input_level_dbu=calib.amp_b_model_input_level_dbu,
+        amp_a_calibration_gain_db=calib.amp_a_gain_db,
+        amp_b_calibration_gain_db=calib.amp_b_gain_db,
+        amp_a_input_gain_db=amp_a_input_gain_db,
+        amp_b_input_gain_db=amp_b_input_gain_db,
+        input_peak_dbfs=_peak_dbfs(profiled_dry),
+        amp_a_input_peak_dbfs=_peak_dbfs(amp_a_input),
+        amp_b_input_peak_dbfs=_peak_dbfs(amp_b_input),
+        calibration_warning=calib.warning,
+    )
+
+
+def amp_input_peak_warnings(pair: RenderedPair, threshold_dbfs: float = 0.0) -> list[str]:
+    """One warning per amp whose actual NAM input peaks at or above
+    `threshold_dbfs`, naming the gains that got it there. NAM captures are
+    trained on audio within +/-1.0, so these peaks are outside what the model
+    has seen, whatever the common input peak says."""
+    warnings = []
+    shared_db = pair.input_profile_gain_db + pair.test_gain_db
+    for label, peak, calibration_db, trim_db in (
+        ("Amp A", pair.amp_a_input_peak_dbfs, pair.amp_a_calibration_gain_db, pair.amp_a_input_gain_db),
+        ("Amp B", pair.amp_b_input_peak_dbfs, pair.amp_b_calibration_gain_db, pair.amp_b_input_gain_db),
+    ):
+        if peak >= threshold_dbfs:
+            warnings.append(
+                f"{label} receives peaks of {peak:+.1f} dBFS (profile/test {shared_db:+.1f} dB, "
+                f"calibration {calibration_db:+.1f} dB, input trim {trim_db:+.1f} dB). NAM captures are "
+                "trained on audio within 0 dBFS, so this amp may respond unpredictably at these peaks."
+            )
+    return warnings
+
+
+@dataclass
+class HybridResult:
+    hybrid: np.ndarray
+    blend_curve: np.ndarray
+    envelope_db: np.ndarray
+    auto_trim_db: float
+    manual_trim_db: float
+    effective_b_trim_db: float
+    alignment_offset_samples: int
+    level_match: LevelMatchResult | None
+
+
+def build_hybrid(
+    pair: RenderedPair,
+    crossover_dbfs: float,
+    transition_width_db: float,
+    auto_level: bool = True,
+    manual_b_trim_db: float = 0.0,
+    align_enabled: bool = False,
+    dry_gain_db: float = 0.0,
+) -> HybridResult:
+    """Blend an already-rendered amp pair. Cheap -- safe to call on every
+    crossover/transition/trim slider move without re-running NAM inference.
+
+    `manual_b_trim_db` is always applied, on top of the auto-match trim when
+    `auto_level` is on -- auto-level gives a safe starting point, the manual
+    trim is the user's tweak from there, and the two combine rather than one
+    replacing the other.
+
+    `dry_gain_db` is DEPRECATED and TEST-ONLY (kept for regression tests
+    exercising the blend/threshold logic in isolation) -- it shifts only the
+    envelope used for blending, by a constant (dB(x*g) = dB(x) + 20*log10(g),
+    an exact O(n) shift), without touching the actual audio. The real,
+    production input-level control is `input_profile_gain_db` on
+    `render_pair`, which changes what both NAMs actually receive. Do not wire
+    this parameter to a user-facing control.
+    """
+    envelope_db = pair.envelope_db + dry_gain_db
+
+    amp_b_render, offset = align_to_reference(pair.amp_a, pair.amp_b, enabled=align_enabled)
+
+    level_match_result: LevelMatchResult | None = None
+    auto_trim_db = 0.0
+    if auto_level:
+        level_match_result = compute_crossover_trim(
+            pair.envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
+        )
+        auto_trim_db = level_match_result.suggested_b_trim_db
+
+    effective_b_trim_db = auto_trim_db + manual_b_trim_db
+
+    config = CrossoverConfig(
+        crossover_dbfs=crossover_dbfs,
+        transition_width_db=transition_width_db,
+        amp_b_trim_db=effective_b_trim_db,
+    )
+    hybrid_audio, t_curve = blend(envelope_db, pair.amp_a, amp_b_render, config)
+
+    return HybridResult(
+        hybrid=hybrid_audio,
+        blend_curve=t_curve,
+        envelope_db=envelope_db,
+        auto_trim_db=auto_trim_db,
+        manual_trim_db=manual_b_trim_db,
+        effective_b_trim_db=effective_b_trim_db,
+        alignment_offset_samples=offset,
+        level_match=level_match_result,
+    )

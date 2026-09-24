@@ -15,10 +15,10 @@ import pytest
 import soundfile as sf
 from flask import Flask
 
-import cg_routes
-import hybrid.cg_project as cgp
-from hybrid.cg_project import CgProject, CgProjectError, suggest_position
-from hybrid.cab_ir import cab_design_from_prepared, get_prepared_cab_ir
+from routes import continuous_gain as cg_routes
+import hybrid.continuous_gain.project as cgp
+from hybrid.continuous_gain.project import CgProject, CgProjectError, suggest_position
+from hybrid.core.cab_ir import cab_design_from_prepared, get_prepared_cab_ir
 from tests.cg_synth import SR, amp_render, synth_di
 
 
@@ -30,7 +30,8 @@ def _nam_bytes(gain, sr=48000):
 def fake_backend(monkeypatch):
     def fake_load(path):
         raw = json.loads(Path(path).read_text())
-        return types.SimpleNamespace(raw=raw, input_level_dbu=None, path=Path(path))
+        return types.SimpleNamespace(raw=raw, input_level_dbu=None, path=Path(path),
+                                     gear_type=(raw.get("metadata") or {}).get("gear_type"))   # as NamModel.gear_type
     monkeypatch.setattr(cgp, "load_nam", fake_load)
     monkeypatch.setattr(cgp, "render", lambda m, x, sr, **k: amp_render(m.raw["metadata"]["gain_param"] * 1.5)(x))
     monkeypatch.setattr(cgp, "load_reference_di", lambda name: synth_di(name, 3.0))
@@ -137,6 +138,63 @@ def test_continuous_gain_cab_is_a_second_artifact_not_part_of_training_target(tm
     assert manifest["output_gain"]["embedded_final"]["final_linear_scalar"] > 0
 
 
+
+def test_continuous_gain_learned_cab_is_convolved_into_each_training_segment(tmp_path, fake_backend):
+    from hybrid.core.cab_ir import apply_cab_ir
+    from hybrid.training.nam_provenance import export_gear_type, export_model_name
+
+    p = _project(tmp_path); p.analyse(); p.plan("use_all", None, "fc")
+    official = tmp_path / "official.wav"; sf.write(official, synth_di("o", 2.0), SR)
+    plain = p.generate_bundle(tmp_path / "a2", official, "Plain")
+    plain_manifest = json.loads(Path(plain["manifest"]).read_text())
+    plain_target, _ = sf.read(Path(plain["manifest"]).parent / "hybrid_target.wav", dtype="float32")
+
+    ir_path = tmp_path / "cab.wav"
+    sf.write(ir_path, np.array([1.0, 0.5, -0.25], dtype=np.float32), SR, subtype="FLOAT")
+    prepared = get_prepared_cab_ir(ir_path, SR)
+    cab = cab_design_from_prepared(prepared, ir_path.name, preview_enabled=False, export_mode="learned", display_name="Test Cab")
+    learned = p.generate_bundle(tmp_path / "a2", official, "Learned", cab=cab)
+    manifest = json.loads(Path(learned["manifest"]).read_text())
+    learned_target, _ = sf.read(Path(learned["manifest"]).parent / "hybrid_target.wav", dtype="float32")
+
+    # Each segment is the cab-free target through the cabinet, then one peak-ceiling gain for the whole file.
+    c_plain, c_learned = plain_manifest["target"]["output_scale_c"], manifest["target"]["output_scale_c"]
+    for seg in manifest["segments"]:
+        a, b = seg["start"], seg["stop"]
+        expected = apply_cab_ir(plain_target[a:b] / c_plain, prepared)
+        np.testing.assert_allclose(learned_target[a:b] / c_learned, expected, atol=1e-5)
+    assert manifest["cab"]["export_mode"] == "learned" and manifest["cab"]["baked"] is True
+    assert "embedded_final" not in manifest["output_gain"]
+    assert export_model_name(manifest) == "Learned + Test Cab [Learned Cab]"
+    assert export_gear_type(manifest) == "amp_cab"
+
+
+def test_receptive_field_record_marks_a_learned_cab_as_baked(tmp_path):
+    from hybrid.continuous_gain.bundle import receptive_field_record
+
+    ir_path = tmp_path / "cab.wav"
+    sf.write(ir_path, np.array([1.0, 0.5, -0.25], dtype=np.float32), SR, subtype="FLOAT")
+    prepared = get_prepared_cab_ir(ir_path, SR)
+    for mode, baked in (("learned", True), ("embedded", False)):
+        cab = cab_design_from_prepared(prepared, ir_path.name, preview_enabled=False, export_mode=mode)
+        record = receptive_field_record([], {}, None, cab=cab)["cab"]
+        assert record["baked"] is baked and record["fir_history_samples"] == 2
+
+
+def test_learned_cab_validation_compares_the_captures_through_the_same_cabinet():
+    from hybrid.continuous_gain import validation as cgv
+
+    calls = []
+    original = cgv.render
+    try:
+        cgv.render = lambda model, x, sr, **k: np.asarray(x, dtype=np.float32) * 2.0
+        ref = cgv._reference_render({1.0: object()}, {1.0: 0}, lambda y: calls.append(len(y)) or y + 1.0)
+        out = ref(1.0, np.ones(4, dtype=np.float32))
+    finally:
+        cgv.render = original
+    assert calls == [4] and np.allclose(out, 3.0)
+
+
 # ---- routes
 @pytest.fixture()
 def client(tmp_path, fake_backend):
@@ -174,6 +232,7 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     st = client.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": [1, 3, 6], "anchors": "fc"}).get_json()
     assert st["plan"]["selected"] == [1.0, 3.0, 6.0] and st["plan"]["mode"] == "custom"
     assert client.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": [1]}).status_code == 400
+    assert client.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": "136"}).status_code == 400   # not positions 1, 3, 6
     j = _wait(client, client.post(f"/api/cg/projects/{pid}/generate", json={"model_name": "Amp X FC"})); assert j["state"] == "done", j["error"]
     st = client.get(f"/api/cg/projects/{pid}").get_json()
     did = st["bundle"]["design_id"]
@@ -199,6 +258,20 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     assert [r for r in client.session_records if r["id"] == pid][-1]["validationReport"] == good
     n_before = len(client.session_records); client.get(f"/api/cg/projects/{pid}"); client.get(f"/api/cg/projects/{pid}")
     assert len(client.session_records) == n_before                    # unchanged state does not rewrite the record
+    hashed = []
+    real_sha256 = hashlib.sha256
+    def counting_sha256(data=b"", *a, **k):
+        if len(data) == len(nam.read_bytes()):
+            hashed.append(1)
+        return real_sha256(data, *a, **k)
+    import routes.continuous_gain as cg_mod
+    cg_mod.hashlib.sha256 = counting_sha256
+    try:
+        for _ in range(3):
+            client.get(f"/api/cg/projects/{pid}")
+    finally:
+        cg_mod.hashlib.sha256 = real_sha256
+    assert hashed == []                                                # the unchanged NAM is not re-read and re-hashed per request
     m["training"]["validation_report"] = {"model_sha256": "0" * 64}; mp.write_text(json.dumps(m)); client.get(f"/api/cg/projects/{pid}")
     assert "validationReport" not in [r for r in client.session_records if r["id"] == pid][-1]        # a report for a different NAM is never attached
     z = client.get(f"/api/cg/projects/{pid}/export")                # export is never gated on validation or listening
@@ -209,6 +282,16 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     assert meta["anchor_method"] == "fc" and [s["position"] for s in meta["selected_captures"]] == [1.0, 3.0, 6.0]
     assert meta["usable_input_gain_range_db"] == [-20.0, 14.0] and "guide and provenance record" in meta["note"]
     assert len(meta["known_limits"]) >= 4 and "Output gain" in zf.read("PLAYER_GUIDE.md").decode()
+    # ---- a validation report is only ever shown/synced/exported for the model it measured
+    vf = tmp_path / "cg" / pid / "validation.json"
+    report = {"design_id": did, "compatibility": {"standard_nam": True}, "progression": {"reversals": []}}
+    vf.write_text(json.dumps({**report, "model": {"sha256": "0" * 64}}))              # an earlier model's report
+    assert client.get(f"/api/cg/projects/{pid}").get_json()["validation"] is None
+    assert json.loads(zipfile.ZipFile(io.BytesIO(client.get(f"/api/cg/projects/{pid}/export").data))
+                      .read("Amp_X_FC.continuous_gain.json"))["validation"] == "not run"
+    assert [r for r in client.session_records if r["id"] == pid][-1]["settings"]["continuousGain"]["stage"] == "trained"
+    vf.write_text(json.dumps({**report, "model": {"sha256": hashlib.sha256(nam.read_bytes()).hexdigest()}}))
+    assert client.get(f"/api/cg/projects/{pid}").get_json()["validation"]["design_id"] == did
 
 
 def test_only_one_job_per_project_and_unknown_things_are_404(client):
@@ -267,3 +350,113 @@ def test_analysis_is_identical_serial_or_parallel_and_probes_are_cached_by_file_
     assert len(calls) == before + 1                                   # only the new capture was probed
     p4.remove_capture("amp-G7.nam"); p4.analyse()
     assert len(calls) == before + 1                                   # and removing one needs no probe at all
+
+
+@pytest.fixture()
+def cab_client(tmp_path, fake_backend, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    app = Flask(__name__)
+    official = tmp_path / "official.wav"; sf.write(official, synth_di("o", 2.0), SR)
+    cab_dir = tmp_path / "cabs"; cab_dir.mkdir()
+    sf.write(cab_dir / "cab.wav", np.array([1.0, 0.5, -0.25], dtype=np.float32), SR, subtype="FLOAT")
+    cg_routes.register_cg_routes(app, cg_dir=tmp_path / "cg", a2_output_dir=tmp_path / "a2", training_input_path=official,
+                                 store_session=lambda rec: None, cab_upload_dir=cab_dir)
+    (tmp_path / "a2").mkdir(exist_ok=True)
+    c = app.test_client()
+    c.cab_path = str(cab_dir / "cab.wav")
+    return c
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_cg_embedded_cab_needs_experimental_architectures_but_learned_does_not(cab_client, monkeypatch, enabled):
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true" if enabled else "false")
+    pid = cab_client.post("/api/cg/projects", json={"name": "Amp X", "amp": "X"}).get_json()["project"]["id"]
+    assert cab_client.get(f"/api/cg/projects/{pid}").get_json()["experimental_architectures"] is enabled
+
+    embedded = cab_client.post(f"/api/cg/projects/{pid}/generate", json={"cab_path": cab_client.cab_path, "cab_export_mode": "embedded"})
+    if enabled:
+        assert "job_id" in embedded.get_json()
+    else:
+        assert embedded.status_code == 409 and "experimental" in embedded.get_json()["error"]
+    for jid in [embedded.get_json().get("job_id")] if enabled else []:
+        _wait(cab_client, types.SimpleNamespace(get_json=lambda jid=jid: {"job_id": jid}))
+
+    learned = cab_client.post(f"/api/cg/projects/{pid}/generate", json={"cab_path": cab_client.cab_path, "cab_export_mode": "learned"})
+    assert "job_id" in learned.get_json(), learned.get_json()
+    _wait(cab_client, learned)
+
+
+# ---- Stage 4: validation and downloads through the routes
+
+def _trained_project(c, tmp_path, generate_payload=None):
+    """Captures -> analysis -> plan -> training files -> a 'trained' NAM recorded in the manifest (as the local trainer does)."""
+    pid = c.post("/api/cg/projects", json={"name": "Amp X", "amp": "X"}).get_json()["project"]["id"]
+    c.post(f"/api/cg/projects/{pid}/captures", data={"files": [(io.BytesIO(_nam_bytes(g)), f"x-G{g}.nam") for g in (1, 2, 3, 4, 5, 6)]},
+           content_type="multipart/form-data")
+    assert _wait(c, c.post(f"/api/cg/projects/{pid}/analyse"))["state"] == "done"
+    c.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": [1, 3, 6], "anchors": "fc"})
+    j = _wait(c, c.post(f"/api/cg/projects/{pid}/generate", json={"model_name": "Amp X FC", **(generate_payload or {})}))
+    assert j["state"] == "done", j["error"]
+    did = c.get(f"/api/cg/projects/{pid}").get_json()["bundle"]["design_id"]
+    nam = tmp_path / "trained.nam"; nam.write_bytes(_nam_bytes(3))
+    mp = tmp_path / "a2" / did / "training_manifest.json"
+    m = json.loads(mp.read_text()); m["training"] = {"output_nam_path": str(nam)}; mp.write_text(json.dumps(m))
+    return pid, mp, nam
+
+
+@pytest.fixture()
+def fake_validation(monkeypatch):
+    import hybrid.continuous_gain.validation as cgv
+
+    def fake_load(path):
+        raw = json.loads(Path(path).read_text())
+        return types.SimpleNamespace(raw=raw, input_level_dbu=None, path=Path(path), gear_type=(raw.get("metadata") or {}).get("gear_type"))
+    fake_render = lambda m, x, sr, **k: amp_render(m.raw["metadata"]["gain_param"] * 1.5)(x)  # noqa: E731
+    for module in (cg_routes, cgv):
+        monkeypatch.setattr(module, "load_nam", fake_load)
+    monkeypatch.setattr(cgv, "render", fake_render)
+    monkeypatch.setattr(cg_routes, "load_reference_di", lambda name: synth_di(name, 3.0))
+
+
+@pytest.mark.parametrize("learned_cab", [False, True])
+def test_validation_route_runs_every_check_and_reports_a_learned_cab(cab_client, tmp_path, monkeypatch, fake_validation, learned_cab):
+    payload = {"cab_path": cab_client.cab_path, "cab_export_mode": "learned", "cab_display_name": "Test Cab"} if learned_cab else {}
+    pid, mp, nam = _trained_project(cab_client, tmp_path, payload)
+    assert json.loads(mp.read_text())["cab"]["baked"] is learned_cab
+
+    j = _wait(cab_client, cab_client.post(f"/api/cg/projects/{pid}/validate"))
+    assert j["state"] == "done", j["error"]
+    v = cab_client.get(f"/api/cg/projects/{pid}").get_json()["validation"]
+    assert v["model"]["sha256"] == hashlib.sha256(nam.read_bytes()).hexdigest()
+    assert v["compatibility"]["standard_nam"] is True and v["safety"]["finite"] is True
+    assert {r["position"] for r in v["progression"]["positions"]} == {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}
+    assert {r["role"] for r in v["progression"]["positions"]} == {"training", "reference"}
+    assert v["blocks_export"] is False and v["learned_cab"] is learned_cab and ("cab_note" in v) is learned_cab
+    assert cab_client.get(f"/api/cg/projects/{pid}/audition/sweep.wav").status_code == 200
+    assert cab_client.get(f"/api/cg/projects/{pid}/audition/..%2Fproject.json").status_code == 404
+
+
+def test_nam_download_route_serves_the_tested_nam_and_gates_the_embedded_one(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    pid, mp, nam = _trained_project(client, tmp_path)
+    stem = json.loads(mp.read_text())["artifact_stem"]
+
+    head = client.get(f"/api/cg/projects/{pid}/nam/download")
+    assert head.status_code == 200 and head.data == nam.read_bytes()
+    assert f'filename={stem}.nam' in head.headers["Content-Disposition"]
+    assert client.get(f"/api/cg/projects/{pid}/nam/download?artifact=other").status_code == 400
+
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "false")
+    refused = client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab")
+    assert refused.status_code == 409 and "experimental" in refused.get_json()["error"]
+
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true")
+    assert client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab").status_code == 409     # nothing validated yet
+    sequential = tmp_path / "with-cab.nam"
+    m = json.loads(mp.read_text())
+    m["training"]["embedded_artifact"] = {"state": "validated", "artifacts": {"sequential_nam_path": str(sequential)}}
+    mp.write_text(json.dumps(m))
+    assert client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab").status_code == 404     # recorded but missing on disk
+    sequential.write_text("{}")
+    cab = client.get(f"/api/cg/projects/{pid}/nam/download?artifact=cab")
+    assert cab.status_code == 200 and f"filename={stem}-with-cab.nam" in cab.headers["Content-Disposition"]

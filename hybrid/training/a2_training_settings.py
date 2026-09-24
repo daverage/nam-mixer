@@ -1,0 +1,172 @@
+"""Single source of truth for the A2 (PackedWaveNet) training settings used by
+BOTH the local trainer (`scripts/train_a2.py`) and the Kaggle cloud worker
+(`cloud/kaggle/train_a2_cloud.py`) -- see docs/history/kaggle_training.md.
+
+Pure data, no torch/nam import, safe to import from the normal torch-free
+Flask/runtime environment as well as both training environments. The whole
+point of this module is to make local/cloud drift structurally impossible:
+both trainers import the same frozen dataclass instances rather than each
+hard-coding their own copy of "epochs=100, batch_size=16, ...".
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .nam_provenance import export_gear_type, export_model_name
+
+
+@dataclass(frozen=True)
+class A2TrainingSettings:
+    epochs: int
+    batch_size: int
+    ny: int
+    seed: int
+    latency: int
+    ignore_checks: bool
+    fast_dev_run: bool
+    silent: bool
+
+
+# Quality/speed presets for a real (non-smoke-test) training run -- draft for
+# a fast preview, standard for normal use, high_def for the best result at
+# the cost of a longer run. Every non-epochs setting (batch_size/ny/seed/
+# latency/etc, see _full_settings below) stays identical across presets --
+# only the number of epochs differs.
+A2_EPOCH_PRESETS: dict[str, int] = {
+    "draft": 20,
+    "standard": 60,
+    "high_def": 120,
+}
+DEFAULT_EPOCH_PRESET = "standard"
+
+
+def _full_settings(epochs: int) -> A2TrainingSettings:
+    return A2TrainingSettings(
+        epochs=epochs,
+        batch_size=16,
+        ny=8192,
+        seed=0,
+        latency=0,  # synthetic target -- authoritatively zero, never auto-detected
+        ignore_checks=False,
+        fast_dev_run=False,
+        silent=True,
+    )
+
+
+def settings_for_preset(preset: str) -> A2TrainingSettings:
+    """Full (non-smoke-test) training settings for one of A2_EPOCH_PRESETS'
+    named quality levels ("draft"/"standard"/"high_def"). Raises ValueError
+    on an unrecognized preset name rather than silently falling back --
+    an invalid preset should never quietly train at the wrong length."""
+    if preset not in A2_EPOCH_PRESETS:
+        raise ValueError(f"unknown A2 epoch preset {preset!r} -- choose one of {sorted(A2_EPOCH_PRESETS)}")
+    return _full_settings(A2_EPOCH_PRESETS[preset])
+
+
+# Normal, full-quality training run at the default preset.
+A2_TRAINING_SETTINGS = settings_for_preset(DEFAULT_EPOCH_PRESET)
+
+# Fast development/smoke-test run only -- never the final model (docs/history/phase3.md
+# section 15, docs/history/kaggle_training.md "real end-to-end test" section).
+A2_QUICK_SETTINGS = A2TrainingSettings(
+    epochs=1,
+    batch_size=A2_TRAINING_SETTINGS.batch_size,
+    ny=A2_TRAINING_SETTINGS.ny,
+    seed=A2_TRAINING_SETTINGS.seed,
+    latency=A2_TRAINING_SETTINGS.latency,
+    ignore_checks=A2_TRAINING_SETTINGS.ignore_checks,
+    fast_dev_run=True,
+    silent=A2_TRAINING_SETTINGS.silent,
+)
+
+# Pinned trainer package version -- both environments must install exactly
+# this (requirements-training.txt locally; cloud/kaggle/train_a2_cloud.py
+# installs it explicitly inside the Kaggle kernel).
+NEURAL_AMP_MODELER_VERSION = "0.13.0"
+
+# The official NAM v3.0.0 training/reamp input file's MD5 -- see
+# hybrid/modes/training_target.py's OFFICIAL_V3_INPUT_MD5 docstring for how this was
+# verified. Duplicated here (rather than imported) because the Kaggle cloud
+# worker is deliberately self-contained (see cloud/kaggle/train_a2_cloud.py's
+# module docstring) and cannot import hybrid/modes/training_target.py, which pulls
+# in soundfile/numpy assumptions tied to this repo's package layout. Tested
+# for equality against the authoritative constant in
+# tests/test_a2_training_settings.py so the two can never silently diverge.
+OFFICIAL_V3_INPUT_MD5 = "36cd1af62985c2fac3e654333e36431e"
+
+
+def custom_split_train_stop(manifest: dict) -> "int | None":
+    """Train/validation boundary (in samples) for a bundle whose training input is NOT the official NAM
+    file -- the Continuous Gain bundle declares `training_input.custom_split`. None for every other bundle
+    (they use the official input's own layout and are checked against OFFICIAL_V3_INPUT_MD5). Duplicated
+    literally in cloud/kaggle/train_a2_cloud.py (self-contained); parity in tests/test_a2_training_settings.py."""
+    ti = manifest.get("training_input") or {}
+    if not ti.get("custom_split"):
+        return None
+    stop = int(ti.get("train_stop_samples") or 0)
+    if stop <= 0:
+        raise ValueError("training_input.custom_split requires a positive train_stop_samples")
+    return stop
+
+
+def settings_for(quick: bool) -> A2TrainingSettings:
+    return A2_QUICK_SETTINGS if quick else A2_TRAINING_SETTINGS
+
+
+def user_metadata_kwargs(manifest: dict) -> dict:
+    """Build the plain-dict kwargs for `nam.models.metadata.UserMetadata` from
+    a training_manifest.json dict -- pure Python, no nam/torch import, so both
+    `scripts/train_a2.py` (local) and `cloud/kaggle/train_a2_cloud.py` (cloud)
+    can share this exact logic instead of maintaining two copies that could
+    silently drift (see docs/history/kaggle_training.md). `gear_type` and
+    `tone_type` come back as plain strings: callers must pop them and map
+    them onto the installed nam enums (GearType/ToneType) before
+    constructing `UserMetadata(**kwargs)` -- see scripts/train_a2.py's
+    _build_user_metadata.
+
+    Deliberately omits output_level_dbu semantics that require the nam
+    package's own enums -- see scripts/train_a2.py's _build_user_metadata
+    docstring for why. `tone_type` IS included here as a plain string (or
+    omitted/None); callers using the real nam package must resolve it
+    against nam.models.metadata.ToneType themselves before constructing
+    UserMetadata, exactly like they already do for gear_type -- see
+    scripts/train_a2.py's _build_user_metadata.
+
+    The export name comes from hybrid/training/nam_provenance.py's
+    export_model_name (one rule per export mode). cloud/kaggle/train_a2_cloud.py
+    cannot import the hybrid package inside a Kaggle kernel, so it keeps a
+    literal copy; tests/test_a2_training_settings.py checks both give the same
+    name for every export mode.
+    """
+    calibration = manifest.get("calibration", {})
+
+    # Only report input_level_dbu when calibration was genuinely applied to
+    # BOTH source models -- never invent one for a Raw-fallback pair
+    # (docs/history/phase3.md section 9).
+    input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
+
+    # One naming rule per export mode -- see nam_provenance.export_model_name.
+    model_name = export_model_name(manifest)
+
+    # tone_type: copy only when both sources report the IDENTICAL, officially
+    # recognised value -- a clean+hi_gain hybrid is not genuinely either, so
+    # an unset tone_type (left for the user) is the honest default.
+    _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
+    amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
+    amp_b_tone = manifest.get("amp_b", {}).get("tone_type")
+    tone_type = amp_a_tone if amp_a_tone and amp_a_tone == amp_b_tone and amp_a_tone in _tone_types else None
+
+    return {
+        "name": model_name,
+        # Plain NAM gear_type string ("amp" / "amp_cab") for what the audio
+        # contains; callers map it onto the installed nam GearType enum.
+        "gear_type": export_gear_type(manifest),
+        # This identifies the creator of the generated NAM.  Do not invent
+        # a physical manufacturer/model for a synthetic hybrid; those remain
+        # blank for the user to enter in the official metadata editor.
+        "modeled_by": "NAM Mixer",
+        "tone_type": tone_type,
+        # output_level_dbu deliberately absent -- see
+        # scripts/train_a2.py's _build_user_metadata docstring for why.
+        "input_level_dbu": input_level_dbu,
+    }

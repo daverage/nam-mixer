@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from hybrid.cg_bundle import (FC_RECIPE, FcRecipe, build_training_audio, bundle_manifest_core, make_chain, sha256_f32, write_bundle)
-from hybrid.safety import apply_peak_ceiling
+from hybrid.continuous_gain.bundle import (FC_RECIPE, FcRecipe, build_training_audio, bundle_manifest_core, make_chain, sha256_f32, write_bundle)
+from hybrid.core.safety import apply_peak_ceiling
 from tests.cg_synth import SR, synth_di
 
 TINY = FcRecipe(train_dis=("a", "b"), val_dis=("v",), train_offsets_db=(-6.0, 6.0), val_offsets_db=(0.0,), di_seconds=1, val_seconds=1)
@@ -97,3 +97,46 @@ def test_written_bundle_is_a_standard_a2_bundle_with_a_declared_custom_split(tmp
 def test_apply_peak_ceiling_semantics_the_bundle_relies_on():
     y, red = apply_peak_ceiling(np.array([0.0, 2.0, -1.0]), -0.2)
     assert red > 0 and np.max(np.abs(y)) == pytest.approx(10 ** (-0.2 / 20))
+
+
+def test_manifest_records_the_ceiling_the_recipe_actually_applied(tmp_path):
+    chain = make_chain(POS, ANCH)
+    custom = FcRecipe(**{**TINY.__dict__, "ceiling_dbfs": -3.0})
+    b = build_training_audio(chain, _renderers(), {}, _official(), _di, custom)
+    mp = write_bundle(tmp_path / "d", b, chain, ANCH, {}, sources=[], model_name="M", artifact_stem="M",
+                      design={"kind": "x"}, receptive_field={"branch_samples": {"G1": 10}})
+    assert json.loads(mp.read_text())["target"]["ceiling_dbfs"] == -3.0
+    assert np.max(np.abs(b.target)) <= 10 ** (-3.0 / 20) + 1e-6
+
+
+def test_source_records_carry_each_captures_gear_type(tmp_path):
+    """So a Continuous Gain export of full-rig captures is labelled [Full Rig]/amp_cab."""
+    from hybrid.continuous_gain.bundle import source_records
+
+    paths = {}
+    for position, gear in ((1.0, "amp_cab"), (5.0, "amp_cab")):
+        path = tmp_path / f"g{position:g}.nam"
+        path.write_text(json.dumps({"architecture": "WaveNet", "config": {}, "weights": [], "sample_rate": 48000,
+                                    "metadata": {"gear_type": gear}}))
+        paths[position] = path
+    audit = {"captures": {"1": {"status": "VALID", "correction": None}, "5": {"status": "VALID", "correction": None}}}
+    recs = source_records([1.0, 5.0], paths, [-10.0, 10.0], make_chain([1.0, 5.0], [-10.0, 10.0]), audit)
+    assert [r["gear_type"] for r in recs] == ["amp_cab", "amp_cab"]
+
+
+def test_source_records_use_already_loaded_captures_instead_of_reloading(monkeypatch, tmp_path):
+    import types
+
+    import hybrid.continuous_gain.bundle as bundle_mod
+    from hybrid.continuous_gain.bundle import make_chain, source_records
+
+    def no_reload(path):
+        raise AssertionError(f"reloaded {path}")
+    monkeypatch.setattr(bundle_mod, "load_nam", no_reload)
+    paths = {}
+    for p in (1.0, 5.0):
+        paths[p] = tmp_path / f"G{p:g}.nam"; paths[p].write_bytes(b"{}")
+    audit = {"captures": {f"{p:g}": {"status": "verified", "correction": None, "evidence": {}} for p in paths}}
+    models = {1.0: types.SimpleNamespace(gear_type="amp"), 5.0: types.SimpleNamespace(gear_type="amp_cab")}
+    recs = source_records([1.0, 5.0], paths, [-10.0, 10.0], make_chain([1.0, 5.0], [-10.0, 10.0]), audit, models)
+    assert [r["gear_type"] for r in recs] == ["amp", "amp_cab"]

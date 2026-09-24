@@ -1,7 +1,7 @@
 # Continuous Gain tab (integration of the frozen FC recipe)
 
-One amp/channel, N fixed-gain captures -> ONE standard `.nam` driven by the player's Input gain. Code: `hybrid/cg_*.py`
-(pure library), `cg_routes.py` (`/api/cg/*`), `static/cg.js`. Training reuses the existing local and Kaggle trainers.
+One amp/channel, N fixed-gain captures -> ONE standard `.nam` driven by the player's Input gain. Code: `hybrid/continuous_gain/*.py`
+(pure library), `routes/continuous_gain.py` (`/api/cg/*`), `static/cg.js`. Training reuses the existing local and Kaggle trainers.
 
 ## Workflow
 1. **Add captures** - upload `.nam` files, confirm each physical gain position (file-name parsing is only a suggestion).
@@ -40,18 +40,18 @@ carries standard NAM user metadata (name, modeled_by).
 The Phase 2-5 research scripts (`p4*`, `fc_*`, `p5_*`, `pl_*`, `tr_*`, v3 `cg_*`, `single_nam_*`, `continuous_gain_*`) were removed from `scripts/` on 2026-09-21. They are in `~/Documents/hybrid-nam-builder-archive/research_scripts_2026-09-21.tar.gz` (extract repo-relative) and in git history. `scripts/` keeps the app infrastructure plus `single_nam_common.py` and `cg_reproduce_fc.py`, which the frozen-configuration reproduction still uses.
 
 ## Sessions
-Each project keeps a normal Sessions record (`work/sessions/<project id>.nam-mixer.json`, written by `cg_routes.sync_session` through the
+Each project keeps a normal Sessions record (`work/sessions/<project id>.nam-mixer.json`, written by `routes.continuous_gain.sync_session` through the
 app's own session writer): kind "Continuous Gain", how far it got, the selection/anchors, and - once trained - the NAM plus the trainers'
 validation report (attached only if it belongs to that exact NAM). Sessions -> Load opens the Continuous Gain tab on that project; Delete
 removes the record, the project folder and the training bundle. The tab has no project list of its own.
 
 ## Training material
-The frozen recipe trains on the official NAM input plus three guitar DIs at eight level offsets. `hybrid/cg_excitation.py` generates a
+The frozen recipe trains on the official NAM input plus three guitar DIs at eight level offsets. `hybrid/continuous_gain/excitation.py` generates a
 single deterministic file that covers the same level range in one pass (synthesised guitar-like playing under a slow gain sweep);
 `generate_bundle(recipe=..., load_di=..., official_transform=...)` lets experiments swap the material.
 
 ## Speed (no change to any result)
-The slow steps are many independent native renders, so they run in parallel (`hybrid/cg_parallel.pmap`, order-preserving; default half the
+The slow steps are many independent native renders, so they run in parallel (`hybrid.continuous_gain.parallel.pmap`, order-preserving; default half the
 cores capped at 6, override with `NAM_MIXER_CG_WORKERS`): capture probing, the per-capture renders of each training segment, and the stage-4
 comparisons/sweeps. Probes are cached per project by capture file hash (`probe_cache.json`), so adding or removing a capture only probes what is new.
 Measured on the JCM800 set (19 captures): analysis 176 s -> 49 s (8 s when nothing changed); bundle audio (Vibrolux, 6 captures) 116 s -> 25 s;

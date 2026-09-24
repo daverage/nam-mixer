@@ -1,14 +1,16 @@
-"""Tests for hybrid/cab_ir.py -- see docs/blend-mode.md "CAB IR PROCESSING"."""
+"""Tests for hybrid/core/cab_ir.py -- see docs/history/blend-mode.md "CAB IR PROCESSING"."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-from hybrid.cab_ir import (
+from hybrid.core.cab_ir import (
+    CabDesign,
     CabIrError,
     apply_cab_ir,
     cab_design_from_prepared,
+    get_frozen_prepared_cab_ir,
     get_prepared_cab_ir,
     load_and_prepare_cab_ir,
 )
@@ -111,7 +113,7 @@ def test_leading_silence_is_trimmed_and_recorded(tmp_path):
 
 def test_preview_and_bake_use_the_same_prepared_ir_path(tmp_path):
     """get_prepared_cab_ir (used by both preview and baked-target
-    generation, see hybrid/training_target.py::maybe_bake_cab) must be
+    generation, see hybrid/modes/training_target.py::maybe_bake_cab) must be
     cache-consistent: same file + same target rate -> identical result."""
     ir_path = _write_wav(tmp_path / "ir.wav", np.random.default_rng(4).uniform(-1, 1, 300))
     a = get_prepared_cab_ir(ir_path, 48000)
@@ -144,7 +146,7 @@ def test_cab_design_display_name_defaults_to_none_and_round_trips(tmp_path):
     assert named.to_dict()["display_name"] == "Modern Boutique 4x12"
 
 
-# -- Cabinet energy diagnostics -- docs/blend-mode.md "CABINET ENERGY ANALYSIS" ---
+# -- Cabinet energy diagnostics -- docs/history/blend-mode.md "CABINET ENERGY ANALYSIS" ---
 # Purely informational: must never alter the actual FIR taps/convolution.
 
 def test_energy_one_tap_ir_reports_immediate_effective_energy(tmp_path):
@@ -165,7 +167,7 @@ def test_energy_percentile_indices_are_known_for_synthetic_ir():
     silent, so leading/trailing trimming doesn't interfere) samples --
     99%/99.9%/99.99% energy must all be reached within the first ~100
     "loud" samples, well before the tail is exhausted."""
-    from hybrid.cab_ir import _energy_percentile_sample_counts
+    from hybrid.core.cab_ir import _energy_percentile_sample_counts
 
     loud = np.full(100, 1.0, dtype=np.float32)
     quiet = np.full(100, 1e-6, dtype=np.float32)  # negligible energy contribution
@@ -229,3 +231,25 @@ def test_cab_design_from_prepared_carries_energy_diagnostics(tmp_path):
     assert design.energy_999_ms == pytest.approx(prepared.energy_999_ms)
     assert design.energy_9999_samples == prepared.energy_9999_samples
     assert design.prepared_duration_ms == pytest.approx(prepared.prepared_duration_ms)
+
+
+def test_missing_ir_raises_cab_ir_error_from_cached_and_frozen_loaders(tmp_path):
+    """A deleted working copy must surface as CabIrError (which callers handle),
+    not as a raw FileNotFoundError from hashing the file first."""
+    missing = tmp_path / "gone.wav"
+    with pytest.raises(CabIrError, match="not found"):
+        get_prepared_cab_ir(missing, 48000)
+    cab = CabDesign(selected=True, ir_working_path=str(missing), sha256="0" * 64)
+    with pytest.raises(CabIrError, match="not found"):
+        get_frozen_prepared_cab_ir(cab, 48000)
+
+
+def test_cache_hit_reports_the_requested_path(tmp_path):
+    """Identical IR content uploaded under two names shares one cache entry, but
+    each caller must get its own path back as source_path."""
+    a = _write_wav(tmp_path / "a.wav", [1.0, 0.25])
+    b = _write_wav(tmp_path / "b.wav", [1.0, 0.25])
+    assert get_prepared_cab_ir(a, 48000).source_path == str(a)
+    prepared_b = get_prepared_cab_ir(b, 48000)
+    assert prepared_b.source_path == str(b)
+    assert prepared_b.sha256 == get_prepared_cab_ir(a, 48000).sha256

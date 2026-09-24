@@ -393,6 +393,26 @@
           <button id="btn-preview-b" class="btn btn-amp" disabled><span class="dot dot-b"></span>Amp B</button>
         </div>
 
+        <div class="cab-strip" id="cab-strip" aria-labelledby="cab-strip-title">
+          <div class="cab-strip-head">
+            <div class="cab-strip-text">
+              <span class="cab-strip-title" id="cab-strip-title">Cabinet IR <span class="cab-strip-optional">optional</span></span>
+              <span id="cab-name" class="cab-strip-name">No cabinet</span>
+              <span id="cab-detail" class="cab-strip-info" aria-live="polite">You are hearing the amps on their own.</span>
+              <span id="cab-info" hidden></span>
+            </div>
+            <div class="cab-strip-actions">
+              <input type="file" id="cab-file" accept=".wav" class="visually-hidden" tabindex="-1">
+              <label for="cab-file" id="cab-file-button" class="btn btn-secondary btn-small">Choose IR…</label>
+              <button type="button" id="cab-remove" class="btn btn-secondary btn-small" hidden>Remove</button>
+            </div>
+          </div>
+          <label class="checkbox-row">
+            <input type="checkbox" id="cab-preview-enabled" disabled>
+            <span class="checkbox-text">Hear through this cabinet<span class="checkbox-hint">Instant — the amps are not prepared again</span></span>
+          </label>
+        </div>
+
         <div class="audition-live-row shape-only"><button id="btn-live-blend" class="btn btn-secondary" disabled title="Available in Always-on mix mode">Adjust the mix while listening</button><label class="checkbox-row audition-autorefresh"><input type="checkbox" id="auto-audition" checked> Update the result while it plays</label></div>
 
         <div id="live-blend-status" class="info shape-only" aria-live="polite">Always-on mix can change immediately while audio plays. Other modes update the result after you adjust a control.</div>
@@ -413,31 +433,23 @@
         <summary>Finish the sound <span>Add a cabinet IR (optional), and set output level</span></summary>
         <div class="finish-tools">
       <section class="card" id="cab-panel">
-        <h2>Cabinet IR <span class="hint">(optional)</span> <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant, no need to re-render</span></h2>
-        <p class="info">Adding a cabinet never re-runs the amps -- it's applied on top of what you've already prepared. But if you already made training files, you must click <strong>Create training files</strong> again after changing anything here for the cabinet to be included.</p>
+        <h2>Cabinet in the NAM <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant</span></h2>
+        <p id="cab-finish-summary" class="cab-finish-summary">No cabinet chosen. Choose a cabinet IR in the listening card above to hear it and include it.</p>
+        <p class="info">If you already made training files, click <strong>Create training files</strong> again after changing the cabinet so it is included.</p>
 
-        <label class="field-label" for="cab-file">Cabinet IR (WAV)</label>
-        <input type="file" id="cab-file" accept=".wav" class="file-input">
-        <div id="cab-info" class="info"></div>
-
-        <label class="checkbox-row">
-          <input type="checkbox" id="cab-preview-enabled" disabled>
-          Hear the sound through this cabinet
-        </label>
-        <label class="field-label" for="cab-export-mode">Final cabinet export</label>
-        <select id="cab-export-mode" disabled>
-          <option value="none">Head-only NAM only</option>
-          <option value="embedded" id="cab-export-option-embedded" hidden>Create both — tested head NAM + exact embedded-cab NAM</option>
-          <option value="learned" hidden>Legacy learned-cab target</option>
+        <label class="field-label" for="cab-export-mode">Cabinet in the trained NAM</label>
+        <select id="cab-export-mode" class="select-input" disabled>
+          <option value="none">Amp only — no cabinet in the NAM</option>
+          <option value="learned" id="cab-export-option-learned">Learned cab — train the cabinet into the NAM</option>
+          <option value="embedded" id="cab-export-option-embedded">Create both — tested head NAM + exact embedded-cab NAM (experimental)</option>
         </select>
-        <div class="info" id="cab-export-mode-info">The main A2 is always trained and tested without the cabinet. Advanced users can enable “Create both” in Settings.</div>
-        <div class="info" id="cab-export-experimental-hint">“Create both” is an advanced experimental export. Enable it under Settings &gt; Advanced &gt; “Enable experimental NAM architectures”.</div>
+        <div class="info" id="cab-export-mode-info">The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.</div>
         <div class="info" id="cab-export-compatibility-hint" hidden>The cabinet version uses NAM Sequential/Linear and may not load in players that accept only A2 architectures. The tested head-only NAM is always provided separately.</div>
 
         <label class="field-label" for="cab-display-name">Cabinet display name <span class="hint">(shown in the exported model's name)</span></label>
         <input type="text" id="cab-display-name" class="file-input" maxlength="80" placeholder="e.g. Modern Boutique 4x12" autocomplete="off">
 
-        <div id="cab-status" class="info" aria-live="polite">Cab: off</div>
+        <div id="cab-status" class="info" hidden>Cab: off</div>
       </section>
 
       <section class="card" id="output-gain-panel">

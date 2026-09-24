@@ -1,5 +1,5 @@
 """Tests for the bounded, finite-memory production envelope
-(`hybrid.envelope.bounded_causal_envelope_db`) -- see docs/phase3.md section 4.
+(`hybrid.core.envelope.bounded_causal_envelope_db`) -- see docs/history/phase3.md section 4.
 
 Unlike `rms_envelope_db`'s one-pole release (recursive, theoretically
 infinite memory), this envelope must have a documented, provable, EXACT
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from hybrid.envelope import (
+from hybrid.core.envelope import (
     BoundedEnvelopeConfig,
     bounded_causal_envelope_db,
     bounded_envelope_max_history_ms,

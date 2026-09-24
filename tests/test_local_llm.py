@@ -7,13 +7,13 @@ from urllib.error import HTTPError
 
 import pytest
 
-from hybrid import local_llm
+from hybrid.services import local_llm
 
 
 @pytest.fixture(autouse=True)
 def isolated_env_file(tmp_path, monkeypatch):
     """These tests exercise NAM_MIXER_AI_*/NAM_MIXER_LOCAL_LLM_* purely via monkeypatched os.environ, so a real .env on the
-    developer's machine (hybrid/env_file.py's fallback, used deliberately in production) must never leak in -- point it at a
+    developer's machine (hybrid/services/env_file.py's fallback, used deliberately in production) must never leak in -- point it at a
     file that doesn't exist. Tests that want the .env fallback itself set NAM_MIXER_ENV_FILE to a real tmp_path file explicitly."""
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
     for name in local_llm.PROVIDER_AI_ENV_NAMES:
@@ -186,10 +186,11 @@ def test_local_llm_teaches_mode_selection_from_signal_behaviour(monkeypatch):
 
     local_llm.converse("Use one whole amp at low guitar volume and another at high volume.", opener=fake_open)
 
-    assert "constant mixture" in seen["system"]
-    assert "entire amp to become the other" in seen["system"]
-    assert "stable tonal foundation" in seen["system"]
-    assert "2-18 dB" in seen["system"]
+    assert "choose by requested signal behaviour" in seen["system"]
+    assert "FIXED mix" in seen["system"]
+    assert "the entire voice" in seen["system"]
+    assert "stable broad tone/feel" in seen["system"]
+    assert "2-18 dB" in seen["system"]  # must match the UI transition slider's range
     assert "Changes as you play harder" in seen["system"]
     assert "Parallel Blend" not in seen["system"]
 
@@ -218,7 +219,7 @@ def test_local_llm_compacts_prose_but_preserves_a_structured_source_plan(monkeyp
     assert len(messages) == 8  # system, six compact history turns, user
     assert all(len(message["content"]) <= 900 for message in messages[1:-1])
     assert len(messages[-1]["content"]) <= len("Which file should I use?") + 5_200
-    # Computed from the real formula (hybrid.local_llm._default_max_tokens applied to the actual char-limit constants) rather
+    # Computed from the real formula (hybrid.services.local_llm._default_max_tokens applied to the actual char-limit constants) rather
     # than a hardcoded number: a hardcoded 1400 here silently went stale after the char limits changed and only "passed" by
     # coincidence on machines whose .env happened to pin NAM_MIXER_AI_MAX_TOKENS/NAM_MIXER_LOCAL_LLM_MAX_TOKENS to 1400.
     expected_max_tokens = local_llm._default_max_tokens(
@@ -376,7 +377,7 @@ def test_local_llm_keeps_a_detailed_but_bounded_explanation(monkeypatch):
 def test_canonical_explanation_and_reply_char_caps_are_actually_read(monkeypatch):
     # Regression test: these two caps used to be looked up by their legacy
     # NAM_MIXER_LOCAL_LLM_* name directly, so the canonical NAM_MIXER_AI_*
-    # setting the Settings page now exposes (see hybrid/settings.py) was
+    # setting the Settings page now exposes (see hybrid/services/settings.py) was
     # silently ignored. Confirm the canonical name actually wins.
     monkeypatch.setenv("NAM_MIXER_AI_MAX_EXPLANATION_CHARS", "12")
     monkeypatch.setenv("NAM_MIXER_AI_MAX_REPLY_CHARS", "9")
@@ -733,3 +734,34 @@ def test_converse_rejects_recipe_with_backwards_switch_knob_narrative(monkeypatc
 
     with pytest.raises(local_llm.LocalLlmError, match="incorrectly described"):
         local_llm.converse("make a punk tone", opener=fake_open, require_recipe=True)
+
+
+@pytest.mark.parametrize("width", [1, 1.9, 18.5, 24])
+def test_hybrid_width_outside_the_ui_slider_range_is_rejected(width):
+    """The transition slider is 2-18 dB; a wider/narrower value would be
+    silently clamped by the UI while the explanation still quoted it."""
+    with pytest.raises(local_llm.LocalLlmError, match="invalid width"):
+        local_llm._recipe_from_json({"mode": "hybrid", "switchKnob": 4, "width": width, "explanation": "x"})
+
+
+@pytest.mark.parametrize("width", [2, 9.5, 18])
+def test_hybrid_width_inside_the_ui_slider_range_is_accepted(width):
+    assert local_llm._recipe_from_json({"mode": "hybrid", "switchKnob": 4, "width": width, "explanation": "x"}).width == width
+
+
+def test_empty_inherited_variable_does_not_mask_the_saved_env_value(tmp_path, monkeypatch):
+    """A launcher exporting NAM_MIXER_AI_PROVIDER='' must not hide the provider saved in .env."""
+    env = tmp_path / ".env"
+    env.write_text("NAM_MIXER_AI_PROVIDER=custom\n", encoding="utf-8")
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(env))
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "")
+    assert local_llm._setting("NAM_MIXER_AI_PROVIDER", "local") == "custom"
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "cloudflare")
+    assert local_llm._setting("NAM_MIXER_AI_PROVIDER", "local") == "cloudflare"   # a real value still wins
+
+
+def test_empty_variables_fall_back_to_the_default(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "")
+    monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
+    assert local_llm._setting("NAM_MIXER_AI_MODEL", "fallback", legacy="NAM_MIXER_LOCAL_LLM_MODEL") == "fallback"
+

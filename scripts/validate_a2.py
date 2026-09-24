@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Held-out musical validation of a trained A2 export against the LIVE
-reference hybrid -- docs/phase3.md sections 24-28.
+reference hybrid -- docs/history/phase3.md sections 24-28.
 
-Runs entirely on the native NAMCore renderer (`hybrid.render.render`), no
+Runs entirely on the native NAMCore renderer (`hybrid.core.render.render`), no
 torch/neural-amp-modeler required -- safe to run in the normal app
 environment, independently of scripts/train_a2.py's training venv.
 
@@ -23,7 +23,7 @@ combination.
 Unlike training-target generation, input-profile gains ARE applied here as
 real audio gain (never the deprecated envelope-only `dry_gain_db`) --
 that's the whole point of this validation: testing how different real
-input levels behave (docs/phase3.md section 25).
+input levels behave (docs/history/phase3.md section 25).
 """
 from __future__ import annotations
 
@@ -38,16 +38,17 @@ import soundfile as sf
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from hybrid.design import HybridDesign  # noqa: E402
-from hybrid.fixed_blend import BlendDesign  # noqa: E402
-from hybrid.character_blend import CharacterBlendDesign  # noqa: E402
-from hybrid.input_profiles import db_to_amplitude  # noqa: E402
-from hybrid.safety import check_audio  # noqa: E402
-from hybrid.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character, render_trained_a2  # noqa: E402
+from hybrid.modes.design import HybridDesign  # noqa: E402
+from hybrid.modes.fixed_blend import BlendDesign  # noqa: E402
+from hybrid.modes.character_blend import CharacterBlendDesign  # noqa: E402
+from hybrid.core.input_profiles import db_to_amplitude  # noqa: E402
+from hybrid.core.render import SLIM_FULL, SLIM_LITE  # noqa: E402
+from hybrid.core.safety import check_audio  # noqa: E402
+from hybrid.training.validation import compute_esr_metrics, render_reference_hybrid, render_reference_blend, render_reference_character, render_trained_a2  # noqa: E402
 
 # A single fixed listening-safety gain applied identically to every file in a
 # comparison, if any of them would clip -- never per-file, never a limiter,
-# per docs/phase3.md section 27 ("use the SAME fixed gain for all compared
+# per docs/history/phase3.md section 27 ("use the SAME fixed gain for all compared
 # files and document it").
 LISTENING_TARGET_PEAK_DBFS = -3.0
 SILENCE_GAP_S = 1.0
@@ -86,9 +87,9 @@ def run_validation(
             gained = (dry * db_to_amplitude(gain_db)).astype(np.float32)
 
             ref = render_teacher(design, gained, sr)
-            full = render_trained_a2(a2_nam_path, gained, sr, slim=0.0)
+            full = render_trained_a2(a2_nam_path, gained, sr, slim=SLIM_FULL)
             try:
-                lite = render_trained_a2(a2_nam_path, gained, sr, slim=1.0)
+                lite = render_trained_a2(a2_nam_path, gained, sr, slim=SLIM_LITE)
                 lite_ok = True
             except Exception as exc:  # noqa: BLE001 -- Lite may not be supported by every export
                 print(f"WARNING: Lite render failed for {di_stem}/{label}: {exc}")
@@ -123,7 +124,7 @@ def run_validation(
 def _write_listening_files(case_dir: Path, reference: np.ndarray, full: np.ndarray, lite, sample_rate: int) -> None:
     """Apply ONE shared fixed gain (if any of the three would clip) to all
     three files identically -- never normalize each independently
-    (docs/phase3.md section 27)."""
+    (docs/history/phase3.md section 27)."""
     case_dir.mkdir(parents=True, exist_ok=True)
     n = min(len(reference), len(full), len(lite) if lite is not None else len(full))
     clips = [reference[:n], full[:n]] + ([lite[:n]] if lite is not None else [])

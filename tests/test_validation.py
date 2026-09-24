@@ -1,4 +1,4 @@
-"""Tests for hybrid/validation.py -- docs/phase3.md sections 24-28.
+"""Tests for hybrid/training/validation.py -- docs/history/phase3.md sections 24-28.
 
 Uses a fake identity render() (same pattern as other pipeline tests) so
 these run without the native nam_render tool or real .nam captures.
@@ -10,15 +10,15 @@ import json
 import numpy as np
 import pytest
 
-import hybrid.validation as validation
-from hybrid.design import HybridDesign
-from hybrid.validation import (
+import hybrid.training.validation as validation
+from hybrid.modes.design import HybridDesign
+from hybrid.training.validation import (
     compute_esr_metrics, load_frozen_design, render_processed_reference,
     render_reference_hybrid, render_reference_blend, render_reference_character,
 )
-from hybrid.fixed_blend import BlendDesign
-from hybrid.character_blend import CharacterBlendDesign
-from hybrid.validation_report import build_validation_report
+from hybrid.modes.fixed_blend import BlendDesign
+from hybrid.modes.character_blend import CharacterBlendDesign
+from hybrid.training.validation_report import build_validation_report
 
 
 @pytest.fixture(autouse=True)
@@ -142,7 +142,7 @@ def test_processed_reference_replays_fixed_output_and_safety_gains_once(tmp_path
 def test_processed_reference_applies_baked_cab_only_in_teacher_post_stage(monkeypatch, tmp_path):
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")
-    from hybrid.cab_ir import CabDesign
+    from hybrid.core.cab_ir import CabDesign
     design = _design(
         amp_a, amp_b,
         cab=CabDesign(selected=True, baked=True, ir_working_path=str(tmp_path / "cab.wav")),
@@ -195,7 +195,7 @@ def test_validation_report_separates_completion_quality_and_unavailable_checks()
         "lite_render": "failed", "lite_quality": "unavailable",
         "full_quiet_playing": "not_applicable", "lite_quiet_playing": "not_applicable",
     }
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["policy"]["max_raw_esr"] == 0.25
 
 

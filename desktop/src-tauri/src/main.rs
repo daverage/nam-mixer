@@ -1,3 +1,6 @@
+// Release builds on Windows are GUI apps: no console window beside the UI.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // NAM Mixer desktop shell.
 //
 // This is a thin Tauri wrapper, not a reimplementation: it starts the
@@ -17,7 +20,66 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-struct BackendProcess(Mutex<Option<Child>>);
+/// The backend child (None until started in the background), its port, the
+/// per-launch token its /api/shutdown endpoint requires, and the background
+/// start-up step (joined on quit if it has not registered the child yet).
+struct Backend {
+    child: Mutex<BackendSlot>,
+    port: u16,
+    shutdown_token: String,
+    startup: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+/// The child and whether the app is quitting, behind ONE lock, so a quit
+/// during start-up can never miss a child that is being registered.
+#[derive(Default)]
+struct BackendSlot {
+    child: Option<Child>,
+    quitting: bool,
+}
+
+impl BackendSlot {
+    /// Store a freshly started child, unless the app is already quitting:
+    /// then it is handed back and the caller must stop it.
+    fn register(slot: &Mutex<BackendSlot>, child: Child) -> Option<Child> {
+        let mut guard = slot.lock().unwrap();
+        if guard.quitting {
+            return Some(child);
+        }
+        guard.child = Some(child);
+        None
+    }
+
+    /// Mark the app as quitting and take whatever child is registered.
+    fn begin_quit(slot: &Mutex<BackendSlot>) -> Option<Child> {
+        let mut guard = slot.lock().unwrap();
+        guard.quitting = true;
+        guard.child.take()
+    }
+
+    fn quitting(slot: &Mutex<BackendSlot>) -> bool {
+        slot.lock().unwrap().quitting
+    }
+}
+
+/// An unguessable per-launch token: std's RandomState keys are seeded from
+/// the OS random source.
+fn shutdown_token() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    (0..4)
+        .map(|i| {
+            let mut hasher = RandomState::new().build_hasher();
+            hasher.write_u128(nanos ^ (i as u128));
+            hasher.write_u32(std::process::id());
+            format!("{:016x}", hasher.finish())
+        })
+        .collect()
+}
 
 // A native confirm command (tauri-plugin-dialog's blocking_show(), called
 // from an async command the same way the save commands below call
@@ -84,10 +146,16 @@ fn open_external_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err("only http(s) URLs can be opened this way".to_string());
     }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("URL contains whitespace or control characters".to_string());
+    }
     let result = if cfg!(target_os = "macos") {
         Command::new("open").arg(&url).status()
     } else if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", "start", "", &url]).status()
+        // Never `cmd /C start`: cmd treats & | ^ % in the URL as shell syntax,
+        // so a link could run another command. FileProtocolHandler receives
+        // the URL as a plain argument.
+        Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()
     } else {
         Command::new("xdg-open").arg(&url).status()
     };
@@ -135,8 +203,11 @@ fn repo_root() -> std::path::PathBuf {
 // covers Kaggle CLI discovery, not just Python version detection.
 fn user_shell_path() -> Option<String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    // `env` prints the exported PATH colon-joined in every shell (fish's
+    // "$PATH" would be space-separated), and taking the last PATH= line
+    // ignores anything the user's rc files print first.
     let mut child = Command::new(&shell)
-        .args(["-ilc", "printf '%s' \"$PATH\""])
+        .args(["-ilc", "env"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -154,8 +225,7 @@ fn user_shell_path() -> Option<String> {
                 }
                 let mut stdout = String::new();
                 child.stdout.take()?.read_to_string(&mut stdout).ok()?;
-                let path = stdout.trim().to_string();
-                return (!path.is_empty()).then_some(path);
+                return path_from_env_output(&stdout);
             }
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -164,6 +234,13 @@ fn user_shell_path() -> Option<String> {
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     }
+}
+
+/// The PATH value from `env` output: the last `PATH=` line, so text printed
+/// by the user's rc files before it is ignored.
+fn path_from_env_output(stdout: &str) -> Option<String> {
+    let path = stdout.lines().rev().find_map(|line| line.strip_prefix("PATH="))?.trim().to_string();
+    (!path.is_empty()).then_some(path)
 }
 
 // The bundled backend (packaging/backend/nam_mixer_backend.spec, built with
@@ -175,7 +252,7 @@ fn user_shell_path() -> Option<String> {
 // stable directory instead of a fresh temp-extraction path on every launch.
 // Bundling the whole folder as a resource and spawning the exe inside it
 // directly sidesteps that mismatch entirely.
-fn bundled_backend_exe(app: &tauri::App) -> Option<std::path::PathBuf> {
+fn bundled_backend_exe(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     let exe_name = if cfg!(windows) { "nam-mixer-backend.exe" } else { "nam-mixer-backend" };
     let candidate = app
         .path()
@@ -193,14 +270,14 @@ fn bundled_backend_exe(app: &tauri::App) -> Option<std::path::PathBuf> {
 // Either way this is a REAL SEPARATE process, never asked to relaunch this
 // GUI executable itself (that relaunch-loop bug is what killed the
 // previous pywebview-based desktop app -- see docs/history/).
-fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Child {
-    let mut command = match bundled_backend_exe(app) {
+fn spawn_backend(bundled_exe: Option<std::path::PathBuf>, port: u16, data_dir: &std::path::Path, token: &str) -> Child {
+    let mut command = match bundled_exe {
         Some(exe) => {
             let mut cmd = Command::new(&exe);
             let exe_dir = exe.parent().unwrap();
             cmd.current_dir(exe_dir);
             // Local A2 training's OWN separate venv subprocess (see
-            // hybrid/local_training.py) needs real loose scripts/hybrid
+            // hybrid/training/local_training.py) needs real loose scripts/hybrid
             // source + requirements-training.txt on disk -- bundled at
             // training_support/ alongside this exe (see the .spec file's
             // datas), never inside this frozen process's own packed
@@ -221,72 +298,225 @@ fn spawn_backend(app: &tauri::App, port: u16, data_dir: &std::path::Path) -> Chi
     if let Some(path) = user_shell_path() {
         command.env("PATH", path);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW); // the console backend gets no window of its own
+    }
     command
         .env("PORT", port.to_string())
         .env("NAM_MIXER_DATA_DIR", data_dir)
         .env("NAM_MIXER_ENV_FILE", data_dir.join(".env"))
+        .env("NAM_MIXER_SHUTDOWN_TOKEN", token)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .expect("failed to start the NAM Mixer backend (is python3 on PATH? -- see NAM_MIXER_PYTHON)")
 }
 
-fn wait_for_health(port: u16, timeout: Duration) -> bool {
+/// Ok once /api/health answers; Err with the reason if the backend exits
+/// first (reported at once rather than after the full timeout) or times out.
+fn wait_for_health(port: u16, timeout: Duration, child: &Mutex<BackendSlot>) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/api/health");
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
+        match child.lock().unwrap().child.as_mut().map(|c| c.try_wait()) {
+            Some(Ok(Some(status))) => return Err(format!("The local backend exited during startup ({status}).")),
+            None => return Err("The app is quitting.".to_string()), // taken by the quit handler
+            _ => {}
+        }
         if let Ok(resp) = ureq::get(&url).timeout(Duration::from_millis(500)).call() {
             if resp.status() == 200 {
-                return true;
+                return Ok(());
             }
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+    Err(format!("The local backend did not become ready within {} seconds.", timeout.as_secs()))
+}
+
+fn exited_within(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     false
+}
+
+/// Stop the backend cleanly so it can stop its own local-training subprocess
+/// (a separate process group/session that would otherwise outlive it): the
+/// token-protected /api/shutdown works on every OS; SIGTERM is the unix
+/// fallback; a hard kill is the last resort.
+fn stop_backend(mut child: Child, port: u16, token: &str) {
+    let _ = ureq::post(&format!("http://127.0.0.1:{port}/api/shutdown"))
+        .set("X-NAM-Mixer-Shutdown-Token", token)
+        .timeout(Duration::from_secs(3))
+        .call();
+    if exited_within(&mut child, Duration::from_secs(5)) {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+        if exited_within(&mut child, Duration::from_secs(3)) {
+            return;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn startup_error_url(reason: &str) -> String {
+    format!(
+        "data:text/html,{}",
+        percent_encode(&format!(
+            "<html><body style=\"font-family:sans-serif;padding:2rem\"><h1>NAM Mixer could not start</h1><p>{reason} Quit and try again.</p></body></html>"
+        ))
+    )
+}
+
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![save_file_from_url, save_bytes, open_external_url])
-        .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = find_free_port();
+            let token = shutdown_token();
+            app.manage(Backend { child: Mutex::new(BackendSlot::default()), port, shutdown_token: token.clone(),
+                                 startup: Mutex::new(None) });
             // A real per-OS user data directory (e.g. ~/Library/Application
             // Support/com.nammixer.desktop on macOS) -- NEVER the bundle's
             // own (read-only, ephemeral-on-reinstall) directory. app.py
             // already creates this path itself (WORK_DIR.mkdir(...)) once
             // told about it via NAM_MIXER_DATA_DIR.
             let data_dir = app.path().app_data_dir().expect("failed to resolve app data dir");
-            let child = spawn_backend(app, port, &data_dir);
-            *app.state::<BackendProcess>().0.lock().unwrap() = Some(child);
 
-            let ready = wait_for_health(port, Duration::from_secs(30));
-            let url = if ready {
-                format!("http://127.0.0.1:{port}/")
-            } else {
-                // A blank about: page looks like a frozen launch and gives
-                // the user no recovery path. Keep the failure in the same
-                // window and make it explicit instead.
-                "data:text/html,%3Chtml%3E%3Cbody%20style=%22font-family:sans-serif;padding:2rem%22%3E%3Ch1%3ENAM%20Mixer%20could%20not%20start%3C%2Fh1%3E%3Cp%3EThe%20local%20backend%20did%20not%20become%20ready%20within%2030%20seconds.%20Quit%20and%20try%20again.%3C%2Fp%3E%3C%2Fbody%3E%3C%2Fhtml%3E".to_string()
-            };
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse().unwrap()))
+            // Show the window at once on the bundled "Starting" page, then do
+            // the slow parts (shell PATH lookup, backend start -- the first
+            // launch after installing can take ~40 s while macOS checks the
+            // bundled libraries) off the main thread and navigate when ready.
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("NAM Mixer")
                 .inner_size(1280.0, 860.0)
                 .build()?;
+            let handle = app.handle().clone();
+            let startup = std::thread::spawn(move || {
+                let backend = handle.state::<Backend>();
+                if BackendSlot::quitting(&backend.child) {
+                    return; // quit before the backend was even started
+                }
+                let child = spawn_backend(bundled_backend_exe(&handle), port, &data_dir, &token);
+                if let Some(child) = BackendSlot::register(&backend.child, child) {
+                    // The app started quitting while this child was being
+                    // started; the quit handler is waiting for this thread.
+                    stop_backend(child, port, &token);
+                    return;
+                }
+                // Waiting for health and navigating can take a while, and the
+                // quit handler never needs to wait for it: run it separately.
+                let handle = handle.clone();
+                std::thread::spawn(move || {
+                    let backend = handle.state::<Backend>();
+                    let url = match wait_for_health(port, Duration::from_secs(120), &backend.child) {
+                        Ok(()) => format!("http://127.0.0.1:{port}/"),
+                        // A blank page looks like a frozen launch; say what happened.
+                        Err(reason) => startup_error_url(&reason),
+                    };
+                    if let (Some(window), Ok(parsed)) = (handle.get_webview_window("main"), url.parse()) {
+                        let _ = window.navigate(parsed);
+                    }
+                });
+            });
+            *app.state::<Backend>().startup.lock().unwrap() = Some(startup);
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building NAM Mixer desktop shell")
         .run(|app_handle, event| {
             // Covers every quit path (window close, Cmd+Q, dock quit) --
-            // whichever fires first kills the backend exactly once.
+            // whichever fires first stops the backend exactly once.
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-                let state = app_handle.state::<BackendProcess>();
-                let taken = state.0.lock().unwrap().take();
-                if let Some(mut child) = taken {
-                    let _ = child.kill();
+                if let Some(backend) = app_handle.try_state::<Backend>() {
+                    if let Some(child) = BackendSlot::begin_quit(&backend.child) {
+                        stop_backend(child, backend.port, &backend.shutdown_token);
+                    } else if let Some(startup) = backend.startup.lock().unwrap().take() {
+                        // Quit during start-up: that thread either never
+                        // starts the backend or stops the one it started
+                        // (bounded by the shell PATH lookup, ~5 s).
+                        let _ = startup.join();
+                    }
                 }
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn sleeper() -> Child {
+        Command::new("sleep").arg("30").spawn().expect("spawn sleep")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_registered_before_quit_is_handed_to_the_quit_handler() {
+        let slot = Mutex::new(BackendSlot::default());
+        assert!(BackendSlot::register(&slot, sleeper()).is_none());
+        let mut child = BackendSlot::begin_quit(&slot).expect("quit must take the registered child");
+        assert!(BackendSlot::quitting(&slot));
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_started_after_quit_began_is_handed_back_to_be_stopped() {
+        let slot = Mutex::new(BackendSlot::default());
+        assert!(BackendSlot::begin_quit(&slot).is_none()); // quit wins the race: nothing registered yet
+        let mut returned = BackendSlot::register(&slot, sleeper()).expect("must not be stored once quitting");
+        assert!(slot.lock().unwrap().child.is_none());
+        returned.kill().unwrap();
+        returned.wait().unwrap();
+    }
+
+    #[test]
+    fn path_comes_from_env_output_even_after_rc_file_greetings() {
+        let zsh = "Welcome back!\nHOME=/Users/x\nPATH=/opt/homebrew/bin:/usr/bin:/bin\nSHELL=/bin/zsh\n";
+        assert_eq!(path_from_env_output(zsh).as_deref(), Some("/opt/homebrew/bin:/usr/bin:/bin"));
+        // fish exports PATH colon-joined through `env` too
+        let fish = "PATH=/opt/homebrew/bin:/usr/bin\nfish_greeting=hi\n";
+        assert_eq!(path_from_env_output(fish).as_deref(), Some("/opt/homebrew/bin:/usr/bin"));
+        assert_eq!(path_from_env_output("no path here\n"), None);
+    }
+
+    #[test]
+    fn shutdown_tokens_are_long_and_unique() {
+        let (a, b) = (shutdown_token(), shutdown_token());
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn startup_error_page_is_fully_encoded() {
+        let encoded = percent_encode("<p>exited (exit status: 1). Quit</p>");
+        assert!(!encoded.contains('<') && !encoded.contains(' ') && !encoded.contains('('));
+        assert!(encoded.starts_with("%3Cp%3Eexited"));
+    }
+}
+

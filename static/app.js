@@ -190,7 +190,7 @@ if (!welcomeAlreadySeen) showWelcome();
 // Tabs are DESIGN MODES, not separate applications -- Amp A/B, the preview
 // DI, input profile/calibration, render, test gain, Listen controls, the
 // Cabinet IR stage, official training input, A2 quality, and training all
-// stay SHARED between tabs (see docs/blend-mode.md). Only the crossover/
+// stay SHARED between tabs (see docs/history/blend-mode.md). Only the crossover/
 // transition/level-match controls, the journey/coverage diagnostics, and
 // the Create A2 wording differ per mode. Switching tabs never re-renders.
 let currentMode = "hybrid";
@@ -363,9 +363,9 @@ document.getElementById("amp-b-file").addEventListener("change", () =>
 );
 
 // ---- Shared Cabinet IR stage (both design modes) ----
-// See docs/blend-mode.md "SHARED CABINET IR STAGE"/"CAB UI". The cab sits
+// See docs/history/blend-mode.md "SHARED CABINET IR STAGE"/"CAB UI". The cab sits
 // AFTER the amp combination and is applied identically to Amp A/Result/Amp B
-// previews (fair comparisons) -- see hybrid/cab_ir.py and app.py's
+// previews (fair comparisons) -- see hybrid/core/cab_ir.py and app.py's
 // _parse_cab_params/_resolve_cab_design.
 let cabServerPath = null;
 const cabFileInput = document.getElementById("cab-file");
@@ -373,14 +373,61 @@ const cabInfoEl = document.getElementById("cab-info");
 const cabPreviewEnabled = document.getElementById("cab-preview-enabled");
 const cabExportMode = document.getElementById("cab-export-mode");
 const cabStatusEl = document.getElementById("cab-status");
+const cabExportModeInfo = document.getElementById("cab-export-mode-info");
+const CAB_EXPORT_MODE_NOTES = {
+  none: "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.",
+  learned: "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download.",
+  embedded: "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it.",
+};
+
+const cabFinishSummary = document.getElementById("cab-finish-summary");
+const cabNameEl = document.getElementById("cab-name");
+const cabDetailEl = document.getElementById("cab-detail");
+const cabFileButton = document.getElementById("cab-file-button");
+const cabRemoveButton = document.getElementById("cab-remove");
+
+// cab-info keeps the full upload description (sessions store it as the label);
+// the listening card shows it as a name plus a smaller detail line.
+function updateCabStrip() {
+  const info = cabInfoEl.textContent;
+  const [namePart, ...rest] = info.split(" -- ");
+  if (cabServerPath) {
+    cabNameEl.textContent = stripRestoredSuffix(namePart).trim() || "Cabinet IR";
+    cabDetailEl.textContent = rest.join(" · ") || (info.endsWith("(restored)") ? "Restored from the session" : "");
+  } else {
+    cabNameEl.textContent = "No cabinet";
+    cabDetailEl.textContent = info || "You are hearing the amps on their own.";
+  }
+  cabFileButton.textContent = cabServerPath ? "Change IR…" : "Choose IR…";
+  cabRemoveButton.hidden = !cabServerPath;
+}
+
+cabRemoveButton.addEventListener("click", () => {
+  cabFileInput.value = "";
+  cabFileInput.dispatchEvent(new Event("change"));
+});
+// The <label> opens the hidden file input; make it keyboard-operable too.
+cabFileButton.tabIndex = 0;
+cabFileButton.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); cabFileInput.click(); }
+});
 
 function updateCabStatus() {
+  updateCabStrip();
+  if (cabExportModeInfo) cabExportModeInfo.textContent = CAB_EXPORT_MODE_NOTES[cabExportMode.value] || CAB_EXPORT_MODE_NOTES.none;
+  if (cabFinishSummary) {
+    const name = stripRestoredSuffix(cabInfoEl.textContent.split(" -- ")[0]).trim();
+    cabFinishSummary.textContent = cabServerPath
+      ? `Cabinet: ${name || "selected IR"} — chosen in the listening card above.`
+      : "No cabinet chosen. Choose a cabinet IR in the listening card above to hear it and include it.";
+    cabFinishSummary.classList.toggle("is-set", Boolean(cabServerPath));
+  }
   if (!cabServerPath) {
     cabStatusEl.textContent = "Cab: off";
   } else if (cabExportMode.value === "embedded") {
     cabStatusEl.textContent = "Cab: two downloads -- tested head-only NAM plus exact embedded-cab NAM";
   } else if (cabExportMode.value === "learned") {
-    cabStatusEl.textContent = "Cab: Baked In -- trained into the A2 model";
+    cabStatusEl.textContent = "Cab: learned -- trained into the A2 model";
   } else if (cabPreviewEnabled.checked) {
     cabStatusEl.textContent = "Cab: preview only -- exported A2 remains amp/head only";
   } else {
@@ -393,7 +440,7 @@ cabFileInput.addEventListener("change", async () => {
   const file = cabFileInput.files[0];
   cabServerPath = null;
   cabPreviewEnabled.checked = false;
-  cabExportMode.value = "none";
+  setCabExportMode("none");
   cabPreviewEnabled.disabled = true;
   cabExportMode.disabled = true;
   if (!file) {
@@ -415,7 +462,7 @@ cabFileInput.addEventListener("change", async () => {
     cabServerPath = data.path;
     cabPreviewEnabled.disabled = false;
     cabExportMode.disabled = false;
-    cabExportMode.value = experimentalArchitecturesEnabled() ? "embedded" : "none";
+    setCabExportMode("none");
     const durationS = data.duration_s !== undefined ? data.duration_s.toFixed(2) : "?";
     const preparedMs = data.prepared_duration_ms !== undefined ? data.prepared_duration_ms.toFixed(1) : null;
     const energy999Ms = data.energy_999_ms !== undefined ? data.energy_999_ms.toFixed(1) : null;
@@ -425,6 +472,9 @@ cabFileInput.addEventListener("change", async () => {
     if (preparedMs !== null) info += ` -- prepared length ${preparedMs} ms`;
     if (energy999Ms !== null) info += `, 99.9% energy by ${energy999Ms} ms`;
     cabInfoEl.textContent = info;
+    // The IR is chosen in the listening card in order to hear it.
+    cabPreviewEnabled.checked = true;
+    cabPreviewEnabled.dispatchEvent(new Event("change"));
   } catch (err) {
     cabInfoEl.textContent = "Upload failed: " + err;
   } finally {
@@ -454,14 +504,15 @@ cabExportMode.addEventListener("change", () => {
       "The tested head-only A2 will also be available as a separate download."
     );
     if (!proceed) {
-      cabExportMode.value = "none";
+      setCabExportMode("none");
       updateCabStatus();
       return;
     }
     sequentialEmbeddedWarningAcknowledged = true;
   }
+  syncCabExportOptions();
   // "If Bake cab into A2 is enabled, automatically ensure Use cab in preview
-  // is also enabled" -- docs/blend-mode.md "CAB UI".
+  // is also enabled" -- docs/history/blend-mode.md "CAB UI".
   updateCabStatus();
   resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
   invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
@@ -519,7 +570,7 @@ function populateProfileSelect() {
 
 // Anything that changes what the two amps actually receive (amp files, DI
 // clip, instrument/profile/custom-gain, calibration mode, reference level)
-// invalidates the cached RenderedPair -- see hybrid/pipeline.py's
+// invalidates the cached RenderedPair -- see hybrid/core/pipeline.py's
 // render_pair() docstring for the authoritative list. This makes that
 // staleness impossible to miss: preview buttons disable, the Render Amps
 // button gets a pulsing highlight, and the status line names WHAT changed
@@ -574,7 +625,7 @@ customGainSlider.addEventListener("input", () => {
 calibrationModeSelect.addEventListener("change", () => markProfileStale("Calibration mode changed"));
 referenceDbuInput.addEventListener("change", () => markProfileStale("Reference level changed"));
 
-// Independent per-amp pre-render input trim -- see hybrid/pipeline.py's
+// Independent per-amp pre-render input trim -- see hybrid/core/pipeline.py's
 // RenderedPair docstring. A render-stage control like the profile/
 // calibration settings above (it changes what each amp actually receives),
 // not a blend-stage one, so it invalidates the cached RenderedPair too.
@@ -592,7 +643,7 @@ ampBInputGainSlider.addEventListener("input", () => {
 });
 
 // Real audio gain (unlike the deprecated preview-only dry_gain_db) -- see
-// hybrid/pipeline.py's render_pair() docstring. Does NOT affect the
+// hybrid/core/pipeline.py's render_pair() docstring. Does NOT affect the
 // coverage table (that's computed from the un-gained source envelope so it
 // can compare hypothetical profiles independently of this stress-test knob).
 //
@@ -646,7 +697,7 @@ testGainSlider.addEventListener("input", () => {
 });
 
 // DI filenames beginning with "bass_" are a trivial, documented instrument
-// hint (see hybrid/input_profiles.py) -- used only as a default, never as a
+// hint (see hybrid/core/input_profiles.py) -- used only as a default, never as a
 // claim about what pickup actually produced the recording.
 const diSelector = document.getElementById("di-selector");
 
@@ -712,6 +763,12 @@ function knobFromDb(db) {
 // a preset load, the suggested-crossover auto-set, or its reset link) back
 // onto the knob's position, without re-triggering the raw slider's own
 // input handling.
+// The slider clamps (-40..0) and snaps (0.5 dB) whatever it is given; always
+// label the value it will actually send, not the number it was handed.
+function showCrossoverSliderValue() {
+  crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
+}
+
 function syncCrossoverKnobFromDb() {
   const knobPos = knobFromDb(crossoverSlider.value);
   crossoverKnobSlider.value = knobPos.toFixed(1);
@@ -744,7 +801,7 @@ function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
 crossoverKnobSlider.addEventListener("input", () => {
   const db = dbFromKnob(crossoverKnobSlider.value);
   crossoverSlider.value = db.toFixed(2);
-  crossoverValue.textContent = `${db.toFixed(1)} dBFS`;
+  showCrossoverSliderValue();
   crossoverKnobValue.textContent = `${parseFloat(crossoverKnobSlider.value).toFixed(1)} / 10`;
   scheduleUpdate();
   scheduleAuditionRefresh();
@@ -998,7 +1055,7 @@ function applyWizardSettings() {
     const crossoverDb = dbFromKnob(wizardSwitch.value);
     crossoverSlider.value = crossoverDb.toFixed(2);
     crossoverBaseline = { value: crossoverSlider.value, label: "wizard" };
-    crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
+    showCrossoverSliderValue();
     syncCrossoverKnobFromDb();
     transitionSlider.value = behaviour === "smooth" ? "12" : "6";
     transitionValue.textContent = `${transitionSlider.value} dB`;
@@ -1190,9 +1247,10 @@ function applyRecipe(recipe, prefix = "", { showMessage = true, noRecipeMessage 
     const crossoverDb = dbFromKnob(recipe.switchKnob);
     crossoverSlider.value = crossoverDb.toFixed(2);
     crossoverBaseline = { value: crossoverSlider.value, label: "recipe" };
-    crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
+    showCrossoverSliderValue();
     transitionSlider.value = recipe.width;
-    transitionValue.textContent = `${recipe.width} dB`;
+    // Show the slider's own (clamped/stepped) value, not the raw recipe number.
+    transitionValue.textContent = `${transitionSlider.value} dB`;
     syncCrossoverKnobFromDb();
     syncPresetButtonStates();
     updateTransitionAroundSwitchNote();
@@ -1417,16 +1475,6 @@ ampBTrimSlider.addEventListener("input", () => {
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
-
-async function notImplementedAction(url) {
-  try {
-    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    const data = await resp.json();
-    setStatus(data.error || "Not implemented yet.", true);
-  } catch (err) {
-    setStatus("Request failed: " + err, true);
-  }
-}
 
 const previewButtons = [
   document.getElementById("btn-preview-a"),
@@ -1708,7 +1756,7 @@ function characterParamsBody() {
 }
 
 // Rendered display for a LowLevelResponseCheck dict (see
-// hybrid.character_blend.LowLevelResponseCheck / docs/blend-mode-fixes.md
+// hybrid.modes.character_blend.LowLevelResponseCheck / docs/history/blend-mode-fixes.md
 // Phase 6) -- shared by the on-demand check button and the Generate result.
 function renderLowLevelResponseHtml(check) {
   if (!check) return "";
@@ -1717,7 +1765,7 @@ function renderLowLevelResponseHtml(check) {
     .join("");
   const verdict = check.ok
     ? `<div class="ok-line">&#10003; continuous low-level response, no dead zone</div>`
-    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design -- see docs/blend-mode-fixes.md.</div>`;
+    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design: it would bake silence at quiet playing into the model. Change the Drive settings or the amps and check again.</div>`;
   return `
     <div><strong>LOW-LEVEL RESPONSE</strong></div>
     <table class="coverage-table"><tbody>${rows}</tbody></table>
@@ -1743,8 +1791,8 @@ function cabParamsBody() {
 
 // --- Output gain (shared, post-combination, all modes) -----------------
 // Mirrors cabParamsBody()'s "shared control" pattern -- see
-// hybrid/design.py's output_gain_mode/manual_output_gain_db and
-// hybrid/safety.py's compute_auto_output_gain_db/apply_output_gain.
+// hybrid/modes/design.py's output_gain_mode/manual_output_gain_db and
+// hybrid/core/safety.py's compute_auto_output_gain_db/apply_output_gain.
 const outputGainAutoCheckbox = document.getElementById("output-gain-auto");
 const outputGainManualSlider = document.getElementById("output-gain-manual-slider");
 const outputGainManualValue = document.getElementById("output-gain-manual-value");
@@ -1845,8 +1893,10 @@ async function updateJourney() {
   }
 }
 
+let coverageRequestSeq = 0;
 async function updateCoverage() {
   if (!havePair) return;
+  const mine = ++coverageRequestSeq;  // slider drags fire overlapping requests; only the newest may render
   try {
     const resp = await fetch("/api/profile_coverage", {
       method: "POST",
@@ -1860,9 +1910,16 @@ async function updateCoverage() {
       }),
     });
     const data = await resp.json();
-    if (!resp.ok) return;
+    if (mine !== coverageRequestSeq || !resp.ok) return;
 
     coverageTbody.innerHTML = "";
+    if (data.active_signal === false) {
+      coverageTable.hidden = true;
+      coverageWarning.hidden = true;
+      coverageEmpty.textContent = "No active playing detected in this DI, so coverage can't be estimated.";
+      coverageEmpty.hidden = false;
+      return;
+    }
     data.coverage.forEach((row) => {
       const tr = document.createElement("tr");
       const cell = (text) => {
@@ -2163,10 +2220,10 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
     if (data.suggested_crossover_dbfs !== null && data.suggested_crossover_dbfs !== undefined) {
       const suggested = data.suggested_crossover_dbfs;
       crossoverSlider.value = suggested.toFixed(1);
-      crossoverValue.textContent = `${suggested.toFixed(1)} dBFS`;
+      showCrossoverSliderValue();
       syncCrossoverKnobFromDb();
       suggestedCrossoverNote.textContent =
-        `Crossover set to ${suggested.toFixed(1)} dBFS, suggested from this DI's active-signal level. `;
+        `Crossover set to ${parseFloat(crossoverSlider.value).toFixed(1)} dBFS, suggested from this DI's active-signal level. `;
       const resetBtn = document.createElement("button");
       resetBtn.type = "button";
       resetBtn.className = "link-btn";
@@ -2308,7 +2365,7 @@ async function refreshTrainingInputStatus() {
     const data = await resp.json();
     trainingInputReady = !!data.ready;
     // A "ready" file is always byte-identical to the official NAM v3.0.0
-    // input -- validate_training_input (hybrid/training_target.py) rejects
+    // input -- validate_training_input (hybrid/modes/training_target.py) rejects
     // anything else outright, including a different custom sweep. So
     // "ready" and "the bundled default (or an identical copy of it) is
     // loaded" are the same fact; make that obvious instead of leaving the
@@ -2777,13 +2834,16 @@ function validationSummaryHtml(report) {
     return `<div><strong>${escapeHtml(check.id).replaceAll("_", " ")} — ${escapeHtml(check.state)}</strong><br><span>${escapeHtml(check.reason || "")}</span>${metrics}</div>`;
   }).join("");
   const cabinet = report.cabinet?.note ? `<div><strong>Cabinet:</strong> ${escapeHtml(report.cabinet.note)}</div>` : "";
-  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
+  // Reports before schema 3 rendered "Full" and "Lite" with the slim values swapped.
+  const swapped = Number(report.schema_version) < 3
+    ? `<br><small>This report was made by an older version that measured Full and Lite the wrong way round: its Full results are the Lite model's, and vice versa.</small>` : "";
+  return `<div class="${report.state === "passed" ? "info" : "warning-box"}"><strong>${label}.</strong> ${escapeHtml(report.summary)}${swapped}<br><small>${checks}</small><details><summary>Validation metrics and reasons</summary>${detailRows}${cabinet}</details></div>`;
 }
 
 function renderLocalDownloadResult(designId, validationReport = null, downloadFilename = "model.nam", embeddedArtifact = null) {
   const downloadUrl = `/api/local_training/download?design_id=${encodeURIComponent(designId)}`;
   const namFilename = downloadFilename || "model.nam";
-  const embeddedValidated = embeddedArtifact?.state === "validated";
+  const embeddedValidated = experimentalArchitecturesEnabled() && embeddedArtifact?.state === "validated";
   const embeddedFilename = namFilename.replace(/\.nam$/, "-with-cab.nam");
   completedNamArtifact = { type: "local", designId, downloadUrl, filename: namFilename, embeddedArtifact };
   completedValidationReport = validationReport;
@@ -2794,7 +2854,7 @@ function renderLocalDownloadResult(designId, validationReport = null, downloadFi
   const cabHtml = embeddedValidated
     ? `<a href="${downloadUrl}&artifact=embedded" download="${escapeHtml(embeddedFilename)}" class="btn btn-secondary btn-block btn-download-artifact">${desktopSaveLabel("Download NAM with embedded cabinet")}</a>`
     : "";
-  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel("Download tested head-only NAM")}</a>${cabHtml}<div class="hint">The validation below belongs to <code>${escapeHtml(namFilename)}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ""}</div>${validationSummaryHtml(validationReport)}`;
+  localResultEl.innerHTML = `<a href="${downloadUrl}" download="${escapeHtml(namFilename)}" class="btn btn-primary btn-block btn-download-artifact">${desktopSaveLabel(embeddedValidated ? "Download tested head-only NAM" : "Download tested NAM")}</a>${cabHtml}<div class="hint">The validation below belongs to <code>${escapeHtml(namFilename)}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ""}</div>${validationSummaryHtml(validationReport)}`;
 }
 
 async function refreshLocalTraining() {
@@ -2969,7 +3029,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
   // basename), which previously made the button's label lie about what
   // file the browser would actually save.
   const namFilename = data.download_filename || "model.nam";
-  const embeddedValidated = data.embedded_artifact?.state === "validated";
+  const embeddedValidated = experimentalArchitecturesEnabled() && data.embedded_artifact?.state === "validated";
   const embeddedFilename = namFilename.replace(/\.nam$/, "-with-cab.nam");
   completedNamArtifact = { type: "kaggle", designId, jobId, downloadUrl, filename: namFilename, toolPath: data.output_nam_path || null, embeddedArtifact: data.embedded_artifact || null };
   document.dispatchEvent(new CustomEvent("nam:training-complete", { detail: { designId } }));
@@ -2980,7 +3040,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
     ? `<a href="${downloadUrl}&artifact=embedded" download="${embeddedFilename}" class="btn btn-secondary btn-block">${desktopSaveLabel("Download NAM with embedded cabinet")}</a>`
     : "";
   kaggleResultEl.innerHTML = `
-    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel("Download tested head-only NAM")}</a>
+    <a href="${downloadUrl}" download="${namFilename}" class="btn btn-primary btn-block">${desktopSaveLabel(embeddedValidated ? "Download tested head-only NAM" : "Download tested NAM")}</a>
     ${cabHtml}
     <div class="hint" title="${data.output_nam_path || ""}">Validated head artifact: <code>${namFilename}</code>.${embeddedValidated ? " The cabinet version is a separately checked exact derivative." : ` Full path: <code>${data.output_nam_path || "(unknown)"}</code>`}</div>
     <div><strong>SHA-256:</strong> <code>${data.output_nam_sha256 || ""}</code></div>
@@ -2991,6 +3051,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
 // State label, elapsed-since-submit, and a progress bar/log tail when
 // available -- a bare repeating "running" string with no other signal made
 // it look stuck even while training was progressing normally.
+// "uploading" is legacy: only job.json files written before 2026-09-24 have it.
 const KAGGLE_ACTIVE_STATES = new Set([
   "preparing", "uploading", "uploading_dataset", "verifying_dataset",
   "creating_kernel", "verifying_kernel", "queued", "running",
@@ -3217,7 +3278,7 @@ trainA2Btn.addEventListener("click", async () => {
   kaggleTrainingActive = true;
   syncTrainingControls();
   kaggleJobSubmittedAt = Date.now();
-  renderKaggleProgress("Uploading training bundle…", { state: "uploading" });
+  renderKaggleProgress("Preparing cloud training…", { state: "preparing" });
   kaggleResultEl.hidden = true;
   try {
     const resp = await fetch("/api/kaggle/train", {
@@ -3404,7 +3465,7 @@ function applySessionSettings(s) {
   cabPreviewEnabled.disabled = !s.cab.path;
   cabExportMode.disabled = !s.cab.path;
   cabPreviewEnabled.checked = s.cab.previewEnabled;
-  cabExportMode.value = s.cab.exportMode || (s.cab.baked ? "learned" : "none");
+  setCabExportMode(s.cab.exportMode || (s.cab.baked ? "learned" : "none"));
   applyCabDerivativeVisibility();
   updateCabStatus();
 
@@ -3931,12 +3992,18 @@ async function setToolNam(data, label) {
   }
 
   const calibration = inspection.calibration || {};
-  toolCalibrationStatus.textContent = calibration.status === "Calibrated NAM"
-    ? `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`
-    : "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
+  if (calibration.status === "Calibrated NAM") {
+    toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`;
+  } else if (calibration.input_level_dbu != null) {
+    toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output not recorded (read-only). The input level is enough for Auto calibration.`;
+  } else if (calibration.output_level_dbu != null) {
+    toolCalibrationStatus.textContent = `Calibration: output ${calibration.output_level_dbu.toFixed(1)} dBu · input not recorded (read-only). Auto calibration needs the input level.`;
+  } else {
+    toolCalibrationStatus.textContent = "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs record an input level.";
+  }
   if (inspection.volume_unsupported_reason) {
     // e.g. an embedded-cab export's "Sequential" architecture -- see
-    // hybrid/sequential_nam.py. Metadata editing below still works fine;
+    // hybrid/training/sequential_nam.py. Metadata editing below still works fine;
     // only the volume slider (which needs a recognised head_scale) is
     // unavailable for this file.
     toolVolumeSlider.disabled = true;
@@ -3962,14 +4029,14 @@ tone3000Tab.addEventListener("click", () => setTone3000Open(true));
 document.getElementById("btn-close-tone3000").addEventListener("click", () => setTone3000Open(false));
 
 // ---- Settings: exposes the same env vars the app has always read (see
-// hybrid/settings.py), with a place to change them without a shell. ----
+// hybrid/services/settings.py), with a place to change them without a shell. ----
 const settingsGroups = document.getElementById("settings-groups");
 const settingsStatus = document.getElementById("settings-status");
 const btnDiscardSettings = document.getElementById("btn-reload-settings");
 let settingsFields = [];
 // Tracks whether the draft has unsaved edits, so "Discard changes" only
 // offers to do something when there is actually something to discard (see
-// docs/settings_ux_refactor_plan.md's single-save-action goal).
+// docs/history/settings_ux_refactor_plan.md's single-save-action goal).
 let settingsDirty = false;
 
 function setSettingsDirty(dirty) {
@@ -4094,7 +4161,7 @@ function renderSettings() {
     let deferredStatusRow = null;
     // Fields without a subgroup render first, then each subgroup in
     // first-seen order under its own sub-heading (see SettingField.subgroup
-    // in hybrid/settings.py) -- keeps long groups like AI Assistant scannable.
+    // in hybrid/services/settings.py) -- keeps long groups like AI Assistant scannable.
     const subgroupFields = new Map();
     const directFields = [];
     for (const field of fields) {
@@ -4165,7 +4232,7 @@ function renderSettings() {
       validation.setAttribute("role", "alert");
       if (field.kind === "secret") {
         // The real value never comes back from the server (see
-        // hybrid/settings.py's get_settings); leaving this blank on save
+        // hybrid/services/settings.py's get_settings); leaving this blank on save
         // means "unchanged", not "clear it".
         input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
         input.value = "";
@@ -4177,7 +4244,7 @@ function renderSettings() {
         input.placeholder = field.placeholder || "";
         input.value = field.value || "";
         if (field.name === "NAM_MIXER_AI_MODEL" && field.suggestions?.length && !input.value) {
-          // Recommended model differs per provider (see hybrid/settings.py's
+          // Recommended model differs per provider (see hybrid/services/settings.py's
           // _MODEL_FIELD_TEXT, which get_settings() picks by current provider) --
           // suggestions[0] is always that provider's recommendation.
           input.value = field.suggestions[0];
@@ -4261,21 +4328,41 @@ function renderSettings() {
 // the separately labelled exact head+cab download.
 const cabExportOptionEmbedded = document.getElementById("cab-export-option-embedded");
 const cabExportCompatibilityHint = document.getElementById("cab-export-compatibility-hint");
-const cabExportExperimentalHint = document.getElementById("cab-export-experimental-hint");
 let sequentialEmbeddedWarningAcknowledged = false;
 
-function applyCabDerivativeVisibility() {
-  const enabled = settingsFields.some((field) =>
-    field.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES" && field.value
+// The embedded (Sequential) cabinet export is for a possible future NAM
+// specification: unavailable everywhere unless this setting is on.
+function experimentalArchitecturesEnabled() {
+  return settingsFields.some((field) =>
+    field.name === "NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES" && field.value === true
   );
-  if (cabExportOptionEmbedded) cabExportOptionEmbedded.hidden = !enabled;
-  if (cabExportExperimentalHint) cabExportExperimentalHint.hidden = enabled;
-  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = !enabled;
-  if (!enabled && cabExportMode.value === "embedded") {
-    cabExportMode.value = "none";
-    updateCabStatus();
+}
+
+// WebKit (Safari and the desktop app) ignores `hidden` on <option>, so the
+// embedded choice is taken out of the list when it is unavailable.
+function syncCabExportOptions() {
+  if (!cabExportOptionEmbedded) return;
+  if (experimentalArchitecturesEnabled()) {
+    if (!cabExportOptionEmbedded.parentNode) cabExportMode.append(cabExportOptionEmbedded);
+  } else {
+    if (cabExportMode.value === "embedded") cabExportMode.value = "none";
+    cabExportOptionEmbedded.remove();
   }
 }
+
+function setCabExportMode(value) {
+  if (value === "embedded" && experimentalArchitecturesEnabled()) syncCabExportOptions();
+  cabExportMode.value = value === "embedded" && !experimentalArchitecturesEnabled() ? "none" : value;
+}
+
+function applyCabDerivativeVisibility() {
+  const enabled = experimentalArchitecturesEnabled();
+  const before = cabExportMode.value;
+  syncCabExportOptions();
+  if (cabExportCompatibilityHint) cabExportCompatibilityHint.hidden = !enabled;
+  if (cabExportMode.value !== before) updateCabStatus();
+}
+applyCabDerivativeVisibility();
 
 function renderTone3000ApiKeyLinkRow() {
   const row = document.createElement("div");
@@ -4533,7 +4620,7 @@ settingsGroups.addEventListener("change", async (event) => {
   const provider = event.target.value;
   settingsGroups.querySelectorAll("[data-cloudflare-setup]").forEach((row) => { row.hidden = provider !== "cloudflare"; });
   // The recommended default model, its description, and its suggestions all
-  // depend on the provider (see hybrid/settings.py's _MODEL_FIELD_TEXT) -- the
+  // depend on the provider (see hybrid/services/settings.py's _MODEL_FIELD_TEXT) -- the
   // reload below re-fetches them instead of guessing a provider's default here.
   settingsGroups.querySelector("[data-ai-status-row]")?.refreshAiStatus?.();
   settingsGroups.querySelectorAll("[data-provider-field]").forEach((row) => {

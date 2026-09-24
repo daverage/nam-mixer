@@ -1,20 +1,21 @@
-"""Tests for hybrid/receptive_field.py -- docs/phase3.md section 5.
+"""Tests for hybrid/core/receptive_field.py -- docs/history/phase3.md section 5.
 
 The pure math (receptive-field formula) is tested directly against a
 constructed config dict, independent of whether neural-amp-modeler is
 actually installed. The "real installed config" path is exercised only when
 the training environment is present (skipped otherwise, matching
-docs/phase3.md section 37's "have a separate integration/manual test path for
+docs/history/phase3.md section 37's "have a separate integration/manual test path for
 real A2 training" for anything that needs the actual package).
 """
 from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
-import hybrid.receptive_field as receptive_field
-from hybrid.receptive_field import (
+import hybrid.core.receptive_field as receptive_field
+from hybrid.core.receptive_field import (
     A2ReceptiveField,
     ReceptiveFieldUnavailable,
     _layer_array_receptive_field,
@@ -47,7 +48,7 @@ def test_layer_array_receptive_field_dilated_stack():
 
 def test_layer_array_receptive_field_per_layer_kernel_sizes():
     """The real installed 0.13.x packed config uses a PER-LAYER kernel_sizes
-    list (not one shared kernel size) -- see hybrid/receptive_field.py's
+    list (not one shared kernel size) -- see hybrid/core/receptive_field.py's
     module docstring."""
     cfg = {"kernel_sizes": [6, 15, 6], "dilations": [1, 3, 7]}
     expected = 1 + (6 - 1) * 1 + (15 - 1) * 3 + (6 - 1) * 7
@@ -77,7 +78,7 @@ def test_receptive_field_unavailable_without_training_env():
 
 @pytest.mark.skipif(not _NAM_INSTALLED, reason="requires the neural-amp-modeler training package")
 def test_real_a2_receptive_field_fits_bounded_envelope_history():
-    from hybrid.envelope import bounded_envelope_max_history_samples
+    from hybrid.core.envelope import bounded_envelope_max_history_samples
     rf = compute_a2_receptive_field()
     history = bounded_envelope_max_history_samples(48000)
     assert history < rf.receptive_field_samples
@@ -125,7 +126,7 @@ def test_real_source_nam_captures_receptive_field(tmp_path):
     not just a hand-constructed test dict."""
     from pathlib import Path
 
-    from hybrid.nam_loader import load_nam
+    from hybrid.core.nam_loader import load_nam
 
     candidates = list(Path("assets/nam_models").glob("*.nam"))
     if not candidates:
@@ -140,7 +141,7 @@ def _fake_a2_rf(samples: int) -> A2ReceptiveField:
 
 
 def test_assert_required_history_fits_permits_exact_fit(monkeypatch):
-    """docs/phase3.md review: Amp A/B/envelope run in PARALLEL and the final
+    """docs/history/phase3.md review: Amp A/B/envelope run in PARALLEL and the final
     blend is memoryless, so required == available is a legitimate exact fit,
     not a failure -- only required > available should raise."""
     monkeypatch.setattr(receptive_field, "compute_a2_receptive_field", lambda: _fake_a2_rf(1000))
@@ -160,7 +161,7 @@ def test_assert_required_history_fits_accepts_comfortable_margin(monkeypatch):
     assert rf.receptive_field_samples == 1000
 
 
-# -- docs/blend-mode.md "RECEPTIVE FIELD" -----------------------------------
+# -- docs/history/blend-mode.md "RECEPTIVE FIELD" -----------------------------------
 
 def test_cab_fir_serial_history_samples_is_length_minus_one():
     assert cab_fir_serial_history_samples(1) == 0
@@ -214,14 +215,14 @@ def test_combine_required_history_includes_explicit_character_parallel_paths():
 
 
 def test_character_record_counts_both_smoothers_and_fir_on_control_path(monkeypatch):
-    from hybrid.training_target import compute_receptive_field_record
-    import hybrid.training_target as target_module
+    from hybrid.modes.training_target import compute_receptive_field_record
+    import hybrid.modes.training_target as target_module
 
     model = SimpleNamespace(path="synthetic.nam")
     monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda _model: 100)
     record = compute_receptive_field_record(
         "character", model, model, 1000, None,
-        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0,
+        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0, character_teacher_semantics_version=2,
     )
     # 80 envelope + 39 drive smoothing + 9 transition + 39 compensation
     # smoothing + 64 correction FIR.
@@ -230,3 +231,64 @@ def test_character_record_counts_both_smoothers_and_fir_on_control_path(monkeypa
     assert record["formal_character_required_samples"] == 231
     assert record["exact_history_bounded"] is False
     assert "repeated mid-ramp reversals" in record["history_qualification"]
+
+
+def test_character_v3_record_counts_the_residual_envelope_path(monkeypatch):
+    from hybrid.modes.training_target import compute_receptive_field_record
+    import hybrid.modes.training_target as target_module
+
+    model = SimpleNamespace(path="synthetic.nam")
+    monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda _model: 100)
+    record = compute_receptive_field_record(
+        "character", model, model, 1000, None,
+        envelope_max_history_ms=80.0, character_envelope_smoothing_ms=40.0, character_teacher_semantics_version=3,
+    )
+    branches = record["branch_samples"]
+    assert branches["character_drive_control"] == 80 + 39 + 39 + 64          # no donor transition in v3
+    assert branches["character_residual_envelope"] == 100 + 80 + 64          # envelope over the amp outputs
+    assert record["formal_character_required_samples"] == 244
+    assert record["hard_required_samples"] == 100                            # the hard gate is unchanged
+    assert record["exact_history_bounded"] is True
+
+
+def test_character_v3_record_bounds_the_real_teachers_history(monkeypatch):
+    """Perturb the input only before sample p, with amps of known finite history
+    (boxcar FIR + tanh) and every teacher path live, and check that the output
+    stops changing within the formal v3 requirement. With a long Amp B history
+    the teacher really does exceed the old (v2-style) figure, via the residual
+    envelope over the amp outputs."""
+    from hybrid.core.envelope import bounded_envelope_max_history_ms
+    from hybrid.modes import character_blend as cb
+    from hybrid.modes.character_analysis import analyse_rendered_audio
+    from hybrid.modes.training_target import compute_receptive_field_record
+    import hybrid.modes.training_target as target_module
+
+    sr, n, p, taps = 48000, 36000, 12000, {"a.nam": 100, "b.nam": 9000}
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(0)
+    dry = 0.3 * np.sin(2 * np.pi * 110 * t) * (0.2 + 0.8 * (t % 0.25 < 0.12)) + 0.02 * rng.standard_normal(n)
+
+    def amp(x, name, drive):
+        return 0.5 * np.tanh(drive * np.convolve(x, np.ones(taps[name]) / taps[name])[: len(x)])
+
+    design = cb.CharacterBlendDesign("a.nam", "b.nam", tone_mix_b=.3, feel_mix_b=.7, drive_mix_b=.5,
+                                     drive_low_mix_b=.38, drive_mid_mix_b=.5, drive_high_mix_b=.62)
+    analyses = (analyse_rendered_audio(dry, amp(dry, "a.nam", 3.0), sr), analyse_rendered_audio(dry, amp(dry, "b.nam", 12.0), sr))
+
+    def teacher(x):
+        pair = SimpleNamespace(dry=x, amp_a=amp(x, "a.nam", 3.0), amp_b=amp(x, "b.nam", 12.0), sample_rate=sr)
+        return cb.build_character_blend(pair, design, analysis_a=analyses[0], analysis_b=analyses[1]).blend.astype(np.float64)
+
+    perturbed = dry.copy()
+    perturbed[:p] += 0.2 * rng.standard_normal(p)
+    base, changed = teacher(dry), teacher(perturbed)
+    observed = int(np.flatnonzero(np.abs(changed - base) > 1e-9 * np.max(np.abs(base))).max()) - (p - 1)
+
+    monkeypatch.setattr(target_module, "compute_source_nam_receptive_field", lambda model: taps[model.path])
+    record_args = ("character", SimpleNamespace(path="a.nam"), SimpleNamespace(path="b.nam"), sr, None,
+                   bounded_envelope_max_history_ms(), design.envelope_smoothing_ms)
+    v3 = compute_receptive_field_record(*record_args, character_teacher_semantics_version=3)
+    v2_style = compute_receptive_field_record(*record_args, character_teacher_semantics_version=2)
+    assert observed <= v3["formal_character_required_samples"]
+    assert observed > v2_style["formal_character_required_samples"]
+

@@ -6,7 +6,7 @@ from this repo's GitHub Releases instead — see the README's "Quick start".
 CI builds and attaches these binaries automatically on every
 `nam-render-v*` tag (`.github/workflows/build-nam-render.yml`).
 
-A small C++ CLI wrapper that gives `hybrid/render.py` real NAM inference,
+A small C++ CLI wrapper that gives `hybrid/core/render.py` real NAM inference,
 without needing torch or the Python `neural-amp-modeler` package installed.
 It links directly against [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore)
 (the same inference core used by the official NAM plugin) and builds
@@ -37,7 +37,7 @@ its cached pin. The top-level README has ready-to-copy macOS, Linux, and
 Windows commands.
 
 On Windows this produces `build/Release/nam_render.exe`; on other platforms,
-`build/nam_render`. `hybrid/render.py`'s `find_nam_render_exe()` looks in
+`build/nam_render`. `hybrid/core/render.py`'s `find_nam_render_exe()` looks in
 both locations (and on `PATH`) automatically.
 
 ## Manual CLI usage

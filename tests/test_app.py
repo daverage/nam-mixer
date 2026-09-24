@@ -20,9 +20,10 @@ import pytest
 import soundfile as sf
 
 import app as app_module
-import hybrid.blend_training_target as blend_training_target
-import hybrid.pipeline as pipeline
-import hybrid.training_target as training_target
+from hybrid.core.render import SLIM_FULL, SLIM_LITE
+import hybrid.modes.blend_training_target as blend_training_target
+import hybrid.core.pipeline as pipeline
+import hybrid.modes.training_target as training_target
 
 # Smallest bundled DI fixture (17.75s) -- keeps these tests fast since the
 # causal envelope follower is a real (if cheap) per-sample computation.
@@ -60,7 +61,7 @@ def _write_fake_nam(path, input_level_dbu=None):
 
 
 def test_selected_cab_warns_for_explicit_amp_cab_source_metadata(tmp_path):
-    from hybrid.cab_ir import CabDesign
+    from hybrid.core.cab_ir import CabDesign
     source = tmp_path / "source.nam"
     source.write_text(jsonlib.dumps({"architecture": "Test", "config": {}, "sample_rate": 48000,
                                      "metadata": {"gear_type": "amp_cab"}}))
@@ -69,7 +70,7 @@ def test_selected_cab_warns_for_explicit_amp_cab_source_metadata(tmp_path):
 
 
 def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client, monkeypatch):
-    # provider != "local" never gets a `reachable` probe (see hybrid/local_llm.py's
+    # provider != "local" never gets a `reachable` probe (see hybrid/services/local_llm.py's
     # status()) -- the checklist must not fall through to a bogus "start ollama
     # serve" message for a fully-configured Cloudflare/custom provider.
     monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True, "provider": "cloudflare", "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"})
@@ -81,7 +82,7 @@ def test_setup_status_reports_a_configured_non_local_ai_provider_as_ready(client
 
 
 def test_local_llm_recipe_is_unavailable_until_a_model_is_configured(client, monkeypatch, tmp_path):
-    # Isolate from a real .env on this machine (hybrid/env_file.py's deliberate fallback), same as tests/test_local_llm.py.
+    # Isolate from a real .env on this machine (hybrid/services/env_file.py's deliberate fallback), same as tests/test_local_llm.py.
     monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "unused.env"))
     monkeypatch.setenv("NAM_MIXER_LOCAL_LLM_MODEL", "")
     assert client.get("/api/local_llm/status").get_json()["enabled"] is False
@@ -611,7 +612,7 @@ def test_deleting_a_session_with_an_active_kaggle_job_requires_explicit_confirma
     specific warning about cancelling the Kaggle job -- then actually
     cancel it once the caller passes ?cancel_active_jobs=1, rather than
     leaving an orphaned Kaggle kernel/dataset with no session managing it."""
-    from hybrid.kaggle_training import KaggleJob, save_job
+    from hybrid.training.kaggle_training import KaggleJob, save_job
 
     session_dir = tmp_path / "sessions"
     model_dir = session_dir / "models"
@@ -795,7 +796,7 @@ def test_upload_sweep_also_checks_generated_sessions(tmp_path, monkeypatch):
 
 
 def test_update_check_route_reports_an_available_update(client, monkeypatch):
-    from hybrid.update_check import UpdateCheckResult
+    from hybrid.services.update_check import UpdateCheckResult
     monkeypatch.setattr(app_module, "check_for_update", lambda current: UpdateCheckResult(
         current_version=current, latest_version="v9.9.9", update_available=True,
         release_url="https://github.com/daverage/nam-mixer/releases/tag/v9.9.9", asset_url="https://example.invalid/asset.dmg"))
@@ -806,7 +807,7 @@ def test_update_check_route_reports_an_available_update(client, monkeypatch):
 
 
 def test_update_check_route_reports_a_ui_safe_error_without_raising(client, monkeypatch):
-    from hybrid.update_check import UpdateCheckError
+    from hybrid.services.update_check import UpdateCheckError
     def boom(current):
         raise UpdateCheckError("Could not reach GitHub to check for updates: no route to host")
     monkeypatch.setattr(app_module, "check_for_update", boom)
@@ -821,7 +822,7 @@ def test_update_check_route_never_hits_the_real_network(client):
     call, never as a side effect of import/app-startup/collection -- proven here by having urlopen itself fail
     and confirming the route still only reports a UI-safe error, rather than the test suite having quietly made
     a real network call before this point."""
-    import hybrid.update_check as update_check_module
+    import hybrid.services.update_check as update_check_module
     with patch.object(update_check_module, "urlopen", side_effect=OSError("must not hit the real network")) as mock_urlopen:
         response = client.get("/api/update/check")
     assert mock_urlopen.call_count == 1
@@ -884,7 +885,7 @@ def test_renaming_loaded_generated_session_updates_untrained_manifest(client, tm
 
 
 def test_rejected_training_start_preserves_running_bundle_protection(client, tmp_path, monkeypatch):
-    from hybrid.local_training import LocalTrainingManager
+    from hybrid.training.local_training import LocalTrainingManager
 
     a2_dir = tmp_path / "a2"
     for design in ("running-A", "other-B"):
@@ -943,7 +944,7 @@ def test_nam_metadata_tool_edits_descriptive_fields_only(client, tmp_path):
 
 def test_nam_tools_inspect_works_for_embedded_cab_sequential_export(client, tmp_path):
     # Regression test: an embedded-cab export's architecture is "Sequential"
-    # (hybrid/sequential_nam.py), which find_output_scalers() can't find a
+    # (hybrid/training/sequential_nam.py), which find_output_scalers() can't find a
     # head_scale for -- that must not block the metadata editor from
     # loading at all (it previously raised a hard error, see the NAM Tools
     # UI bug report this test guards against).
@@ -1246,7 +1247,7 @@ def _comparison_bundle(tmp_path, monkeypatch):
     amp_a, amp_b, model = bundle / "a.nam", bundle / "b.nam", bundle / "model.nam"
     for path in (amp_a, amp_b, model):
         _write_fake_nam(path)
-    from hybrid.design import HybridDesign
+    from hybrid.modes.design import HybridDesign
     HybridDesign(
         str(amp_a), str(amp_b), crossover_dbfs=-20.0, calibration_mode="raw",
     ).write_json(bundle / "hybrid_design.json")
@@ -1270,7 +1271,7 @@ def test_comparison_builds_synchronised_teacher_full_lite_stems(client, tmp_path
     monkeypatch.setattr(app_module, "render_processed_reference", lambda design, manifest, dry, sr: SimpleNamespace(hybrid=dry * 2.0))
     def fake_model(path, dry, sr, slim=None):
         seen.append((Path(path), slim, float(dry[0])))
-        return dry * (2.0 if slim == 0.0 else 1.5)
+        return dry * (2.0 if slim == SLIM_FULL else 1.5)
     monkeypatch.setattr(app_module, "render_trained_a2", fake_model)
 
     response = client.post("/api/comparison", json={
@@ -1282,7 +1283,7 @@ def test_comparison_builds_synchronised_teacher_full_lite_stems(client, tmp_path
     assert data["actual_output_levels"] is True
     assert [variant["id"] for variant in data["variants"]] == ["teacher", "full", "lite"]
     assert data["variants"][1]["metrics"]["raw_esr"] == pytest.approx(0.0)
-    assert [entry[1] for entry in seen] == [0.0, 1.0]
+    assert [entry[1] for entry in seen] == [SLIM_FULL, SLIM_LITE]
     assert all(entry[0] == model for entry in seen)
     audio_response = client.get(data["audio_url"])
     audio, sample_rate = sf.read(io.BytesIO(audio_response.data), dtype="float32", always_2d=True)
@@ -1331,7 +1332,7 @@ def test_comparison_cache_identity_changes_with_gain_and_lite_can_be_unavailable
     _comparison_bundle(tmp_path, monkeypatch)
     monkeypatch.setattr(app_module, "render_processed_reference", lambda design, manifest, dry, sr: SimpleNamespace(hybrid=dry))
     def fake_model(path, dry, sr, slim=None):
-        if slim == 1.0:
+        if slim == SLIM_LITE:
             raise RuntimeError("export has no Lite branch")
         return dry
     monkeypatch.setattr(app_module, "render_trained_a2", fake_model)
@@ -1579,7 +1580,7 @@ def test_generate_baked_cab_records_provenance(client, isolated_training_paths, 
     assert manifest["cab"]["selected"] is True
     assert manifest["cab"]["display_name"] == "Modern Boutique 4x12"
 
-    from hybrid.a2_training_settings import user_metadata_kwargs
+    from hybrid.training.a2_training_settings import user_metadata_kwargs
     assert user_metadata_kwargs(manifest)["name"] == "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
 
 
@@ -1665,7 +1666,7 @@ def test_settings_api_rejects_tone3000_publishable_key(client, tmp_path, monkeyp
 
 
 def test_local_llm_pull_route_reports_backend_error_as_json(client, monkeypatch):
-    from hybrid.ollama_pull import OllamaPullError
+    from hybrid.services.ollama_pull import OllamaPullError
 
     def fake_start_pull(model=None):
         raise OllamaPullError("ollama not found")
@@ -1697,7 +1698,7 @@ def test_local_llm_pull_status_route_returns_current_state(client, monkeypatch):
 
 
 def test_renderer_download_route_reports_backend_error_as_json(client, monkeypatch):
-    from hybrid.render_bootstrap import NamRenderDownloadError
+    from hybrid.core.render_bootstrap import NamRenderDownloadError
 
     def fake_download():
         raise NamRenderDownloadError("no prebuilt binary for this platform")
@@ -1708,3 +1709,167 @@ def test_renderer_download_route_reports_backend_error_as_json(client, monkeypat
     data = resp.get_json()
     assert data["ok"] is False
     assert "no prebuilt binary" in data["error"]
+
+
+def test_character_low_level_check_applies_per_amp_input_gain(client, tmp_path, monkeypatch):
+    """The preview sweep must feed each amp the same input the bundle gate does
+    (calibration + that amp's input trim), or preview and generation disagree."""
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    body = _render_body(amp_a, amp_b, calibration_mode="raw", amp_b_input_gain_db=-12.0)
+    assert client.post("/api/render_pair", json=body).status_code == 200
+
+    peaks = {"a.nam": [], "b.nam": []}
+
+    def recording_render(model, audio, sample_rate):
+        peaks[Path(model.path).name].append(float(np.max(np.abs(audio))))
+        return np.asarray(audio, dtype=np.float32).copy()
+
+    monkeypatch.setattr(app_module, "render", recording_render)
+    resp = client.post("/api/character/low_level_check", json={"render_id": _current_render_id()})
+    assert resp.status_code == 200
+    assert peaks["a.nam"] and len(peaks["a.nam"]) == len(peaks["b.nam"])
+    for peak_a, peak_b in zip(peaks["a.nam"], peaks["b.nam"]):
+        assert peak_b == pytest.approx(peak_a * 10 ** (-12.0 / 20.0), rel=1e-4)
+
+
+def test_render_sources_sweep_keeps_the_live_renders_sources(tmp_path, monkeypatch):
+    """A render auditioned for longer than the grace period is still in use:
+    deleting any session must not sweep the amp copies it will generate from."""
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path / "a2")
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path)
+    rs = tmp_path / "render_sources"; rs.mkdir()
+    amp_a = rs / "aaa111" / "amp-a.nam"; amp_a.parent.mkdir(); amp_a.write_text("{}")
+    amp_b = rs / "bbb222" / "amp-b.nam"; amp_b.parent.mkdir(); amp_b.write_text("{}")
+    for f in (amp_a, amp_b):
+        _age(f.parent, 4000); _age(f, 4000)
+    monkeypatch.setitem(app_module._rendered_pair_cache, "snapshot",
+                        {"amp_a_path": str(amp_a), "amp_b_path": str(amp_b), "source_paths": {}})
+    assert app_module._sweep_orphaned_render_sources() == []
+    assert amp_a.exists() and amp_b.exists()
+
+
+def test_profile_coverage_rejects_a_non_numeric_custom_gain(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+    resp = client.post("/api/profile_coverage", json={"render_id": _current_render_id(), "crossover_dbfs": -20,
+                                                      "transition_width_db": 6, "custom_input_gain_db": "abc"})
+    assert resp.status_code == 400 and "custom_input_gain_db" in resp.get_json()["error"]
+
+
+def test_character_low_level_check_reports_renderer_failure_as_json(client, tmp_path, monkeypatch):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+
+    def failing_render(*_a, **_k):
+        raise app_module.NamRenderError("model failed to load")
+
+    monkeypatch.setattr(app_module, "render", failing_render)
+    resp = client.post("/api/character/low_level_check", json={"render_id": _current_render_id()})
+    assert resp.status_code == 500 and "model failed to load" in resp.get_json()["error"]
+
+
+def test_character_analyses_are_computed_once_per_render(client, tmp_path, monkeypatch):
+    """The wizard, the low-level check and Character previews for one render
+    share one analysis per amp: no re-hashing or re-analysis per request."""
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    monkeypatch.setattr(app_module, "WORK_DIR", tmp_path / "work")
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+    monkeypatch.setattr(app_module, "render", lambda model, audio, sr, **k: np.asarray(audio, dtype=np.float32).copy())
+    calls = []
+    real = app_module.analyse_rendered_audio
+    monkeypatch.setattr(app_module, "analyse_rendered_audio", lambda *a, **k: calls.append(1) or real(*a, **k))
+    rid = _current_render_id()
+    assert client.post("/api/wizard/insight", json={"render_id": rid}).status_code == 200
+    first = len(calls)
+    assert 1 <= first <= 2   # at most once per amp (identical fake amps share the disk cache entry)
+    assert client.post("/api/wizard/insight", json={"render_id": rid}).status_code == 200
+    assert client.post("/api/character/low_level_check", json={"render_id": rid}).status_code == 200
+    assert len(calls) == first   # later requests for the same render analyse nothing
+
+
+def test_packaged_app_keeps_the_training_venv_in_the_writable_data_dir(tmp_path):
+    """In the packaged app TRAINING_ROOT is inside the installed bundle; the
+    1.4 GB venv must go to the per-user data dir. From source it stays the
+    README's <repo>/.venv-a2."""
+    root, work = tmp_path / "bundle" / "training_support", tmp_path / "data"
+    assert app_module._training_venv_dir(root, work, frozen=True) == work / ".venv-a2"
+    assert app_module._training_venv_dir(root, work, frozen=False) == root / ".venv-a2"
+
+
+def test_backend_bundle_spec_includes_the_kaggle_worker_and_excludes_personal_captures():
+    spec = (Path(__file__).resolve().parent.parent / "packaging" / "backend" / "nam_mixer_backend.spec").read_text()
+    assert '"cloud" / "kaggle" / "train_a2_cloud.py"' in spec and "training_support/cloud/kaggle" in spec
+    assert '"assets" / "nam_models"), "assets/nam_models"' not in spec
+    assert "raise SystemExit" in spec   # no renderer, no bundle
+
+
+def test_backend_exit_stops_a_running_local_training(monkeypatch):
+    """The desktop shell SIGTERMs the backend on quit; local training runs in its
+    own session, so the backend must stop it on the way out."""
+    stopped = []
+
+    class Manager:
+        def cancel(self):
+            stopped.append(True)
+
+    monkeypatch.setattr(app_module, "_local_training_manager", Manager())
+    app_module._stop_local_training_on_exit()
+    assert stopped == [True]
+
+    class Idle:
+        def cancel(self):
+            raise RuntimeError("No local setup or training process is running.")
+
+    monkeypatch.setattr(app_module, "_local_training_manager", Idle())
+    app_module._stop_local_training_on_exit()   # nothing running: no error
+    with pytest.raises(SystemExit):
+        app_module._exit_on_sigterm(15, None)
+
+
+
+def test_shutdown_endpoint_needs_the_shells_token(client, monkeypatch):
+    stopped, exited = [], []
+    monkeypatch.setattr(app_module, "_stop_local_training_on_exit", lambda: stopped.append(1))
+
+    class ImmediateTimer:
+        def __init__(self, _delay, fn):
+            self.fn = fn
+        def start(self):
+            self.fn()
+
+    monkeypatch.setattr(app_module.threading, "Timer", ImmediateTimer)
+    monkeypatch.setattr(app_module, "_exit_process", lambda: exited.append(1))
+
+    monkeypatch.delenv("NAM_MIXER_SHUTDOWN_TOKEN", raising=False)
+    assert client.post("/api/shutdown").status_code == 404          # source runs: no shutdown endpoint
+    monkeypatch.setenv("NAM_MIXER_SHUTDOWN_TOKEN", "s3cret-token")
+    assert client.post("/api/shutdown").status_code == 403
+    assert client.post("/api/shutdown", headers={"X-NAM-Mixer-Shutdown-Token": "wrong"}).status_code == 403
+    assert stopped == [] and exited == []
+    resp = client.post("/api/shutdown", headers={"X-NAM-Mixer-Shutdown-Token": "s3cret-token"})
+    assert resp.status_code == 200 and stopped == [1] and exited == [1]
+
+
+@pytest.mark.parametrize("enabled, status", [(False, 409), (True, 200)])
+def test_embedded_nam_download_requires_experimental_architectures(client, tmp_path, monkeypatch, enabled, status):
+    a2_dir = tmp_path / "a2"; (a2_dir / "d1").mkdir(parents=True)
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", a2_dir)
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true" if enabled else "false")
+    sequential = a2_dir / "d1" / "model-with-cab.nam"; sequential.write_text("{}")
+    head = a2_dir / "d1" / "model.nam"; head.write_text("{}")
+    (a2_dir / "d1" / "training_manifest.json").write_text(jsonlib.dumps({"training": {
+        "output_nam_path": str(head),
+        "embedded_artifact": {"state": "validated", "artifacts": {"sequential_nam_path": str(sequential)}}}}))
+    resp = client.get("/api/local_training/download?design_id=d1&artifact=embedded")
+    assert resp.status_code == status
+    if not enabled:
+        assert "experimental" in resp.get_json()["error"]

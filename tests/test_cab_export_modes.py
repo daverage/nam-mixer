@@ -4,15 +4,23 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hybrid.cab_ir import (
+from hybrid.core.cab_ir import (
     CabDesign, CabIrError, EXPORT_MODE_EMBEDDED, EXPORT_MODE_LEARNED,
     EXPORT_MODE_NONE, PREPARATION_PRESERVE_ORIGINAL_TIMING,
     PREPARATION_TRIM_INITIAL_SILENCE, get_frozen_prepared_cab_ir,
     load_and_prepare_cab_ir,
 )
-from hybrid.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential, package_embedded_artifacts
-from hybrid.render import NamRenderError, find_sequential_nam_render_exe
-from hybrid.embedded_completion import complete_embedded_artifact
+from hybrid.training.sequential_nam import SequentialNamError, build_embedded_sequential, package_embedded_sequential, package_embedded_artifacts
+from hybrid.core.render import NamRenderError, find_sequential_nam_render_exe
+from hybrid.training.embedded_completion import complete_embedded_artifact
+
+
+@pytest.fixture(autouse=True)
+def experimental_architectures_on(monkeypatch, tmp_path):
+    """These tests exercise the embedded (Sequential) package itself, which is
+    only produced with experimental architectures enabled."""
+    monkeypatch.setenv("NAM_MIXER_ENV_FILE", str(tmp_path / "test.env"))
+    monkeypatch.setenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES", "true")
 
 
 def _a2_head(sample_rate=48000):
@@ -116,7 +124,7 @@ def test_embedded_packager_rejects_overflowing_scaled_taps():
 
 def test_embedded_validator_uses_default_renderer_when_not_overridden(monkeypatch):
     monkeypatch.delenv("NAM_RENDER_SEQUENTIAL_EXE", raising=False)
-    monkeypatch.setattr("hybrid.render.find_nam_render_exe", lambda: Path("/tmp/nam_render"))
+    monkeypatch.setattr("hybrid.core.render.find_nam_render_exe", lambda: Path("/tmp/nam_render"))
     assert find_sequential_nam_render_exe() == Path("/tmp/nam_render")
 
 
@@ -176,4 +184,111 @@ def test_embedded_completion_missing_renderer_preserves_head_and_reports_failed(
     result = complete_embedded_artifact(manifest, head_path, tmp_path, sample_rate=48000,
                                         final_scalar=1.0, validation_input=ir_path)
     assert result["state"] == "failed"
+    assert head_path.is_file()
+
+
+def _embedded_manifest(tmp_path):
+    import soundfile as sf
+    ir_path = tmp_path / "source.wav"; sf.write(ir_path, np.array([1., .25], dtype=np.float32), 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    return {"cab": CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256,
+                             export_mode=EXPORT_MODE_EMBEDDED).to_dict()}, ir_path
+
+
+def test_embedded_completion_reports_unexpected_errors_instead_of_raising(monkeypatch, tmp_path):
+    """E.g. a Sequential child without 'layers' (KeyError) must not escape into
+    the trainer, which has already produced a valid head."""
+    manifest, _ = _embedded_manifest(tmp_path)
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(_a2_head()))
+
+    def broken(*_a, **_k):
+        raise KeyError("layers")
+
+    monkeypatch.setattr("hybrid.training.embedded_completion.package_embedded_artifacts", broken)
+    result = complete_embedded_artifact(manifest, head_path, tmp_path, sample_rate=48000, final_scalar=1.0)
+    assert result["state"] == "failed" and "layers" in result["error"]
+    assert head_path.is_file()
+
+
+def test_embedded_completion_never_validates_when_nothing_is_compared(monkeypatch, tmp_path):
+    manifest, ir_path = _embedded_manifest(tmp_path)   # a 2-sample validation input
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(_a2_head()))
+    monkeypatch.setattr("hybrid.training.embedded_completion.package_embedded_artifacts",
+                        lambda *a, **k: {"sequential_nam_path": str(head_path)})
+    monkeypatch.setattr("hybrid.training.embedded_completion.sequential_renderer_record", lambda: {"ok": True})
+    monkeypatch.setattr("hybrid.training.embedded_completion._sequential_warmup_samples", lambda path: 1000)
+    monkeypatch.setattr("hybrid.core.render.render", lambda model, audio, sr, **kw: np.asarray(audio, dtype=np.float32))
+    monkeypatch.setattr("hybrid.core.render.find_sequential_nam_render_exe", lambda: Path("/tmp/seq"))
+    result = complete_embedded_artifact(manifest, head_path, tmp_path, sample_rate=48000, final_scalar=1.0,
+                                        validation_input=ir_path)
+    assert result["state"] == "failed" and "warm-up" in result["error"]
+    assert "download_available" not in result
+
+
+_REPO = Path(__file__).resolve().parent.parent
+_REAL_A2 = _REPO / "docs" / "history" / "Continuous Gain" / "phase4e" / "models" / "jcm800_P4E_B_s0.nam"
+_REAL_IR = _REPO / "assets" / "nam_models" / "V30 LL 4FB 4x12 SM57 1.00in 0.0in SA73.wav"
+
+
+def _sequential_renderer_available() -> bool:
+    from hybrid.core.render import NamRenderError, find_sequential_nam_render_exe
+    try:
+        find_sequential_nam_render_exe()
+        return True
+    except NamRenderError:
+        return False
+
+
+@pytest.mark.skipif(not (_REAL_A2.is_file() and _REAL_IR.is_file() and _sequential_renderer_available()),
+                    reason="needs the built native/nam_render (Sequential-capable) and the committed A2/IR fixtures")
+@pytest.mark.parametrize("final_scalar", [1.0, 10 ** (-4 / 20)])
+def test_real_embedded_package_with_a_long_ir_validates_inside_the_tolerance(tmp_path, final_scalar):
+    """A real A2 head + the real 24001-tap V30 IR through the real Sequential
+    renderer: measured max error ~3e-7, well inside the 3e-6 check (a 0.01 dB
+    scalar error alone is ~7e-4)."""
+    import shutil
+    import soundfile as sf
+
+    head_path = tmp_path / "trained-a2.nam"
+    shutil.copyfile(_REAL_A2, head_path)
+    ir_path = tmp_path / "cab.wav"
+    shutil.copyfile(_REAL_IR, ir_path)
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    manifest = {"cab": CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256,
+                                  export_mode=EXPORT_MODE_EMBEDDED).to_dict()}
+    dry, sr = sf.read(_REPO / "assets" / "di" / "moderate_brit.wav", dtype="float32")
+    validation_input = tmp_path / "input.wav"
+    sf.write(validation_input, dry[: 3 * sr], sr, subtype="FLOAT")
+    result = complete_embedded_artifact(manifest, head_path, tmp_path / "out", sample_rate=48000,
+                                        final_scalar=final_scalar, validation_input=validation_input)
+    assert result["state"] == "validated", result.get("error")
+    assert result["package_max_abs_error"] < 1e-6
+
+
+def test_embedded_package_is_named_from_the_base_name_not_the_suffixed_head(tmp_path):
+    """The head download is labelled '[Amp Only]'/'[Full Rig]'; the package with
+    the cabinet must not inherit that suffix."""
+    import soundfile as sf
+    head = _a2_head()
+    head["metadata"] = {"name": "Studio [Amp Only]"}
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(head))
+    ir_path = tmp_path / "v30.wav"; sf.write(ir_path, np.array([1., .25], dtype=np.float32), 48000, subtype="FLOAT")
+    prepared = load_and_prepare_cab_ir(ir_path, 48000)
+    cab = CabDesign(selected=True, ir_working_path=str(ir_path), sha256=prepared.sha256, original_filename="v30.wav")
+    art = package_embedded_artifacts(head_path, tmp_path / "out", cab, sample_rate=48000, final_scalar=1.0, base_name="Studio")
+    metadata = json.loads(Path(art["sequential_nam_path"]).read_text())["metadata"]
+    assert metadata["name"] == "Studio + v30.wav [Embedded Cab · Full]"
+    assert metadata["gear_type"] == "amp_cab"
+    assert json.loads(head_path.read_text())["metadata"]["name"] == "Studio [Amp Only]"   # the head download is untouched
+
+
+def test_embedded_completion_is_disabled_unless_experimental_architectures_are_on(monkeypatch, tmp_path):
+    import soundfile as sf
+    head_path = tmp_path / "trained-a2.nam"; head_path.write_text(json.dumps(_a2_head()))
+    manifest, ir_path = _embedded_manifest(tmp_path)
+    monkeypatch.delenv("NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES")
+    result = complete_embedded_artifact(manifest, head_path, tmp_path / "out", sample_rate=48000,
+                                        final_scalar=1.0, validation_input=ir_path)
+    assert result["state"] == "disabled"
+    assert "artifacts" not in result and not (tmp_path / "out").exists()
     assert head_path.is_file()

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from hybrid.nam_loader import load_nam
-from hybrid.render import NamRenderError, find_nam_render_exe, render
+from hybrid.core.nam_loader import load_nam
+from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = REPO_ROOT / "assets" / "nam_models" / "FenderSuperReverb1977_Clean.nam"
@@ -60,7 +60,7 @@ def test_render_is_deterministic():
 
 
 def test_render_rejects_stereo_input(monkeypatch):
-    import hybrid.render as render_module
+    import hybrid.core.render as render_module
 
     monkeypatch.setattr(render_module, "find_nam_render_exe", lambda: Path("unused-renderer"))
     model = SimpleNamespace(path=Path("unused-model.nam"))
@@ -71,7 +71,7 @@ def test_render_rejects_stereo_input(monkeypatch):
 
 
 def test_render_missing_exe_raises_nam_render_error(monkeypatch):
-    import hybrid.render as render_module
+    import hybrid.core.render as render_module
 
     def _raise():
         raise NamRenderError("not found")
@@ -95,3 +95,49 @@ def test_renderer_env_override_rejects_non_executable(monkeypatch, tmp_path):
     monkeypatch.setenv("NAM_RENDER_EXE", str(configured))
     with pytest.raises(NamRenderError, match="NAM_RENDER_EXE"):
         find_nam_render_exe()
+
+
+def test_render_unlaunchable_exe_raises_nam_render_error(tmp_path):
+    """A renderer that exists but can't be executed (no exec bit, or a binary for
+    another CPU) must surface as NamRenderError, not a raw OSError."""
+    not_executable = tmp_path / "nam_render"
+    not_executable.write_text("#!/bin/sh\nexit 0\n")
+    not_executable.chmod(0o644)
+    model = SimpleNamespace(path=Path("unused-model.nam"))
+    with pytest.raises(NamRenderError, match="could not run nam_render"):
+        render(model, np.zeros(100, dtype=np.float32), 48000, executable=not_executable)
+
+
+PACKED_A2 = REPO_ROOT / "docs" / "history" / "Continuous Gain" / "phase4e" / "models" / "jcm800_P4E_B_s0.nam"
+
+
+@pytest.mark.skipif(not (PACKED_A2.is_file() and _exe_available()), reason="needs a built native/nam_render")
+def test_slim_constants_select_the_full_and_lite_submodels(tmp_path):
+    """NAMCore picks the first submodel whose max_value exceeds the slim size;
+    A2 exports list Lite (3 ch) first and Full (8 ch) last. Render each
+    submodel on its own and check SLIM_FULL/SLIM_LITE (and no slim) match."""
+    import json
+
+    import soundfile as sf
+
+    packed = json.loads(PACKED_A2.read_text())
+    submodels = sorted(packed["config"]["submodels"], key=lambda s: s["max_value"])
+    channels = [s["model"]["config"]["layers"][0]["channels"] for s in submodels]
+    assert channels[0] < channels[-1]  # Lite is the smaller network
+    paths = []
+    for i, sub in enumerate(submodels):
+        path = tmp_path / f"sub{i}.nam"
+        path.write_text(json.dumps({**sub["model"], "sample_rate": packed.get("sample_rate", 48000)}))
+        paths.append(path)
+    x, sr = sf.read(REPO_ROOT / "assets" / "di" / "moderate_brit.wav", dtype="float32")
+    x = x[:sr]
+    lite_alone, full_alone = render(load_nam(paths[0]), x, sr), render(load_nam(paths[-1]), x, sr)
+    model = load_nam(PACKED_A2)
+    assert np.array_equal(render(model, x, sr, slim=SLIM_FULL), full_alone)
+    assert np.array_equal(render(model, x, sr, slim=SLIM_LITE), lite_alone)
+    assert np.array_equal(render(model, x, sr), full_alone)
+    assert not np.array_equal(full_alone, lite_alone)
+    # A plain (non-slimmable) WaveNet export must still validate as "Full":
+    # nam_render rejects any --slim value for it, so SLIM_FULL passes none.
+    assert np.array_equal(render(load_nam(paths[-1]), x, sr, slim=SLIM_FULL), full_alone)
+

@@ -1,6 +1,6 @@
 import pytest
 
-from hybrid.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, calculate_gain_multiplier, compare_changes, describe_nam_tools
+from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, calculate_gain_multiplier, compare_changes, describe_nam_tools
 
 
 def slimmable(count=2):
@@ -51,7 +51,7 @@ def test_metadata_editor_refuses_gear_type():
     # gear_type is a fact about what was actually built (amp vs. amp+cab),
     # determined by the export/cabinet mode at generation time -- not a
     # free-text label a user can retroactively relabel here. See the
-    # metadata-categories design review / hybrid/nam_provenance.py.
+    # metadata-categories design review / hybrid/training/nam_provenance.py.
     with pytest.raises(NamToolError, match="only permits"):
         apply_metadata_changes(slimmable(1), {"gear_type": "amp_cab"})
 
@@ -69,7 +69,7 @@ def test_editor_reports_current_loudness_and_standard_metadata():
 
 def test_describe_nam_tools_still_works_for_unsupported_volume_architecture():
     # Regression test: an embedded-cab export's top-level architecture is
-    # "Sequential" (hybrid/sequential_nam.py) -- find_output_scalers()
+    # "Sequential" (hybrid/training/sequential_nam.py) -- find_output_scalers()
     # correctly can't identify a head_scale for that shape, but that must
     # not block the metadata editor, which only touches the top-level
     # `metadata` object regardless of architecture. Previously this raised
@@ -87,3 +87,25 @@ def test_describe_nam_tools_still_works_for_unsupported_volume_architecture():
     assert details["head_scales"] == []
     assert details["loudness_db"] == -16.3
     assert "Sequential" in details["volume_unsupported_reason"]
+
+
+def test_metadata_edit_on_a_file_without_a_metadata_block():
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": []}
+    result, paths = apply_metadata_changes(data, {"name": "X"})
+    assert result["metadata"] == {"name": "X"} and paths == ["metadata"]
+    assert result["config"] == data["config"] and "metadata" not in data
+
+
+def test_clearing_an_absent_metadata_field_is_a_no_op():
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [], "metadata": {"name": "A"}}
+    result, paths = apply_metadata_changes(data, {"modeled_by": None})
+    assert result == data and paths == []
+    bare = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": []}
+    assert apply_metadata_changes(bare, {"name": None}) == (bare, [])
+
+
+def test_zero_db_volume_change_is_a_no_op():
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [], "metadata": {"loudness": -12.0}}
+    result, paths, multiplier = apply_volume_change(data, 0.0)
+    assert result == data and paths == [] and multiplier == 1.0
+

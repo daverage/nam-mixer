@@ -1,6 +1,6 @@
-"""Unit tests for hybrid/kaggle_training.py -- all Kaggle CLI interaction is
+"""Unit tests for hybrid/training/kaggle_training.py -- all Kaggle CLI interaction is
 mocked at the subprocess boundary. No real network/CLI call, no credentials,
-no Kaggle quota consumed -- see docs/kaggle_training.md.
+no Kaggle quota consumed -- see docs/history/kaggle_training.md.
 """
 import json
 import subprocess
@@ -14,12 +14,13 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import hybrid.kaggle_training as kaggle_training
-from hybrid.kaggle_training import (
+import hybrid.training.kaggle_training as kaggle_training
+from hybrid.training.kaggle_training import (
     A2_EPOCH_PRESETS,
     ACCELERATOR,
     DEFAULT_EPOCH_PRESET,
     FORBIDDEN_ACCELERATORS,
+    JOB_STATES,
     REQUIRED_DATASET_FILES,
     STAGED_BUNDLE_FILES,
     CliResult,
@@ -252,6 +253,22 @@ def test_redact_scrubs_secret_shaped_text():
     assert "abc123XYZ" not in redacted
 
 
+@pytest.mark.parametrize("text, secret", [
+    ("auth token=abc123:xyz done", "abc123"),                     # value containing ':'
+    ('{"username":"u","key":"deadbeef"}', "deadbeef"),           # kaggle.json shape
+    ("KAGGLE_KEY: s3cr3t-value", "s3cr3t-value"),
+    ("api_key = a=b=c", "a=b=c"),
+    ("password:'hunter2'", "hunter2"),
+])
+def test_redact_removes_the_whole_secret_value(text, secret):
+    redacted = _redact(text)
+    assert secret not in redacted and "<redacted>" in redacted
+
+
+def test_redact_accepts_bytes_from_a_timed_out_process():
+    assert _redact(b"token=abc123 partial") == "token=<redacted> partial"
+
+
 def test_safe_slug_sanitisation():
     assert _safe_slug("../../etc/passwd") == "etc-passwd"
     assert _safe_slug("My Design #1!!") == "my-design-1"
@@ -275,7 +292,7 @@ def bundle_dir(tmp_path):
 
 @pytest.fixture
 def cloud_script(tmp_path, monkeypatch):
-    """hybrid/kaggle_training.py locates cloud/kaggle/train_a2_cloud.py
+    """hybrid/training/kaggle_training.py locates cloud/kaggle/train_a2_cloud.py
     relative to the real repo -- that file exists for real, so no fixture
     needed; this fixture is a no-op placeholder kept for clarity."""
     return None
@@ -297,7 +314,9 @@ def test_staging_allow_list(tmp_path, bundle_dir):
     # re-uploaded as part of the dataset payload.
     assert "train_a2_cloud.py" not in dataset_names
     assert "train_a2_cloud.py" in kernel_names
-    assert job.state == "uploading"
+    # Staging is preparation; only create_dataset() starts "uploading_dataset".
+    assert job.state == "preparing"
+    assert job.state in JOB_STATES
 
 
 def test_staging_uses_an_explicit_packaged_cloud_worker(tmp_path, bundle_dir):
@@ -883,7 +902,7 @@ def test_create_dataset_never_creates_kernel_when_verification_fails(tmp_path, b
 
 
 def test_dataset_upload_is_never_automatically_retried(tmp_path, bundle_dir, monkeypatch):
-    """A deliberate design decision (see docs/kaggle_training.md): on upload
+    """A deliberate design decision (see docs/history/kaggle_training.md): on upload
     failure we fail clearly and preserve diagnostics rather than blindly
     retrying and risking multiple orphaned partial datasets. Locks that in."""
     def responses(argv):
@@ -1219,8 +1238,6 @@ def test_verify_settling_never_starts_kernel_creation(tmp_path, bundle_dir, monk
     cli, calls = make_cli(monkeypatch, responses=responses)
     manager.cli = cli
 
-    kernel_calls_before_verified = []
-
     real_create_kernel = manager.create_kernel
 
     def wrapped_create_kernel(job_arg, staging_arg):
@@ -1281,8 +1298,8 @@ class _DownloadStubCli:
     kernels_output() call (in particular: whether a file_pattern was ever
     passed) without touching the filesystem -- tests populate the output
     directory directly to simulate what a real `kaggle kernels output -p
-    <dir>` download would have written. datasets_create/kernels_push raise
-    if ever called, since recovery must never re-create either."""
+    <dir>` download would have written. datasets_create_streaming/kernels_push
+    raise if ever called, since recovery must never re-create either."""
 
     def __init__(self, kernel_status_text="andrzejmarczewski/foo has status \"KernelWorkerStatus.COMPLETE\"",
                  kernel_status_ok=True, output_ok=True, output_error="",
@@ -1321,9 +1338,6 @@ class _DownloadStubCli:
                           extra_files=self.extra_files)
         return CliResult(ok=True, returncode=0, stdout="", stderr="")
 
-    def datasets_create(self, *a, **k):
-        raise AssertionError("recovery must never create a new dataset")
-
     def datasets_create_streaming(self, *a, **k):
         raise AssertionError("recovery must never create a new dataset")
 
@@ -1359,11 +1373,11 @@ def _write_bundle_wavs(a2_output_dir: Path, design_id: str, n: int = 1000, sr: i
 
 
 def test_validate_downloaded_model_runs_low_level_response_check_when_manifest_is_character_mode(monkeypatch, tmp_path):
-    """docs/blend-mode-fixes.md Phase 10/11: a Kaggle-trained Character
+    """docs/history/blend-mode-fixes.md Phase 10/11: a Kaggle-trained Character
     Blend A2 gets the same low-level-response bar as a locally-trained one,
-    via the SAME hybrid.character_training_target.check_full_low_level_
+    via the SAME hybrid.modes.character_training_target.check_full_low_level_
     response function scripts/train_a2.py uses."""
-    import hybrid.character_training_target as character_training_target
+    import hybrid.modes.character_training_target as character_training_target
 
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"
@@ -1628,7 +1642,7 @@ def test_retry_download_recovers_completed_job_without_new_kernel_or_dataset(mon
     assert recovered.local_validation is not None
     assert recovered.local_validation["full"]["rendered_ok"] is True
     assert recovered.local_validation["lite"]["rendered_ok"] is True
-    # datasets_create/kernels_push raise on _DownloadStubCli if ever called --
+    # datasets_create_streaming/kernels_push raise on _DownloadStubCli if ever called --
     # reaching `complete` here already proves neither was invoked.
 
 
@@ -1683,3 +1697,180 @@ def test_retry_download_refuses_job_with_no_kernel_ref(tmp_path):
 
     with pytest.raises(KaggleTrainingError, match="no kernel_ref"):
         manager.retry_download(job)
+
+
+def test_submission_failure_that_raises_without_saving_is_recorded(tmp_path, bundle_dir, monkeypatch):
+    """stage() raises on a missing bundle file without saving 'failed'; the job
+    must not stay 'preparing' forever (and block the design)."""
+    (bundle_dir / "hybrid_target.wav").unlink()
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    with pytest.raises(KaggleTrainingError, match="missing required file"):
+        manager.submit("mydesign", bundle_dir)
+    assert find_active_job(tmp_path, "mydesign").state == "failed"   # not left "preparing"
+
+
+def test_unverified_kernel_is_recorded_and_deleted_by_cleanup(tmp_path, bundle_dir, monkeypatch):
+    """A pushed kernel that never verified is not treated as real (kernel_ref
+    stays None) but may still run on Kaggle, so cleanup deletes it."""
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=1)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
+
+    def responses(argv):
+        if argv[1:3] == ["kernels", "status"]:
+            return FakeCompleted(1, "", "Not found")
+        if argv[1:3] == ["datasets", "status"]:
+            return FakeCompleted(0, "ready", "")
+        if argv[1:3] == ["datasets", "files"]:
+            return _auto_datasets_files_response(dataset_staging)
+        return FakeCompleted(0, "" if argv[1] != "config" else DEFAULT_CONFIG_VIEW.stdout, "")
+
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager.cli = cli
+    manager.create_dataset(job, dataset_staging)
+    with pytest.raises(KaggleTrainingError):
+        manager.create_kernel(job, kernel_staging)
+    assert job.kernel_ref is None and job.unverified_kernel_ref.startswith("testuser/hybrid-a2-train-")
+
+    manager.cleanup(job)
+    deletes = [c for c in calls if c[1:3] == ["kernels", "delete"]]
+    assert deletes and job.unverified_kernel_ref in deletes[0]
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ('running-man/hybrid-a2-x has status "KernelWorkerStatus.COMPLETE"', "downloading"),
+    ('queued-queen/hybrid-a2-x has status "KernelWorkerStatus.ERROR"', "failed"),
+    ('someone/complete-kernel has status "KernelWorkerStatus.RUNNING"', "running"),
+    ('someone/x has status "KernelWorkerStatus.QUEUED"', "queued"),
+    ("complete", "downloading"),                      # bare status text still understood
+])
+def test_kernel_status_comes_from_the_status_word_not_the_kernel_ref(raw, expected):
+    from hybrid.training.kaggle_training import _map_kernel_status
+
+    assert _map_kernel_status(raw) == expected
+
+
+def test_job_orphaned_before_its_kernel_existed_fails_instead_of_blocking(tmp_path, monkeypatch):
+    """After an app restart nothing is still submitting a 'uploading_dataset'
+    job with no kernel; it must fail rather than block the design forever."""
+    cli, _ = make_cli(monkeypatch)
+    job = KaggleJob(job_id="orphan1", design_id="mydesign", state="uploading_dataset", dataset_ref="testuser/ds")
+    save_job(tmp_path, job)
+    fresh_manager = KaggleJobManager(tmp_path, cli=cli)
+    refreshed = fresh_manager.refresh(load_job(tmp_path, "mydesign", "orphan1"))
+    assert refreshed.state == "failed" and "interrupted" in refreshed.error and "testuser/ds" in refreshed.error
+
+
+def test_job_still_submitting_in_this_process_is_not_treated_as_orphaned(tmp_path, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    job.state = "uploading_dataset"
+    assert manager.refresh(job).state == "uploading_dataset"
+
+
+def test_poll_during_a_running_download_does_not_start_another(tmp_path, monkeypatch):
+    cli, calls = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="dl1", design_id="mydesign", state="validating", kernel_ref="testuser/k")
+    manager._downloading.add(job.job_id)
+    assert manager.refresh(job).state == "validating"
+    assert not [c for c in calls if c[1:3] in (["kernels", "status"], ["kernels", "output"])]
+
+
+def test_cancelled_submission_stops_and_never_pushes_a_kernel(tmp_path, bundle_dir, monkeypatch):
+    cli, calls = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    manager.cancel_active(KaggleJob.from_dict(job.to_dict()))   # e.g. the owning session was deleted
+    with pytest.raises(KaggleTrainingError, match="cancelled"):
+        manager._run_pipeline(job, bundle_dir)
+    assert not [c for c in calls if c[1:3] == ["kernels", "push"]]
+    saved = load_job(tmp_path, "mydesign", job.job_id)
+    assert saved.state == "failed" and saved.error.startswith("Cancelled")
+
+
+def test_logs_show_upload_progress_before_the_kernel_and_never_duplicate_remote_logs(tmp_path, monkeypatch):
+    remote = "epoch 1\nepoch 2\n"
+    cli, _ = make_cli(monkeypatch, responses=lambda argv: FakeCompleted(0, remote if argv[1:3] == ["kernels", "logs"] else "", ""))
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="log1", design_id="mydesign", state="uploading_dataset")
+    manager._append_log(job, "upload 50%")
+    assert "upload 50%" in manager.fetch_logs(job)          # no kernel yet: local progress, not ""
+
+    job.kernel_ref = "testuser/k"
+    for _ in range(3):
+        tail = manager.fetch_logs(job)
+    assert tail.count("epoch 2") == 1 and "upload 50%" in tail
+
+
+def test_unexpected_validation_error_is_a_recorded_failure_not_a_stuck_job(monkeypatch, tmp_path):
+    """e.g. soundfile's LibsndfileError is a RuntimeError: it must end in a
+    saved 'failed' job with the downloaded export recorded, not escape refresh()."""
+    cli = _DownloadStubCli(nam_name="model.nam", training_result={"success": True})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    _write_bundle_wavs(tmp_path, "d1")
+
+    def unreadable(*_a, **_k):
+        raise RuntimeError("Error opening 'input.wav': Format not recognised.")
+
+    monkeypatch.setattr(kaggle_training, "validate_downloaded_model", unreadable)
+    manager._download_and_validate(job)
+    saved = load_job(tmp_path, "d1", "j1")
+    assert saved.state == "failed" and "Format not recognised" in saved.error
+    assert Path(saved.output_nam_path).is_file()
+
+
+
+def test_a_cancel_between_push_and_recording_the_kernel_still_deletes_it(tmp_path, bundle_dir, monkeypatch):
+    """Ultrareview race: cancel_active() reads the job from disk, where the pushed kernel's ref is not yet
+    recorded, so it cannot delete it; the pipeline must then delete the kernel it pushed."""
+    cli, calls = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    real_check = manager._raise_if_cancelled
+
+    def check_then_cancel(j, when):
+        real_check(j, when)
+        if when == "while its kernel was being pushed":      # the check passed; the cancel lands right after it
+            on_disk = load_job(tmp_path, "mydesign", j.job_id)
+            assert on_disk.kernel_ref is None and on_disk.unverified_kernel_ref is None
+            manager.cancel_active(on_disk)
+    monkeypatch.setattr(manager, "_raise_if_cancelled", check_then_cancel)
+
+    with pytest.raises(KaggleTrainingError, match="cancelled"):
+        manager._run_pipeline(job, bundle_dir)
+    pushed = [c for c in calls if c[1:3] == ["kernels", "push"]]
+    deleted = [c for c in calls if c[1:3] == ["kernels", "delete"]]
+    assert len(pushed) == 1 and len(deleted) == 1 and deleted[0][3].startswith("testuser/")
+    saved = load_job(tmp_path, "mydesign", job.job_id)
+    assert saved.state == "failed" and saved.error.startswith("Cancelled")
+
+
+def test_a_step_failing_because_its_job_was_cancelled_keeps_the_cancelled_record(tmp_path, bundle_dir, monkeypatch):
+    """e.g. the owning session is deleted mid-staging: its bundle disappears and staging fails because of that."""
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+
+    def stage_after_cancel(j, _bundle_dir):
+        manager.cancel_active(load_job(tmp_path, "mydesign", j.job_id))
+        raise KaggleTrainingError("training bundle is missing required file: input.wav")
+    monkeypatch.setattr(manager, "stage", stage_after_cancel)
+
+    with pytest.raises(kaggle_training.JobCancelledError):
+        manager._run_pipeline(job, bundle_dir)
+    saved = load_job(tmp_path, "mydesign", job.job_id)
+    assert saved.error.startswith("Cancelled") and "missing required file" not in saved.error
+
+
+def test_staging_a_cancelled_job_writes_nothing(tmp_path, bundle_dir, monkeypatch):
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = manager._precheck_and_reserve_job("mydesign")
+    manager.cancel_active(load_job(tmp_path, "mydesign", job.job_id))
+    with pytest.raises(kaggle_training.JobCancelledError):
+        manager.stage(job, bundle_dir)
+    assert not (kaggle_training._job_dir(tmp_path, "mydesign", job.job_id) / "dataset_staging").exists()

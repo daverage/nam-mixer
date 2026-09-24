@@ -3,7 +3,7 @@ project(hybrid_nam_render)
 
 # Fetches NeuralAmpModelerCore source only (not its own tools/CMakeLists.txt,
 # which sets an invalid -Wno-error flag under MSVC) and builds the `render`
-# CLI tool directly. hybrid/render.py shells out to the resulting exe.
+# CLI tool directly. hybrid/core/render.py shells out to the resulting exe.
 include(FetchContent)
 # This pinned commit supports both conventional NAM models and canonical
 # v0.7 Sequential/Linear models.  Never follow a floating branch here.

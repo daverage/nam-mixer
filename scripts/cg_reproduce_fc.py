@@ -1,4 +1,4 @@
-"""Reproduce the FROZEN JCM800 / Vibrolux FC configurations through the new hybrid/cg_* backend and compare them
+"""Reproduce the FROZEN JCM800 / Vibrolux FC configurations through the hybrid/continuous_gain/ backend and compare them
 field-by-field (capture sets, anchors, target/input audio hashes, output scale) with the frozen record.
 Reads only the archived Phase 4 measurements under work/p4 (extract research_work_dirs_*.tar.gz first) and the
 user's own capture files; writes nothing outside the given --out directory. Usage: cg_reproduce_fc.py <amp> [--out DIR] [--skip-audio]"""
@@ -9,25 +9,18 @@ sys.path.insert(0, str(REPO)); sys.path.insert(0, str(REPO / "scripts"))
 import os
 ap = argparse.ArgumentParser(); ap.add_argument("amp"); ap.add_argument("--out", type=Path, default=None); ap.add_argument("--skip-audio", action="store_true"); a = ap.parse_args()
 os.environ["SINGLE_NAM_AMP"] = a.amp
-import numpy as np, soundfile as sf
 from single_nam_common import capture_path, official_input
-from hybrid.cg_probe import load_reference_di, SR
-from hybrid.cg_selection import select_captures, resolve_selection
-from hybrid.cg_anchors import response_anchors
-from hybrid.cg_audit import alignment_shift
-from hybrid.cg_bundle import make_chain, build_training_audio, bundle_manifest_core, FC_RECIPE
-from hybrid.nam_loader import load_nam
-from hybrid.render import render
+from hybrid.continuous_gain.probe import load_reference_di, SR
+from hybrid.continuous_gain.selection import select_captures, resolve_selection
+from hybrid.continuous_gain.anchors import response_anchors
+from hybrid.continuous_gain.audit import alignment_shift
+from hybrid.continuous_gain.bundle import make_chain, build_training_audio, bundle_manifest_core, FC_RECIPE
+from hybrid.core.nam_loader import load_nam
+from hybrid.core.render import render
 
 P = json.loads((REPO / "work/p4" / a.amp / "profile.json").read_text()); A = json.loads((REPO / "work/p4" / a.amp / "audit.json").read_text())
 frozen = json.loads((REPO / "work/p4e/final" / a.amp / "FC_bundle/manifest.json").read_text())
-def _frozen_manifest():
-    import subprocess
-    for rel in ("docs/final/manifest_frozen.json", "docs/history/final/manifest_frozen.json"):
-        if (REPO / rel).is_file():
-            return json.loads((REPO / rel).read_text())
-    return json.loads(subprocess.check_output(["git", "show", "HEAD:docs/final/manifest_frozen.json"], cwd=REPO))
-F = _frozen_manifest()
+F = json.loads((REPO / "docs/history/Continuous Gain/final/manifest_frozen.json").read_text())
 res = {"amp": a.amp, "checks": {}}
 an = select_captures(P, A); sel = resolve_selection(an, P, A, "automatic")
 res["selected"] = sel["selected"]; res["checks"]["capture_set"] = sel["selected"] == [float(g) for g in frozen["gains"]]

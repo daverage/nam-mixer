@@ -148,7 +148,7 @@ signal for "how hard is the player driving this right now."
 
 Concretely: `level = envelope(dry_input)`, and that per-sample level (in dBFS)
 is what decides the Amp A/Amp B mix weight, not the loudness of either
-processed output. See `hybrid/envelope.py`.
+processed output. See `hybrid/core/envelope.py`.
 
 ## Why automatic level matching is needed
 
@@ -160,14 +160,14 @@ avoid. Rather than normalizing the two amps' *overall* loudness (which doesn't
 guarantee anything about how they compare specifically **at the crossover
 point**, where it actually matters), this project measures each amp's loudness
 using only the portion of the render that falls near the chosen crossover level
-and computes a trim from that. See `hybrid/level_match.py`.
+and computes a trim from that. See `hybrid/core/level_match.py`.
 
 ## Input profile vs. crossover vs. NAM calibration — three separate knobs
 
 It's easy to conflate these; they operate at different stages and have very
 different costs:
 
-- **Input profile** (`hybrid/input_profiles.py`, `render_pair()`): simulates a
+- **Input profile** (`hybrid/core/input_profiles.py`, `render_pair()`): simulates a
   different instrument/pickup driving the signal chain *before* it reaches
   either NAM. This changes the actual audio both amps receive, so changing it
   is EXPENSIVE — it requires re-running NAM inference for both amps. See
@@ -177,7 +177,7 @@ different costs:
   only how the *already-rendered* Amp A/B responses are blended together.
   This is CHEAP — pure numpy, no NAM inference, safe to recompute on every
   slider move.
-- **NAM input calibration** (`hybrid/calibration.py`): when both `.nam`
+- **NAM input calibration** (`hybrid/core/calibration.py`): when both `.nam`
   captures report their own recording calibration (`input_level_dbu`),
   applies the official NAM plugin's per-model compensation formula so two
   differently-calibrated captures see the same virtual physical input level.
@@ -254,11 +254,11 @@ tools remain shared across all three design modes.
 4. **Create & train** — the official NAM training excitation is bundled and
    ready by default (upload a different one only if you want to); click
    "Generate Training Bundle" — this freezes the current design into an immutable
-   `HybridDesign` (`hybrid/design.py`) and blends the *official*
+   `HybridDesign` (`hybrid/modes/design.py`) and blends the *official*
    training input (not the preview DI, and not with the input-profile gain
    applied — the profile only shaped *design/preview*, never the actual
    training excitation) through Amp A/Amp B with that frozen design
-   (`hybrid/training_target.py`). Produces `input.wav`, `hybrid_target.wav`
+   (`hybrid/modes/training_target.py`). Produces `input.wav`, `hybrid_target.wav`
    (+ `hybrid_target_raw.wav` for comparison), `hybrid.hybrid.json`, and
    `training_manifest.json` under `work/a2/<design_id>/`.
    Then train a real A2 (PackedWaveNet) model on the bundle, either:
@@ -363,17 +363,17 @@ always listen. The tab's design, the training-material experiments and the froze
 The workflow above describes **Dynamic Hybrid** mode, the original/default
 mode. Two further modes are available from the same mode selector:
 
-- **Dynamic Hybrid** (`hybrid/blend.py`, `hybrid/design.py`,
-  `hybrid/training_target.py`): changes from Amp A toward Amp B according to
+- **Dynamic Hybrid** (`hybrid/modes/blend.py`, `hybrid/modes/design.py`,
+  `hybrid/modes/training_target.py`): changes from Amp A toward Amp B according to
   playing level, via the crossover/transition envelope described above.
-- **Parallel Blend** (`hybrid/fixed_blend.py`, `hybrid/blend_training_target.py`):
+- **Parallel Blend** (`hybrid/modes/fixed_blend.py`, `hybrid/modes/blend_training_target.py`):
   always combines the two amp responses at one constant, user-chosen ratio
   (`result = A * (1 - mix_b) + B * mix_b`), independent of playing level —
   no crossover envelope at all. Its own auto level-match uses the DI's
   ACTIVE playing material (silence excluded) rather than a crossover band,
   since there's no crossover region to match around (see
-  `hybrid.fixed_blend.compute_active_trim`).
-- **Character Blend** (`hybrid/character_blend.py`): uses a continuous,
+  `hybrid.modes.fixed_blend.compute_active_trim`).
+- **Character Blend** (`hybrid/modes/character_blend.py`): uses a continuous,
   residual-bounded nonlinear carrier plus measured EQ and compression
   corrections to produce a deterministic teacher design. Tone, Feel, and
   Drive are not a simple parallel waveform mix. Drive preserves exact Amp A/B
@@ -382,26 +382,29 @@ mode. Two further modes are available from the same mode selector:
 All modes share Amp A/Amp B, the preview DI, input profile/calibration,
 render, test gain, the Listen controls, the Cabinet IR stage, the official
 training input, A2 quality, and training — switching tabs never re-runs NAM
-inference; the already-rendered `RenderedPair` (`hybrid/pipeline.py`) is
+inference; the already-rendered `RenderedPair` (`hybrid/core/pipeline.py`) is
 reused by whichever mode you're auditioning.
 
-A third, mode-independent stage — **Cabinet IR** (`hybrid/cab_ir.py`) — sits
-AFTER the amp combination in any mode. Preview is independent of training:
-all A2 training and validation uses the head-only target. When an IR is
-selected, the export choices are:
+A third, mode-independent stage — **Cabinet IR** (`hybrid/core/cab_ir.py`) — sits
+AFTER the amp combination in any mode, and in the Continuous Gain workflow.
+Preview is independent of training. When an IR is selected, the choices are:
 
-- **No cabinet**: train/export the conventional head-only A2. A selected IR
-  remains a reusable preview/bundle artifact, not part of the target.
-- **Create both** (`embedded`, advanced): retain the tested conventional head-only A2
-  and derive a second NAM containing an explicitly extracted Full WaveNet
-  followed by canonical Linear FIR taps in a NAM **Sequential** model. The
-  prepared IR WAV is also retained. The two artifacts are offered as clearly
-  separate head-only and `-with-cab.nam` downloads. This option is hidden by
-  default; enable *Settings → Advanced → Enable experimental NAM architectures*
-  before selecting it.
-
-Older saved designs that use the legacy `learned` mode remain readable, but
-the current UI no longer applies the cabinet to the training target.
+- **Amp only** (`none`): train/export an amp-only A2. The IR is only for
+  previewing; load it in your player for the cabinet (exact, and swappable).
+- **Learned cab** (`learned`, the supported way to put a cab in a NAM): the
+  training material is played through the amps and then the cabinet IR, like
+  a NAM player feeding an IR loader, and the result is the training target.
+  The cabinet is fixed into the trained NAM, which makes it a full-rig capture
+  (`[Learned Cab]`, gear type `amp_cab`). One NAM is trained, tested with the
+  cabinet on both sides, and downloaded. It is an approximation: see
+  "Baked cabinet" below.
+- **Create both** (`embedded`, experimental, for a possible future NAM
+  specification): retain the tested amp-only A2 and derive a second NAM
+  containing an explicitly extracted Full WaveNet followed by canonical Linear
+  FIR taps in a NAM **Sequential** model, offered as a separate
+  `-with-cab.nam` download. It is unavailable everywhere (generation,
+  packaging after training, downloads) unless *Settings → Advanced → Enable
+  experimental NAM architectures* is on.
 
 The cabinet output folds the recorded post-cab safety scalar into the Linear
 weights and is downloadable only after validation using the bundled,
@@ -426,7 +429,7 @@ exactly:
   field, training still proceeds as an approximation — the Full/Lite export
   and quiet-response checks stay authoritative for judging the result.
 - **Baked cabinet.** A baked cabinet adds `len(ir) - 1` samples of *serial*
-  temporal dependency on top of the core (see `hybrid/receptive_field.py`'s
+  temporal dependency on top of the core (see `hybrid/core/receptive_field.py`'s
   `combine_required_history`). A baked cab whose formal total exceeds the
   A2's receptive field does not block training either — the A2 learns an
   approximation of the post-cab response within its available capacity.
@@ -590,7 +593,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run.ps1
 If `Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
 
 > **Don't double-click `nam_render.exe`.** It's a command-line helper tool
-> that `hybrid/render.py` calls automatically with the right arguments — it's
+> that `hybrid/core/render.py` calls automatically with the right arguments — it's
 > not the app. Double-clicking it in File Explorer runs it with no
 > arguments, so it prints a usage error and the console window closes
 > instantly, which looks like a crash but isn't one. Always launch the app
@@ -683,9 +686,11 @@ checkout doesn't require hunting for each setup button individually.
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
 - **Advanced → Enable experimental NAM architectures** — off by default.
-  Turning it on reveals **Create both**, which exports the tested head-only
-  NAM plus an exact Sequential Embedded cabinet derivative. Leave it off for
-  ordinary use unless you specifically need the advanced export.
+  Turning it on reveals **Create both**, which exports the tested amp-only
+  NAM plus an exact Sequential Embedded cabinet derivative for a possible
+  future NAM specification; players that accept only A2 may reject it. With
+  it off, that export is never generated, packaged or offered for download.
+  The supported way to put a cabinet in a NAM is **Learned cab**.
 Settings are saved to the source checkout's own `.env` file — never uploaded
 anywhere.
 
@@ -696,13 +701,13 @@ anywhere.
 
 ### Implemented
 
-- **Real NAM inference:** `hybrid/render.py` calls the native `nam_render`
+- **Real NAM inference:** `hybrid/core/render.py` calls the native `nam_render`
   C++ CLI in `native/nam_render/`, built against
   [NeuralAmpModelerCore](https://github.com/sdatkinson/NeuralAmpModelerCore).
   This keeps inference independent of Python `torch`/`neural-amp-modeler` and
   lets NAMCore remain authoritative for `.nam` model loading. Build steps are
   in `native/nam_render/README.md`.
-- **`.nam` loading and calibration:** `hybrid/nam_loader.py` reads model
+- **`.nam` loading and calibration:** `hybrid/core/nam_loader.py` reads model
   metadata, including `input_level_dbu` and `output_level_dbu` when present.
   Older or uncalibrated files remain usable and are reported as having
   unavailable calibration metadata.
@@ -731,7 +736,7 @@ anywhere.
   combinations can still expose latency, calibration, or musical problems;
   listen to every preview and validate every exported model against its target.
 - **A/B alignment is deliberately off by default.**
-  `hybrid/align.py` cross-correlates the two rendered signals, so a tonal or
+  `hybrid/core/align.py` cross-correlates the two rendered signals, so a tonal or
   phase difference between dissimilar amps can look like latency. Enable it
   only when the timing behavior of the source models is known.
 - Character Blend is a deterministic teacher design, not a perceptual-match
@@ -759,7 +764,7 @@ The generated hybrid **training target must never be run through a limiter** —
 that would distort the very dynamic behavior we're trying to capture. If the
 generated hybrid exceeds a target peak ceiling (default -3 dBFS), a single
 fixed gain reduction is applied to the whole file instead
-(`hybrid.safety.apply_peak_ceiling`). A limiter (`hybrid.safety.
+(`hybrid.core.safety.apply_peak_ceiling`). A limiter (`hybrid.core.safety.
 preview_safety_limiter`) exists only as a speaker/headphone safety net on the
 live preview/playback path and must never touch a file destined to become (or
 derive) a training target.
@@ -771,33 +776,30 @@ hybrid-nam-builder/
 ├── app.py                 -- Flask entry point
 ├── requirements.txt
 ├── hybrid/                -- core library (no Flask/UI dependencies)
-│   ├── nam_loader.py       -- parse .nam files + calibration metadata
-│   ├── render.py           -- NAM inference (shells out to native/nam_render)
-│   ├── envelope.py         -- dry-input level/envelope extraction
-│   ├── level_match.py      -- crossover-region auto level-match trim
-│   ├── align.py            -- sample-offset detection/correction (optional, off by default)
-│   ├── blend.py            -- the dynamic crossfade itself
-│   ├── fixed_blend.py      -- Parallel Blend mode (fixed-ratio combination)
-│   ├── character_blend.py  -- Character Blend teacher and low-level check
-│   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
-│   ├── training_target.py  -- Dynamic Hybrid A2 training-target generation
-│   ├── blend_training_target.py -- Parallel Blend A2 target generation
-│   ├── character_training_target.py -- Character Blend A2 target generation
-│   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
-│   ├── validation.py        -- frozen-teacher/model rendering and shared metrics
-│   ├── validation_report.py -- versioned Full/Lite/quiet quality reports
-│   ├── kaggle_training.py  -- private Kaggle GPU job and local validation
-│   ├── cg_*.py             -- Continuous Gain: probe, audit, profile, selection, anchors, bundle, project, validation, excitation
-│   ├── nam_tools.py        -- safe output-volume and metadata editing
-│   ├── wizard.py           -- guided setup flow shared by the UI modes
-│   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
-│   ├── settings.py         -- Settings tab registry
-│   ├── render_bootstrap.py -- in-app "download nam_render" for Settings
-│   └── metadata.py         -- hybrid provenance metadata (JSON sidecar)
+│   ├── paths.py            -- REPO_ROOT (stays at this level: derived from its own location)
+│   ├── core/               -- NAM I/O and shared signal processing
+│   │   ├── nam_loader.py       -- parse .nam files + calibration metadata
+│   │   ├── render.py           -- NAM inference (shells out to native/nam_render)
+│   │   ├── render_bootstrap.py -- in-app "download nam_render" for Settings
+│   │   ├── envelope.py         -- dry-input level/envelope extraction
+│   │   ├── level_match.py      -- crossover-region auto level-match trim
+│   │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
+│   │   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
+│   │   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
+│   │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
+│   │   └── pipeline.py, calibration.py, input_profiles.py, coverage.py, audio_metrics.py
+│   ├── modes/              -- the three design modes
+│   │   ├── blend.py, design.py, training_target.py -- Dynamic Hybrid (+ metadata.py, wizard.py)
+│   │   ├── fixed_blend.py, blend_training_target.py -- Parallel Blend
+│   │   └── character_analysis.py, character_blend.py, character_training_target.py -- Character Blend
+│   ├── continuous_gain/    -- Continuous Gain: probe, audit, profile, selection, anchors, bundle, project, validation, excitation, multi_blend
+│   ├── training/           -- A2 settings, local/Kaggle backends, validation + reports, nam_tools, provenance, embedded-cab export
+│   └── services/           -- Settings registry and .env, local recipe assistant, research, update check
+├── routes/                 -- Flask route modules registered by app.py
+│   └── continuous_gain.py  -- /api/cg/* routes for the Continuous Gain tab (static/cg.js)
 ├── native/nam_render/      -- C++ NAM inference tool (NeuralAmpModelerCore), see its README
 ├── assets/nam_models/      -- user's own .nam amp captures (gitignored)
 ├── assets/di/              -- genre/style DI library + its own README
-├── cg_routes.py            -- /api/cg/* routes for the Continuous Gain tab (static/cg.js)
 ├── templates/, static/     -- minimal HTML/CSS/JS UI (no build step)
 ├── tests/                  -- unit tests for the hybrid/ modules
 ├── scripts/                -- run/setup/download helpers, train_a2.py, validate_a2.py, analyze_di.py (regenerates assets/di/_analysis.json)
@@ -819,15 +821,15 @@ python3 -m pytest -q
 # `pytest -q` works too; pytest.ini resolves the repository modules.
 ```
 
-The test suite exercises `hybrid/envelope.py`, `hybrid/blend.py`,
-`hybrid/level_match.py`, `hybrid/align.py`, `hybrid/safety.py`,
-`hybrid/nam_loader.py`, `hybrid/input_profiles.py`, `hybrid/calibration.py`,
-`hybrid/coverage.py`, `hybrid/pipeline.py`, `hybrid/design.py`,
-`hybrid/training_target.py`, `hybrid/fixed_blend.py`,
-`hybrid/blend_training_target.py`, `hybrid/character_blend.py`,
-`hybrid/character_training_target.py`, `hybrid/cab_ir.py`,
-`hybrid/receptive_field.py`, `hybrid/a2_training_settings.py`, and
-`hybrid/kaggle_training.py` against synthetic signals and mocked renders —
+The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/safety.py`,
+`hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
+`hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
+`hybrid/modes/training_target.py`, `hybrid/modes/fixed_blend.py`,
+`hybrid/modes/blend_training_target.py`, `hybrid/modes/character_blend.py`,
+`hybrid/modes/character_training_target.py`, `hybrid/core/cab_ir.py`,
+`hybrid/core/receptive_field.py`, `hybrid/training/a2_training_settings.py`, and
+`hybrid/training/kaggle_training.py` against synthetic signals and mocked renders —
 none of it requires torch, `neural-amp-modeler`, or the native `nam_render`
 tool to be built. `tests/test_render.py` exercises real NAM inference and is
 skipped automatically unless both `native/nam_render` has been built (see its

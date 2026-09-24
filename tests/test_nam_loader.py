@@ -1,8 +1,7 @@
 import json
 
-import pytest
 
-from hybrid.nam_loader import load_nam
+from hybrid.core.nam_loader import load_nam
 
 
 def test_calibrated_nam(tmp_path):
@@ -69,3 +68,14 @@ def test_descriptive_metadata_accessors_default_to_none(tmp_path):
     assert model.gear_make is None
     assert model.gear_model is None
     assert model.tone_type is None
+
+
+def test_input_only_calibration_is_reported_as_usable(tmp_path):
+    """Auto calibration only needs input_level_dbu, so an input-only file must
+    not be labelled as having no calibration metadata."""
+    p = tmp_path / "input_only.nam"
+    p.write_text(json.dumps({"architecture": "WaveNet", "sample_rate": 48000, "input_level_dbu": 12.0}))
+    model = load_nam(p)
+    assert not model.is_calibrated
+    assert model.calibration_status == "Input level only (enough for Auto calibration)"
+

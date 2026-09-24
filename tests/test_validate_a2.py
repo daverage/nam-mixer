@@ -1,4 +1,4 @@
-"""Unit tests for scripts/validate_a2.py -- docs/phase3.md sections 24-28.
+"""Unit tests for scripts/validate_a2.py -- docs/history/phase3.md sections 24-28.
 
 Mocks rendering (native NAMCore isn't required for these), same pattern as
 tests/test_validation.py.
@@ -87,7 +87,7 @@ def test_write_listening_files_applies_shared_attenuation_when_hot(tmp_path):
 def test_run_validation_writes_report_and_files(tmp_path, monkeypatch):
     amp_a = _write_nam(tmp_path / "a.nam")
     amp_b = _write_nam(tmp_path / "b.nam")
-    from hybrid.design import HybridDesign
+    from hybrid.modes.design import HybridDesign
     design = HybridDesign(
         amp_a_path=str(amp_a), amp_b_path=str(amp_b),
         crossover_dbfs=-20.0, transition_width_db=8.0, effective_b_trim_db=0.0,

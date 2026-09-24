@@ -1,6 +1,12 @@
 import numpy as np
 
-from hybrid.safety import apply_output_gain, apply_peak_ceiling, check_audio, compute_auto_output_gain_db
+from hybrid.core.safety import (
+    apply_output_gain,
+    apply_peak_ceiling,
+    check_audio,
+    compute_auto_output_gain_db,
+    preview_safety_limiter,
+)
 
 
 def test_detects_nan():
@@ -40,3 +46,10 @@ def test_auto_output_gain_uses_available_headroom_without_attenuating_hot_audio(
     hot_gain_db, hot_peak_dbfs = compute_auto_output_gain_db(np.array([1.0]), -3.0)
     assert hot_peak_dbfs == 0.0
     assert hot_gain_db == 0.0
+
+
+def test_preview_limiter_never_passes_nan_or_inf_to_playback():
+    ceiling = 10.0 ** (-1.0 / 20.0)
+    out = preview_safety_limiter(np.array([np.nan, np.inf, -np.inf, 2.0, 0.1], dtype=np.float32))
+    assert np.all(np.isfinite(out))
+    np.testing.assert_allclose(out, [0.0, ceiling, -ceiling, ceiling, 0.1], rtol=1e-6)

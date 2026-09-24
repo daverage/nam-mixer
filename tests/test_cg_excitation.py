@@ -1,7 +1,7 @@
 """The single-file Continuous Gain excitation: deterministic, level-swept across the requested range, calibrated to a reference level."""
 import numpy as np
 
-from hybrid.cg_excitation import SR, active_rms, level_swept_excitation
+from hybrid.continuous_gain.excitation import SR, active_rms, level_swept_excitation
 
 
 def test_deterministic_and_sized():

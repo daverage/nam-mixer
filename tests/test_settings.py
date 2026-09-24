@@ -1,12 +1,13 @@
-"""Tests for hybrid/settings.py and the .env read/write helpers it relies on
-(hybrid/env_file.py) -- these back the browser Settings page, which lets
+"""Tests for hybrid/services/settings.py and the .env read/write helpers it relies on
+(hybrid/services/env_file.py) -- these back the browser Settings page, which lets
 someone configure the app without a shell to `export` env vars into.
 """
 import os
 
 import pytest
 
-from hybrid import env_file, settings
+from hybrid.services import env_file
+from hybrid.services import settings
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def isolated_env_file(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     yield env_path
     # write_env_values() sets os.environ directly (by design -- so a saved
-    # setting takes effect immediately, see hybrid/env_file.py), which
+    # setting takes effect immediately, see hybrid/services/env_file.py), which
     # monkeypatch doesn't track since it wasn't set via monkeypatch.setenv;
     # clean up explicitly so a value saved in one test can't leak into others.
     for field in settings.SETTINGS:
@@ -318,3 +319,17 @@ def test_save_warns_only_when_a_restart_required_value_changes(isolated_env_file
 
     unrelated = settings.save_settings({"NAM_RENDER_EXE": "/opt/nam_render"})
     assert unrelated["warnings"] == []
+
+
+def test_setting_value_with_a_line_break_is_rejected(isolated_env_file):
+    """One .env line per setting: a newline must not be able to add another
+    KEY=value line (e.g. NAM_RENDER_EXE) to the file."""
+    with pytest.raises(settings.SettingsValidationError, match="line breaks"):
+        settings.save_settings({"NAM_RENDER_EXE": "/usr/bin/nam_render\nNAM_MIXER_AI_PROVIDER=custom"})
+    assert env_file.read_env_value("NAM_MIXER_AI_PROVIDER") in (None, "")
+
+
+def test_env_writer_refuses_control_characters(isolated_env_file):
+    with pytest.raises(ValueError, match="control character"):
+        env_file.write_env_values({"NAM_RENDER_EXE": "a\nNAM_MIXER_AI_PROVIDER=custom"})
+    assert not isolated_env_file.exists() or "NAM_MIXER_AI_PROVIDER" not in isolated_env_file.read_text()

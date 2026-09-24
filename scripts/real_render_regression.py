@@ -19,18 +19,18 @@ import soundfile as sf
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import hybrid.render as render_module
-from hybrid.blend import DEFAULT_TRANSITION_WIDTH_DB
-from hybrid.character_blend import CharacterBlendDesign, build_character_blend, freeze_character_design
-from hybrid.cab_ir import apply_cab_ir, get_prepared_cab_ir
-from hybrid.design import freeze_design
-from hybrid.fixed_blend import build_fixed_blend, freeze_blend_design
-from hybrid.nam_loader import load_nam
-from hybrid.pipeline import build_hybrid, render_pair
-from hybrid.render import NamRenderError, find_nam_render_exe, render
-from hybrid.validation import compute_esr_metrics, render_reference_hybrid
+import hybrid.core.render as render_module
+from hybrid.modes.blend import DEFAULT_TRANSITION_WIDTH_DB
+from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, freeze_character_design
+from hybrid.core.cab_ir import apply_cab_ir, get_prepared_cab_ir
+from hybrid.modes.design import freeze_design
+from hybrid.modes.fixed_blend import build_fixed_blend, freeze_blend_design
+from hybrid.core.nam_loader import load_nam
+from hybrid.core.pipeline import build_hybrid, render_pair
+from hybrid.core.render import SLIM_FULL, SLIM_LITE, NamRenderError, find_nam_render_exe, render
+from hybrid.training.validation import compute_esr_metrics, render_reference_hybrid
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3  # 3: correct Full/Lite slim selection (see hybrid/training/validation_report.py)
 
 
 class PrerequisiteUnavailable(RuntimeError):
@@ -209,7 +209,7 @@ def run(
         for export_path in export_paths:
             model = load_nam(export_path)
             variants = {}
-            for label, slim in (("full", 0.0), ("lite", 1.0)):
+            for label, slim in (("full", SLIM_FULL), ("lite", SLIM_LITE)):
                 try:
                     candidate = render(model, dry, sample_rate, slim=slim)
                     variants[label] = {"audio": _audio_check(candidate, len(dry)),

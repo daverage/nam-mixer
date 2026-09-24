@@ -1,11 +1,11 @@
-"""Tests for hybrid/nam_provenance.py -- shared source-model provenance and
+"""Tests for hybrid/training/nam_provenance.py -- shared source-model provenance and
 export-name suffix logic used by all three design modes' manifest builders
-and by hybrid/a2_training_settings.py's user_metadata_kwargs."""
+and by hybrid/training/a2_training_settings.py's user_metadata_kwargs."""
 from types import SimpleNamespace
 
 import pytest
 
-from hybrid import nam_provenance as prov
+from hybrid.training import nam_provenance as prov
 
 
 def _model(**kwargs):
@@ -42,39 +42,46 @@ def test_agreed_tone_type_rejects_unofficial_value():
     assert prov.agreed_tone_type(a, b) is None
 
 
-@pytest.mark.parametrize("export_mode,expected", [
-    ("none", prov.SUFFIX_AMP_ONLY),
-    (None, prov.SUFFIX_AMP_ONLY),
-    ("learned", prov.SUFFIX_LEARNED_CAB),
-    ("embedded", ""),
+@pytest.mark.parametrize("cab, expected", [
+    (None, "none"),
+    ({}, "none"),
+    ({"export_mode": "none", "selected": True}, "none"),          # preview-only cab: external IR needed
+    ({"export_mode": "learned", "baked": True}, "learned"),
+    ({"baked": True}, "learned"),                                 # historical record: cab was baked in
+    ({"baked": False}, "none"),
+    ({"export_mode": "embedded"}, "embedded"),
 ])
-def test_export_name_suffix(export_mode, expected):
-    cab = {"export_mode": export_mode} if export_mode is not None else None
-    assert prov.export_name_suffix(cab) == expected
-
-
-def test_build_export_name_no_cab():
-    assert prov.build_export_name("British American High Gain", None) == "British American High Gain [Amp Only]"
-
-
-def test_build_export_name_learned_cab_uses_display_name():
-    cab = {"export_mode": "learned", "display_name": "Modern Boutique 4x12"}
-    assert prov.build_export_name("British American High Gain", cab) == \
-        "British American High Gain + Modern Boutique 4x12 [Learned Cab]"
-
-
-def test_build_export_name_learned_cab_falls_back_to_filename():
-    cab = {"export_mode": "learned", "original_filename": "cab_ir_01.wav"}
-    assert prov.build_export_name("Base", cab) == "Base + cab_ir_01.wav [Learned Cab]"
-
-
-def test_build_export_name_embedded_leaves_base_unsuffixed():
-    cab = {"export_mode": "embedded", "display_name": "Modern Boutique 4x12"}
-    assert prov.build_export_name("British American High Gain", cab) == "British American High Gain"
+def test_cab_export_mode_includes_historical_baked_records(cab, expected):
+    assert prov.cab_export_mode(cab) == expected
 
 
 def test_cabinet_display_name_prefers_display_name_over_filename():
-    cab = {"display_name": "Modern Boutique 4x12", "original_filename": "cab_ir_01.wav"}
-    assert prov.cabinet_display_name(cab) == "Modern Boutique 4x12"
+    assert prov.cabinet_display_name({"display_name": "Modern Boutique 4x12", "original_filename": "cab_ir_01.wav"}) == "Modern Boutique 4x12"
     assert prov.cabinet_display_name({"original_filename": "cab_ir_01.wav"}) == "cab_ir_01.wav"
     assert prov.cabinet_display_name(None) == "Cabinet"
+
+
+def test_app_export_name_is_the_shared_rule_for_every_export_mode():
+    """The app (a2_training_settings.user_metadata_kwargs) must use exactly
+    export_model_name -- no second, test-only naming routine."""
+    from hybrid.training.a2_training_settings import user_metadata_kwargs
+    from tests.test_a2_training_settings import EXPORT_NAME_CASES
+
+    for _label, manifest, expected, gear_type in EXPORT_NAME_CASES:
+        assert prov.export_model_name(manifest) == expected == user_metadata_kwargs(manifest)["name"]
+        assert prov.export_gear_type(manifest) == gear_type == user_metadata_kwargs(manifest)["gear_type"]
+
+
+def test_embedded_package_name():
+    assert prov.embedded_package_name("Studio", "Boutique 4x12") == "Studio + Boutique 4x12 [Embedded Cab · Full]"
+    assert prov.embedded_package_name(None, "  ") == "NAM Head + Cabinet [Embedded Cab · Full]"
+    # Built from the base name, never the head's suffixed name.
+    assert prov.embedded_package_name(prov.export_base_name({"model_name": "Studio"}), "v30.wav") == "Studio + v30.wav [Embedded Cab · Full]"
+
+
+def test_package_name_fallback_never_doubles_the_head_label():
+    assert prov.strip_content_suffix("Studio [Amp Only]") == "Studio"
+    assert prov.strip_content_suffix("Studio [Full Rig]") == "Studio"
+    assert prov.strip_content_suffix("Studio + v30 [Learned Cab]") == "Studio + v30 [Learned Cab]"
+    assert prov.embedded_package_name(prov.strip_content_suffix("Studio [Amp Only]"), "v30.wav") == "Studio + v30.wav [Embedded Cab · Full]"
+

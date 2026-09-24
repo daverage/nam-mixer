@@ -4,11 +4,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hybrid.cg_anchors import effective_min_sep, fixed_ladder_anchors, mapping_table, position_input_gain_db, response_anchors
-from hybrid.cg_audit import alignment_shift, audit_captures
-from hybrid.cg_probe import FIT_DIS, probe_capture
-from hybrid.cg_profile import build_profile
-from hybrid.cg_selection import (GROUPS, MAX_EXHAUSTIVE_ELIGIBLE, PHYS, evaluate_set, resolve_selection, select_captures)
+from hybrid.continuous_gain.anchors import effective_min_sep, fixed_ladder_anchors, mapping_table, position_input_gain_db, response_anchors
+from hybrid.continuous_gain.audit import alignment_shift, audit_captures
+from hybrid.continuous_gain.probe import FIT_DIS, probe_capture
+from hybrid.continuous_gain.profile import build_profile
+from hybrid.continuous_gain.selection import (GROUPS, MAX_EXHAUSTIVE_ELIGIBLE, PHYS, evaluate_set, resolve_selection, select_captures)
 from tests.cg_synth import SR, amp_render, synth_di
 
 GAINS = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
@@ -56,6 +56,10 @@ def test_a_verified_timing_offset_is_corrected_and_the_shift_realigns_it():
     audit = audit_captures(GAINS, probes, meta, lambda g, x: renders[g](x), _load_di)
     a = audit["captures"]["3"]
     assert a["status"] == "CORRECTED" and a["correction"]["samples"] == -40
+    assert a["corrected"] is not None
+    # A 'corrected' record means a correction was applied, never just suggested.
+    assert all((c["corrected"] is not None) == bool(c["correction"] and "samples" in c["correction"])
+               for c in audit["captures"].values())
     sh = alignment_shift(a)
     x = _load_di("clean_smooth")
     y = renders[3.0](x)
@@ -181,7 +185,7 @@ def test_mapping_marks_anchors_and_interpolates_the_rest():
 
 # ---- parallel rendering + probe cache: outputs identical to the serial computation
 def test_pmap_preserves_order_and_propagates_errors(monkeypatch):
-    from hybrid.cg_parallel import default_workers, pmap
+    from hybrid.continuous_gain.parallel import default_workers, pmap
     import time as _t
     assert pmap(lambda i: (_t.sleep(0.02 * (5 - i)), i * i)[1], range(6), workers=4) == [0, 1, 4, 9, 16, 25]
     assert pmap(lambda i: i, [], workers=4) == [] and pmap(lambda i: i + 1, [3], workers=8) == [4]
@@ -192,3 +196,27 @@ def test_pmap_preserves_order_and_propagates_errors(monkeypatch):
         pmap(boom, range(4), workers=3)
     monkeypatch.setenv("NAM_MIXER_CG_WORKERS", "3"); assert default_workers() == 3
     monkeypatch.setenv("NAM_MIXER_CG_WORKERS", "junk"); assert 1 <= default_workers() <= 6
+
+
+@pytest.mark.parametrize("mode", ["automatic", "use_all"])
+def test_fewer_than_two_eligible_captures_is_a_clear_error_not_a_crash(mode):
+    """All but one capture flagged by the audit: selection must refuse with a
+    message (turned into CgProjectError by plan), not IndexError in predict()."""
+    profile, audit = _rough_profile(4, statuses={1.0: "SUSPECT", 2.0: "INVALID", 3.0: "SUSPECT"})
+    an = select_captures(profile, audit)
+    with pytest.raises(ValueError, match="at least two are needed"):
+        resolve_selection(an, profile, audit, mode)
+
+
+def test_identical_capture_responses_give_finite_evenly_spaced_anchors():
+    from hybrid.continuous_gain.anchors import response_anchors
+
+    profile, audit = _rough_profile(4)
+    for series in profile["series"].values():
+        series["values"] = [0.5] * 4        # e.g. the same .nam uploaded under four positions
+    an = select_captures(profile, audit)
+    rc = an["response_coordinate"]
+    assert rc["total"] == 0.0 and all(np.isfinite(rc["arc"]))
+    _, anchors = response_anchors(rc, [1.0, 2.0, 3.0, 4.0])
+    assert all(np.isfinite(anchors)) and anchors == sorted(anchors) and len(set(anchors)) == 4
+

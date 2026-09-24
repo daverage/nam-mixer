@@ -1,10 +1,11 @@
+import json
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from hybrid.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio
-from hybrid.character_blend import (
+from hybrid.modes.character_analysis import CharacterAnalysisConfig, analyse_rendered_audio
+from hybrid.modes.character_blend import (
     CharacterBlendDesign,
     LowLevelResponseCheck,
     _adjacent_level_weights,
@@ -112,7 +113,7 @@ def test_freeze_character_design_preserves_per_amp_input_gains():
 
 # ---------------------------------------------------------------------------
 # Phase 1/2 -- adjacent-level interpolation weights never zero out below/
-# above the analysis grid (docs/blend-mode-fixes.md).
+# above the analysis grid (docs/history/blend-mode-fixes.md).
 # ---------------------------------------------------------------------------
 
 _ANALYSIS_LEVELS = np.array([-24.0, -18.0, -12.0, -6.0, 0.0, 6.0])
@@ -188,7 +189,7 @@ def test_evaluate_low_level_response_passes_for_healthy_linear_amps():
 
 
 def test_evaluate_low_level_response_flags_a_hard_gate(monkeypatch):
-    import hybrid.character_blend as character_blend_module
+    import hybrid.modes.character_blend as character_blend_module
 
     def fake_build(pair, design, **kwargs):
         # Simulates the pre-fix bug: flat output until the envelope falls
@@ -324,11 +325,209 @@ def test_character_design_without_semantics_version_loads_as_legacy(tmp_path):
 
 
 def test_character_temporal_history_reports_serial_dependencies():
-    history = character_temporal_history_samples(1000, 40.0)
+    history = character_temporal_history_samples(1000, 40.0, semantics_version=2)
     assert history == {
+        "teacher_semantics_version": 2,
         "drive_smoothing_serial_samples": 39,
         "compensation_smoothing_serial_samples": 39,
         "donor_transition_serial_samples": 9,
         "correction_fir_serial_samples": 64,
         "donor_transition_exact_history_bounded": False,
     }
+
+
+def test_character_v3_temporal_history_has_no_donor_transition_and_is_bounded():
+    assert character_temporal_history_samples(1000, 40.0, semantics_version=3) == {
+        "teacher_semantics_version": 3,
+        "drive_smoothing_serial_samples": 39,
+        "compensation_smoothing_serial_samples": 39,
+        "correction_fir_serial_samples": 64,
+        "donor_transition_exact_history_bounded": True,
+    }
+
+
+def test_preview_pair_is_measured_against_profiled_dry_not_raw_di():
+    """A preview RenderedPair's amps were driven by profiled_dry; the teacher
+    must match a generation-style pair whose `dry` IS that profiled signal."""
+    base = _pair()
+    profiled = (base.dry * 2.0).astype(np.float32)  # +6 dB pickup profile
+    preview = SimpleNamespace(**{**vars(base), "dry": base.dry, "profiled_dry": profiled})
+    generation_style = SimpleNamespace(**{**vars(base), "dry": profiled})
+    design = CharacterBlendDesign("a.nam", "b.nam", tone_mix_b=.4, feel_mix_b=.6, drive_mix_b=.5)
+    assert np.array_equal(build_character_blend(preview, design).blend,
+                          build_character_blend(generation_style, design).blend)
+
+
+def test_analysis_cache_key_changes_with_the_measured_audio():
+    from hybrid.modes.character_analysis import analysis_cache_key
+
+    pair = _pair()
+    key = analysis_cache_key("nam", pair.dry, pair.amp_a)
+    assert key == analysis_cache_key("nam", pair.dry.copy(), pair.amp_a.copy())
+    assert key != analysis_cache_key("nam", pair.dry * 2.0, pair.amp_a)   # different DI level/profile
+    assert key != analysis_cache_key("nam", pair.dry, pair.amp_a * 0.5)   # different render (e.g. input trim)
+    assert key != analysis_cache_key("other", pair.dry, pair.amp_a)
+
+
+@pytest.mark.parametrize("window_db", [3.0, 2.0])
+def test_frozen_design_records_and_restores_the_analysis_level_window(tmp_path, window_db):
+    """Default and non-default windows survive freeze -> JSON -> load, and the
+    restored config reproduces the analyses' own config hash exactly."""
+    pair = _pair()
+    config = CharacterAnalysisConfig(level_window_db=window_db)
+    analysis_a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    analysis_b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=analysis_a, analysis_b=analysis_b)
+
+    frozen = freeze_character_design(pair, result, "a.nam", "b.nam")
+    loaded = CharacterBlendDesign.read_json(frozen.write_json(tmp_path / "character.json"))
+
+    restored = CharacterAnalysisConfig(**loaded.analysis_config)
+    assert restored.level_window_db == window_db
+    assert restored.cache_key() == analysis_a.config_hash == analysis_b.config_hash
+
+
+def test_legacy_frozen_design_without_level_window_keeps_its_behaviour():
+    """Designs frozen before the window was recorded: analyses without the
+    field load as the default window, and the teacher is unchanged."""
+    pair = _pair()
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"))
+    current = freeze_character_design(pair, result, "a.nam", "b.nam").to_dict()
+
+    legacy = json.loads(json.dumps(current))
+    for key in ("analysis_a", "analysis_b"):
+        del legacy[key]["level_window_db"]
+    del legacy["analysis_config"]["level_window_db"]
+    legacy_design = CharacterBlendDesign(**legacy)
+
+    assert CharacterAnalysisConfig(**legacy_design.analysis_config).level_window_db == 3.0
+    assert np.array_equal(build_character_blend(pair, legacy_design).blend,
+                          build_character_blend(pair, CharacterBlendDesign(**current)).blend)
+
+
+def _dense_reference_mix(signal, firs, levels, envelope):
+    """The per-level mix build_character_blend used before streaming: every
+    filtered path stacked and summed against the dense weight matrix."""
+    from scipy.signal import fftconvolve
+
+    n = len(signal)
+    filtered = [fftconvolve(signal, fir, mode="full")[:n] for fir in firs]
+    return np.sum(np.vstack(filtered) * _adjacent_level_weights(levels, envelope), axis=0)
+
+
+def _level_firs(n_levels, sample_rate=48000):
+    from hybrid.modes.character_blend import _minimum_phase_correction
+
+    freqs = np.geomspace(80.0, 10_000.0, 24)
+    rng = np.random.default_rng(7)
+    return [_minimum_phase_correction(freqs, rng.uniform(-4, 4, len(freqs)), sample_rate) for _ in range(n_levels)]
+
+
+@pytest.mark.parametrize("case", ["sweep", "on_grid_points", "below_and_above_grid", "constant_inside", "tiny"])
+def test_streamed_level_mix_is_bit_identical_to_the_dense_sum(case):
+    from hybrid.modes.character_blend import _mix_adjacent_filtered_levels
+
+    levels = np.array([-24.0, -18.0, -12.0, -6.0, 0.0, 6.0])
+    rng = np.random.default_rng(3)
+    n = 5 if case == "tiny" else 20_000
+    t = np.arange(n) / 48000
+    signal = 0.3 * np.sin(2 * np.pi * 196 * t) + 0.05 * rng.standard_normal(n)
+    envelope = {
+        "sweep": np.linspace(-40.0, 15.0, n),                        # crosses every level and both edges
+        "on_grid_points": np.resize(levels, n),                     # exactly on each grid point
+        "below_and_above_grid": np.where(np.arange(n) % 2, -80.0, 30.0),  # clamped at both ends
+        "constant_inside": np.full(n, -9.5),                         # never touches most levels
+        "tiny": np.array([-30.0, -18.0, -3.0, 6.0, 10.0]),
+    }[case]
+    firs = _level_firs(len(levels))
+
+    streamed = _mix_adjacent_filtered_levels(signal, firs, levels, envelope)
+    dense = _dense_reference_mix(signal, firs, levels, envelope)
+    assert np.array_equal(streamed, dense)  # exact float64 equality, not approximate
+
+
+def _alternating_level_sine(seconds=6, sample_rate=48000):
+    """A pure 220 Hz tone alternating between -12 and -30 dB RMS every 150 ms:
+    the samples near either level form separate runs, so stitching them
+    creates seams, while any contiguous stretch has almost no HF energy."""
+    t = np.arange(sample_rate * seconds) / sample_rate
+    gain = np.where((np.arange(len(t)) // int(0.150 * sample_rate)) % 2 == 0, 10 ** (-9 / 20), 10 ** (-27 / 20))
+    return np.sin(2 * np.pi * 220 * t) * gain
+
+
+def _hf_below_peak_db(analysis, level_db=-12.0):
+    freqs = np.array(analysis.frequencies_hz)
+    spectrum = np.array(next(x for x in analysis.levels if x.input_gain_db == level_db).spectrum_db)
+    return float(np.mean(spectrum[freqs >= 2000]) - spectrum.max())
+
+
+def test_v1_spectrum_shows_the_stitching_artefact_and_v2_does_not():
+    x = _alternating_level_sine()
+    stitched = analyse_rendered_audio(x, x, 48000, CharacterAnalysisConfig(version=1))
+    contiguous = analyse_rendered_audio(x, x, 48000, CharacterAnalysisConfig(version=2))
+    assert _hf_below_peak_db(stitched) > -50.0      # seams put HF energy into a pure tone
+    assert _hf_below_peak_db(contiguous) < -75.0    # contiguous frames do not
+    assert contiguous.version == 2 and stitched.version == 1
+
+
+def test_default_analysis_is_the_contiguous_version_2_method():
+    x = _alternating_level_sine(seconds=2)
+    y = np.tanh(3.0 * x)
+    default = analyse_rendered_audio(x, y, 48000)
+    assert CharacterAnalysisConfig().version == 2 and default.version == 2
+    assert default == analyse_rendered_audio(x, y, 48000, CharacterAnalysisConfig(version=2))
+
+
+def test_frozen_version_1_design_keeps_its_stored_analysis(tmp_path):
+    """Designs frozen before v2 became the default are never re-analysed: they
+    keep their stored v1 spectra, and a stored analysis without a version
+    field loads as v1."""
+    pair = _pair()
+    v1 = CharacterAnalysisConfig(version=1)
+    a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, v1)
+    b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, v1)
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=a, analysis_b=b)
+    frozen = freeze_character_design(pair, result, "a.nam", "b.nam")
+    loaded = CharacterBlendDesign.read_json(frozen.write_json(tmp_path / "v1.json"))
+    assert loaded.analysis_config["version"] == 1 and loaded.analysis_a["version"] == 1
+    assert np.array_equal(build_character_blend(pair, loaded).blend, result.blend)
+
+    legacy = dict(loaded.analysis_a)
+    del legacy["version"]
+    from hybrid.modes.character_analysis import AmpCharacterAnalysis
+    assert AmpCharacterAnalysis.from_dict(legacy).version == 1
+
+
+def test_analyses_of_different_versions_cannot_be_mixed():
+    pair = _pair()
+    a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, CharacterAnalysisConfig(version=1))
+    b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, CharacterAnalysisConfig(version=2))
+    with pytest.raises(ValueError, match="different Character analysis versions"):
+        build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=a, analysis_b=b)
+
+
+def test_version_2_design_records_and_restores_its_analysis_version(tmp_path):
+    pair = _pair(n=48000)
+    config = CharacterAnalysisConfig(version=2)
+    a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, config)
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=a, analysis_b=b)
+    loaded = CharacterBlendDesign.read_json(freeze_character_design(pair, result, "a.nam", "b.nam").write_json(tmp_path / "d.json"))
+    assert loaded.analysis_config["version"] == 2 and loaded.analysis_a["version"] == 2
+    assert CharacterAnalysisConfig(**loaded.analysis_config).cache_key() == a.config_hash
+    assert np.array_equal(build_character_blend(pair, loaded).blend, result.blend)
+
+
+def test_corrupt_analysis_cache_entry_is_a_miss_not_an_error(tmp_path):
+    from hybrid.modes.character_analysis import analysis_cache_path, load_cached_analysis, store_cached_analysis
+
+    pair = _pair()
+    config = CharacterAnalysisConfig()
+    analysis = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    path = store_cached_analysis(tmp_path, analysis, config, "k")
+    assert load_cached_analysis(tmp_path, "k", config) == analysis
+    assert list(tmp_path.glob(".*.tmp")) == []
+    path.write_text('{"sample_rate": 48000, "freq')       # a torn write
+    assert load_cached_analysis(tmp_path, "k", config) is None
+    assert analysis_cache_path(tmp_path, "k", config) == path
+

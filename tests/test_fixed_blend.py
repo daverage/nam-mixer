@@ -1,17 +1,17 @@
-"""Tests for hybrid/fixed_blend.py -- Fixed Blend design mode, see
-docs/blend-mode.md "TAB 2 -- FIXED BLEND" / "BLEND LEVEL MATCHING".
+"""Tests for hybrid/modes/fixed_blend.py -- Fixed Blend design mode, see
+docs/history/blend-mode.md "TAB 2 -- FIXED BLEND" / "BLEND LEVEL MATCHING".
 """
 from __future__ import annotations
 
 import numpy as np
 
-from hybrid.fixed_blend import (
+from hybrid.modes.fixed_blend import (
     BlendDesign,
     build_fixed_blend,
     compute_active_trim,
     freeze_blend_design,
 )
-from hybrid.pipeline import RenderedPair
+from hybrid.core.pipeline import RenderedPair
 
 
 def _pair(amp_a, amp_b, envelope_db=None, sample_rate=48000):
@@ -82,8 +82,7 @@ def test_manual_trim_shifts_amp_b_before_mixing():
 def test_active_level_match_uses_active_playing_not_crossover_region():
     """compute_active_trim must ignore silent samples and NOT depend on any
     crossover config -- it only needs an active-signal mask over the whole
-    clip (docs/blend-mode.md "BLEND LEVEL MATCHING")."""
-    n = 1000
+    clip (docs/history/blend-mode.md "BLEND LEVEL MATCHING")."""
     envelope_db = np.concatenate([
         np.full(500, -80.0, dtype=np.float32),   # silence -- excluded
         np.full(500, -10.0, dtype=np.float32),   # active
@@ -138,3 +137,10 @@ def test_blend_design_round_trips_through_json(tmp_path):
     path = design.write_json(tmp_path / "blend_design.json")
     loaded = BlendDesign.read_json(path)
     assert loaded == design
+
+
+def test_active_trim_with_silent_amp_is_zero():
+    envelope_db = np.full(1000, -10.0, dtype=np.float32)
+    amp_a = np.full(1000, 0.5, dtype=np.float32)
+    silent = np.zeros(1000, dtype=np.float32)
+    assert compute_active_trim(envelope_db, amp_a, silent).suggested_b_trim_db == 0.0

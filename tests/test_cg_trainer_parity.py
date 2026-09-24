@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from hybrid.a2_training_settings import custom_split_train_stop, user_metadata_kwargs
+from hybrid.training.a2_training_settings import custom_split_train_stop, user_metadata_kwargs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -85,11 +85,12 @@ def test_both_trainers_install_the_same_data_config(local_mod, cloud_mod, monkey
         assert core._get_final_latency(core._analyze_latency(7)) == 7
 
 
-def test_export_name_is_the_users_model_name_without_a_hybrid_suffix(cloud_mod):
-    assert user_metadata_kwargs(CG_MANIFEST)["name"] == "My Amp"
-    assert cloud_mod.user_metadata_kwargs(CG_MANIFEST)["name"] == "My Amp"
+def test_export_name_is_the_users_model_name_with_the_content_suffix(cloud_mod):
+    """Continuous Gain follows the same naming rule as every other mode."""
+    assert user_metadata_kwargs(CG_MANIFEST)["name"] == "My Amp [Amp Only]"
+    assert cloud_mod.user_metadata_kwargs(CG_MANIFEST)["name"] == "My Amp [Amp Only]"
     unnamed = {"mode": "continuous_gain", "cab": {"baked": False}}
-    assert user_metadata_kwargs(unnamed)["name"] == cloud_mod.user_metadata_kwargs(unnamed)["name"] == "Continuous Gain"
+    assert user_metadata_kwargs(unnamed)["name"] == cloud_mod.user_metadata_kwargs(unnamed)["name"] == "Continuous Gain [Amp Only]"
 
 
 def test_receptive_field_policy_matches_for_continuous_gain(local_mod, cloud_mod, monkeypatch):

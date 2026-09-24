@@ -7,12 +7,19 @@
   const body = document.getElementById("cg-body");
 
   const S = { id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard",
-    cab: null, cabEnabled: false, cabDisplayName: "" };
+    cab: null, cabMode: "none", cabDisplayName: "" };
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
   // Rough elapsed-time estimates -- real measurements from this project's own end-to-end runs (parallel capture
-  // rendering + a per-capture probe cache, see hybrid/cg_parallel.py), not a guarantee: "usually", not exact.
-  const estimateSeconds = (count) => 20 + count * 2.6;      // ~20s fixed (timing/dither audit) + ~2.6s/capture, measured on 19 captures
+  // rendering + a per-capture probe cache, see hybrid/continuous_gain/parallel.py), not a guarantee: "usually", not exact.
+  // Measured time per step: a fixed part plus a per-capture part. The one
+  // place to update when a step gets faster or slower.
+  const STEP_TIMING = {
+    analyse: { fixed: 20, perCapture: 2.6 },   // timing/dither audit + per-capture probes, measured on 19 captures
+    generate: { fixed: 20, perCapture: 4 },    // training audio through each selected capture
+    validate: { fixed: 15, perCapture: 3 },    // comparisons + audition sweep
+  };
+  const estimateSeconds = (step, count) => STEP_TIMING[step].fixed + count * STEP_TIMING[step].perCapture;
   const formatDuration = (seconds) => seconds < 90 ? `about ${Math.max(10, Math.round(seconds / 10) * 10)} seconds` : `about ${Math.round(seconds / 60)} minutes`;
   const say = (t, bad) => setStatus(t || "", Boolean(bad));       // the app-wide status line (app.js), not a second message area
 
@@ -52,15 +59,15 @@
   let loadSeq = 0;
   async function load(id) {
     const changedProject = S.id !== id;
-    S.id = id;
     const mine = ++loadSeq;
     const data = await api(`/api/cg/projects/${id}`);
     if (mine !== loadSeq) return;            // a newer load (e.g. the project the user just created) superseded this response
+    S.id = id;                               // only once it loaded: a failed open must not retarget the project on screen
     S.data = data;
     if (changedProject) {
       const cab = data.bundle && data.bundle.cab;
       S.cab = cab && cab.selected ? { path: cab.ir_working_path, filename: cab.original_filename, sha256: cab.sha256 } : null;
-      S.cabEnabled = Boolean(S.cab);
+      S.cabMode = S.cab ? (cab.export_mode || (cab.baked ? "learned" : "embedded")) : "none";
       S.cabDisplayName = cab?.display_name || "";
     }
     document.getElementById("cg-current-name").textContent = data.project.name;
@@ -100,7 +107,7 @@
         S.stage = 1;
         await load(projectId);
         const st = S.data.project;
-        S.stage = S.data.training && S.data.training.trained ? 4 : S.data.bundle ? 3 : S.data.plan ? 2 : S.data.analysis ? 2 : 1;
+        S.stage = S.data.training && S.data.training.trained ? 4 : S.data.bundle ? 3 : (S.data.plan || S.data.analysis) ? 2 : 1;
         render();
         say(`Opened ${st.name}.`);
       } catch (e) { say(`Could not open this project: ${e.message}. Its working files are not on this computer (a session file carries the trained model, not the captures).`, true); }
@@ -112,28 +119,37 @@
   });
 
   // ---------- jobs
+  // A job belongs to the project that started it (pid): its follow-up actions
+  // always target that project, even if the user has opened another one since.
   async function runJob(startPath, payload, after) {
+    const pid = S.id;
     try {
       const j = await api(startPath, { method: "POST", json: payload || {} });
-      S.job = { id: j.job_id, message: "starting", log: [] };
+      S.job = { id: j.job_id, pid, message: "starting", log: [] };
       render();
       clearInterval(S.pollTimer);
-      S.pollTimer = setInterval(async () => {
+      let busy = false;                      // a slow tick must not overlap the next one and finish the job twice
+      const timer = S.pollTimer = setInterval(async () => {
+        if (busy) return;
+        busy = true;
         try {
           const st = await api(`/api/cg/jobs/${j.job_id}`);
-          S.job = { id: j.job_id, message: st.message, log: st.log, elapsed: st.elapsed };
           if (st.state !== "running") {
-            clearInterval(S.pollTimer);
+            clearInterval(timer);
             const failed = st.state === "error";
-            S.job = null;
-            await load(S.id);
-            if (failed) say(st.error || "The job failed", true); else if (after) await after(st);
-          } else { const el = document.getElementById("cg-job-log"); if (el) { el.textContent = st.log.join("\n"); el.scrollTop = el.scrollHeight; } const m = document.getElementById("cg-job-msg"); if (m) m.textContent = `${st.message} (${Math.round(st.elapsed)} s)`; }
-        } catch (e) { clearInterval(S.pollTimer); say(e.message, true); }
+            if (S.job && S.job.id === j.job_id) S.job = null;
+            if (S.id === pid) await load(pid);
+            if (failed) say(st.error || "The job failed", true); else if (after) await after(st, pid);
+          } else {
+            S.job = { id: j.job_id, pid, message: st.message, log: st.log, elapsed: st.elapsed };
+            const el = document.getElementById("cg-job-log"); if (el) { el.textContent = st.log.join("\n"); el.scrollTop = el.scrollHeight; } const m = document.getElementById("cg-job-msg"); if (m) m.textContent = `${st.message} (${Math.round(st.elapsed)} s)`;
+          }
+        } catch (e) { clearInterval(timer); say(e.message, true); }
+        finally { busy = false; }
       }, 1500);
     } catch (e) { say(e.message, true); }
   }
-  const jobBox = () => S.job ? `<div class="training-activity-card" aria-live="polite"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details" open><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
+  const jobBox = () => S.job && S.job.pid === S.id ? `<div class="training-activity-card" aria-live="polite"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details" open><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
 
   // ---------- charts (inline SVG, theme variables)
   function chart({ xs, series, xLabel, yLabel, height = 220, width = 460, xTicks, shade = [], points = [] }) {
@@ -190,8 +206,8 @@
       (caps.length ? table(["File", "Physical gain position", "Audit", ""], rows) : `<p class="info">No captures yet.</p>`)
       + `<p class="info">${esc(d.check.summary)}</p>${issues ? `<ul class="cg-issues">${issues}</ul>` : ""}
         <button type="button" class="btn btn-primary btn-block" id="cg-analyse" ${d.check.ready && !S.job ? "" : "disabled"}>Analyse captures</button>
-        <p class="info">Runs each capture through the native renderer, in parallel (usually ${formatDuration(estimateSeconds(d.check.count))} for ${d.check.count} captures on this computer). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
-      `<span class="cost-badge cost-badge-expensive">⚡ ${formatDuration(estimateSeconds(d.check.count))}</span>`);
+        <p class="info">Runs each capture through the native renderer, in parallel (usually ${formatDuration(estimateSeconds("analyse", d.check.count))} for ${d.check.count} captures on this computer). Uncertain source material is flagged, never silently fixed.</p>${jobBox()}`,
+      `<span class="cost-badge cost-badge-expensive">⚡ ${formatDuration(estimateSeconds("analyse", d.check.count))}</span>`);
     return cols(setup, main);
   }
   function bindStage1() {
@@ -213,7 +229,10 @@
       try { S.data = await api(`/api/cg/projects/${S.id}/captures/${encodeURIComponent(el.dataset.cgRemove)}`, { method: "DELETE" }); render(); } catch (e) { say(e.message, true); }
     }));
     const an = document.getElementById("cg-analyse");
-    if (an) an.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/analyse`, {}, async () => { await api(`/api/cg/projects/${S.id}/plan`, { method: "POST", json: { mode: "automatic", anchors: "fc" } }); await load(S.id); S.stage = 2; render(); }));
+    if (an) an.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/analyse`, {}, async (_st, pid) => {
+      await api(`/api/cg/projects/${pid}/plan`, { method: "POST", json: { mode: "automatic", anchors: "fc" } });
+      if (S.id === pid) { await load(pid); S.stage = 2; render(); }
+    }));
   }
   const val = (id) => (document.getElementById(id) || {}).value || "";
 
@@ -299,27 +318,46 @@
   }
 
   // ---------- Stage 3
+  // The cabinet choice actually in effect: none without a cab, and the embedded (Sequential) export -- a possible
+  // future NAM specification -- only while experimental architectures are enabled.
+  function cgCabMode(d) {
+    if (!S.cab) return "none";
+    if (S.cabMode === "embedded" && !(d && d.experimental_architectures)) return "none";
+    return S.cabMode || "none";
+  }
+
   function stage3() {
     const d = S.data;
     if (!d || !d.plan) return `${card("Train", `<p class="info">Review the training plan in stage 2 first.</p>`)}`;
     const p = d.plan, b = d.bundle, t = d.training;
     const bundledCab = b && b.cab;
-    const currentCabSha = S.cabEnabled && S.cab ? S.cab.sha256 : null;
+    const cabMode = cgCabMode(d);
+    const currentCabSha = cabMode !== "none" && S.cab ? S.cab.sha256 : null;
     const bundledCabSha = bundledCab && bundledCab.selected ? bundledCab.sha256 : null;
     const stale = b && ((b.plan && b.plan.planned !== p.planned) || currentCabSha !== bundledCabSha ||
-      (currentCabSha && (S.cabDisplayName || "") !== (bundledCab.display_name || "")));
+      (currentCabSha && ((S.cabDisplayName || "") !== (bundledCab.display_name || "") || cabMode !== bundledCab.export_mode)));
+    const cabNote = cabMode === "learned"
+      ? "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download."
+      : cabMode === "embedded"
+        ? "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it."
+        : "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.";
     const range = [Math.min(...p.anchors_input_gain_db), Math.max(...p.anchors_input_gain_db)];
     const files = card("Training files", `
         <label class="field-label" for="cg-model-name">Model name</label><input class="file-input" id="cg-model-name" maxlength="100" value="${esc(d.project.name)}">
-        <label class="field-label" for="cg-cab-file">Cabinet IR <span class="hint">(optional second NAM)</span></label>
+        <label class="field-label" for="cg-cab-file">Cabinet IR <span class="hint">(optional)</span></label>
         <input type="file" id="cg-cab-file" accept=".wav" class="file-input">
-        <div id="cg-cab-info" class="info">${S.cab ? `${esc(S.cab.filename || "Cabinet IR")} selected. The trained and tested NAM remains cabless.` : "No cabinet selected."}</div>
-        <label class="checkbox-row"><input type="checkbox" id="cg-cab-enabled" ${S.cabEnabled && S.cab ? "checked" : ""} ${S.cab ? "" : "disabled"}> Also create a second NAM with this exact cabinet embedded</label>
+        <div id="cg-cab-info" class="info">${S.cab ? `${esc(S.cab.filename || "Cabinet IR")} selected.` : "No cabinet selected."}</div>
+        <label class="field-label" for="cg-cab-mode">Cabinet in the NAM</label>
+        <select id="cg-cab-mode" class="select-input" ${S.cab ? "" : "disabled"}>
+          <option value="none" ${cabMode === "none" ? "selected" : ""}>Amp only — no cabinet in the NAM</option>
+          <option value="learned" ${cabMode === "learned" ? "selected" : ""}>Learned cab — train the cabinet into the NAM</option>
+          ${d.experimental_architectures ? `<option value="embedded" ${cabMode === "embedded" ? "selected" : ""}>Create both — tested amp NAM + exact embedded-cab NAM (experimental)</option>` : ""}
+        </select>
         <label class="field-label" for="cg-cab-name">Cabinet display name</label>
-        <input class="file-input" id="cg-cab-name" maxlength="80" value="${esc(S.cabDisplayName)}" ${S.cab ? "" : "disabled"} placeholder="e.g. Modern Boutique 4x12">
-        <p class="info">Training and validation use the head-only signal. Afterward NAM Mixer derives a separate head + cabinet NAM. The cabinet version uses NAM Sequential/Linear and may not load in A2-only players.</p>
+        <input class="file-input" id="cg-cab-name" maxlength="80" value="${esc(S.cabDisplayName)}" ${cabMode !== "none" ? "" : "disabled"} placeholder="e.g. Modern Boutique 4x12">
+        <p class="info">${cabNote}</p>
         <button type="button" class="btn btn-primary btn-block" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Recreate training files" : "Create training files"}</button>
-        <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(20 + p.selected.length * 4)}.</p>
+        <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(estimateSeconds("generate", p.selected.length))}.</p>
         ${stale ? `<p class="info"><strong>The plan changed since these files were created — recreate them before training.</strong></p>` : ""}${jobBox()}
         ${b && t && t.core ? `<p class="info">Design <code>${esc(b.design_id)}</code><br>input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code> · target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code><br>output scale ${fmt(t.core.output_scale_c, 4)} — set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB.</p>` : ""}`);
     const train = b && !stale ? card("Train", `<div id="cg-train-slot"></div>${t && t.trained ? `<p class="info">${badge("instant", "trained")} <code>${esc(t.output_nam_path.split("/").pop())}</code></p><button type="button" class="btn btn-primary btn-block" id="cg-goto4">Continue to Test &amp; export</button>` : ""}`) : "";
@@ -342,21 +380,22 @@
       const form = new FormData(); form.append("file", file);
       try {
         const uploaded = await api("/api/cab/upload", { method: "POST", form });
-        S.cab = uploaded; S.cabEnabled = true;
+        S.cab = uploaded; S.cabMode = "learned";
         if (!S.cabDisplayName) S.cabDisplayName = file.name.replace(/\.wav$/i, "");
         say(`Cabinet ${file.name} selected.`); render();
       } catch (e) { say(e.message, true); }
     });
-    const cabEnabled = document.getElementById("cg-cab-enabled");
-    if (cabEnabled) cabEnabled.addEventListener("change", () => { S.cabEnabled = cabEnabled.checked; render(); });
+    const cabModeSelect = document.getElementById("cg-cab-mode");
+    if (cabModeSelect) cabModeSelect.addEventListener("change", () => { S.cabMode = cabModeSelect.value; render(); });
     const cabName = document.getElementById("cg-cab-name");
     if (cabName) cabName.addEventListener("change", () => { S.cabDisplayName = cabName.value.trim(); render(); });
     const g = document.getElementById("cg-generate");
     if (g) g.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/generate`, {
       model_name: val("cg-model-name"),
-      cab_path: S.cabEnabled && S.cab ? S.cab.path : null,
+      cab_path: cgCabMode(d) !== "none" && S.cab ? S.cab.path : null,
+      cab_export_mode: cgCabMode(d),
       cab_display_name: S.cabDisplayName,
-    }, async () => { say("Training files created."); render(); }));
+    }, async (_st, pid) => { if (S.id === pid) { say("Training files created."); render(); } }));
     const g4 = document.getElementById("cg-goto4"); if (g4) g4.addEventListener("click", () => { S.stage = 4; render(); });
     // The Kaggle / local training UI is the Builder's own section (app.js), hosted here for this design.
     const slot = document.getElementById("cg-train-slot");
@@ -368,7 +407,9 @@
   }
   // The hosted section announces completion; reload so the project shows the trained model.
   document.addEventListener("nam:training-complete", (e) => {
-    if (S.data && S.data.bundle && S.data.bundle.design_id === e.detail.designId && !(S.data.training && S.data.training.trained)) load(S.id);
+    if (S.data && S.data.bundle && S.data.bundle.design_id === e.detail.designId && !(S.data.training && S.data.training.trained)) {
+      load(S.id).catch((err) => say(`Training finished, but the project could not be reloaded: ${err.message}`, true));
+    }
   });
 
   // ---------- Stage 4
@@ -376,14 +417,17 @@
     const d = S.data;
     if (!d || !d.training || !d.training.trained) return `${card("Test & export", `<p class="info">Train a model first (stage 3). Testing and export unlock once a trained .nam exists.</p>`)}`;
     const v = d.validation;
-    const cabReady = d.training.embedded_artifact && d.training.embedded_artifact.state === "validated";
+    const cabReady = Boolean(d.experimental_architectures) && d.training.embedded_artifact && d.training.embedded_artifact.state === "validated";
+    const learnedCab = Boolean(d.bundle && d.bundle.cab && d.bundle.cab.baked);
     const actions = card("Test & export", `
         <button type="button" class="btn btn-secondary btn-block" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>
-        <p class="info">Usually ${formatDuration(15 + (d.plan ? d.plan.selected.length * 3 : 12))} -- renders comparisons and the audition sweep, in parallel.</p>
-        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download>Download tested head-only NAM</a>
+        <p class="info">Usually ${formatDuration(estimateSeconds("validate", d.plan ? d.plan.selected.length : 4))} -- renders comparisons and the audition sweep, in parallel.</p>
+        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download>${cabReady ? "Download tested amp-only NAM" : learnedCab ? "Download tested NAM (with learned cabinet)" : "Download tested NAM"}</a>
         ${cabReady ? `<a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=cab" download>Download NAM with embedded cabinet</a>` : ""}
         <a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download>Download provenance package</a>
-        <p class="info">Validation is always performed on the head-only NAM against your original captures. The cabinet download is a separately validated exact derivative; some A2-only players may not support its Sequential architecture.</p>${jobBox()}`);
+        <p class="info">${learnedCab
+          ? "This is a full-rig capture: the cabinet is learned into the NAM, so validation compares it with your captures through the same cabinet IR."
+          : "Validation compares the NAM with your original captures."}${cabReady ? " The cabinet download is a separately validated exact derivative; some A2-only players may not support its Sequential architecture." : ""}</p>${jobBox()}`);
     if (!v) return cols(actions, card("Validation", `<p class="info">No validation has been run for this model.</p>`));
     const c = v.compatibility, sf = v.safety, pg = v.progression;
     const chip = (ok, yes, no) => badge(ok ? "instant" : "bad", ok ? yes : no);
@@ -405,7 +449,7 @@
   function bindStage4() {
     const d = S.data; if (!d) return;
     const v = document.getElementById("cg-validate");
-    if (v) v.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/validate`, {}, async () => { say("Validation complete."); render(); }));
+    if (v) v.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/validate`, {}, async (_st, pid) => { if (S.id === pid) { say("Validation complete."); render(); } }));
     const sel = document.getElementById("cg-cmp");
     if (sel && d.validation) {
       const show = () => { const c = d.validation.audition.comparisons[Number(sel.value)]; document.getElementById("cg-cmp-pair").innerHTML = `<div><strong>Trained model</strong><audio controls preload="none" src="/api/cg/projects/${S.id}/audition/${c.model}"></audio></div><div><strong>Original capture G${c.position}</strong><audio controls preload="none" src="/api/cg/projects/${S.id}/audition/${c.original}"></audio></div>`; };
@@ -419,7 +463,7 @@
     if (S.trainHost) S.trainHost.remove();          // keep the borrowed section alive while the body is rebuilt
     document.querySelectorAll(".cg-tab").forEach((b) => b.classList.toggle("active", Number(b.dataset.cgStage) === S.stage));
     const hint = document.getElementById("cg-hint"); if (hint) hint.textContent = HINTS[S.stage] || "";
-    if (!S.data) { body.innerHTML = `${card("Continuous Gain", `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`)}</div>`; return; }
+    if (!S.data) { body.innerHTML = `${card("Continuous Gain", `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`)}`; return; }
     body.innerHTML = [stage1, stage2, stage3, stage4][S.stage - 1]();
     [bindStage1, bindStage2, bindStage3, bindStage4][S.stage - 1]();
   }

@@ -56,7 +56,11 @@ bool SaveWavFloat32(const char* fileName, const float* samples, size_t numSample
   out.write(reinterpret_cast<const char*>(&dataSize), 4);
   out.write(reinterpret_cast<const char*>(samples), dataSize);
 
-  return out.good();
+  // Flush and close before checking: a failure writing the last buffered
+  // block (e.g. a full disk) only shows up here, never in the destructor.
+  out.flush();
+  out.close();
+  return !out.fail();
 }
 
 } // namespace
