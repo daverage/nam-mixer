@@ -466,6 +466,10 @@ def _validation_error(field: SettingField, value: str) -> str | None:
     value = str(value).strip()
     if not value:
         return None
+    # One .env line per setting: a newline would let a value write extra
+    # KEY=value lines (see env_file.write_env_values).
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        return f"{field.label} must not contain line breaks or other control characters."
     if field.required_prefix:
         if not (value.startswith(field.required_prefix) and len(value) > len(field.required_prefix)):
             return field.validation_message or f"{field.label} must start with {field.required_prefix}."

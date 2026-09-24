@@ -117,6 +117,9 @@ def write_env_values(values: "dict[str, str]") -> Path:
     Also updates `os.environ` for keys removed this way and returns the
     env-file path written to, so the caller can report where it lives.
     """
+    for key, value in values.items():
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in f"{key}{value.strip()}"):
+            raise ValueError(f"refusing to write a control character (e.g. a line break) into .env for {key}")
     env_file = _env_file()
     existing_lines: list[str] = []
     if env_file.is_file():

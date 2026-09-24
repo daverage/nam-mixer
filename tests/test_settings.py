@@ -319,3 +319,17 @@ def test_save_warns_only_when_a_restart_required_value_changes(isolated_env_file
 
     unrelated = settings.save_settings({"NAM_RENDER_EXE": "/opt/nam_render"})
     assert unrelated["warnings"] == []
+
+
+def test_setting_value_with_a_line_break_is_rejected(isolated_env_file):
+    """One .env line per setting: a newline must not be able to add another
+    KEY=value line (e.g. NAM_RENDER_EXE) to the file."""
+    with pytest.raises(settings.SettingsValidationError, match="line breaks"):
+        settings.save_settings({"NAM_RENDER_EXE": "/usr/bin/nam_render\nNAM_MIXER_AI_PROVIDER=custom"})
+    assert env_file.read_env_value("NAM_MIXER_AI_PROVIDER") in (None, "")
+
+
+def test_env_writer_refuses_control_characters(isolated_env_file):
+    with pytest.raises(ValueError, match="control character"):
+        env_file.write_env_values({"NAM_RENDER_EXE": "a\nNAM_MIXER_AI_PROVIDER=custom"})
+    assert not isolated_env_file.exists() or "NAM_MIXER_AI_PROVIDER" not in isolated_env_file.read_text()
