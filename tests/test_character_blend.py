@@ -470,12 +470,32 @@ def test_v1_spectrum_shows_the_stitching_artefact_and_v2_does_not():
     assert contiguous.version == 2 and stitched.version == 1
 
 
-def test_default_analysis_is_still_the_version_1_method():
+def test_default_analysis_is_the_contiguous_version_2_method():
     x = _alternating_level_sine(seconds=2)
     y = np.tanh(3.0 * x)
     default = analyse_rendered_audio(x, y, 48000)
-    assert CharacterAnalysisConfig().version == 1
-    assert default == analyse_rendered_audio(x, y, 48000, CharacterAnalysisConfig(version=1))
+    assert CharacterAnalysisConfig().version == 2 and default.version == 2
+    assert default == analyse_rendered_audio(x, y, 48000, CharacterAnalysisConfig(version=2))
+
+
+def test_frozen_version_1_design_keeps_its_stored_analysis(tmp_path):
+    """Designs frozen before v2 became the default are never re-analysed: they
+    keep their stored v1 spectra, and a stored analysis without a version
+    field loads as v1."""
+    pair = _pair()
+    v1 = CharacterAnalysisConfig(version=1)
+    a = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, v1)
+    b = analyse_rendered_audio(pair.dry, pair.amp_b, pair.sample_rate, v1)
+    result = build_character_blend(pair, CharacterBlendDesign("a.nam", "b.nam"), analysis_a=a, analysis_b=b)
+    frozen = freeze_character_design(pair, result, "a.nam", "b.nam")
+    loaded = CharacterBlendDesign.read_json(frozen.write_json(tmp_path / "v1.json"))
+    assert loaded.analysis_config["version"] == 1 and loaded.analysis_a["version"] == 1
+    assert np.array_equal(build_character_blend(pair, loaded).blend, result.blend)
+
+    legacy = dict(loaded.analysis_a)
+    del legacy["version"]
+    from hybrid.modes.character_analysis import AmpCharacterAnalysis
+    assert AmpCharacterAnalysis.from_dict(legacy).version == 1
 
 
 def test_analyses_of_different_versions_cannot_be_mixed():

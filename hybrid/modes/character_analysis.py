@@ -22,9 +22,11 @@ from ..core.envelope import bounded_causal_envelope_db
 #        stitched runs add broadband/HF energy that is not in the audio.
 #   2 -- per-level spectrum averaged over real contiguous frames whose level
 #        is near that level (see _contiguous_level_spectrum). No seams.
-# The default stays 1 until version 2 is approved as the production method;
-# frozen designs always keep the version they were analysed with.
-ANALYSIS_VERSION = 1
+# Version 2 is the default since 2026-09-24 (a listening comparison found no
+# audible preference and it removes a known measurement error). Frozen designs
+# always keep the version they were analysed with; a stored analysis without
+# a recorded version is version 1 (AmpCharacterAnalysis.from_dict).
+ANALYSIS_VERSION = 2
 SUPPORTED_ANALYSIS_VERSIONS = (1, 2)
 SPECTRUM_FRAME_SAMPLES = 4096
 SPECTRUM_MIN_FRAMES = 4
