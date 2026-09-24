@@ -712,6 +712,12 @@ function knobFromDb(db) {
 // a preset load, the suggested-crossover auto-set, or its reset link) back
 // onto the knob's position, without re-triggering the raw slider's own
 // input handling.
+// The slider clamps (-40..0) and snaps (0.5 dB) whatever it is given; always
+// label the value it will actually send, not the number it was handed.
+function showCrossoverSliderValue() {
+  crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
+}
+
 function syncCrossoverKnobFromDb() {
   const knobPos = knobFromDb(crossoverSlider.value);
   crossoverKnobSlider.value = knobPos.toFixed(1);
@@ -744,7 +750,7 @@ function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
 crossoverKnobSlider.addEventListener("input", () => {
   const db = dbFromKnob(crossoverKnobSlider.value);
   crossoverSlider.value = db.toFixed(2);
-  crossoverValue.textContent = `${db.toFixed(1)} dBFS`;
+  showCrossoverSliderValue();
   crossoverKnobValue.textContent = `${parseFloat(crossoverKnobSlider.value).toFixed(1)} / 10`;
   scheduleUpdate();
   scheduleAuditionRefresh();
@@ -998,7 +1004,7 @@ function applyWizardSettings() {
     const crossoverDb = dbFromKnob(wizardSwitch.value);
     crossoverSlider.value = crossoverDb.toFixed(2);
     crossoverBaseline = { value: crossoverSlider.value, label: "wizard" };
-    crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
+    showCrossoverSliderValue();
     syncCrossoverKnobFromDb();
     transitionSlider.value = behaviour === "smooth" ? "12" : "6";
     transitionValue.textContent = `${transitionSlider.value} dB`;
@@ -1190,7 +1196,7 @@ function applyRecipe(recipe, prefix = "", { showMessage = true, noRecipeMessage 
     const crossoverDb = dbFromKnob(recipe.switchKnob);
     crossoverSlider.value = crossoverDb.toFixed(2);
     crossoverBaseline = { value: crossoverSlider.value, label: "recipe" };
-    crossoverValue.textContent = `${crossoverDb.toFixed(1)} dBFS`;
+    showCrossoverSliderValue();
     transitionSlider.value = recipe.width;
     // Show the slider's own (clamped/stepped) value, not the raw recipe number.
     transitionValue.textContent = `${transitionSlider.value} dB`;
@@ -1708,7 +1714,7 @@ function renderLowLevelResponseHtml(check) {
     .join("");
   const verdict = check.ok
     ? `<div class="ok-line">&#10003; continuous low-level response, no dead zone</div>`
-    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design -- see docs/history/blend-mode-fixes.md.</div>`;
+    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design: it would bake silence at quiet playing into the model. Change the Drive settings or the amps and check again.</div>`;
   return `
     <div><strong>LOW-LEVEL RESPONSE</strong></div>
     <table class="coverage-table"><tbody>${rows}</tbody></table>
@@ -1836,8 +1842,10 @@ async function updateJourney() {
   }
 }
 
+let coverageRequestSeq = 0;
 async function updateCoverage() {
   if (!havePair) return;
+  const mine = ++coverageRequestSeq;  // slider drags fire overlapping requests; only the newest may render
   try {
     const resp = await fetch("/api/profile_coverage", {
       method: "POST",
@@ -1851,7 +1859,7 @@ async function updateCoverage() {
       }),
     });
     const data = await resp.json();
-    if (!resp.ok) return;
+    if (mine !== coverageRequestSeq || !resp.ok) return;
 
     coverageTbody.innerHTML = "";
     if (data.active_signal === false) {
@@ -2161,10 +2169,10 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
     if (data.suggested_crossover_dbfs !== null && data.suggested_crossover_dbfs !== undefined) {
       const suggested = data.suggested_crossover_dbfs;
       crossoverSlider.value = suggested.toFixed(1);
-      crossoverValue.textContent = `${suggested.toFixed(1)} dBFS`;
+      showCrossoverSliderValue();
       syncCrossoverKnobFromDb();
       suggestedCrossoverNote.textContent =
-        `Crossover set to ${suggested.toFixed(1)} dBFS, suggested from this DI's active-signal level. `;
+        `Crossover set to ${parseFloat(crossoverSlider.value).toFixed(1)} dBFS, suggested from this DI's active-signal level. `;
       const resetBtn = document.createElement("button");
       resetBtn.type = "button";
       resetBtn.className = "link-btn";
@@ -3936,8 +3944,10 @@ async function setToolNam(data, label) {
     toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`;
   } else if (calibration.input_level_dbu != null) {
     toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output not recorded (read-only). The input level is enough for Auto calibration.`;
+  } else if (calibration.output_level_dbu != null) {
+    toolCalibrationStatus.textContent = `Calibration: output ${calibration.output_level_dbu.toFixed(1)} dBu · input not recorded (read-only). Auto calibration needs the input level.`;
   } else {
-    toolCalibrationStatus.textContent = "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs are calibrated.";
+    toolCalibrationStatus.textContent = "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs record an input level.";
   }
   if (inspection.volume_unsupported_reason) {
     // e.g. an embedded-cab export's "Sequential" architecture -- see

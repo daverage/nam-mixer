@@ -398,3 +398,26 @@ test('a Continuous Gain job finishing after the user opened another project acts
   assert.equal(afterPid, 'A');                 // the follow-up targets A, not B
   assert.deepEqual(loads, []);                 // B's screen is not reloaded with A's result
 });
+
+test('a stale coverage response cannot overwrite a newer one', async () => {
+  const el = () => ({ hidden: false, textContent: '', innerHTML: '', value: '0', classList: { add() {} }, appendChild() {} });
+  const pending = [];
+  const sandbox = {
+    havePair: true, activeRenderId: 'r1',
+    crossoverSlider: el(), transitionSlider: el(), customGainSlider: el(), profileSelect: el(),
+    coverageTbody: el(), coverageTable: el(), coverageEmpty: el(), coverageWarning: el(),
+    instrumentSelect: el(),
+    document: { createElement: () => el() },
+    fetch: () => new Promise((resolve) => pending.push(resolve)),
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('let coverageRequestSeq = 0;', '// ---- Journey chart'), sandbox);
+  const older = sandbox.updateCoverage();
+  const newer = sandbox.updateCoverage();
+  const response = (activeSignal) => ({ ok: true, json: async () => ({ coverage: [], active_signal: activeSignal, reachability_warning: null }) });
+  pending[1](response(true));            // the newer request answers first...
+  await newer;
+  pending[0](response(false));           // ...then the stale one (e.g. an earlier, silent DI)
+  await older;
+  assert.equal(sandbox.coverageEmpty.hidden, true);   // the stale "no active playing" did not take over
+});
