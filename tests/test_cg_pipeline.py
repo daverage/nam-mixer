@@ -192,3 +192,27 @@ def test_pmap_preserves_order_and_propagates_errors(monkeypatch):
         pmap(boom, range(4), workers=3)
     monkeypatch.setenv("NAM_MIXER_CG_WORKERS", "3"); assert default_workers() == 3
     monkeypatch.setenv("NAM_MIXER_CG_WORKERS", "junk"); assert 1 <= default_workers() <= 6
+
+
+@pytest.mark.parametrize("mode", ["automatic", "use_all"])
+def test_fewer_than_two_eligible_captures_is_a_clear_error_not_a_crash(mode):
+    """All but one capture flagged by the audit: selection must refuse with a
+    message (turned into CgProjectError by plan), not IndexError in predict()."""
+    profile, audit = _rough_profile(4, statuses={1.0: "SUSPECT", 2.0: "INVALID", 3.0: "SUSPECT"})
+    an = select_captures(profile, audit)
+    with pytest.raises(ValueError, match="at least two are needed"):
+        resolve_selection(an, profile, audit, mode)
+
+
+def test_identical_capture_responses_give_finite_evenly_spaced_anchors():
+    from hybrid.continuous_gain.anchors import response_anchors
+
+    profile, audit = _rough_profile(4)
+    for series in profile["series"].values():
+        series["values"] = [0.5] * 4        # e.g. the same .nam uploaded under four positions
+    an = select_captures(profile, audit)
+    rc = an["response_coordinate"]
+    assert rc["total"] == 0.0 and all(np.isfinite(rc["arc"]))
+    _, anchors = response_anchors(rc, [1.0, 2.0, 3.0, 4.0])
+    assert all(np.isfinite(anchors)) and anchors == sorted(anchors) and len(set(anchors)) == 4
+

@@ -249,6 +249,9 @@ class CgProject:
         except ValueError as exc:
             raise CgProjectError(str(exc)) from exc
         warnings = list(sel["notes"])
+        if anchors == "fc" and np.ptp(np.interp(sel["selected"], rc["gains"], rc["arc"])) == 0:
+            warnings.append("The selected captures show no measurable response difference, so the response-distance "
+                            "anchors fall back to even spacing.")
         if anchors == "fixed":
             warnings.append("Advanced: fixed 4 dB-spacing anchors (v3). The production default is the FC response-distance anchors; this alternative is not a substitute for them.")
             if anc[-1] > 14.0 or anc[0] < -22.0:

@@ -110,7 +110,11 @@ class SelectionAnalysis:
         order = np.argsort(self.G)
         seg = np.linalg.norm(np.diff(Z[order], axis=0), axis=1)
         s = np.concatenate([[0], np.cumsum(seg)])
-        return {"gains": self.G[order].tolist(), "arc": (s / s[-1]).tolist(), "total": float(s[-1])}
+        # Captures with identical measured responses have zero total distance:
+        # report a zero arc (response_anchors then spaces anchors evenly)
+        # rather than dividing by zero into NaN anchors.
+        arc = s / s[-1] if s[-1] > 0 else np.zeros_like(s)
+        return {"gains": self.G[order].tolist(), "arc": arc.tolist(), "total": float(s[-1])}
 
 
 def select_captures(profile: dict, audit: dict, candidate_positions: list[float] | None = None) -> dict:
@@ -212,6 +216,11 @@ def resolve_selection(analysis: dict, profile: dict, audit: dict, mode: str, cus
             notes.append(f"WARNING: positions {bad} are not VALID/CORRECTED in the capture audit; they are used only because you chose them.")
     else:
         raise ValueError(f"unknown selection mode {mode!r}")
+    if len(selected) < 2:
+        raise ValueError(
+            f"Only {len(eligible)} capture(s) passed the audit as VALID/CORRECTED; at least two are needed. "
+            "Check the flagged captures, or choose Custom to use them anyway."
+        )
     ev = evaluate_set(profile, audit, selected, candidate_positions)
     if not ev["all_within_tolerance"] and mode != "automatic":
         notes.append("The chosen set does not reproduce every omitted position within the working tolerances (see coverage).")
