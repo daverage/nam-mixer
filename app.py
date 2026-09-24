@@ -117,7 +117,7 @@ DI_DIR = BASE_DIR / "assets" / "di"
 _data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
 WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
-APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.4.0")
+APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.4.1")
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
