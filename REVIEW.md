@@ -211,10 +211,19 @@ separate commit.
         Blend now reuses HYBRID_BUILDER_VERSION. The goldens and the
         manifest key order are unchanged. Kept as-is on purpose: each
         mode's own sections, Character's `training` note, and CG's own
-        output-gain record. **Open (would be a manifest correction, not
-        done):** Character amp records have never included
-        `output_level_dbu`, while Hybrid/Blend do. Adding it is a separate
-        documented change with its own snapshot update, only if wanted.
+        output-gain record.
+      - ~~Character amp records lacked `output_level_dbu`~~: separate,
+        documented manifest correction (c765b7c). The field is read from the
+        capture's own calibration metadata, like `input_level_dbu`
+        (None when absent). Metadata only; historical Character manifests
+        without it stay valid, since every reader uses `.get`. Tests cover
+        different per-amp levels, an uncalibrated amp, and a historical
+        manifest loading as a session. Golden update: only the 10 Character
+        amp records gained the field; the decoded target audio of all 15
+        cases and every Hybrid/Blend snapshot are unchanged. f1359c5 pins
+        `training_input.detected_version` in the snapshot harness, because it
+        depended on whether neural-amp-modeler was installed and made the
+        goldens fail in `.venv` (harness only).
 - [x] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`: reviewed
       2026-09-24 in three parts (the first attempts hit the usage limit and
       then stalled twice, so training was split into kaggle_training.py and
@@ -309,8 +318,8 @@ separate commit.
       - ~~Windows hard-kill on quit~~: a token-protected `/api/shutdown`
         stops local training and exits, with SIGTERM/kill as fallbacks
         (d0bff7a). The desktop window flow hasn't been launched in this session.
-      - Still open: cg.js keeps three separately maintained timing formulas
-        (minor).
+      - ~~cg.js keeps three separately maintained timing formulas~~: one
+        STEP_TIMING table (0fb6f57).
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
 - [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
 
@@ -377,3 +386,16 @@ separate commit.
 - 2026-09-24: Phase 3 group 4 done (Flask, frontend, desktop/packaging/native, cloud/scripts). 790 passed, 12 skipped; JS 20/20; Rust tests 2/2. Remaining: #10 (deferred) and the final `/code-review ultra`.
 - 2026-09-24: Follow-ups: CG request speed, desktop splash startup, cross-platform clean shutdown. 791 passed, 12 skipped; Rust 3/3.
 - 2026-09-24: #10 done as behaviour-preserving cleanup, guarded by golden bundle snapshots (1661a06, 508d5d1, 83a0e35). 806 passed, 12 skipped. Open: whether Character manifests should gain amp `output_level_dbu` (separate correction). Remaining: final `/code-review ultra` (user-triggered).
+- 2026-09-24: Character manifests record amp `output_level_dbu` (c765b7c); snapshot harness pinned for both venvs (f1359c5). Frozen Continuous Gain audio reproduction run in full (`CG_REPRODUCE_AUDIO=1`, 6/6 passed, ~52 s; `scripts/cg_reproduce_fc.py` 16/16 checks per amp). Every value matches the frozen bundles, with no expectation changed:
+  - JCM800: captures G1/2/4/10; anchors -20/-9.2/-1.7/+14 dB; output_scale_c 0.7219196; peak-ceiling reduction 2.830 dB; alignment shifts all 0.
+  - Vibrolux: G1/2/3/4/7/10; anchors -20/-15.6/-7.1/-2.2/+5.7/+14 dB; scale 1.0; reduction 0 dB; shifts all 0.
+  - Input sha256 593594dd… (both amps); target sha256 2630aa6a… (JCM800) and 64794846… (Vibrolux); levels, train/val splits and offsets also match.
+  - Full suite: 809 passed, 12 skipped in both `.venv` and `.venv-a2`.
+- 2026-09-24 FINAL STATUS: Phases 0-3 and follow-ups #2, #3, #5, #7, #8, #9, #10 done. Still to investigate/do:
+  1. The final `/code-review ultra` on this branch (user-triggered), then merge to master.
+  2. A coverage report: pytest-cov/coverage aren't installed in either venv, so it hasn't been run.
+  3. The desktop window/shutdown flow (d0bff7a) is covered by Rust tests but hasn't been launched by hand, including a Windows quit with local training running.
+  4. Minor: `test_cg_reproduction.py`'s skip reason still says "~11 minutes per amp"; it now takes about a minute.
+  5. Minor: CG `stage()` still writes the legacy 'uploading' state (cosmetic).
+  6. Minor: the pre-existing ruff import-order warnings in `hybrid/continuous_gain/`.
+  7. The 12 skips are environment-gated (real renders/models, training env, CG audio): run them before a release.
