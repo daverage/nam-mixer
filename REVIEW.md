@@ -197,13 +197,10 @@ separate commit.
         ~0.9 GB, which are untouched) (8133ad3).
       - ~~(9) level_window_db dropped at freeze~~: recorded and restored; legacy
         designs load as 3.0 (f902e1c).
-      - (7) Stitched-sample spectrum: **v2 contiguous-frame method implemented
-        as opt-in analysis version 2 (626a5d3); default is still v1.**
-        Comparison on real captures: per-cell EQ-correction changes up to
-        8 dB (mean 0.7–1.3 dB), teacher band changes ≤ 0.7 dB, difference
-        signal −24 to −33 dB. **Waiting for the user's listening review:**
-        `work/character_spectrum_listening/` (README + 18 WAVs +
-        comparison.json).
+      - ~~(7) Stitched-sample spectrum~~: v2 contiguous-frame method (626a5d3)
+        is now the **default** after the user's listening review found no
+        audible preference (see the commit after 401abfa). Frozen v1 designs
+        keep their stored analyses.
       - (10) Duplicated bundle generators: deferred until the above is
         settled. When done, keep each mode's format-specific behaviour, add
         before/after manifest + target regression tests, and document any
@@ -330,3 +327,4 @@ separate commit.
 - 2026-09-24: Phase 3 group 3 done (training, Continuous Gain, services). 755 passed, 12 skipped. Next: group 4 (Flask layer, JS, desktop, cloud, native, scripts); #7 still awaits the listening review; #10 deferred.
 - 2026-09-24: #3 embedded tolerance measured on the real renderer (unchanged, cce0aba); #2 export naming unified (daed998) with three open naming questions; #10 still deferred. 770 passed, 12 skipped.
 - 2026-09-24: Export names and gear_type now state the audio content in every mode (1e58fdd). 780 passed, 12 skipped.
+- 2026-09-24: #7 done: user heard no real difference, so Character analysis v2 is now the default. 781 passed, 12 skipped. Remaining: group 4 review; #10 (deferred).
