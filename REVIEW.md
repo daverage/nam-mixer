@@ -287,16 +287,19 @@ separate commit.
         flagged in the UI (2cef180); no doubled package label, and
         amp_pedal_cab kept (da88cca); one shared tolerance constant and a
         measurement-script tidy-up (25d4c2c).
-      **Not changed (for the user):**
-      - The CG project GET re-reads/encodes/hashes the trained NAM for the
-        Sessions sync on every request (perf); `_JOBS` keeps finished job
-        results for the process lifetime.
-      - cg.js keeps three separately maintained timing formulas.
-      - The desktop shell still blocks its main thread for up to ~35 s
-        before the first window. A crash is now reported at once, but there's
-        no splash window yet.
-      - Windows quit is still a hard kill: there's no SIGTERM to let the
-        backend stop local training.
+      **Follow-ups (user-approved, 2026-09-24):**
+      - ~~CG GET re-reads/hashes the NAM~~: cached hashes, and the NAM is only
+        encoded when the Sessions record changes; finished jobs are pruned
+        after 1 h (a929ca6).
+      - ~~Desktop startup~~: the window opens at once on a Starting page, and
+        the backend starts in the background with a 120 s wait. Measured: the
+        packaged backend's first launch took 37.8 s (over the old 30 s limit);
+        later launches ~0.55 s (d0bff7a).
+      - ~~Windows hard-kill on quit~~: a token-protected `/api/shutdown`
+        stops local training and exits, with SIGTERM/kill as fallbacks
+        (d0bff7a). The desktop window flow hasn't been launched in this session.
+      - Still open: cg.js keeps three separately maintained timing formulas
+        (minor).
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
 - [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
 
@@ -361,3 +364,4 @@ separate commit.
 - 2026-09-24: Export names and gear_type now state the audio content in every mode (1e58fdd). 780 passed, 12 skipped.
 - 2026-09-24: #7 done: user heard no real difference, so Character analysis v2 is now the default. 781 passed, 12 skipped. Remaining: group 4 review; #10 (deferred).
 - 2026-09-24: Phase 3 group 4 done (Flask, frontend, desktop/packaging/native, cloud/scripts). 790 passed, 12 skipped; JS 20/20; Rust tests 2/2. Remaining: #10 (deferred) and the final `/code-review ultra`.
+- 2026-09-24: Follow-ups: CG request speed, desktop splash startup, cross-platform clean shutdown. 791 passed, 12 skipped; Rust 3/3.
