@@ -68,48 +68,78 @@ def agreed_tone_type(amp_a: NamModel, amp_b: NamModel) -> Optional[str]:
     return None
 
 
-def export_name_suffix(cab: Optional[dict]) -> str:
-    """The automatic suffix for a SlimmableContainer export (no-cab/learned-cab).
-
-    `cab` is the manifest's "cab" dict (or None), whose `export_mode` is
-    "none"/"learned"/"embedded" -- see hybrid/core/cab_ir.py's CabDesign. An
-    "embedded" export's SlimmableContainer head is deliberately left
-    unsuffixed here: it isn't the final deliverable in that mode (the
-    packaged Sequential file is, see hybrid/training/sequential_nam.py, which adds
-    its own SUFFIX_EMBEDDED_CAB), and suffixing the head too would produce
-    a doubled-up name like "X [Amp Only] + Y [Embedded Cab - Full]".
-    """
-    export_mode = (cab or {}).get("export_mode", "none")
-    if export_mode == "learned":
-        return SUFFIX_LEARNED_CAB
-    if export_mode == "embedded":
-        return ""
-    return SUFFIX_AMP_ONLY
-
-
 def cabinet_display_name(cab: Optional[dict]) -> str:
     """The cabinet's user-facing name: its editable display_name, falling
     back to the original IR filename, never auto-derived from IR content."""
     cab = cab or {}
-    name = str(cab.get("display_name") or "").strip()
-    if name:
-        return name
-    filename = str(cab.get("original_filename") or "").strip()
-    return filename or "Cabinet"
+    return str(cab.get("display_name") or cab.get("original_filename") or "Cabinet").strip()
 
 
-def build_export_name(base_name: str, cab: Optional[dict]) -> str:
-    """The full auto-suffixed name for a SlimmableContainer export.
+def cab_export_mode(cab: Optional[dict]) -> str:
+    """The manifest cab record's export mode. Records written before
+    `export_mode` existed only have `baked`; a baked cab was convolved into
+    the training target, i.e. today's "learned" mode (same rule as
+    hybrid.core.cab_ir.CabDesign.from_dict)."""
+    cab = cab or {}
+    return cab.get("export_mode") or ("learned" if cab.get("baked") else "none")
 
-    `base_name` is the user-editable name (e.g. project/output name);
-    the cabinet clause and technical suffix are appended automatically and
-    are never directly editable -- see the Settings/metadata design review.
+
+def default_model_base_name(manifest: dict) -> str:
+    """The base name derived from the sources, for manifests without a
+    user-entered model_name."""
+    from pathlib import Path
+
+    amp_a_name = Path(manifest.get("amp_a", {}).get("filename", "Amp A")).stem
+    amp_b_name = Path(manifest.get("amp_b", {}).get("filename", "Amp B")).stem
+    mode = manifest.get("mode", "hybrid")
+    if mode == "blend":
+        mix_b = manifest.get("design", {}).get("mix_b")
+        ratio = f" {round((1 - mix_b) * 100)}-{round(mix_b * 100)}" if mix_b is not None else ""
+        return f"Blend {amp_a_name} + {amp_b_name}{ratio}"
+    if mode == "character":
+        return f"Character Blend {amp_a_name} + {amp_b_name}"
+    if mode == "continuous_gain":
+        return "Continuous Gain"
+    return f"Hybrid {amp_a_name} -> {amp_b_name}"
+
+
+def export_model_name(manifest: dict) -> str:
+    """The display name written into a trained A2 export's metadata -- the
+    one naming rule for every export mode, used by local training
+    (a2_training_settings.user_metadata_kwargs) and mirrored literally by
+    cloud/kaggle/train_a2_cloud.py (parity-tested).
+
+    The base is the user-entered `model_name`, or the source-derived default.
+    The suffix states what the model's audio contains:
+
+    - "none" (no cab, or a preview-only cab that needs an external IR): the
+      model has no NAM Mixer cabinet stage -> "<base> [Amp Only]".
+      Continuous Gain keeps the plain base name (one amp's own gain range).
+    - "learned" (and historical records with only `baked: true`): the IR was
+      convolved into the training target, so the model learned amp + cabinet
+      -> "<base> + <cabinet> [Learned Cab]".
+    - "embedded": this trained head is amp-only; the packaged Sequential file
+      carries the cabinet and is named by embedded_package_name -> "<base>"
+      (a head suffix would double up inside the package name).
+
+    Only newly trained exports use this: a historical export keeps the name
+    already written into its .nam, and its download filename comes from the
+    manifest's artifact_filename (hybrid.modes.metadata.suggested_nam_filename).
     """
-    base_name = base_name.strip()
-    suffix = export_name_suffix(cab)
-    export_mode = (cab or {}).get("export_mode", "none")
+    base_name = str(manifest.get("model_name") or "").strip() or default_model_base_name(manifest)
+    cab = manifest.get("cab") or {}
+    export_mode = cab_export_mode(cab)
     if export_mode == "learned":
-        return f"{base_name} + {cabinet_display_name(cab)} {suffix}".strip()
-    if suffix:
-        return f"{base_name} {suffix}".strip()
-    return base_name
+        return f"{base_name} + {cabinet_display_name(cab)} {SUFFIX_LEARNED_CAB}"
+    if export_mode == "embedded":
+        return base_name
+    if manifest.get("mode", "hybrid") == "continuous_gain":
+        return base_name
+    return f"{base_name} {SUFFIX_AMP_ONLY}"
+
+
+def embedded_package_name(head_name: Optional[str], cabinet_name: Optional[str]) -> str:
+    """Name of the packaged Sequential (head + exact cabinet IR) export."""
+    head = head_name if isinstance(head_name, str) else "NAM Head"
+    cab = cabinet_name.strip() if isinstance(cabinet_name, str) and cabinet_name.strip() else "Cabinet"
+    return f"{head} + {cab} {SUFFIX_EMBEDDED_CAB}"

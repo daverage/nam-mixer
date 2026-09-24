@@ -23,6 +23,7 @@ import numpy as np
 import soundfile as sf
 
 from ..core.cab_ir import CabDesign, get_frozen_prepared_cab_ir
+from .nam_provenance import embedded_package_name
 
 
 class SequentialNamError(ValueError):
@@ -86,13 +87,11 @@ def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
     # mode -- this packaged Sequential file is), so it's safe to use
     # directly here without stripping an "[Amp Only]"/"[Learned Cab]" suffix
     # that would otherwise double up with the one appended below.
-    head_name = head_metadata.get("name") if isinstance(head_metadata.get("name"), str) else "NAM Head"
-    cab_name = cabinet_name.strip() if isinstance(cabinet_name, str) and cabinet_name.strip() else "Cabinet"
     inherited_gain = head_metadata.get("gain")
     gain = float(inherited_gain) if isinstance(inherited_gain, (int, float)) and np.isfinite(inherited_gain) else None
     return {
         "date": _packaging_date(),
-        "name": f"{head_name} + {cab_name} [Embedded Cab · Full]",
+        "name": embedded_package_name(head_metadata.get("name"), cabinet_name),
         "modeled_by": "NAM Mixer",
         "gear_type": "amp_cab",
         "gear_make": None,

@@ -310,3 +310,66 @@ def test_cloud_worker_run_training_rejects_unknown_epoch_preset(tmp_path):
     (bundle_dir / "training_manifest.json").write_text("{}")
     with pytest.raises(cloud.CloudTrainingError, match="unknown A2 epoch preset"):
         cloud.run_training(bundle_dir, tmp_path / "out", quick=False, epoch_preset="ultra")
+
+
+# One row per export mode (and the historical shapes the app still reads).
+# The expected names are the app's current behaviour, which matches what each
+# export actually contains:
+#   none      -> no NAM Mixer cabinet stage in the model  -> "[Amp Only]"
+#   learned   -> the IR was convolved into the training target, so the model
+#                learned amp + cabinet                   -> "+ <cab> [Learned Cab]"
+#   embedded  -> the trained head is amp-only; the separate Sequential package
+#                (sequential_nam) carries the cabinet   -> head keeps the plain base name
+#   continuous_gain with no cab -> the plain base name (one amp's own gain range)
+_A = {"filename": "JCM800.nam"}
+_B = {"filename": "Fender.nam"}
+EXPORT_NAME_CASES = [
+    ("amp only, hybrid",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": {"selected": False, "export_mode": "none"}},
+     "Studio [Amp Only]"),
+    ("amp only, preview cab needs an external IR",
+     {"mode": "blend", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
+      "cab": {"selected": True, "export_mode": "none", "baked": False, "original_filename": "v30.wav"}},
+     "Studio [Amp Only]"),
+    ("learned cab, display name",
+     {"mode": "character", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
+      "cab": {"selected": True, "export_mode": "learned", "baked": True, "display_name": "Boutique 4x12", "original_filename": "v30.wav"}},
+     "Studio + Boutique 4x12 [Learned Cab]"),
+    ("learned cab, filename only",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
+      "cab": {"selected": True, "export_mode": "learned", "baked": True, "original_filename": "v30.wav"}},
+     "Studio + v30.wav [Learned Cab]"),
+    ("learned cab, no cabinet name recorded",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": {"selected": True, "export_mode": "learned", "baked": True}},
+     "Studio + Cabinet [Learned Cab]"),
+    ("historical baked cab without export_mode (contains the cabinet)",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B, "cab": {"selected": True, "baked": True, "original_filename": "v30.wav"}},
+     "Studio + v30.wav [Learned Cab]"),
+    ("embedded cab: amp-only head, package named separately",
+     {"mode": "hybrid", "model_name": "Studio", "amp_a": _A, "amp_b": _B,
+      "cab": {"selected": True, "export_mode": "embedded", "baked": False, "original_filename": "v30.wav"}},
+     "Studio"),
+    ("continuous gain, no cab",
+     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "cab": {"selected": False, "export_mode": "none"}},
+     "JCM800 Gain"),
+    ("continuous gain, learned cab",
+     {"mode": "continuous_gain", "model_name": "JCM800 Gain", "cab": {"selected": True, "export_mode": "learned", "baked": True, "original_filename": "v30.wav"}},
+     "JCM800 Gain + v30.wav [Learned Cab]"),
+    ("historical: no cab record, no model_name",
+     {"mode": "hybrid", "amp_a": _A, "amp_b": _B},
+     "Hybrid JCM800 -> Fender [Amp Only]"),
+    ("historical: blend without model_name",
+     {"mode": "blend", "amp_a": _A, "amp_b": _B, "design": {"mix_b": 0.25}},
+     "Blend JCM800 + Fender 75-25 [Amp Only]"),
+    ("historical: no mode, no source filenames",
+     {},
+     "Hybrid Amp A -> Amp B [Amp Only]"),
+]
+
+
+@pytest.mark.parametrize("label, manifest, expected", EXPORT_NAME_CASES, ids=[c[0] for c in EXPORT_NAME_CASES])
+def test_export_name_for_every_export_mode_local_and_cloud(label, manifest, expected):
+    cloud = _load_cloud_module()
+    assert user_metadata_kwargs(manifest)["name"] == expected
+    assert cloud.user_metadata_kwargs(manifest)["name"] == expected
+

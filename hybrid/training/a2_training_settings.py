@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .nam_provenance import export_model_name
+
 
 @dataclass(frozen=True)
 class A2TrainingSettings:
@@ -128,19 +130,12 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     UserMetadata, exactly like they already do for gear_type -- see
     scripts/train_a2.py's _build_user_metadata.
 
-    Suffix/gear_type-adjacent naming logic here is intentionally duplicated
-    literally in cloud/kaggle/train_a2_cloud.py's copy of this function
-    (that module cannot import hybrid/training/nam_provenance.py -- it runs
-    self-contained inside a Kaggle kernel with no hybrid package installed)
-    rather than imported from hybrid/training/nam_provenance.py, so both copies stay
-    exactly the shape tests/test_a2_training_settings.py's parity test
-    checks. hybrid/training/nam_provenance.py's TONE_TYPES/SUFFIX_* constants are the
-    canonical reference for what "identical logic" means here.
+    The export name comes from hybrid/training/nam_provenance.py's
+    export_model_name (one rule per export mode). cloud/kaggle/train_a2_cloud.py
+    cannot import the hybrid package inside a Kaggle kernel, so it keeps a
+    literal copy; tests/test_a2_training_settings.py checks both give the same
+    name for every export mode.
     """
-    from pathlib import Path
-
-    amp_a_name = Path(manifest.get("amp_a", {}).get("filename", "Amp A")).stem
-    amp_b_name = Path(manifest.get("amp_b", {}).get("filename", "Amp B")).stem
     calibration = manifest.get("calibration", {})
 
     # Only report input_level_dbu when calibration was genuinely applied to
@@ -148,43 +143,8 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     # (docs/history/phase3.md section 9).
     input_level_dbu = calibration.get("reference_input_level_dbu") if calibration.get("applied") else None
 
-    mode = manifest.get("mode", "hybrid")
-    if mode == "blend":
-        mix_b = manifest.get("design", {}).get("mix_b")
-        ratio = f" {round((1 - mix_b) * 100)}-{round(mix_b * 100)}" if mix_b is not None else ""
-        name = f"Blend {amp_a_name} + {amp_b_name}{ratio}"
-    elif mode == "character":
-        name = f"Character Blend {amp_a_name} + {amp_b_name}"
-    elif mode == "continuous_gain":
-        name = "Continuous Gain"
-    else:
-        name = f"Hybrid {amp_a_name} -> {amp_b_name}"
-
-    # `model_name` is supplied by the builder UI/API and is persisted in the
-    # manifest.  Prefer it for the name displayed by NAM tools; retain the
-    # source-model-derived fallback for legacy manifests. This is the
-    # user-editable BASE name -- the cabinet clause and technical suffix
-    # below are always appended automatically, never stored back into it.
-    base_name = str(manifest.get("model_name") or "").strip() or name
-
-    # Automatic export-identity suffix -- see the "Design modes" export
-    # table in CLAUDE.md / hybrid/training/nam_provenance.py. A no-cab and a
-    # learned-cab export are otherwise indistinguishable in a NAM player
-    # (both SlimmableContainer); an embedded export's own SlimmableContainer
-    # head is deliberately left unsuffixed since it isn't the final
-    # deliverable in that mode -- hybrid/training/sequential_nam.py's packaged
-    # Sequential file carries "[Embedded Cab · Full]" instead.
-    cab = manifest.get("cab") or {}
-    export_mode = cab.get("export_mode") or ("learned" if cab.get("baked") else "none")
-    if export_mode == "learned":
-        cabinet_name = str(cab.get("display_name") or cab.get("original_filename") or "Cabinet").strip()
-        model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
-    elif export_mode == "embedded":
-        model_name = base_name
-    elif mode == "continuous_gain":
-        model_name = base_name      # one amp's own gain range: no "[Amp Only]" hybrid/cabinet identity suffix applies
-    else:
-        model_name = f"{base_name} [Amp Only]"
+    # One naming rule per export mode -- see nam_provenance.export_model_name.
+    model_name = export_model_name(manifest)
 
     # tone_type: copy only when both sources report the IDENTICAL, officially
     # recognised value -- a clean+hi_gain hybrid is not genuinely either, so
