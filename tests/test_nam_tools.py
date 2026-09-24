@@ -87,3 +87,25 @@ def test_describe_nam_tools_still_works_for_unsupported_volume_architecture():
     assert details["head_scales"] == []
     assert details["loudness_db"] == -16.3
     assert "Sequential" in details["volume_unsupported_reason"]
+
+
+def test_metadata_edit_on_a_file_without_a_metadata_block():
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": []}
+    result, paths = apply_metadata_changes(data, {"name": "X"})
+    assert result["metadata"] == {"name": "X"} and paths == ["metadata"]
+    assert result["config"] == data["config"] and "metadata" not in data
+
+
+def test_clearing_an_absent_metadata_field_is_a_no_op():
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [], "metadata": {"name": "A"}}
+    result, paths = apply_metadata_changes(data, {"modeled_by": None})
+    assert result == data and paths == []
+    bare = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": []}
+    assert apply_metadata_changes(bare, {"name": None}) == (bare, [])
+
+
+def test_zero_db_volume_change_is_a_no_op():
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [], "metadata": {"loudness": -12.0}}
+    result, paths, multiplier = apply_volume_change(data, 0.0)
+    assert result == data and paths == [] and multiplier == 1.0
+

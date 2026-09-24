@@ -168,19 +168,23 @@ def apply_volume_change(data: dict[str, Any], db_change: float) -> tuple[dict[st
     result = deepcopy(data)
     scalers = find_output_scalers(result)
     expected = []
+    # Only paths whose value actually changes are expected: a 0 dB request, or
+    # a head_scale of 0, changes nothing and must be a no-op, not a rejection.
     for path, config in scalers:
+        before = config["head_scale"]
         config["head_scale"] *= multiplier
-        expected.append(path)
+        if config["head_scale"] != before:
+            expected.append(path)
         # The only submodel metadata associated with a recognised scaler.
         metadata_path = path.rsplit(".config.head_scale", 1)[0] + ".metadata.loudness"
-        if path.startswith("config.submodels"):
+        if path.startswith("config.submodels") and db_change != 0.0:
             index = int(path.split("[")[1].split("]")[0])
             metadata = result["config"]["submodels"][index]["model"].get("metadata")
             if isinstance(metadata, dict) and isinstance(metadata.get("loudness"), (int, float)):
                 metadata["loudness"] += db_change
                 expected.append(metadata_path)
     metadata = result.get("metadata")
-    if isinstance(metadata, dict) and isinstance(metadata.get("loudness"), (int, float)):
+    if db_change != 0.0 and isinstance(metadata, dict) and isinstance(metadata.get("loudness"), (int, float)):
         metadata["loudness"] += db_change
         expected.append("metadata.loudness")
     validate_changes(data, result, expected)
@@ -203,15 +207,25 @@ def apply_metadata_changes(data: dict[str, Any], updates: dict[str, Any]) -> tup
         if key == "tone_type" and value not in _TONE_TYPES:
             raise NamToolError("metadata.tone_type is not a NAM tone type")
     result = deepcopy(data)
+    had_metadata = "metadata" in data
     metadata = result.setdefault("metadata", {})
     if not isinstance(metadata, dict):
         raise NamToolError("top-level metadata is not an object")
-    expected = [f"metadata.{key}" for key in updates]
     for key, value in updates.items():
         if value is None:
             metadata.pop(key, None)
         else:
             metadata[key] = value
+    # Expect exactly what changed: a new metadata object as a whole, or the
+    # individual fields whose value differs (clearing an absent field is a no-op).
+    if not had_metadata:
+        if not metadata:
+            del result["metadata"]
+        expected = ["metadata"] if metadata else []
+    else:
+        missing = object()
+        before = data["metadata"]
+        expected = [f"metadata.{key}" for key in updates if before.get(key, missing) != metadata.get(key, missing)]
     validate_changes(data, result, expected)
     return result, expected
 
