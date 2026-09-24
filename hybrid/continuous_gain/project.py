@@ -23,7 +23,7 @@ from typing import Callable
 
 import numpy as np
 
-from ..core.cab_ir import CabDesign
+from ..core.cab_ir import CabDesign, apply_cab_ir, get_frozen_prepared_cab_ir
 from ..core.envelope import bounded_envelope_max_history_samples
 from ..core.nam_loader import load_nam
 from ..core.render import render
@@ -306,7 +306,12 @@ class CgProject:
         recipe = recipe or FC_RECIPE
         if official_transform is not None:
             official = official_transform(official).astype(np.float32)
-        built = build_training_audio(chain, lambda g, x: render(models[g], x, SR), shifts, official, load_di or load_reference_di, recipe, progress=note)
+        cab_fn = None
+        if cab is not None and cab.requires_training_convolution:
+            prepared_cab = get_frozen_prepared_cab_ir(cab, SR)
+            cab_fn = lambda y: apply_cab_ir(y, prepared_cab)  # noqa: E731 -- the learned cab, applied per segment
+        built = build_training_audio(chain, lambda g, x: render(models[g], x, SR), shifts, official, load_di or load_reference_di, recipe,
+                                     progress=note, cab_fn=cab_fn)
         name = (model_name or st["name"]).strip()
         stem = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "continuous_gain"
         design_id = f"{st['id']}-{int(_now())}"
@@ -318,7 +323,7 @@ class CgProject:
         srcs = source_records(positions, paths, anchors, chain, an["audit"])
         rf = receptive_field_record(positions, models, bounded_envelope_max_history_samples(SR), cab=cab)
         output_gain = {"mode": "continuous_gain_scale", "applied_gain_db": -built.reduction_db}
-        if cab is not None:
+        if cab is not None and cab.export_mode == "embedded":
             _, output_gain["embedded_final"] = embedded_final_scalar(built.target, cab, SR, recipe.ceiling_dbfs)
         mp = write_bundle(out_dir, built, chain, anchors, shifts, sources=srcs, model_name=name, artifact_stem=stem, design=design, receptive_field=rf,
                           cab=cab, output_gain=output_gain,

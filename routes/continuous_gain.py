@@ -24,10 +24,11 @@ from hybrid.training.a2_training_settings import A2_EPOCH_PRESETS
 from hybrid.continuous_gain.project import ANCHOR_METHODS, SELECTION_MODES, CgProject, CgProjectError
 from hybrid.continuous_gain.validation import (HELD_OUT_DIS, check_compatibility, check_progression, check_safety, write_audition)
 from hybrid.continuous_gain.audit import alignment_shift
-from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
+from hybrid.core.cab_ir import CabDesign, CabIrError, apply_cab_ir, cab_design_from_prepared, get_frozen_prepared_cab_ir, get_prepared_cab_ir
 from hybrid.training.kaggle_training import find_active_job
 from hybrid.continuous_gain.probe import SR, load_reference_di
 from hybrid.core.nam_loader import load_nam
+from hybrid.services.settings import experimental_architectures_enabled
 
 _JOBS: dict[str, dict] = {}
 _JOB_LOCK = threading.Lock()
@@ -109,10 +110,21 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
     def err(exc: Exception, code: int = 400):
         return jsonify({"error": str(exc)}), (404 if str(exc) == "project not found" else code)
 
-    def resolve_embedded_cab(data: dict):
+    def resolve_cab(data: dict):
+        """"learned" (the default and the supported method) trains the cabinet into the NAM; "embedded" (a
+        possible future NAM specification) is refused unless experimental architectures are enabled."""
         cab_path = str(data.get("cab_path") or "").strip()
-        if not cab_path:
+        export_mode = str(data.get("cab_export_mode") or "learned")
+        if not cab_path or export_mode == "none":
             return None
+        if export_mode not in ("learned", "embedded"):
+            raise CgProjectError("cab_export_mode must be 'none', 'learned' or 'embedded'")
+        # Same gate as the Builder's "Create both" (app._resolve_cab_design).
+        if export_mode == "embedded" and not experimental_architectures_enabled():
+            raise CgProjectError(
+                "The embedded-cabinet NAM is an experimental NAM architecture and is disabled. "
+                "Enable 'Enable experimental NAM architectures' under Settings > Advanced to use it."
+            )
         if cab_upload_dir is None:
             raise CgProjectError("cabinet uploads are not configured")
         root = Path(cab_upload_dir).resolve()
@@ -124,7 +136,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             prepared,
             original_filename=candidate.name,
             preview_enabled=False,
-            export_mode="embedded",
+            export_mode=export_mode,
             display_name=str(data.get("cab_display_name") or "").strip() or None,
         )
 
@@ -187,7 +199,8 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         sync_session(p)
         return {"project": st, "check": p.check_captures(), "analysis": summary, "plan": st.get("plan"), "bundle": st.get("bundle"),
                 "training": training_record(st), "validation": val, "epoch_presets": A2_EPOCH_PRESETS, "selection_modes": list(SELECTION_MODES),
-                "anchor_methods": list(ANCHOR_METHODS), "held_out_dis": list(HELD_OUT_DIS)}
+                "anchor_methods": list(ANCHOR_METHODS), "held_out_dis": list(HELD_OUT_DIS),
+                "experimental_architectures": experimental_architectures_enabled()}
 
     _written: dict[str, tuple] = {}
 
@@ -342,7 +355,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             name = str(d.get("model_name") or "").strip() or None
             if name and len(name) > 100:
                 return jsonify({"error": "model name must be 100 characters or fewer"}), 400
-            cab = resolve_embedded_cab(d)
+            cab = resolve_cab(d)
             job = _job_start(
                 p.root.name,
                 "generate",
@@ -402,6 +415,13 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         paths = p.capture_paths()
         caps = {row["position"]: load_nam(paths[row["position"]]) for row in plan}
         shifts = {row["position"]: alignment_shift(an["audit"]["captures"][f"{row['position']:g}"]) for row in plan}
+        # A learned cab is part of the trained model (a full-rig capture), so the captures are compared
+        # through the same frozen cabinet.
+        cab_fn = None
+        cab_record = manifest.get("cab") or {}
+        if cab_record.get("baked"):
+            prepared_cab = get_frozen_prepared_cab_ir(CabDesign.from_dict(cab_record), SR)
+            cab_fn = lambda y: apply_cab_ir(y, prepared_cab)  # noqa: E731
         import soundfile as sf
         vin, _ = sf.read(str(a2_output_dir / st["bundle"]["design_id"] / "input.wav"), dtype="float32")
         vstop = manifest["training_input"]["train_stop_samples"]
@@ -411,12 +431,14 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         x = load_reference_di(HELD_OUT_DIS[0])[: 12 * SR]
         safety = check_safety(model, c, x)
         note("comparing with the original captures")
-        prog = check_progression(model, c, caps, shifts, plan, training, progress=note)
+        prog = check_progression(model, c, caps, shifts, plan, training, progress=note, cab_fn=cab_fn)
         note("rendering the audition sweep")
-        aud = write_audition(p.root / "audition", model, c, caps, shifts, plan)
+        aud = write_audition(p.root / "audition", model, c, caps, shifts, plan, cab_fn=cab_fn)
         report = {"made": time.time(), "design_id": st["bundle"]["design_id"], "model": {"path": str(nam_path), "sha256": __import__("hashlib").sha256(nam_path.read_bytes()).hexdigest()},
                   "compatibility": compat, "safety": safety, "progression": prog, "coverage": (manifest["design"].get("selection") or {}).get("coverage"),
                   "audition": aud, "blocks_export": False,
+                  "learned_cab": bool(cab_fn), **({"cab_note": "The model includes the learned cabinet, so the captures were "
+                                                   "compared through the same cabinet IR."} if cab_fn else {}),
                   "statement": "These are measurements. Export is never gated on them or on listening."}
         p.validation_file.write_text(json.dumps(report, default=float), encoding="utf-8")
         return {"ok": True}
@@ -497,6 +519,9 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             path = head_path
             filename = f"{stem}.nam"
         elif artifact == "cab":
+            if not experimental_architectures_enabled():
+                return jsonify({"error": "the embedded-cabinet NAM is an experimental NAM architecture and is disabled "
+                                         "(Settings > Advanced)"}), 409
             embedded = (training_record(st) or {}).get("embedded_artifact") or {}
             path_value = (embedded.get("artifacts") or {}).get("sequential_nam_path")
             if embedded.get("state") != "validated" or not path_value:

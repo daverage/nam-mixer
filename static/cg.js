@@ -7,7 +7,7 @@
   const body = document.getElementById("cg-body");
 
   const S = { id: null, data: null, stage: 1, job: null, pollTimer: null, seriesName: null, train: null, backend: "local", preset: "standard",
-    cab: null, cabEnabled: false, cabDisplayName: "" };
+    cab: null, cabMode: "none", cabDisplayName: "" };
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toFixed(d));
   // Rough elapsed-time estimates -- real measurements from this project's own end-to-end runs (parallel capture
@@ -67,7 +67,7 @@
     if (changedProject) {
       const cab = data.bundle && data.bundle.cab;
       S.cab = cab && cab.selected ? { path: cab.ir_working_path, filename: cab.original_filename, sha256: cab.sha256 } : null;
-      S.cabEnabled = Boolean(S.cab);
+      S.cabMode = S.cab ? (cab.export_mode || (cab.baked ? "learned" : "embedded")) : "none";
       S.cabDisplayName = cab?.display_name || "";
     }
     document.getElementById("cg-current-name").textContent = data.project.name;
@@ -318,25 +318,44 @@
   }
 
   // ---------- Stage 3
+  // The cabinet choice actually in effect: none without a cab, and the embedded (Sequential) export -- a possible
+  // future NAM specification -- only while experimental architectures are enabled.
+  function cgCabMode(d) {
+    if (!S.cab) return "none";
+    if (S.cabMode === "embedded" && !(d && d.experimental_architectures)) return "none";
+    return S.cabMode || "none";
+  }
+
   function stage3() {
     const d = S.data;
     if (!d || !d.plan) return `${card("Train", `<p class="info">Review the training plan in stage 2 first.</p>`)}`;
     const p = d.plan, b = d.bundle, t = d.training;
     const bundledCab = b && b.cab;
-    const currentCabSha = S.cabEnabled && S.cab ? S.cab.sha256 : null;
+    const cabMode = cgCabMode(d);
+    const currentCabSha = cabMode !== "none" && S.cab ? S.cab.sha256 : null;
     const bundledCabSha = bundledCab && bundledCab.selected ? bundledCab.sha256 : null;
     const stale = b && ((b.plan && b.plan.planned !== p.planned) || currentCabSha !== bundledCabSha ||
-      (currentCabSha && (S.cabDisplayName || "") !== (bundledCab.display_name || "")));
+      (currentCabSha && ((S.cabDisplayName || "") !== (bundledCab.display_name || "") || cabMode !== bundledCab.export_mode)));
+    const cabNote = cabMode === "learned"
+      ? "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download."
+      : cabMode === "embedded"
+        ? "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it."
+        : "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.";
     const range = [Math.min(...p.anchors_input_gain_db), Math.max(...p.anchors_input_gain_db)];
     const files = card("Training files", `
         <label class="field-label" for="cg-model-name">Model name</label><input class="file-input" id="cg-model-name" maxlength="100" value="${esc(d.project.name)}">
-        <label class="field-label" for="cg-cab-file">Cabinet IR <span class="hint">(optional second NAM)</span></label>
+        <label class="field-label" for="cg-cab-file">Cabinet IR <span class="hint">(optional)</span></label>
         <input type="file" id="cg-cab-file" accept=".wav" class="file-input">
-        <div id="cg-cab-info" class="info">${S.cab ? `${esc(S.cab.filename || "Cabinet IR")} selected. The trained and tested NAM remains cabless.` : "No cabinet selected."}</div>
-        <label class="checkbox-row"><input type="checkbox" id="cg-cab-enabled" ${S.cabEnabled && S.cab ? "checked" : ""} ${S.cab ? "" : "disabled"}> Also create a second NAM with this exact cabinet embedded</label>
+        <div id="cg-cab-info" class="info">${S.cab ? `${esc(S.cab.filename || "Cabinet IR")} selected.` : "No cabinet selected."}</div>
+        <label class="field-label" for="cg-cab-mode">Cabinet in the NAM</label>
+        <select id="cg-cab-mode" class="select-input" ${S.cab ? "" : "disabled"}>
+          <option value="none" ${cabMode === "none" ? "selected" : ""}>Amp only — no cabinet in the NAM</option>
+          <option value="learned" ${cabMode === "learned" ? "selected" : ""}>Learned cab — train the cabinet into the NAM</option>
+          ${d.experimental_architectures ? `<option value="embedded" ${cabMode === "embedded" ? "selected" : ""}>Create both — tested amp NAM + exact embedded-cab NAM (experimental)</option>` : ""}
+        </select>
         <label class="field-label" for="cg-cab-name">Cabinet display name</label>
-        <input class="file-input" id="cg-cab-name" maxlength="80" value="${esc(S.cabDisplayName)}" ${S.cab ? "" : "disabled"} placeholder="e.g. Modern Boutique 4x12">
-        <p class="info">Training and validation use the head-only signal. Afterward NAM Mixer derives a separate head + cabinet NAM. The cabinet version uses NAM Sequential/Linear and may not load in A2-only players.</p>
+        <input class="file-input" id="cg-cab-name" maxlength="80" value="${esc(S.cabDisplayName)}" ${cabMode !== "none" ? "" : "disabled"} placeholder="e.g. Modern Boutique 4x12">
+        <p class="info">${cabNote}</p>
         <button type="button" class="btn btn-primary btn-block" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Recreate training files" : "Create training files"}</button>
         <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(estimateSeconds("generate", p.selected.length))}.</p>
         ${stale ? `<p class="info"><strong>The plan changed since these files were created — recreate them before training.</strong></p>` : ""}${jobBox()}
@@ -361,19 +380,20 @@
       const form = new FormData(); form.append("file", file);
       try {
         const uploaded = await api("/api/cab/upload", { method: "POST", form });
-        S.cab = uploaded; S.cabEnabled = true;
+        S.cab = uploaded; S.cabMode = "learned";
         if (!S.cabDisplayName) S.cabDisplayName = file.name.replace(/\.wav$/i, "");
         say(`Cabinet ${file.name} selected.`); render();
       } catch (e) { say(e.message, true); }
     });
-    const cabEnabled = document.getElementById("cg-cab-enabled");
-    if (cabEnabled) cabEnabled.addEventListener("change", () => { S.cabEnabled = cabEnabled.checked; render(); });
+    const cabModeSelect = document.getElementById("cg-cab-mode");
+    if (cabModeSelect) cabModeSelect.addEventListener("change", () => { S.cabMode = cabModeSelect.value; render(); });
     const cabName = document.getElementById("cg-cab-name");
     if (cabName) cabName.addEventListener("change", () => { S.cabDisplayName = cabName.value.trim(); render(); });
     const g = document.getElementById("cg-generate");
     if (g) g.addEventListener("click", () => runJob(`/api/cg/projects/${S.id}/generate`, {
       model_name: val("cg-model-name"),
-      cab_path: S.cabEnabled && S.cab ? S.cab.path : null,
+      cab_path: cgCabMode(d) !== "none" && S.cab ? S.cab.path : null,
+      cab_export_mode: cgCabMode(d),
       cab_display_name: S.cabDisplayName,
     }, async (_st, pid) => { if (S.id === pid) { say("Training files created."); render(); } }));
     const g4 = document.getElementById("cg-goto4"); if (g4) g4.addEventListener("click", () => { S.stage = 4; render(); });
@@ -397,14 +417,17 @@
     const d = S.data;
     if (!d || !d.training || !d.training.trained) return `${card("Test & export", `<p class="info">Train a model first (stage 3). Testing and export unlock once a trained .nam exists.</p>`)}`;
     const v = d.validation;
-    const cabReady = d.training.embedded_artifact && d.training.embedded_artifact.state === "validated";
+    const cabReady = Boolean(d.experimental_architectures) && d.training.embedded_artifact && d.training.embedded_artifact.state === "validated";
+    const learnedCab = Boolean(d.bundle && d.bundle.cab && d.bundle.cab.baked);
     const actions = card("Test & export", `
         <button type="button" class="btn btn-secondary btn-block" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>
         <p class="info">Usually ${formatDuration(estimateSeconds("validate", d.plan ? d.plan.selected.length : 4))} -- renders comparisons and the audition sweep, in parallel.</p>
-        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download>Download tested head-only NAM</a>
+        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download>${cabReady ? "Download tested amp-only NAM" : learnedCab ? "Download tested NAM (with learned cabinet)" : "Download tested NAM"}</a>
         ${cabReady ? `<a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=cab" download>Download NAM with embedded cabinet</a>` : ""}
         <a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download>Download provenance package</a>
-        <p class="info">Validation is always performed on the head-only NAM against your original captures. The cabinet download is a separately validated exact derivative; some A2-only players may not support its Sequential architecture.</p>${jobBox()}`);
+        <p class="info">${learnedCab
+          ? "This is a full-rig capture: the cabinet is learned into the NAM, so validation compares it with your captures through the same cabinet IR."
+          : "Validation compares the NAM with your original captures."}${cabReady ? " The cabinet download is a separately validated exact derivative; some A2-only players may not support its Sequential architecture." : ""}</p>${jobBox()}`);
     if (!v) return cols(actions, card("Validation", `<p class="info">No validation has been run for this model.</p>`));
     const c = v.compatibility, sf = v.safety, pg = v.progression;
     const chip = (ok, yes, no) => badge(ok ? "instant" : "bad", ok ? yes : no);

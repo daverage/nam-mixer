@@ -73,9 +73,20 @@ def _delta(m: dict, r: dict) -> dict:
             "dyn_range_db": m["dyn_range_db"] - r["dyn_range_db"], "eq_max_db": max(abs(m[k] - r[k]) for k in EQ_KEYS)}
 
 
+def _reference_render(capture_models: dict, shifts: dict, cab_fn: Callable[[np.ndarray], np.ndarray] | None):
+    """The real capture's output for comparison with the model: aligned, and through the learned cab when the
+    model was trained with one (so both sides contain the same cabinet)."""
+    def ref(position: float, x: np.ndarray) -> np.ndarray:
+        y = _shift(render(capture_models[position], x, SR), shifts.get(position, 0))
+        return y if cab_fn is None else np.asarray(cab_fn(y), dtype=np.float32)
+    return ref
+
+
 def check_progression(model, scale_c: float, capture_models: dict, shifts: dict, mapping: list[dict], training: set,
-                      load_di: Callable[[str], np.ndarray] = load_reference_di, progress: Callable[[str], None] | None = None) -> dict:
+                      load_di: Callable[[str], np.ndarray] = load_reference_di, progress: Callable[[str], None] | None = None,
+                      cab_fn: Callable[[np.ndarray], np.ndarray] | None = None) -> dict:
     note = progress or (lambda _m: None)
+    ref = _reference_render(capture_models, shifts, cab_fn)
     ordered = sorted(mapping, key=lambda r: r["position"])
     dis = {di: load_di(di)[: CLIP_SECONDS * SR] for di in HELD_OUT_DIS}
 
@@ -85,7 +96,7 @@ def check_progression(model, scale_c: float, capture_models: dict, shifts: dict,
         for di in HELD_OUT_DIS:
             x = dis[di]
             ym = render(model, (x * _db(T)).astype(np.float32), SR) / scale_c
-            yr = _shift(render(capture_models[p], x, SR), shifts.get(p, 0))
+            yr = ref(p, x)
             ds.append(_delta(features(ym), features(yr)))
             n = min(len(ym), len(yr)); w = SR // 2
             c, r = ym[w:n].astype(np.float64), yr[w:n].astype(np.float64)
@@ -100,7 +111,7 @@ def check_progression(model, scale_c: float, capture_models: dict, shifts: dict,
 
     def curve(row):
         return (features(render(model, (di0 * _db(row["input_gain_db"])).astype(np.float32), SR) / scale_c),
-                features(_shift(render(capture_models[row["position"]], di0, SR), shifts.get(row["position"], 0))))
+                features(ref(row["position"], di0)))
 
     fm, fr = zip(*pmap(curve, rows)) if rows else ((), ())
     # direction reversals of the model's progression vs the real amp's (level, HF, crest on the first held-out DI)
@@ -121,7 +132,8 @@ def check_progression(model, scale_c: float, capture_models: dict, shifts: dict,
 
 
 def write_audition(out_dir: Path, model, scale_c: float, capture_models: dict, shifts: dict, mapping: list[dict],
-                   load_di: Callable[[str], np.ndarray] = load_reference_di, di: str = "moderate_brit", seconds: int = 6) -> dict:
+                   load_di: Callable[[str], np.ndarray] = load_reference_di, di: str = "moderate_brit", seconds: int = 6,
+                   cab_fn: Callable[[np.ndarray], np.ndarray] | None = None) -> dict:
     """Short Input-gain sweep + per-position original-capture comparison clips (WAV, 24-bit). Level-safe: a clip whose
     scaled peak would exceed -1 dBFS is attenuated as a whole and flagged, never limited."""
     import soundfile as sf
@@ -139,11 +151,12 @@ def write_audition(out_dir: Path, model, scale_c: float, capture_models: dict, s
     sf.write(out_dir / "sweep.wav", sweep.astype(np.float32), SR, subtype="PCM_24")
     sweep_info = {"file": "sweep.wav", "di": di, "seconds_per_step": seconds, "input_gains_db": list(SWEEP_GAINS_DB), "attenuated_db": att}
     ordered = sorted(mapping, key=lambda r: r["position"])
+    ref = _reference_render(capture_models, shifts, cab_fn)
 
     def clip_pair(row):
         p, T = row["position"], row["input_gain_db"]
         ym = render(model, (x * _db(T)).astype(np.float32), SR) / scale_c
-        yr = _shift(render(capture_models[p], x, SR), shifts.get(p, 0))
+        yr = ref(p, x)
         return ym, yr
 
     files = []

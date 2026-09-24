@@ -79,8 +79,11 @@ class BuiltAudio:
 
 def build_training_audio(chain: GainChain, render_fn: Callable[[float, np.ndarray], np.ndarray], shifts: dict[float, int],
                          official_input: np.ndarray, load_di: Callable[[str], np.ndarray], recipe: FcRecipe = FC_RECIPE,
-                         progress: Callable[[str], None] | None = None) -> BuiltAudio:
-    """`render_fn(position, audio)` renders capture `position` raw; `shifts[position]` is its verified alignment."""
+                         progress: Callable[[str], None] | None = None,
+                         cab_fn: Callable[[np.ndarray], np.ndarray] | None = None) -> BuiltAudio:
+    """`render_fn(position, audio)` renders capture `position` raw; `shifts[position]` is its verified alignment.
+    `cab_fn` (a learned cab) convolves each segment's target before the single peak-ceiling gain; each segment
+    ends in PAD samples of silence, so the IR tail stays inside its own segment. None leaves the target as is."""
     note = progress or (lambda _m: None)
 
     def segment(x: np.ndarray) -> np.ndarray:
@@ -96,7 +99,8 @@ def build_training_audio(chain: GainChain, render_fn: Callable[[float, np.ndarra
         for name, off, x in group:
             x = np.concatenate([x * _db(off), np.zeros(PAD, np.float32)]).astype(np.float32)
             X.append(x)
-            Y.append(segment(x))
+            y = segment(x)
+            Y.append(y if cab_fn is None else np.asarray(cab_fn(y), dtype=np.float32))
             seg.append({"split": split, "source": name, "offset_db": off, "start": pos, "stop": pos + len(x)})
             pos += len(x)
             note(f"{split} {name} {off:+g} dB")
@@ -187,7 +191,7 @@ def receptive_field_record(positions: list[float], loaded_models: dict, envelope
         prepared = get_frozen_prepared_cab_ir(cab, SR)
         record["cab"] = {
             "export_mode": cab.export_mode,
-            "baked": False,
+            "baked": cab.baked,
             "fir_length_samples": prepared.prepared_frame_count,
             "fir_history_samples": max(0, prepared.prepared_frame_count - 1),
             "sha256": cab.sha256,
