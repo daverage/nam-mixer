@@ -121,3 +121,18 @@ def test_asset_url_is_none_for_an_unsupported_platform_or_a_release_missing_it()
     with _mock_releases(payload):
         assert update_check.check_for_update("v0.3.1", platform="sunos5").asset_url is None
         assert update_check.check_for_update("v0.3.1", platform="win32").asset_url is None
+
+
+def test_requests_a_full_page_of_releases():
+    """App releases share the repo with nam-render-v* releases; the default
+    30-entry page can miss the newest app release."""
+    seen = {}
+
+    def fake_urlopen(request, timeout=None):
+        seen["url"] = request.full_url
+        return _FakeResponse(json.dumps(_releases(("v0.3.5", False, False))).encode("utf-8"))
+
+    with patch.object(update_check, "urlopen", fake_urlopen):
+        update_check.check_for_update("v0.3.5")
+    assert seen["url"].endswith("/releases?per_page=100")
+

@@ -49,7 +49,9 @@ def _parse_version(tag: str) -> "tuple[int, int, int] | None":
 
 
 def _fetch_releases() -> list[dict]:
-    request = Request(_RELEASES_API, headers={"Accept": "application/vnd.github+json"})
+    # One page of 100: nam-render-v* releases share this repo and would push
+    # the newest app vX.Y.Z release off the default 30-entry page.
+    request = Request(f"{_RELEASES_API}?per_page=100", headers={"Accept": "application/vnd.github+json"})
     try:
         with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode("utf-8"))
