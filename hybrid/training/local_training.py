@@ -22,6 +22,9 @@ from pathlib import Path
 # "No matching distribution found for neural-amp-modeler==0.13.0" instead of
 # a clear "wrong Python version" message.
 MIN_TRAINING_PYTHON = (3, 10)
+# Every package scripts/train_a2.py imports at training time; `nam` is
+# neural-amp-modeler itself, the trainer.
+TRAINING_IMPORT_CHECK = "import torch, soundfile, numpy, scipy, nam"
 
 
 def _candidate_training_pythons() -> list[list[str]]:
@@ -84,6 +87,9 @@ class LocalTrainingManager:
         self.cancel_requested = False
         self.manifest_path: Path | None = None
         self._lock = threading.Lock()
+        # (python path, mtime) of a venv whose adoption import check already
+        # failed, so status polls don't re-run a slow torch import each time.
+        self._failed_import_check: tuple[str, float] | None = None
 
     @property
     def design_id(self) -> str | None:
@@ -130,12 +136,20 @@ class LocalTrainingManager:
             # never race an import check against it mid-install.
             return False
         try:
+            identity = (str(self.python), self.python.stat().st_mtime)
+        except OSError:
+            return False
+        if self._failed_import_check == identity:
+            return False  # already checked this exact venv and it failed
+        try:
             subprocess.run(
-                [str(self.python), "-c", "import torch, soundfile, numpy, scipy"],
+                [str(self.python), "-c", TRAINING_IMPORT_CHECK],
                 capture_output=True, timeout=15, check=True,
             )
         except (subprocess.SubprocessError, OSError):
+            self._failed_import_check = identity
             return False
+        self._failed_import_check = None
         self._setup_complete_marker.write_text("ok")
         return True
 
@@ -150,9 +164,12 @@ class LocalTrainingManager:
         environment itself deliberately stays torch-free (see CLAUDE.md), so
         it may not meet the training venv's own requirement.
         """
-        own_version = _training_python_version([sys.executable])
-        if own_version is not None and own_version >= MIN_TRAINING_PYTHON:
-            return [sys.executable]
+        # In the packaged (PyInstaller) app sys.executable is the app itself,
+        # not a Python interpreter: running it with -c would start a second app.
+        if not getattr(sys, "frozen", False):
+            own_version = _training_python_version([sys.executable])
+            if own_version is not None and own_version >= MIN_TRAINING_PYTHON:
+                return [sys.executable]
 
         configured = os.environ.get("NAM_MIXER_TRAINING_PYTHON", "").strip()
         if configured:
@@ -351,7 +368,7 @@ class LocalTrainingManager:
             # a hybrid/core/cab_ir.py dependency that pip can silently skip if an
             # earlier install step was interrupted, which used to leave
             # `ready` true and Train enabled against a broken environment.
-            "import_check=\"import torch, soundfile, numpy, scipy; print('MPS available: ' + str(torch.backends.mps.is_available())); print('MPS built: ' + str(torch.backends.mps.is_built()))\"; "
+            f"import_check={TRAINING_IMPORT_CHECK + '; '!r} + \"print('MPS available: ' + str(torch.backends.mps.is_available())); print('MPS built: ' + str(torch.backends.mps.is_built()))\"; "
             "subprocess.check_call([str(py),'-c',import_check]); "
             f"pathlib.Path({str(self._setup_complete_marker)!r}).write_text('ok')"
         )

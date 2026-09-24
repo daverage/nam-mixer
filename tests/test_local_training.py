@@ -257,3 +257,42 @@ def test_collect_keeps_crlf_lines_and_multibyte_characters_split_across_reads(tm
         manager._collect()
     assert list(manager.log)[-3:] == ["Epoch 1/60 done", "progress 90%", "bar \u2588 end"]
 
+
+
+def _fake_venv_python(manager):
+    manager.python.parent.mkdir(parents=True, exist_ok=True)
+    manager.python.write_text("")
+    return manager.python
+
+
+def test_adoption_check_imports_neural_amp_modeler_and_caches_a_failure(tmp_path, monkeypatch):
+    import os
+    import subprocess
+
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2", venv_dir=tmp_path / "venv")
+    python = _fake_venv_python(manager)
+    calls = []
+
+    def failing_run(argv, **kwargs):
+        calls.append(argv)
+        raise subprocess.CalledProcessError(1, argv)
+
+    monkeypatch.setattr("hybrid.training.local_training.subprocess.run", failing_run)
+    assert manager.is_ready is False and manager.is_ready is False
+    assert len(calls) == 1                                  # the failed check is not re-run on every poll
+    assert "nam" in calls[0][-1].replace(" ", "").split("import")[-1].split(",")
+    os.utime(python, (python.stat().st_atime, python.stat().st_mtime + 10))   # the venv changed
+    assert manager.is_ready is False and len(calls) == 2
+
+
+def test_packaged_app_never_probes_its_own_executable_as_python(tmp_path, monkeypatch):
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
+    configured = tmp_path / "python3.11"
+    configured.write_text("")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("NAM_MIXER_TRAINING_PYTHON", str(configured))
+    probed = []
+    monkeypatch.setattr("hybrid.training.local_training._training_python_version",
+                        lambda argv: probed.append(argv) or (3, 11))
+    command = manager._bootstrap_python()
+    assert [sys.executable] not in probed and command[0] != sys.executable
