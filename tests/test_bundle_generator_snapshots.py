@@ -39,6 +39,9 @@ def deterministic_render(monkeypatch):
     for module in (training_target, blend_training_target, character_training_target):
         monkeypatch.setattr(module, "render", fake_render)
     monkeypatch.setattr(training_target, "_md5_file", lambda path: training_target.OFFICIAL_V3_INPUT_MD5)
+    # The detected version depends on whether neural-amp-modeler is installed
+    # (.venv vs .venv-a2), not on the generators.
+    monkeypatch.setattr(training_target, "_detect_nam_input_version", lambda path: "<pinned by test>")
 
 
 def _write_nam(path):

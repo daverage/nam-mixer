@@ -145,7 +145,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -295,7 +295,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -422,7 +422,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -549,7 +549,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -676,7 +676,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -964,7 +964,7 @@
     "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -1246,7 +1246,7 @@
     "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -1480,7 +1480,7 @@
     "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -1714,7 +1714,7 @@
     "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -1948,7 +1948,7 @@
     "status": "not yet run -- Character Blend defaults to high_def (120 epochs)"
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -2111,7 +2111,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -2268,7 +2268,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -2402,7 +2402,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -2536,7 +2536,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
@@ -2670,7 +2670,7 @@
     "training_settings": null
    },
    "training_input": {
-    "detected_version": "unrecognized (Input file at <TMP>/input.wav cannot be recognized as any known version!)",
+    "detected_version": "<pinned by test>",
     "frame_count": 48000,
     "md5": "36cd1af62985c2fac3e654333e36431e",
     "path": "<TMP>/input.wav",
