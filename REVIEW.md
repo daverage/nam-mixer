@@ -319,7 +319,7 @@ separate commit.
         (d0bff7a). The desktop window flow hasn't been launched in this session.
       - ~~cg.js keeps three separately maintained timing formulas~~: one
         STEP_TIMING table (0fb6f57).
-- [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
+- [x] Coverage report (`pytest --cov`), 2026-09-24: 84.4% of `hybrid/`, `routes/` and `app.py` (1,307 of 8,400 statements never run). See the log entry for the gaps that matter.
 - [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
 
 ### Findings carried into Phase 3
@@ -401,3 +401,9 @@ separate commit.
 - 2026-09-24: Minor items 4-6 done (898e7d5, b648e0d, d251316). 809 passed, 12 skipped in both venvs; JS 21/21; CG audio reproduction 6/6. Next: manual desktop check by the user, then `/code-review ultra`.
 - 2026-09-24: Cab export fixes found by the user in the desktop app (4025807, 5e7e259, 8e04b53). The Builder cab upload crashed (a missing JS function, a pre-review bug), and the embedded option showed because WebKit ignores hidden <option>. Learned cab is now the supported method in the Builder AND CG (one training, a full-rig capture, validated through the same IR). Embedded (a possible future spec) is refused everywhere unless experimental architectures are enabled. 817 passed, 12 skipped (both venvs); JS 21/21; CG frozen reproduction 6/6. Mac app rebuilt.
 - 2026-09-24: UI: the cabinet is chosen and heard in the listening card; the Finish card keeps only what is trained. Every checkbox is now a switch row (4a51628; checked in light, dark and at phone width with headless Chrome). The user checked the desktop app on macOS: it works, and quitting stops Python. All six invariants re-verified against the current code (see the checklist). Remaining: coverage report (needs pytest-cov, awaiting the user's OK), the Windows quit check, `/code-review ultra`, merge.
+- 2026-09-24: Coverage report (pytest-cov 7.1.0, installed in `.venv` only with the user's OK): 84.4% overall, 817 tests. Gaps that matter, in priority order:
+  1. CG post-training validation is effectively untested: `hybrid/continuous_gain/validation.py` is at 25%, and `check_progression`, `write_audition`, `check_compatibility` and the `run_validation` route are never called (they render real NAMs). This includes today's learned-cab comparison path.
+  2. The CG NAM download route (`api_cg_download_nam`) is never called, including its new embedded-cab gate.
+  3. The SSRF guard `research._is_safe_public_host` (it blocks private/loopback/link-local targets from web-search links) has no test; `research.py` is at 37%.
+  4. Lower priority: parts of `api_generate` (36 lines), the AI recipe route, `compute_a2_receptive_field` (covered only by environment-gated tests), and macOS/GPU system-usage probes (platform-specific).
+  None of these are dead code: all are reachable features without tests.
