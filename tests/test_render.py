@@ -137,4 +137,7 @@ def test_slim_constants_select_the_full_and_lite_submodels(tmp_path):
     assert np.array_equal(render(model, x, sr, slim=SLIM_LITE), lite_alone)
     assert np.array_equal(render(model, x, sr), full_alone)
     assert not np.array_equal(full_alone, lite_alone)
+    # A plain (non-slimmable) WaveNet export must still validate as "Full":
+    # nam_render rejects any --slim value for it, so SLIM_FULL passes none.
+    assert np.array_equal(render(load_nam(paths[-1]), x, sr, slim=SLIM_FULL), full_alone)
 

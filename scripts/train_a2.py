@@ -601,7 +601,7 @@ def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate
     return {"path": str(nam_path), "sample_rate": sr, "frame_count": len(rendered), "rendered": rendered}
 
 
-def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float = SLIM_FULL) -> "dict | None":
+def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float | None = SLIM_FULL) -> "dict | None":
     """Thin wrapper over `hybrid.modes.character_training_target.check_full_low_
     level_response` (docs/history/blend-mode-fixes.md, Phases 10-11) that also prints
     a verdict line -- the actual sweep/comparison logic is shared with

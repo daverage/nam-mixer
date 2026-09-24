@@ -165,7 +165,7 @@ def render_reference_character(design: CharacterBlendDesign, dry: np.ndarray, sa
 
 def render_trained_a2(nam_path, dry: np.ndarray, sample_rate: int, slim: float | None = None) -> np.ndarray:
     """Thin wrapper for rendering `dry` through a trained/exported A2 -- see
-    `hybrid.core.render.render`'s `slim` kwarg (None or SLIM_FULL = Full, SLIM_LITE = Lite)."""
+    `hybrid.core.render.render`'s `slim` kwarg (SLIM_FULL, i.e. None = Full; SLIM_LITE = Lite)."""
     model = load_nam(nam_path)
     return render(model, np.asarray(dry, dtype=np.float32), sample_rate, slim=slim)
 

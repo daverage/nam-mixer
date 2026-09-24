@@ -125,7 +125,7 @@ def build_export_validation_reference(design, amp_a, amp_b, calibration, officia
     }, excerpt
 
 
-def check_export_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int, *, variant: str, slim: float) -> "dict | None":
+def check_export_low_level_response(manifest: dict, nam_path, input_path, sample_rate: int, *, variant: str, slim: float | None) -> "dict | None":
     """Re-run the teacher's low-level response sweep (docs/history/blend-mode-fixes.md,
     Phases 10-11) through an exported Full A2 and compare its output RMS at
     each level against the teacher's OWN recorded RMS (the `low_level_response`
