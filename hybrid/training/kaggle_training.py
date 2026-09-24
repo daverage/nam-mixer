@@ -508,8 +508,9 @@ JOB_STATES = (
     "complete", "failed", "cleanup_pending", "cleaned",
 )
 TERMINAL_STATES = ("complete", "failed")
-# Note: a job.json written by a pre-rewrite version of this module may still
-# have state "uploading"/"waiting_for_dataset"/"submitted" -- every check
+# Note: a job.json written by an older version of this module may still have
+# state "uploading" (stage() wrote it until 2026-09-24)/"waiting_for_dataset"/
+# "submitted" -- every check
 # below tests `state not in TERMINAL_STATES` (never an exact new-state
 # match), so those old values keep behaving as non-terminal without needing
 # a migration table.
@@ -742,7 +743,8 @@ class KaggleJobManager:
             raise KaggleTrainingError(f"cloud worker script missing: {cloud_script}")
         shutil.copyfile(cloud_script, kernel_staging / cloud_script.name)
 
-        job.state = "uploading"
+        # Staging is still "preparing"; create_dataset() moves the job to
+        # "uploading_dataset". Saving here is also a cancellation checkpoint.
         self._save_submission(job)
         return dataset_staging, kernel_staging
 

@@ -3000,6 +3000,7 @@ function renderKaggleDownloadResult(designId, jobId, data) {
 // State label, elapsed-since-submit, and a progress bar/log tail when
 // available -- a bare repeating "running" string with no other signal made
 // it look stuck even while training was progressing normally.
+// "uploading" is legacy: only job.json files written before 2026-09-24 have it.
 const KAGGLE_ACTIVE_STATES = new Set([
   "preparing", "uploading", "uploading_dataset", "verifying_dataset",
   "creating_kernel", "verifying_kernel", "queued", "running",
@@ -3226,7 +3227,7 @@ trainA2Btn.addEventListener("click", async () => {
   kaggleTrainingActive = true;
   syncTrainingControls();
   kaggleJobSubmittedAt = Date.now();
-  renderKaggleProgress("Uploading training bundle…", { state: "uploading" });
+  renderKaggleProgress("Preparing cloud training…", { state: "preparing" });
   kaggleResultEl.hidden = true;
   try {
     const resp = await fetch("/api/kaggle/train", {

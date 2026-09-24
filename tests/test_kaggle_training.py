@@ -20,6 +20,7 @@ from hybrid.training.kaggle_training import (
     ACCELERATOR,
     DEFAULT_EPOCH_PRESET,
     FORBIDDEN_ACCELERATORS,
+    JOB_STATES,
     REQUIRED_DATASET_FILES,
     STAGED_BUNDLE_FILES,
     CliResult,
@@ -313,7 +314,9 @@ def test_staging_allow_list(tmp_path, bundle_dir):
     # re-uploaded as part of the dataset payload.
     assert "train_a2_cloud.py" not in dataset_names
     assert "train_a2_cloud.py" in kernel_names
-    assert job.state == "uploading"
+    # Staging is preparation; only create_dataset() starts "uploading_dataset".
+    assert job.state == "preparing"
+    assert job.state in JOB_STATES
 
 
 def test_staging_uses_an_explicit_packaged_cloud_worker(tmp_path, bundle_dir):
