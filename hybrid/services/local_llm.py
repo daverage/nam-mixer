@@ -7,7 +7,6 @@ local web UI from becoming an arbitrary HTTP proxy.
 from __future__ import annotations
 
 import json
-import os
 import ipaddress
 import re
 import socket
