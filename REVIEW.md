@@ -235,7 +235,7 @@ separate commit.
       - Kaggle: secret redaction (partial values, JSON keys, bytes) (76cd08a);
         stuck 'preparing' plus unverified kernels never deleted (9964294);
         status parsed from the kernel ref (e.g. a username containing
-        'running') (8d4a2c3); double downloads, permanent orphans and the
+        'running') (f911600); double downloads, permanent orphans and the
         cancel race (481d614); logs (286f00b); unexpected validation errors
         (6f71205).
       **Not changed, for the user to decide:**
