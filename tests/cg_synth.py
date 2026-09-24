@@ -1,13 +1,16 @@
 """Synthetic amps/DIs for the Continuous Gain tests: no native renderer, no real captures."""
 from __future__ import annotations
 
+import zlib
+
 import numpy as np
 
 SR = 48000
 
 
 def synth_di(name: str = "x", seconds: float = 6.0) -> np.ndarray:
-    rng = np.random.default_rng(abs(hash(name)) % 1000)
+    # zlib.crc32, not hash(): str hashes are randomised per process, which made every run's DIs differ.
+    rng = np.random.default_rng(zlib.crc32(name.encode()) % 1000)
     n = int(seconds * SR)
     x = np.zeros(n)
     for k in range(int(seconds * 3)):
