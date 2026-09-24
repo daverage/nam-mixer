@@ -1,11 +1,12 @@
-"""The frozen JCM800 and Vibrolux FC configurations, reproduced through the hybrid/cg_* backend.
+"""The frozen JCM800 and Vibrolux FC configurations, reproduced through the hybrid/continuous_gain/ backend.
 
 Reads the archived Phase 4 measurements (work/p4/<amp>/{profile,audit}.json, restored from
 ~/Documents/hybrid-nam-builder-archive/research_work_dirs_*.tar.gz) and the frozen FC record
 (docs/history/Continuous Gain/final/manifest_frozen.json), so it skips on a machine without them.
 The expensive half -- rebuilding the training audio from the user's real captures and comparing its SHA-256 with
 the frozen bundle manifest -- runs only with CG_REPRODUCE_AUDIO=1 (scripts/cg_reproduce_fc.py does the same
-from the command line); it was verified bit-for-bit for both amps when the backend was written.
+from the command line); it was verified bit-for-bit for both amps when the backend was written, and again
+on 2026-09-24 after the repo review.
 """
 from __future__ import annotations
 
@@ -71,7 +72,7 @@ def test_frozen_manifest_recipe_matches_the_default_recipe(amp):
     assert frozen["training"]["epochs"] == 60 and frozen["training"]["batch_size"] == 16 and frozen["training"]["ny"] == 8192
 
 
-@pytest.mark.skipif(os.environ.get("CG_REPRODUCE_AUDIO") != "1", reason="set CG_REPRODUCE_AUDIO=1 (renders ~11 minutes of audio per amp through the real captures)")
+@pytest.mark.skipif(os.environ.get("CG_REPRODUCE_AUDIO") != "1", reason="set CG_REPRODUCE_AUDIO=1 (renders the 11.6-minute training audio through every selected capture of each amp; about a minute in total on an Apple-silicon Mac)")
 @pytest.mark.parametrize("amp", AMPS)
 def test_training_audio_and_output_scale_reproduce_the_frozen_bundle_bit_for_bit(amp):
     import subprocess as sp

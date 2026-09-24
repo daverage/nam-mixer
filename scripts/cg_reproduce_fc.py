@@ -1,4 +1,4 @@
-"""Reproduce the FROZEN JCM800 / Vibrolux FC configurations through the new hybrid/cg_* backend and compare them
+"""Reproduce the FROZEN JCM800 / Vibrolux FC configurations through the hybrid/continuous_gain/ backend and compare them
 field-by-field (capture sets, anchors, target/input audio hashes, output scale) with the frozen record.
 Reads only the archived Phase 4 measurements under work/p4 (extract research_work_dirs_*.tar.gz first) and the
 user's own capture files; writes nothing outside the given --out directory. Usage: cg_reproduce_fc.py <amp> [--out DIR] [--skip-audio]"""
