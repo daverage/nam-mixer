@@ -434,7 +434,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         prog = check_progression(model, c, caps, shifts, plan, training, progress=note, cab_fn=cab_fn)
         note("rendering the audition sweep")
         aud = write_audition(p.root / "audition", model, c, caps, shifts, plan, cab_fn=cab_fn)
-        report = {"made": time.time(), "design_id": st["bundle"]["design_id"], "model": {"path": str(nam_path), "sha256": __import__("hashlib").sha256(nam_path.read_bytes()).hexdigest()},
+        report = {"made": time.time(), "design_id": st["bundle"]["design_id"], "model": {"path": str(nam_path), "sha256": _cached_sha256(nam_path)},
                   "compatibility": compat, "safety": safety, "progression": prog, "coverage": (manifest["design"].get("selection") or {}).get("coverage"),
                   "audition": aud, "blocks_export": False,
                   "learned_cab": bool(cab_fn), **({"cab_note": "The model includes the learned cabinet, so the captures were "
@@ -482,7 +482,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         stem = manifest.get("artifact_stem") or "continuous_gain"
         meta = {
             "kind": "continuous_gain", "amplifier": st["amp"], "channel": st["channel"], "model_name": manifest.get("model_name"),
-            "model_file": f"{stem}.nam", "model_sha256": __import__("hashlib").sha256(nam_path.read_bytes()).hexdigest(),
+            "model_file": f"{stem}.nam", "model_sha256": _cached_sha256(nam_path),
             "selected_captures": manifest["sources"], "selection": design.get("selection"), "anchor_method": design["anchor_method"],
             "input_gain_mapping": mapping, "usable_input_gain_range_db": usable, "recommended_constant_output_gain_db": rec_out,
             "training": {"epochs": t.get("epochs"), "epoch_preset": t.get("epoch_preset"), "recipe": design["recipe"], "input_audio_sha256": core["input_audio_sha256"],
