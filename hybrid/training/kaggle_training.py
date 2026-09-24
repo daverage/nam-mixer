@@ -536,6 +536,10 @@ class KaggleJob:
     updated_at: float = field(default_factory=time.time)
     dataset_ref: Optional[str] = None
     kernel_ref: Optional[str] = None
+    # A kernel `kernels push` accepted but that never verified: not treated
+    # as real (kernel_ref stays None), but it may still exist and run on
+    # Kaggle, so cleanup/cancel delete it too.
+    unverified_kernel_ref: Optional[str] = None
     accelerator: str = ACCELERATOR
     epoch_preset: str = DEFAULT_EPOCH_PRESET
     upload_completed_at: Optional[float] = None
@@ -961,6 +965,7 @@ class KaggleJobManager:
         # "queued". Never leave it looking submitted for an unresolved
         # kernel -- the dataset/staging are preserved either way for
         # diagnosis (we never delete them here).
+        job.unverified_kernel_ref = kernel_ref
         job.state = "verifying_kernel"
         save_job(self.a2_output_dir, job)
         if not self._verify_kernel_exists(kernel_ref):
@@ -974,6 +979,7 @@ class KaggleJobManager:
             raise KaggleTrainingError(job.error)
 
         job.kernel_ref = kernel_ref
+        job.unverified_kernel_ref = None
         job.state = "queued"
         save_job(self.a2_output_dir, job)
 
@@ -1020,9 +1026,18 @@ class KaggleJobManager:
         The actually-long-running part of submission; called synchronously
         by `submit()` (tests, and callers that genuinely want to block) or
         from a background thread by `submit_async()`."""
-        dataset_staging, kernel_staging = self.stage(job, bundle_dir)
-        self.create_dataset(job, dataset_staging)
-        self.create_kernel(job, kernel_staging)
+        try:
+            dataset_staging, kernel_staging = self.stage(job, bundle_dir)
+            self.create_dataset(job, dataset_staging)
+            self.create_kernel(job, kernel_staging)
+        except KaggleTrainingError as exc:
+            # Some steps (e.g. stage()'s missing-file checks) raise without
+            # recording the failure; never leave the job looking in progress.
+            if job.state != "failed":
+                job.state = "failed"
+                job.error = str(exc)
+                save_job(self.a2_output_dir, job)
+            raise
 
     def submit(self, design_id: str, bundle_dir: Path, epoch_preset: str = DEFAULT_EPOCH_PRESET) -> KaggleJob:
         """Synchronous end-to-end submission -- blocks for the entire
@@ -1318,8 +1333,9 @@ class KaggleJobManager:
             result = self.cli.datasets_delete(job.dataset_ref)
             if not result.ok:
                 errors.append(f"dataset delete failed: {result.stderr.strip() or result.stdout.strip()}")
-        if job.kernel_ref:
-            result = self.cli.kernels_delete(job.kernel_ref)
+        kernel_to_delete = job.kernel_ref or job.unverified_kernel_ref
+        if kernel_to_delete:
+            result = self.cli.kernels_delete(kernel_to_delete)
             if not result.ok:
                 errors.append(f"kernel delete failed: {result.stderr.strip() or result.stdout.strip()}")
 
@@ -1349,8 +1365,9 @@ class KaggleJobManager:
             result = self.cli.datasets_delete(job.dataset_ref)
             if not result.ok:
                 errors.append(f"dataset delete failed: {result.stderr.strip() or result.stdout.strip()}")
-        if job.kernel_ref:
-            result = self.cli.kernels_delete(job.kernel_ref)
+        kernel_to_delete = job.kernel_ref or job.unverified_kernel_ref
+        if kernel_to_delete:
+            result = self.cli.kernels_delete(kernel_to_delete)
             if not result.ok:
                 errors.append(f"kernel delete failed: {result.stderr.strip() or result.stdout.strip()}")
         job.state = "failed"

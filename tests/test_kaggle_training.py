@@ -1694,3 +1694,43 @@ def test_retry_download_refuses_job_with_no_kernel_ref(tmp_path):
 
     with pytest.raises(KaggleTrainingError, match="no kernel_ref"):
         manager.retry_download(job)
+
+
+def test_submission_failure_that_raises_without_saving_is_recorded(tmp_path, bundle_dir, monkeypatch):
+    """stage() raises on a missing bundle file without saving 'failed'; the job
+    must not stay 'preparing' forever (and block the design)."""
+    (bundle_dir / "hybrid_target.wav").unlink()
+    cli, _ = make_cli(monkeypatch)
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    with pytest.raises(KaggleTrainingError, match="missing required file"):
+        manager.submit("mydesign", bundle_dir)
+    assert find_active_job(tmp_path, "mydesign").state == "failed"   # not left "preparing"
+
+
+def test_unverified_kernel_is_recorded_and_deleted_by_cleanup(tmp_path, bundle_dir, monkeypatch):
+    """A pushed kernel that never verified is not treated as real (kernel_ref
+    stays None) but may still run on Kaggle, so cleanup deletes it."""
+    manager = KaggleJobManager(tmp_path, kernel_verify_delay_s=0, kernel_verify_attempts=1)
+    job = KaggleJob(job_id="abc123", design_id="mydesign")
+    dataset_staging, kernel_staging = manager.stage(job, bundle_dir)
+
+    def responses(argv):
+        if argv[1:3] == ["kernels", "status"]:
+            return FakeCompleted(1, "", "Not found")
+        if argv[1:3] == ["datasets", "status"]:
+            return FakeCompleted(0, "ready", "")
+        if argv[1:3] == ["datasets", "files"]:
+            return _auto_datasets_files_response(dataset_staging)
+        return FakeCompleted(0, "" if argv[1] != "config" else DEFAULT_CONFIG_VIEW.stdout, "")
+
+    cli, calls = make_cli(monkeypatch, responses=responses)
+    manager.cli = cli
+    manager.create_dataset(job, dataset_staging)
+    with pytest.raises(KaggleTrainingError):
+        manager.create_kernel(job, kernel_staging)
+    assert job.kernel_ref is None and job.unverified_kernel_ref.startswith("testuser/hybrid-a2-train-")
+
+    manager.cleanup(job)
+    deletes = [c for c in calls if c[1:3] == ["kernels", "delete"]]
+    assert deletes and job.unverified_kernel_ref in deletes[0]
+
