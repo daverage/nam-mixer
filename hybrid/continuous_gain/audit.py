@@ -13,8 +13,8 @@ from typing import Callable
 import numpy as np
 from scipy.signal import butter, sosfilt
 
-from .probe import FIT_DIS, SR
 from ..training.validation import compute_esr_metrics
+from .probe import FIT_DIS, SR
 
 TIMING_TOL = 4
 VERIFY_TOL = 3

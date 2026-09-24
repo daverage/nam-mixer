@@ -28,15 +28,16 @@ from typing import Callable
 import numpy as np
 
 from ..core.cab_ir import CabDesign, get_frozen_prepared_cab_ir
-from ..core.nam_loader import load_nam
-from .anchors import REFERENCE_DB
-from .audit import alignment_shift, apply_alignment_shift as _shifted
-from .parallel import pmap
-from ..modes.character_analysis import sha256_file      # shared file-hash helper
 from ..core.envelope import bounded_causal_envelope_db
 from ..core.input_profiles import db_to_amplitude as _db
-from .multi_blend import GainChain, multi_blend
+from ..core.nam_loader import load_nam
 from ..core.safety import apply_peak_ceiling
+from ..modes.character_analysis import sha256_file  # shared file-hash helper
+from .anchors import REFERENCE_DB
+from .audit import alignment_shift
+from .audit import apply_alignment_shift as _shifted
+from .multi_blend import GainChain, multi_blend
+from .parallel import pmap
 
 SR = 48000
 PAD = SR // 2

@@ -23,19 +23,26 @@ from typing import Callable
 
 import numpy as np
 
-from .anchors import REFERENCE_DB, fixed_ladder_anchors, mapping_table, response_anchors
-from .audit import alignment_shift, audit_captures
-from .bundle import (FC_RECIPE, build_training_audio, frozen_design_record, make_chain, receptive_field_record,
-                        source_records, write_bundle)
-from .parallel import pmap
-from .probe import PROBE_VERSION, SR, load_reference_di, probe_capture
-from .profile import build_profile
-from .selection import resolve_selection, select_captures
 from ..core.cab_ir import CabDesign
 from ..core.envelope import bounded_envelope_max_history_samples
 from ..core.nam_loader import load_nam
 from ..core.render import render
 from ..modes.training_target import embedded_final_scalar
+from .anchors import REFERENCE_DB, fixed_ladder_anchors, mapping_table, response_anchors
+from .audit import alignment_shift, audit_captures
+from .bundle import (
+    FC_RECIPE,
+    build_training_audio,
+    frozen_design_record,
+    make_chain,
+    receptive_field_record,
+    source_records,
+    write_bundle,
+)
+from .parallel import pmap
+from .probe import PROBE_VERSION, SR, load_reference_di, probe_capture
+from .profile import build_profile
+from .selection import resolve_selection, select_captures
 
 ANCHOR_METHODS = ("fc", "fixed")           # "fc" = production default (frozen FC recipe); "fixed" = Advanced v3 ladder
 SELECTION_MODES = ("automatic", "use_all", "custom")
