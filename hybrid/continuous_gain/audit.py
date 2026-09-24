@@ -192,3 +192,13 @@ def alignment_shift(audit_capture: dict) -> int:
     """Samples applied to a capture's render (verified Phase 4A correction only; 0 otherwise)."""
     c = audit_capture.get("correction")
     return -int(c["samples"]) if c and "samples" in c else 0
+
+
+def apply_alignment_shift(y: np.ndarray, sh: int) -> np.ndarray:
+    """Advance (sh > 0) or delay (sh < 0) a render by ``sh`` samples,
+    zero-filling, keeping its length -- applies an ``alignment_shift``."""
+    if sh > 0:
+        return np.concatenate([y[sh:], np.zeros(sh, y.dtype)])
+    if sh < 0:
+        return np.concatenate([np.zeros(-sh, y.dtype), y[:sh]])
+    return y

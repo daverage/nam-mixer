@@ -20,8 +20,10 @@ from typing import Callable
 
 import numpy as np
 
+from .audit import apply_alignment_shift as _shift
 from .parallel import pmap
 from .probe import SR, features, load_reference_di
+from ..core.input_profiles import db_to_amplitude as _db
 from ..core.nam_loader import load_nam
 from ..core.render import SLIM_FULL, SLIM_LITE, NamRenderError, render
 from ..training.validation import compute_esr_metrics
@@ -31,18 +33,6 @@ CLIP_SECONDS = 12
 SWEEP_GAINS_DB = tuple(range(-20, 15, 2))
 REVERSAL_MIN_DB = 0.3
 EQ_KEYS = ["eq_sub_db", "eq_low_db", "eq_lowmid_db", "eq_mid_db", "eq_presence_db", "eq_air_db"]
-
-
-def _db(x: float) -> float:
-    return 10.0 ** (x / 20.0)
-
-
-def _shift(y: np.ndarray, sh: int) -> np.ndarray:
-    if sh > 0:
-        return np.concatenate([y[sh:], np.zeros(sh, y.dtype)])
-    if sh < 0:
-        return np.concatenate([np.zeros(-sh, y.dtype), y[:sh]])
-    return y
 
 
 def _peak_db(y: np.ndarray) -> float:

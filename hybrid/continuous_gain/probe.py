@@ -16,6 +16,7 @@ from typing import Callable
 import numpy as np
 
 from ..core.envelope import bounded_causal_envelope_db
+from ..core.input_profiles import db_to_amplitude as _db
 from ..paths import REPO_ROOT
 
 SR = 48000
@@ -26,10 +27,6 @@ SECONDS = 15
 OFFSETS = [-12.0, -6.0, 0.0, 6.0]
 TONE_F0 = (110.0, 440.0)
 TONE_LEVELS = [-54.0, -42.0, -30.0, -18.0, -6.0, 0.0]
-
-
-def _db(x: float) -> float:
-    return 10.0 ** (x / 20.0)
 
 
 def crest_db(x: np.ndarray) -> float:

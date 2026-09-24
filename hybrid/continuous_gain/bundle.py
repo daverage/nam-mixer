@@ -30,10 +30,11 @@ import numpy as np
 from ..core.cab_ir import CabDesign, get_frozen_prepared_cab_ir
 from ..core.nam_loader import load_nam
 from .anchors import REFERENCE_DB
-from .audit import alignment_shift
+from .audit import alignment_shift, apply_alignment_shift as _shifted
 from .parallel import pmap
 from ..modes.character_analysis import sha256_file      # shared file-hash helper
 from ..core.envelope import bounded_causal_envelope_db
+from ..core.input_profiles import db_to_amplitude as _db
 from .multi_blend import GainChain, multi_blend
 from ..core.safety import apply_peak_ceiling
 
@@ -56,18 +57,6 @@ class FcRecipe:
 
 
 FC_RECIPE = FcRecipe()
-
-
-def _db(x: float) -> float:
-    return 10.0 ** (x / 20.0)
-
-
-def _shifted(y: np.ndarray, sh: int) -> np.ndarray:
-    if sh > 0:
-        return np.concatenate([y[sh:], np.zeros(sh, y.dtype)])
-    if sh < 0:
-        return np.concatenate([np.zeros(-sh, y.dtype), y[:sh]])
-    return y
 
 
 def sha256_f32(a: np.ndarray) -> str:
