@@ -208,7 +208,50 @@ separate commit.
         settled. When done, keep each mode's format-specific behaviour, add
         before/after manifest + target regression tests, and document any
         intentional manifest correction separately.
-- [ ] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`
+- [x] 3. `hybrid/training/` + `hybrid/continuous_gain/` + `hybrid/services/`: reviewed
+      2026-09-24 in three parts (the first attempts hit the usage limit and
+      then stalled twice, so training was split into kaggle_training.py and
+      the rest). All verified findings fixed, each with a test that fails
+      without the fix:
+      - **Full/Lite swapped everywhere (1e48510):** NAMCore slim 0.0 = Lite and
+        1.0 = Full (proved by rendering each extracted submodel), but the
+        app, CG validation, Kaggle re-validation, the Character quiet check
+        and train_a2/validate_a2 all used 0.0 for Full. There are now
+        `SLIM_FULL`/`SLIM_LITE` constants and a real-render test. **Reports
+        and manifests written before this have Full and Lite metrics
+        swapped.**
+      - Services: `.env` newline injection (57e7f5b); local-LLM width
+        validator 2-18 (4a990fa); empty env var masking `.env` (a2b9199);
+        update check per_page (5c2bd73); Ollama pull stuck on 'running' plus a
+        single recommended model (cd5c616).
+      - Continuous Gain: <2 eligible captures crash and NaN anchors for
+        identical responses (bb710fe); manifest records the applied ceiling
+        (328f6a3); audit 'corrected' only when applied (12526b4).
+      - Training: nam_tools 0 dB / no-metadata edits rejected (c041776);
+        Windows CRLF log lines lost and split UTF-8 (2138831); venv check
+        missing `nam`, the packaged app probing itself, and slow status polls
+        (0da0b10); embedded completion leaking exceptions and validating
+        zero samples (2e0b4ce).
+      - Kaggle: secret redaction (partial values, JSON keys, bytes) (76cd08a);
+        stuck 'preparing' plus unverified kernels never deleted (9964294);
+        status parsed from the kernel ref (e.g. a username containing
+        'running') (8d4a2c3); double downloads, permanent orphans and the
+        cancel race (481d614); logs (286f00b); unexpected validation errors
+        (6f71205).
+      **Not changed, for the user to decide:**
+      - Embedded-package tolerance 3e-6 (absolute) may be too tight for long
+        real IRs near 0 dBFS (float32 NAMCore vs fftconvolve). Plausible but
+        unproven here: the Sequential renderer isn't configured on this
+        machine.
+      - `nam_provenance.build_export_name`/`export_name_suffix` are test-only
+        and have diverged from the production naming in
+        `a2_training_settings.user_metadata_kwargs` and `sequential_nam`
+        (e.g. legacy baked cab: '[Learned Cab]' vs '[Amp Only]'). Which one
+        is canonical? `_TONE_TYPES` is also copied three times.
+      - CG `_shift`/`_db` helpers are copied across bundle/validation/probe
+        (a consolidation refactor; could go with #10).
+      - `stage()` still writes the legacy 'uploading' state (the UI labels it
+        correctly, so it's cosmetic).
 - [ ] 4. The Flask layer (`app.py`, `routes/`), `static/*.js`, `desktop/`, `cloud/`, `native/`, `scripts/`
 - [ ] Coverage report (`pytest --cov`): untested code is where review finds the most problems and where dead code hides
 - [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
@@ -269,3 +312,4 @@ separate commit.
   silent-DI coverage, per-amp peak warning). 690 passed, 12 skipped. Verifying the group 2 (`hybrid/modes/`) findings next.
 - 2026-09-23: Phase 3 group 2 (`hybrid/modes/`) done, see the checklist. 694 passed, 12 skipped.
 - 2026-09-23: modes #5, #8 and #9 done; #7 implemented as opt-in v2, stopped for the listening review; #10 deferred. 709 passed, 12 skipped.
+- 2026-09-24: Phase 3 group 3 done (training, Continuous Gain, services). 755 passed, 12 skipped. Next: group 4 (Flask layer, JS, desktop, cloud, native, scripts); #7 still awaits the listening review; #10 deferred.
