@@ -299,7 +299,10 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         try:
             p = project_or_404(pid)
             d = request.get_json(force=True, silent=True) or {}
-            custom = [float(x) for x in d["custom"]] if d.get("custom") else None
+            raw_custom = d.get("custom")
+            if raw_custom and not isinstance(raw_custom, list):
+                raise ValueError("custom must be a list of capture positions")  # never iterate a string's characters
+            custom = [float(x) for x in raw_custom] if raw_custom else None
             p.plan(str(d.get("mode") or "automatic"), custom, str(d.get("anchors") or "fc"))
             return jsonify(public_state(p))
         except (CgProjectError, ValueError, TypeError) as exc:

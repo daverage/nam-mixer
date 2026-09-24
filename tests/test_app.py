@@ -1748,3 +1748,27 @@ def test_render_sources_sweep_keeps_the_live_renders_sources(tmp_path, monkeypat
                         {"amp_a_path": str(amp_a), "amp_b_path": str(amp_b), "source_paths": {}})
     assert app_module._sweep_orphaned_render_sources() == []
     assert amp_a.exists() and amp_b.exists()
+
+
+def test_profile_coverage_rejects_a_non_numeric_custom_gain(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+    resp = client.post("/api/profile_coverage", json={"render_id": _current_render_id(), "crossover_dbfs": -20,
+                                                      "transition_width_db": 6, "custom_input_gain_db": "abc"})
+    assert resp.status_code == 400 and "custom_input_gain_db" in resp.get_json()["error"]
+
+
+def test_character_low_level_check_reports_renderer_failure_as_json(client, tmp_path, monkeypatch):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    assert client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).status_code == 200
+
+    def failing_render(*_a, **_k):
+        raise app_module.NamRenderError("model failed to load")
+
+    monkeypatch.setattr(app_module, "render", failing_render)
+    resp = client.post("/api/character/low_level_check", json={"render_id": _current_render_id()})
+    assert resp.status_code == 500 and "model failed to load" in resp.get_json()["error"]

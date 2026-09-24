@@ -2153,6 +2153,11 @@ def api_profile_coverage():
 
     instrument_type = data.get("instrument_type", pair.instrument_type)
     custom_gain_db = data.get("custom_input_gain_db")
+    if custom_gain_db is not None:
+        try:
+            custom_gain_db = float(custom_gain_db)
+        except (TypeError, ValueError):
+            return jsonify({"error": "custom_input_gain_db must be a number"}), 400
     profiles = PROFILES_BY_INSTRUMENT.get(instrument_type)
     order = PROFILE_ORDER_BY_INSTRUMENT.get(instrument_type)
     if profiles is None:
@@ -2268,7 +2273,10 @@ def api_character_low_level_check():
     reference = pair.profiled_dry[: int(pair.sample_rate * LOW_LEVEL_CHECK_REFERENCE_SECONDS)]
     if len(reference) == 0:
         reference = pair.profiled_dry
-    amp_a, amp_b = load_nam(a_path), load_nam(b_path)
+    try:
+        amp_a, amp_b = load_nam(a_path), load_nam(b_path)
+    except (OSError, ValueError) as exc:
+        return jsonify({"error": f"could not load the rendered amp models: {exc}"}), 409
 
     def build_pair_at_gain(gain_db: float):
         scaled = (reference * db_to_amplitude(gain_db)).astype(np.float32)
@@ -2277,7 +2285,10 @@ def api_character_low_level_check():
         b = render(amp_b, (scaled * db_to_amplitude(pair.amp_b_calibration_gain_db + pair.amp_b_input_gain_db)).astype(np.float32), pair.sample_rate)
         return SimpleNamespace(dry=scaled, amp_a=a, amp_b=b, sample_rate=pair.sample_rate)
 
-    check = evaluate_low_level_response(build_pair_at_gain, design)
+    try:
+        check = evaluate_low_level_response(build_pair_at_gain, design)
+    except NamRenderError as exc:
+        return jsonify({"error": f"nam_render failed during the low-level check: {exc}"}), 500
     return jsonify({"low_level_response": check.to_dict()})
 
 

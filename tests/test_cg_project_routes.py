@@ -174,6 +174,7 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     st = client.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": [1, 3, 6], "anchors": "fc"}).get_json()
     assert st["plan"]["selected"] == [1.0, 3.0, 6.0] and st["plan"]["mode"] == "custom"
     assert client.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": [1]}).status_code == 400
+    assert client.post(f"/api/cg/projects/{pid}/plan", json={"mode": "custom", "custom": "136"}).status_code == 400   # not positions 1, 3, 6
     j = _wait(client, client.post(f"/api/cg/projects/{pid}/generate", json={"model_name": "Amp X FC"})); assert j["state"] == "done", j["error"]
     st = client.get(f"/api/cg/projects/{pid}").get_json()
     did = st["bundle"]["design_id"]
