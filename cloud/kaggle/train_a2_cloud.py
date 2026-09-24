@@ -462,7 +462,10 @@ def user_metadata_kwargs(manifest: dict) -> dict:
         model_name = f"{base_name} + {cabinet_name} [Learned Cab]"
     else:
         model_name = f"{base_name} {'[Full Rig]' if full_rig else '[Amp Only]'}"
-    gear_type = "amp_cab" if export_mode == "learned" or full_rig else "amp"
+    if "amp_pedal_cab" in source_gear:
+        gear_type = "amp_pedal_cab"
+    else:
+        gear_type = "amp_cab" if export_mode == "learned" or full_rig else "amp"
 
     _tone_types = {"clean", "overdrive", "crunch", "hi_gain", "fuzz"}
     amp_a_tone = manifest.get("amp_a", {}).get("tone_type")
@@ -526,8 +529,10 @@ def run_training(bundle_dir: Path, output_dir: Path, quick: bool, epoch_preset: 
     # per this module's self-containment rule (see module docstring).
     kwargs = user_metadata_kwargs(manifest)
     gear_type = GearType.AMP
-    if kwargs.pop("gear_type", "amp") == "amp_cab":  # learned cab, or a full-rig source capture
-        for candidate_name in ("AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
+    export_gear = kwargs.pop("gear_type", "amp")  # plain string: amp / amp_cab / amp_pedal_cab
+    if export_gear in ("amp_cab", "amp_pedal_cab"):  # learned cab, or a full-rig source capture
+        preferred = ("AMP_PEDAL_CAB",) if export_gear == "amp_pedal_cab" else ()
+        for candidate_name in (*preferred, "AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
             candidate = getattr(GearType, candidate_name, None)
             if candidate is not None:
                 gear_type = candidate

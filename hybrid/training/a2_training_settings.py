@@ -118,9 +118,11 @@ def user_metadata_kwargs(manifest: dict) -> dict:
     a training_manifest.json dict -- pure Python, no nam/torch import, so both
     `scripts/train_a2.py` (local) and `cloud/kaggle/train_a2_cloud.py` (cloud)
     can share this exact logic instead of maintaining two copies that could
-    silently drift (see docs/history/kaggle_training.md). Callers construct the real
-    `UserMetadata(**user_metadata_kwargs(manifest))` themselves, after
-    importing `nam.models.metadata` in their own environment.
+    silently drift (see docs/history/kaggle_training.md). `gear_type` and
+    `tone_type` come back as plain strings: callers must pop them and map
+    them onto the installed nam enums (GearType/ToneType) before
+    constructing `UserMetadata(**kwargs)` -- see scripts/train_a2.py's
+    _build_user_metadata.
 
     Deliberately omits output_level_dbu semantics that require the nam
     package's own enums -- see scripts/train_a2.py's _build_user_metadata

@@ -66,7 +66,7 @@ from `hybrid/training/nam_provenance.py`'s `export_model_name` /
 `export_gear_type` / `embedded_package_name`, and must state what the audio
 contains. `[Amp Only]` (gear_type `amp`) means no cabinet anywhere. Any
 full-rig source capture (gear_type `amp_cab`/`amp_pedal_cab`) gives
-`[Full Rig]` (`amp_cab`). A learned cab gives `+ <cab> [Learned Cab]`
+`[Full Rig]` (`amp_cab`, or `amp_pedal_cab` when a source is one). A learned cab gives `+ <cab> [Learned Cab]`
 (`amp_cab`). With an embedded cab, the trained head is offered as its own
 download with the no-cab label, and the packaged model is
 `<base> + <cab> [Embedded Cab · Full]` (`amp_cab`). The cloud worker keeps a

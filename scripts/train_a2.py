@@ -412,8 +412,10 @@ def _build_user_metadata(manifest: dict):
     # a guessed name.
     kwargs = user_metadata_kwargs(manifest)
     gear_type = GearType.AMP
-    if kwargs.pop("gear_type", "amp") == "amp_cab":  # learned cab, or a full-rig source capture
-        for candidate_name in ("AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
+    export_gear = kwargs.pop("gear_type", "amp")  # plain string: amp / amp_cab / amp_pedal_cab
+    if export_gear in ("amp_cab", "amp_pedal_cab"):  # learned cab, or a full-rig source capture
+        preferred = ("AMP_PEDAL_CAB",) if export_gear == "amp_pedal_cab" else ()
+        for candidate_name in (*preferred, "AMP_CAB", "RIG", "PREAMP_CAB", "AMP_AND_CAB"):
             candidate = getattr(GearType, candidate_name, None)
             if candidate is not None:
                 gear_type = candidate

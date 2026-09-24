@@ -156,12 +156,25 @@ def export_model_name(manifest: dict) -> str:
 
 
 def export_gear_type(manifest: dict) -> str:
-    """NAM gear_type for the trained export: "amp_cab" when its audio
-    contains a cabinet (learned cab, or a full-rig source), else "amp".
-    The embedded package is always "amp_cab" (sequential_nam)."""
+    """NAM gear_type for the trained export: "amp_pedal_cab" when a source is
+    an amp+pedal+cab capture, "amp_cab" when its audio otherwise contains a
+    cabinet (learned cab, or a full-rig source), else "amp". The embedded
+    package is always "amp_cab" (sequential_nam)."""
+    if "amp_pedal_cab" in source_gear_types(manifest):
+        return "amp_pedal_cab"
     if cab_export_mode(manifest.get("cab")) == "learned" or sources_include_cab(manifest):
         return "amp_cab"
     return "amp"
+
+
+def strip_content_suffix(name: Optional[str]) -> Optional[str]:
+    """`name` without a trailing "[Amp Only]"/"[Full Rig]" label."""
+    if not isinstance(name, str):
+        return name
+    for suffix in (SUFFIX_AMP_ONLY, SUFFIX_FULL_RIG):
+        if name.endswith(" " + suffix):
+            return name[: -len(suffix) - 1]
+    return name
 
 
 def embedded_package_name(base_name: Optional[str], cabinet_name: Optional[str]) -> str:

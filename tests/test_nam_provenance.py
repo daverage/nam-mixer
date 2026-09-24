@@ -77,3 +77,11 @@ def test_embedded_package_name():
     assert prov.embedded_package_name(None, "  ") == "NAM Head + Cabinet [Embedded Cab · Full]"
     # Built from the base name, never the head's suffixed name.
     assert prov.embedded_package_name(prov.export_base_name({"model_name": "Studio"}), "v30.wav") == "Studio + v30.wav [Embedded Cab · Full]"
+
+
+def test_package_name_fallback_never_doubles_the_head_label():
+    assert prov.strip_content_suffix("Studio [Amp Only]") == "Studio"
+    assert prov.strip_content_suffix("Studio [Full Rig]") == "Studio"
+    assert prov.strip_content_suffix("Studio + v30 [Learned Cab]") == "Studio + v30 [Learned Cab]"
+    assert prov.embedded_package_name(prov.strip_content_suffix("Studio [Amp Only]"), "v30.wav") == "Studio + v30.wav [Embedded Cab · Full]"
+

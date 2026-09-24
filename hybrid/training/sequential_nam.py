@@ -23,7 +23,7 @@ import numpy as np
 import soundfile as sf
 
 from ..core.cab_ir import CabDesign, get_frozen_prepared_cab_ir
-from .nam_provenance import embedded_package_name
+from .nam_provenance import embedded_package_name, strip_content_suffix
 
 
 class SequentialNamError(ValueError):
@@ -82,18 +82,14 @@ def _sequential_metadata(full_head: dict[str, Any], cabinet_name: str | None,
     """
     head_metadata = full_head.get("metadata")
     head_metadata = head_metadata if isinstance(head_metadata, dict) else {}
-    # The head's own name is left unsuffixed by hybrid/training/a2_training_settings.py
-    # for an "embedded" export_mode (it isn't the final deliverable in this
-    # mode -- this packaged Sequential file is), so it's safe to use
-    # directly here without stripping an "[Amp Only]"/"[Learned Cab]" suffix
-    # that would otherwise double up with the one appended below.
     inherited_gain = head_metadata.get("gain")
     gain = float(inherited_gain) if isinstance(inherited_gain, (int, float)) and np.isfinite(inherited_gain) else None
     return {
         "date": _packaging_date(),
-        # Named from the export's base name (the head's own name now carries
-        # an [Amp Only]/[Full Rig] suffix); older callers fall back to it.
-        "name": embedded_package_name(base_name or head_metadata.get("name"), cabinet_name),
+        # Named from the export's base name. The head is itself a download,
+        # labelled "[Amp Only]"/"[Full Rig]"; callers without a base name fall
+        # back to the head's name with that label removed, never doubled.
+        "name": embedded_package_name(base_name or strip_content_suffix(head_metadata.get("name")), cabinet_name),
         "modeled_by": "NAM Mixer",
         "gear_type": "amp_cab",
         "gear_make": None,
