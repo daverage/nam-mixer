@@ -1801,3 +1801,21 @@ def test_logs_show_upload_progress_before_the_kernel_and_never_duplicate_remote_
         tail = manager.fetch_logs(job)
     assert tail.count("epoch 2") == 1 and "upload 50%" in tail
 
+
+def test_unexpected_validation_error_is_a_recorded_failure_not_a_stuck_job(monkeypatch, tmp_path):
+    """e.g. soundfile's LibsndfileError is a RuntimeError: it must end in a
+    saved 'failed' job with the downloaded export recorded, not escape refresh()."""
+    cli = _DownloadStubCli(nam_name="model.nam", training_result={"success": True})
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    _write_bundle_wavs(tmp_path, "d1")
+
+    def unreadable(*_a, **_k):
+        raise RuntimeError("Error opening 'input.wav': Format not recognised.")
+
+    monkeypatch.setattr(kaggle_training, "validate_downloaded_model", unreadable)
+    manager._download_and_validate(job)
+    saved = load_job(tmp_path, "d1", "j1")
+    assert saved.state == "failed" and "Format not recognised" in saved.error
+    assert Path(saved.output_nam_path).is_file()
+

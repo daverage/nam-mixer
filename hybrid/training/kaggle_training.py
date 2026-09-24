@@ -1331,6 +1331,7 @@ class KaggleJobManager:
         # cannot make the export disappear from the user.
         job.output_nam_path = str(nam_path)
         job.output_nam_sha256 = _sha256_file(nam_path)
+        save_job(self.a2_output_dir, job)  # recorded on disk before anything below can fail
         try:
             bundle_dir = self.a2_output_dir / job.design_id
             manifest_path = bundle_dir / "training_manifest.json"
@@ -1342,7 +1343,7 @@ class KaggleJobManager:
                 except (OSError, json.JSONDecodeError):
                     bundle_manifest = None
             validation = validate_downloaded_model(nam_path, bundle_dir / "input.wav", bundle_dir / "hybrid_target.wav", manifest=bundle_manifest)
-        except (NamRenderError, OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 -- e.g. soundfile's LibsndfileError (a RuntimeError); never a stuck 500
             job.state = "failed"
             job.error = f"local validation of downloaded model failed: {exc}"
             from .validation_report import build_validation_report
