@@ -107,13 +107,20 @@ REQUIRED_DATASET_FILES = (*STAGED_BUNDLE_FILES, "cloud_job.json")
 # Bounded so a Flask route never returns an unbounded log file.
 LOG_TAIL_LINES = 200
 
-_SECRET_PATTERN = re.compile(r"(?i)(key|token|secret|password)\s*[:=]\s*\S+")
+# A secret-looking name (…key/token/secret/password…, optionally quoted as in
+# kaggle.json), a ':' or '=', then the value -- which may itself contain ':'
+# or '=' -- up to whitespace, a quote, or a JSON/shell delimiter.
+_SECRET_PATTERN = re.compile(
+    r"""(?i)(\b[\w.-]*(?:key|token|secret|password)[\w.-]*["']?\s*[:=]\s*["']?)[^\s"',;}]+"""
+)
 
 
-def _redact(text: str) -> str:
+def _redact(text) -> str:
     if not text:
-        return text
-    return _SECRET_PATTERN.sub(lambda m: m.group(0).split(next(c for c in ":=" if c in m.group(0)))[0] + "=<redacted>", text)
+        return "" if text is None else text
+    if isinstance(text, bytes):  # e.g. TimeoutExpired.stdout, which is bytes even with text=True
+        text = text.decode("utf-8", errors="replace")
+    return _SECRET_PATTERN.sub(r"\1<redacted>", text)
 
 
 def _safe_slug(text: str, max_len: int = 40) -> str:

@@ -252,6 +252,22 @@ def test_redact_scrubs_secret_shaped_text():
     assert "abc123XYZ" not in redacted
 
 
+@pytest.mark.parametrize("text, secret", [
+    ("auth token=abc123:xyz done", "abc123"),                     # value containing ':'
+    ('{"username":"u","key":"deadbeef"}', "deadbeef"),           # kaggle.json shape
+    ("KAGGLE_KEY: s3cr3t-value", "s3cr3t-value"),
+    ("api_key = a=b=c", "a=b=c"),
+    ("password:'hunter2'", "hunter2"),
+])
+def test_redact_removes_the_whole_secret_value(text, secret):
+    redacted = _redact(text)
+    assert secret not in redacted and "<redacted>" in redacted
+
+
+def test_redact_accepts_bytes_from_a_timed_out_process():
+    assert _redact(b"token=abc123 partial") == "token=<redacted> partial"
+
+
 def test_safe_slug_sanitisation():
     assert _safe_slug("../../etc/passwd") == "etc-passwd"
     assert _safe_slug("My Design #1!!") == "my-design-1"
