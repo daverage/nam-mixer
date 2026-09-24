@@ -285,6 +285,41 @@ def test_adoption_check_imports_neural_amp_modeler_and_caches_a_failure(tmp_path
     assert manager.is_ready is False and len(calls) == 2
 
 
+def test_a_failed_adoption_check_is_retried_after_packages_change_or_a_minute(tmp_path, monkeypatch):
+    import os
+    import subprocess
+
+    import hybrid.training.local_training as lt
+
+    manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2", venv_dir=tmp_path / "venv")
+    _fake_venv_python(manager)
+    site = tmp_path / "venv" / "lib" / "python3.11" / "site-packages"; site.mkdir(parents=True)
+    outcome = {"ok": False, "calls": 0}
+
+    def run(argv, **kwargs):
+        outcome["calls"] += 1
+        if not outcome["ok"]:
+            raise subprocess.TimeoutExpired(argv, 15)             # e.g. a slow first torch import
+    monkeypatch.setattr(lt.subprocess, "run", run)
+    clock = [1000.0]
+    monkeypatch.setattr(lt.time, "monotonic", lambda: clock[0])
+
+    assert manager.is_ready is False and manager.is_ready is False and outcome["calls"] == 1
+    # pip finishes installing into the existing venv: the interpreter is untouched, site-packages is not
+    outcome["ok"] = True
+    os.utime(site, (site.stat().st_atime, site.stat().st_mtime + 10))
+    assert manager.is_ready is True and outcome["calls"] == 2
+
+    # a transient failure alone is retried once the minute is up
+    manager2 = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2", venv_dir=tmp_path / "venv2")
+    _fake_venv_python(manager2)
+    outcome.update(ok=False, calls=0)
+    assert manager2.is_ready is False and manager2.is_ready is False and outcome["calls"] == 1
+    outcome["ok"] = True
+    clock[0] += lt.FAILED_IMPORT_CHECK_RETRY_S + 1
+    assert manager2.is_ready is True and outcome["calls"] == 2
+
+
 def test_packaged_app_never_probes_its_own_executable_as_python(tmp_path, monkeypatch):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     configured = tmp_path / "python3.11"

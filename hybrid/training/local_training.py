@@ -70,6 +70,10 @@ def _training_python_version(argv: list[str]) -> "tuple[int, int] | None":
         return None
 
 
+# A failed venv adoption check is retried after this long even if nothing changed.
+FAILED_IMPORT_CHECK_RETRY_S = 60.0
+
+
 class LocalTrainingManager:
     def __init__(self, repo_root: Path, output_root: Path, *, venv_dir: Path | None = None):
         self.repo_root, self.output_root = Path(repo_root), Path(output_root)
@@ -89,7 +93,8 @@ class LocalTrainingManager:
         self._lock = threading.Lock()
         # (python path, mtime) of a venv whose adoption import check already
         # failed, so status polls don't re-run a slow torch import each time.
-        self._failed_import_check: tuple[str, float] | None = None
+        # (venv identity, monotonic time) of the last failed adoption check.
+        self._failed_import_check: tuple[tuple, float] | None = None
 
     @property
     def design_id(self) -> str | None:
@@ -103,6 +108,12 @@ class LocalTrainingManager:
     @property
     def _setup_complete_marker(self) -> Path:
         return self.venv_dir / ".setup_complete"
+
+    def _venv_identity(self) -> tuple:
+        """What changes when this venv's interpreter or installed packages change."""
+        site_packages = [*self.venv_dir.glob("lib/python*/site-packages"), self.venv_dir / "Lib" / "site-packages"]
+        return (str(self.python), self.python.stat().st_mtime,
+                tuple(sorted((str(p), p.stat().st_mtime) for p in site_packages if p.is_dir())))
 
     @property
     def is_ready(self) -> bool:
@@ -136,18 +147,24 @@ class LocalTrainingManager:
             # never race an import check against it mid-install.
             return False
         try:
-            identity = (str(self.python), self.python.stat().st_mtime)
+            identity = self._venv_identity()
         except OSError:
             return False
-        if self._failed_import_check == identity:
-            return False  # already checked this exact venv and it failed
+        # Don't re-run a failed 15 s check on every status poll -- but retry
+        # once the packages change (pip adds/removes entries in site-packages,
+        # which leaves the interpreter itself untouched) or after a minute, so
+        # one slow first import can't mark the venv broken for the session.
+        if self._failed_import_check is not None:
+            failed_identity, failed_at = self._failed_import_check
+            if failed_identity == identity and time.monotonic() - failed_at < FAILED_IMPORT_CHECK_RETRY_S:
+                return False
         try:
             subprocess.run(
                 [str(self.python), "-c", TRAINING_IMPORT_CHECK],
                 capture_output=True, timeout=15, check=True,
             )
         except (subprocess.SubprocessError, OSError):
-            self._failed_import_check = identity
+            self._failed_import_check = (identity, time.monotonic())
             return False
         self._failed_import_check = None
         self._setup_complete_marker.write_text("ok")
