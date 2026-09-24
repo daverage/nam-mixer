@@ -209,6 +209,16 @@ def test_full_route_flow_to_a_generated_bundle_and_gated_stage4(client, tmp_path
     assert meta["anchor_method"] == "fc" and [s["position"] for s in meta["selected_captures"]] == [1.0, 3.0, 6.0]
     assert meta["usable_input_gain_range_db"] == [-20.0, 14.0] and "guide and provenance record" in meta["note"]
     assert len(meta["known_limits"]) >= 4 and "Output gain" in zf.read("PLAYER_GUIDE.md").decode()
+    # ---- a validation report is only ever shown/synced/exported for the model it measured
+    vf = tmp_path / "cg" / pid / "validation.json"
+    report = {"design_id": did, "compatibility": {"standard_nam": True}, "progression": {"reversals": []}}
+    vf.write_text(json.dumps({**report, "model": {"sha256": "0" * 64}}))              # an earlier model's report
+    assert client.get(f"/api/cg/projects/{pid}").get_json()["validation"] is None
+    assert json.loads(zipfile.ZipFile(io.BytesIO(client.get(f"/api/cg/projects/{pid}/export").data))
+                      .read("Amp_X_FC.continuous_gain.json"))["validation"] == "not run"
+    assert [r for r in client.session_records if r["id"] == pid][-1]["settings"]["continuousGain"]["stage"] == "trained"
+    vf.write_text(json.dumps({**report, "model": {"sha256": hashlib.sha256(nam.read_bytes()).hexdigest()}}))
+    assert client.get(f"/api/cg/projects/{pid}").get_json()["validation"]["design_id"] == did
 
 
 def test_only_one_job_per_project_and_unknown_things_are_404(client):

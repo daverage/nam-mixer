@@ -162,7 +162,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
                 "profile": {"gains": prof["gains"], "regions": prof["regions"], "quarantine": prof["quarantine"],
                             "series": {n: {k: prof["series"][n][k] for k in ("dimension", "unit", "values", "reliable")} for n in _PROFILE_SERIES_FOR_UI if n in prof["series"]}},
             }
-        val = json.loads(p.validation_file.read_text(encoding="utf-8")) if p.validation_file.is_file() else None
+        val = current_validation(p)
         sync_session(p)
         return {"project": st, "check": p.check_captures(), "analysis": summary, "plan": st.get("plan"), "bundle": st.get("bundle"),
                 "training": training_record(st), "validation": val, "epoch_presets": A2_EPOCH_PRESETS, "selection_modes": list(SELECTION_MODES),
@@ -187,7 +187,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         st = p.state()
         plan, bundle = st.get("plan"), st.get("bundle")
         tr = training_record(st) if bundle else None
-        val = json.loads(p.validation_file.read_text(encoding="utf-8")) if p.validation_file.is_file() else None
+        val = current_validation(p)
         stage = "validated" if (tr and tr.get("trained") and val) else "trained" if (tr and tr.get("trained")) else "files" if bundle else "planned" if plan else "analysed" if st.get("analysis") else "captures"
         positions = sorted(c["position"] for c in st["captures"].values() if c["position"] is not None)
         cg = {"projectId": st["id"], "amp": st["amp"], "channel": st["channel"], "captures": len(st["captures"]), "positions": positions,
@@ -349,6 +349,22 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             raise CgProjectError("this design has not produced a trained model yet" + detail)
         return st, Path(path), manifest
 
+    def current_validation(p: CgProject) -> dict | None:
+        """validation.json, but only while it describes the CURRENT bundle and
+        trained NAM: a report for an earlier model must never be shown,
+        synced to Sessions or exported as this one's."""
+        if not p.validation_file.is_file():
+            return None
+        try:
+            val = json.loads(p.validation_file.read_text(encoding="utf-8"))
+            st, nam_path, _manifest = trained_model(p)
+            sha = __import__("hashlib").sha256(nam_path.read_bytes()).hexdigest()
+        except (CgProjectError, OSError, ValueError):
+            return None
+        if val.get("design_id") != st["bundle"]["design_id"] or (val.get("model") or {}).get("sha256") != sha:
+            return None
+        return val
+
     def run_validation(p: CgProject, note) -> dict:
         st, nam_path, manifest = trained_model(p)
         an = p.analysis()
@@ -408,7 +424,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
             st, nam_path, manifest = trained_model(p)
         except (CgProjectError, OSError, json.JSONDecodeError) as exc:
             return err(exc, 409)
-        val = json.loads(p.validation_file.read_text(encoding="utf-8")) if p.validation_file.is_file() else None
+        val = current_validation(p)
         design, core = manifest["design"], manifest["core"]
         t = training_record(st) or {}
         mapping = design["input_gain_mapping"]
