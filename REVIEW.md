@@ -320,7 +320,7 @@ separate commit.
       - ~~cg.js keeps three separately maintained timing formulas~~: one
         STEP_TIMING table (0fb6f57).
 - [x] Coverage report (`pytest --cov`), 2026-09-24: 84.4% of `hybrid/`, `routes/` and `app.py` (1,307 of 8,400 statements never run). See the log entry for the gaps that matter.
-- [ ] Final check: `/code-review ultra` on the whole tidy branch before merging
+- [x] Final check: `/code-review ultra` on the whole tidy branch before merging. Run in two halves split at 2cef180, because the branch exceeded the 8,000-line limit; 8 findings, all fixed or already resolved (see the log).
 
 ### Findings carried into Phase 3
 
@@ -408,3 +408,7 @@ separate commit.
   4. Lower priority: parts of `api_generate` (36 lines), the AI recipe route, `compute_a2_receptive_field` (covered only by environment-gated tests), and macOS/GPU system-usage probes (platform-specific).
   None of these are dead code: all are reachable features without tests.
 - 2026-09-24: Coverage gaps 1-3 closed with tests: CG validation 25% -> 99% (including the learned-cab like-with-like comparison and the validate route), the CG NAM download route and its embedded gate, and the research SSRF guard (all addresses and schemes, redirects refused). The guard itself was correct. Also found and fixed: `tests/cg_synth.synth_di` seeded from `hash()`, so CG test DIs changed every run. Overall coverage 84.4% -> 86.4%; 849 passed, 12 skipped (both venvs). Remaining: `/code-review ultra` (user), Windows quit check, merge.
+- 2026-09-24: `/code-review ultra` in two halves (the branch is 10,079 lines against the 8,000 limit; split at 2cef180 using temporary local branches `review/split` and `review/part1`, now deleted).
+  - Part 2 (2cef180 -> HEAD): (1) quitting the desktop app during start-up could orphan the backend (a race introduced by d0bff7a), fixed in dd4bee5 with a one-lock BackendSlot, a joined start-up step and Rust tests for both orderings; (2) nit: CG re-hashed the NAM instead of using the cache, fixed in 30986fc.
+  - Part 1 (master -> 2cef180), each checked against the current code first: (3) the local-training readiness cache stuck after one failed check, fixed in b45dece (site-packages mtime + 60 s retry); (4) a cancel between the Kaggle kernel push and recording it orphaned the kernel, and (5) stage()/the error handler bypassed the cancel guard, both fixed in 1233858 (any cancel after a successful push deletes the kernel; tests reproduce each race); (6) `__import__("hashlib")` was already gone; (7) stale `build_export_name` comment and (8) CG source_records re-loading captures, both fixed in 6d74706.
+  - 854 passed, 12 skipped (both venvs); Rust 5/5; CG frozen reproduction 6/6. Mac app rebuilt with the quit fix. Remaining: Windows quit-while-training check (user), then merge to master.
