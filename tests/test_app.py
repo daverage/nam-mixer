@@ -1793,3 +1793,19 @@ def test_character_analyses_are_computed_once_per_render(client, tmp_path, monke
     assert client.post("/api/wizard/insight", json={"render_id": rid}).status_code == 200
     assert client.post("/api/character/low_level_check", json={"render_id": rid}).status_code == 200
     assert len(calls) == first   # later requests for the same render analyse nothing
+
+
+def test_packaged_app_keeps_the_training_venv_in_the_writable_data_dir(tmp_path):
+    """In the packaged app TRAINING_ROOT is inside the installed bundle; the
+    1.4 GB venv must go to the per-user data dir. From source it stays the
+    README's <repo>/.venv-a2."""
+    root, work = tmp_path / "bundle" / "training_support", tmp_path / "data"
+    assert app_module._training_venv_dir(root, work, frozen=True) == work / ".venv-a2"
+    assert app_module._training_venv_dir(root, work, frozen=False) == root / ".venv-a2"
+
+
+def test_backend_bundle_spec_includes_the_kaggle_worker_and_excludes_personal_captures():
+    spec = (Path(__file__).resolve().parent.parent / "packaging" / "backend" / "nam_mixer_backend.spec").read_text()
+    assert '"cloud" / "kaggle" / "train_a2_cloud.py"' in spec and "training_support/cloud/kaggle" in spec
+    assert '"assets" / "nam_models"), "assets/nam_models"' not in spec
+    assert "raise SystemExit" in spec   # no renderer, no bundle

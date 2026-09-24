@@ -30,7 +30,8 @@ datas = [
     (str(REPO_ROOT / "templates"), "templates"),
     (str(REPO_ROOT / "static"), "static"),
     (str(REPO_ROOT / "assets" / "di"), "assets/di"),
-    (str(REPO_ROOT / "assets" / "nam_models"), "assets/nam_models"),
+    # assets/nam_models is deliberately NOT bundled: it holds the developer's
+    # own (gitignored) personal captures, and nothing reads it at runtime.
     # The official NAM v3.0.0 training input (assets/training/README.md) --
     # app.py auto-seeds work/training_input/input.wav from this on first
     # run so training works without a manual upload. Omitting it here
@@ -50,6 +51,9 @@ datas = [
     (str(REPO_ROOT / "hybrid"), "training_support/hybrid"),
     (str(REPO_ROOT / "scripts" / "train_a2.py"), "training_support/scripts"),
     (str(REPO_ROOT / "requirements-training.txt"), "training_support"),
+    # Kaggle GPU training stages this worker script into the kernel; app.py
+    # looks for it at TRAINING_ROOT/cloud/kaggle/train_a2_cloud.py.
+    (str(REPO_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py"), "training_support/cloud/kaggle"),
 ]
 
 binaries = []
@@ -65,6 +69,10 @@ nam_render_exe_win = REPO_ROOT / "native" / "nam_render" / "build" / "Release" /
 if nam_render_exe_win.is_file():
     binaries.append((str(nam_render_exe_win), "native/nam_render/build/Release"))
     binaries.append((str(nam_render_exe_win), "training_support/native/nam_render/build/Release"))
+if not binaries:
+    # Without the renderer every render/preview/generate in the shipped app
+    # fails; never produce a "successful" bundle that can't render.
+    raise SystemExit("nam_render was not built (native/nam_render/build/[Release/]nam_render[.exe]) -- build it first")
 
 a = Analysis(
     [str(REPO_ROOT / "app.py")],

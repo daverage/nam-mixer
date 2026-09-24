@@ -142,6 +142,19 @@ SESSION_MODEL_DIR = SESSION_DIR / "models"
 SESSION_MODEL_DIR.mkdir(exist_ok=True)
 
 TRAINING_ROOT = Path(os.environ.get("NAM_MIXER_TRAINING_ROOT", str(BASE_DIR))).expanduser()
+
+
+def _training_venv_dir(training_root: Path, work_dir: Path, frozen: bool) -> Path:
+    """Where the ~1.4 GB local-training venv lives. From source it is the same
+    <repo>/.venv-a2 that scripts/setup_a2_env.sh/.ps1 create (README's manual
+    path), so the two never duplicate. In the packaged app training_root is
+    inside the installed bundle (read-only on Linux/Windows, and writing into
+    a signed macOS .app breaks its signature and is lost on update), so the
+    venv goes in the writable per-user data directory instead."""
+    return (work_dir / ".venv-a2") if frozen else (training_root / ".venv-a2")
+
+
+
 _kaggle_manager = KaggleJobManager(
     A2_OUTPUT_DIR,
     cloud_worker_path=TRAINING_ROOT / "cloud" / "kaggle" / "train_a2_cloud.py",
@@ -149,12 +162,7 @@ _kaggle_manager = KaggleJobManager(
 _local_training_manager = LocalTrainingManager(
     TRAINING_ROOT,
     A2_OUTPUT_DIR,
-    # Deliberately the SAME location scripts/setup_a2_env.sh/.ps1 (README's
-    # documented manual path) creates by default -- not a separate work/
-    # copy. Two independent training venvs (each ~1.4GB with Torch) would
-    # otherwise exist for the exact same purpose depending on whether a user
-    # followed the README or clicked "Set up local training" in the app.
-    venv_dir=TRAINING_ROOT / ".venv-a2",
+    venv_dir=_training_venv_dir(TRAINING_ROOT, WORK_DIR, getattr(sys, "frozen", False)),
 )
 
 _kaggle_install_lock = threading.Lock()
