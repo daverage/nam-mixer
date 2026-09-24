@@ -380,8 +380,48 @@ const CAB_EXPORT_MODE_NOTES = {
   embedded: "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it.",
 };
 
+const cabFinishSummary = document.getElementById("cab-finish-summary");
+const cabNameEl = document.getElementById("cab-name");
+const cabDetailEl = document.getElementById("cab-detail");
+const cabFileButton = document.getElementById("cab-file-button");
+const cabRemoveButton = document.getElementById("cab-remove");
+
+// cab-info keeps the full upload description (sessions store it as the label);
+// the listening card shows it as a name plus a smaller detail line.
+function updateCabStrip() {
+  const info = cabInfoEl.textContent;
+  const [namePart, ...rest] = info.split(" -- ");
+  if (cabServerPath) {
+    cabNameEl.textContent = stripRestoredSuffix(namePart).trim() || "Cabinet IR";
+    cabDetailEl.textContent = rest.join(" · ") || (info.endsWith("(restored)") ? "Restored from the session" : "");
+  } else {
+    cabNameEl.textContent = "No cabinet";
+    cabDetailEl.textContent = info || "You are hearing the amps on their own.";
+  }
+  cabFileButton.textContent = cabServerPath ? "Change IR…" : "Choose IR…";
+  cabRemoveButton.hidden = !cabServerPath;
+}
+
+cabRemoveButton.addEventListener("click", () => {
+  cabFileInput.value = "";
+  cabFileInput.dispatchEvent(new Event("change"));
+});
+// The <label> opens the hidden file input; make it keyboard-operable too.
+cabFileButton.tabIndex = 0;
+cabFileButton.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); cabFileInput.click(); }
+});
+
 function updateCabStatus() {
+  updateCabStrip();
   if (cabExportModeInfo) cabExportModeInfo.textContent = CAB_EXPORT_MODE_NOTES[cabExportMode.value] || CAB_EXPORT_MODE_NOTES.none;
+  if (cabFinishSummary) {
+    const name = stripRestoredSuffix(cabInfoEl.textContent.split(" -- ")[0]).trim();
+    cabFinishSummary.textContent = cabServerPath
+      ? `Cabinet: ${name || "selected IR"} — chosen in the listening card above.`
+      : "No cabinet chosen. Choose a cabinet IR in the listening card above to hear it and include it.";
+    cabFinishSummary.classList.toggle("is-set", Boolean(cabServerPath));
+  }
   if (!cabServerPath) {
     cabStatusEl.textContent = "Cab: off";
   } else if (cabExportMode.value === "embedded") {
@@ -432,6 +472,9 @@ cabFileInput.addEventListener("change", async () => {
     if (preparedMs !== null) info += ` -- prepared length ${preparedMs} ms`;
     if (energy999Ms !== null) info += `, 99.9% energy by ${energy999Ms} ms`;
     cabInfoEl.textContent = info;
+    // The IR is chosen in the listening card in order to hear it.
+    cabPreviewEnabled.checked = true;
+    cabPreviewEnabled.dispatchEvent(new Event("change"));
   } catch (err) {
     cabInfoEl.textContent = "Upload failed: " + err;
   } finally {

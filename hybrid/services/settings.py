@@ -219,9 +219,10 @@ SETTINGS: tuple[SettingField, ...] = (
     SettingField(
         name="NAM_MIXER_ENABLE_EXPERIMENTAL_ARCHITECTURES",
         label="Enable experimental NAM architectures",
-        description="Shows Create both (Sequential Embedded): a valid NAM Sequential model with a separate "
-                     "Linear/FIR cabinet stage. A2-only players may reject it. Off by default; the tested "
-                     "head-only NAM remains available without this setting.",
+        description="Allows Create both (Sequential Embedded), for a possible future NAM specification: a NAM "
+                     "Sequential model with a separate Linear/FIR cabinet stage, which players that accept only A2 "
+                     "may reject. Off by default. Learned cab, the supported way to put a cabinet in a NAM, works "
+                     "without this setting.",
         group="Advanced",
         kind="checkbox",
     ),
