@@ -516,3 +516,18 @@ def test_version_2_design_records_and_restores_its_analysis_version(tmp_path):
     assert loaded.analysis_config["version"] == 2 and loaded.analysis_a["version"] == 2
     assert CharacterAnalysisConfig(**loaded.analysis_config).cache_key() == a.config_hash
     assert np.array_equal(build_character_blend(pair, loaded).blend, result.blend)
+
+
+def test_corrupt_analysis_cache_entry_is_a_miss_not_an_error(tmp_path):
+    from hybrid.modes.character_analysis import analysis_cache_path, load_cached_analysis, store_cached_analysis
+
+    pair = _pair()
+    config = CharacterAnalysisConfig()
+    analysis = analyse_rendered_audio(pair.dry, pair.amp_a, pair.sample_rate, config)
+    path = store_cached_analysis(tmp_path, analysis, config, "k")
+    assert load_cached_analysis(tmp_path, "k", config) == analysis
+    assert list(tmp_path.glob(".*.tmp")) == []
+    path.write_text('{"sample_rate": 48000, "freq')       # a torn write
+    assert load_cached_analysis(tmp_path, "k", config) is None
+    assert analysis_cache_path(tmp_path, "k", config) == path
+

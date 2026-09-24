@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -191,11 +193,20 @@ def analysis_cache_path(cache_dir: str | Path, cache_key: str, config: Character
 def load_cached_analysis(cache_dir: str | Path, cache_key: str, config: CharacterAnalysisConfig) -> AmpCharacterAnalysis | None:
     path = analysis_cache_path(cache_dir, cache_key, config)
     if not path.is_file(): return None
-    return AmpCharacterAnalysis.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    try:
+        return AmpCharacterAnalysis.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # an unreadable/partial cache entry is a miss: re-analyse and overwrite it
 
 
 def store_cached_analysis(cache_dir: str | Path, analysis: AmpCharacterAnalysis, config: CharacterAnalysisConfig, cache_key: str) -> Path:
     path = analysis_cache_path(cache_dir, cache_key, config)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(analysis.to_dict(), indent=2), encoding="utf-8")
+    # Write beside it and swap in, so a concurrent reader never sees a partial file.
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(analysis.to_dict(), indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
     return path
