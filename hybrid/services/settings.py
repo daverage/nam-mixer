@@ -227,6 +227,15 @@ SETTINGS: tuple[SettingField, ...] = (
         kind="checkbox",
     ),
     SettingField(
+        name="NAM_MIXER_SKIP_STARTUP_UPDATE_CHECK",
+        label="Don't check for updates when NAM Mixer starts",
+        description="By default NAM Mixer asks GitHub once at startup whether a newer release exists (an anonymous "
+                     "read of the public releases list; nothing about you or your files is sent). Tick this to only "
+                     "check when you click Check for updates.",
+        group="Advanced",
+        kind="checkbox",
+    ),
+    SettingField(
         name="TONE3000_API_KEY",
         label="TONE3000 API key",
         description="Server-side TONE3000 Secret Key (t3k_cs_...) used for the TONE3000 tab's "
@@ -451,6 +460,14 @@ def save_settings(values: dict, clear_secrets: list[str] | None = None) -> dict:
             filtered[_PROVIDER_STORAGE.get(requested_provider, {}).get(field.name, field.name)] = ""
     env_file = write_env_values(filtered)
     return {"saved": sorted(filtered), "env_file": str(env_file), "warnings": warnings}
+
+
+def startup_update_check_enabled() -> bool:
+    """Whether the app checks GitHub for a newer release once at startup (on unless explicitly turned off)."""
+    from hybrid.services.env_file import read_env_values
+
+    raw = read_env_values({"NAM_MIXER_SKIP_STARTUP_UPDATE_CHECK"}).get("NAM_MIXER_SKIP_STARTUP_UPDATE_CHECK", "")
+    return raw.strip().lower() not in ("1", "true", "yes", "on")
 
 
 def experimental_architectures_enabled() -> bool:

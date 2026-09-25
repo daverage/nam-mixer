@@ -69,6 +69,7 @@ from hybrid.services.settings import (
     SettingsValidationError,
     experimental_architectures_enabled,
     get_settings as get_app_settings,
+    startup_update_check_enabled,
     save_settings as save_app_settings,
 )
 from hybrid.core.input_profiles import (
@@ -94,6 +95,7 @@ from hybrid.services.ollama_pull import (
 )
 from hybrid.services.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
 from hybrid.core.nam_loader import load_nam
+from hybrid.services.nam_inspector import inspect_nam
 from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
 from hybrid.training.sequential_nam import SequentialNamError, package_embedded_artifacts
 from hybrid.core.pipeline import RenderedPair, amp_input_peak_warnings, build_hybrid, render_pair
@@ -120,7 +122,7 @@ DI_DIR = BASE_DIR / "assets" / "di"
 _data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
 WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
-APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.4.1")
+APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.5.0")
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
@@ -938,12 +940,14 @@ def api_renderer_download():
 
 @app.get("/api/update/check")
 def api_update_check():
-    """Manual-only "is a newer version available?" check for the Settings page -- see hybrid/services/update_check.py.
+    """"Is a newer version available?" -- see hybrid/services/update_check.py.
 
-    Never called automatically: this is the app's one deliberate exception to "no network unless the user asks
-    for it" (README's "Local-first & private"), and it stays that way by only ever running in response to this
-    button. Reports safely-worded errors (network unreachable, no release found) rather than a stack trace.
+    Called by Settings > Updates > "Check for updates", and once per app start with ?startup=1, which returns
+    {"ok": True, "skipped": True} without any network request when the user has turned the startup check off.
+    Reports safely-worded errors (network unreachable, no release found) rather than a stack trace.
     """
+    if request.args.get("startup") == "1" and not startup_update_check_enabled():
+        return jsonify({"ok": True, "skipped": True})
     try:
         result = check_for_update(APP_VERSION)
     except UpdateCheckError as exc:
@@ -1100,6 +1104,8 @@ def api_nam_upload():
     upload.save(dest)
     try:
         model = load_nam(dest)
+        if not isinstance(model.raw, dict):
+            raise ValueError("the JSON root must be a NAM object")
     except (OSError, ValueError) as exc:
         dest.unlink(missing_ok=True)
         return jsonify({"error": f"not a valid .nam file: {exc}"}), 400
@@ -1668,6 +1674,18 @@ def api_nam_tool_inspect():
         return jsonify({"path": str(source), "filename": source.name, **describe_nam_tools(raw)})
     except (OSError, ValueError, NamToolError) as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/nam/tools/nam-inspector", methods=["POST"])
+def api_nam_inspector():
+    """Read-only technical inspection of an app-managed NAM file."""
+    data = request.get_json(force=True)
+    try:
+        source = _tool_source_path(str(data.get("path", "")))
+        result = inspect_nam(source)
+    except (OSError, ValueError, NamToolError) as exc:
+        return jsonify({"error": f"This file could not be loaded as a NAM: {exc}"}), 400
+    return jsonify(result)
 
 
 @app.route("/api/nam/tools/volume", methods=["POST"])

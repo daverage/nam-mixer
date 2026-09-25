@@ -99,8 +99,9 @@ Hybrid NAM Builder is an experimental proof-of-concept tool for building a dynam
 input-level-driven crossfade between two existing Neural Amp Modeler (`.nam`) amp
 captures (e.g. clean amp at low input level morphing into a crunch/lead amp at high
 input level), with the eventual goal of training a fresh NAM model on the resulting
-blended audio. See README.md for the full concept, rationale, and current
-limitations — it is detailed and should be read before making architectural changes.
+blended audio. See README.md (overview), docs/user_guide.md (full concept and
+rationale) and docs/developer_guide.md (current status and limitations) --
+read them before making architectural changes.
 
 **Key thing to know before touching this repo:** NAM inference
 (`hybrid/core/render.py`) is implemented via a native C++ tool, not the Python
@@ -198,9 +199,9 @@ characteristics of the bundled DI fixtures).
 generators, plus `metadata` and `wizard`), `continuous_gain/` (the CG tab;
 module names without the old `cg_` prefix), `training/` (A2 settings,
 local/Kaggle backends, validation, export packaging) and `services/`
-(settings/.env, local LLM, research, update check). `hybrid/paths.py`
+(settings/.env, local LLM, research, update check, read-only NAM inspector). `hybrid/paths.py`
 (`REPO_ROOT`) must stay at the top level, because it derives the repo root from
-its own location. The intended end-to-end pipeline (see README.md "Workflow"
+its own location. The intended end-to-end pipeline (see docs/user_guide.md "The Builder, step by step"
 section for the full picture):
 
 1. **`nam_loader.py`** parses `.nam` files into a `NamModel`, including
@@ -327,7 +328,7 @@ section for the full picture):
 (sourced from the NAMtoClo project — see `assets/di/README.md`) used for
 auditioning and as regression-test fixtures. These are explicitly **not** the
 same thing as a proper calibrated NAM training/reamping signal — do not use them
-as the actual input for generating a real A2 training pair; see README.md's
+as the actual input for generating a real A2 training pair; see docs/user_guide.md's
 "Preview DIs vs. NAM training material" section for the distinction.
 
 `work/` is a gitignored scratch output directory.

@@ -3982,6 +3982,7 @@ const toolGeneratedButton = document.getElementById("btn-tool-generated");
 const toolVolumeResult = document.getElementById("tool-volume-result");
 const toolMetadataResult = document.getElementById("tool-metadata-result");
 let toolNamPath = null;
+let toolInspectorRequestId = 0;
 let originalToolMetadata = {};
 let toolLoudnessDb = null;
 let toolExactCabEmbedSupported = false;
@@ -4196,6 +4197,13 @@ function showToolError(resultEl, message) {
 }
 function updateToolVolumeReadout() { toolVolumeValue.textContent = `${Number(toolVolumeSlider.value).toFixed(1)} dB`; }
 async function setToolNam(data, label) {
+  const inspectorPrompt = document.getElementById("tool-inspector-prompt");
+  const inspectorResult = document.getElementById("tool-inspector-result");
+  const inspectorRequestId = ++toolInspectorRequestId;
+  inspectorResult.hidden = true;
+  inspectorResult.replaceChildren();
+  inspectorPrompt.classList.add("is-loading");
+  inspectorPrompt.textContent = `Inspecting ${label} with a short NAMCore render…`;
   if (toolCabDesignId && !trainingIsActive()) {
     window.namTrainingHost?.detach();
   }
@@ -4266,6 +4274,75 @@ async function setToolNam(data, label) {
   toolInfo.textContent = `Ready: ${label} — ${inspection.architecture || "NAM"}; ${inspection.head_scales.length} recognised output scale${inspection.head_scales.length === 1 ? "" : "s"}. Choose a tool below.`;
   document.getElementById("tool-cab-model-name").value = originalToolMetadata.name || inspection.filename.replace(/\.nam$/i, "");
   syncToolCabMode();
+  try {
+    const response = await fetch("/api/nam/tools/nam-inspector", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: toolNamPath }),
+    });
+    const result = await response.json();
+    if (inspectorRequestId !== toolInspectorRequestId) return;
+    if (!response.ok) throw new Error(result.error || "Inspection failed");
+    showNamInspectorResult(result, inspectorResult);
+    inspectorPrompt.textContent = `Read-only inspection for ${label}.`;
+  } catch (error) {
+    if (inspectorRequestId !== toolInspectorRequestId) return;
+    inspectorResult.hidden = false;
+    inspectorResult.classList.add("is-error");
+    inspectorResult.textContent = error.message || String(error);
+    inspectorPrompt.textContent = "NAM metadata was opened, but the technical inspection could not be completed.";
+  } finally {
+    if (inspectorRequestId === toolInspectorRequestId) inspectorPrompt.classList.remove("is-loading");
+  }
+}
+
+function showNamInspectorResult(result, target) {
+  target.replaceChildren();
+  target.classList.remove("is-error");
+  target.hidden = false;
+  const { identity = {}, architecture = {}, calibration = {}, cabinet = {}, temporal = {}, validation = {} } = result;
+  const title = document.createElement("h4");
+  title.textContent = validation.status === "passed"
+    ? `Valid ${architecture.name || "NAM"}`
+    : validation.status === "warning" ? `Parsed ${architecture.name || "NAM"}` : "Could not validate model";
+  const intro = document.createElement("p");
+  intro.textContent = `${architecture.sample_rate ? `${Math.round(architecture.sample_rate / 1000)} kHz` : "Sample rate unavailable"} · ${architecture.input_channels || 1} → ${architecture.output_channels || 1} channel${(architecture.output_channels || 1) === 1 ? "" : "s"}${architecture.full_lite_supported ? " · Full + Lite" : ""}`;
+  const summary = document.createElement("p");
+  summary.textContent = `${calibration.status === "complete" ? "Input/output calibration present" : calibration.status === "input-only" ? "Input calibration only" : "Calibration metadata absent"} · ${cabinet.label || "Unknown cabinet structure"} · ${validation.summary || "Validation incomplete"}`;
+  target.append(title, intro, summary);
+
+  const details = document.createElement("details");
+  const summaryNode = document.createElement("summary");
+  summaryNode.textContent = "Technical details";
+  details.append(summaryNode);
+  const rows = [
+    ["File", identity.filename], ["Model", identity.name], ["Modeled by", identity.modeled_by],
+    ["Gear", [identity.gear_make, identity.gear_model, identity.gear_type].filter(Boolean).join(" · ")],
+    ["Architecture", architecture.name], ["Format version", identity.format_version],
+    ["Calibration", `Input ${calibration.input_level_dbu ?? "—"} dBu · Output ${calibration.output_level_dbu ?? "—"} dBu`],
+    ["Loudness", calibration.loudness_db == null ? null : `${calibration.loudness_db} dB`],
+    ["Neural receptive field", temporal.neural_receptive_field_samples == null ? null : `${temporal.neural_receptive_field_samples} samples${temporal.neural_receptive_field_ms == null ? "" : ` (${temporal.neural_receptive_field_ms} ms)`}`],
+    ["FIR history", temporal.fir_history_samples == null ? null : `${temporal.fir_history_samples} samples${temporal.fir_history_ms == null ? "" : ` (${temporal.fir_history_ms} ms)`}`],
+    ["Total formal dependency", temporal.total_formal_dependency_samples == null ? null : `${temporal.total_formal_dependency_samples} samples${temporal.total_formal_dependency_ms == null ? "" : ` (${temporal.total_formal_dependency_ms} ms)`}`],
+  ].filter(([, value]) => value != null && value !== "");
+  const list = document.createElement("dl");
+  rows.forEach(([label, value]) => {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = String(value);
+    list.append(dt, dd);
+  });
+  details.append(list);
+  if (architecture.stages?.length) {
+    const stages = document.createElement("p");
+    stages.textContent = `Sequential stages: ${architecture.stages.map(stage => `${stage.index}. ${stage.architecture}${stage.ir_length_samples ? ` (${stage.ir_length_samples} taps, ${stage.duration_ms ?? "?"} ms)` : ""}`).join(" → ")}`;
+    details.append(stages);
+  }
+  Object.entries(validation.branches || {}).forEach(([name, branch]) => {
+    const line = document.createElement("p");
+    line.className = "inspector-branch";
+    const peak = branch.peak_dbfs == null ? "" : ` · peak ${branch.peak_dbfs} dBFS`;
+    line.textContent = `${name === "render" ? "NAMCore" : name}: ${branch.detail || branch.status}${peak}`;
+    details.append(line);
+  });
+  target.append(details);
 }
 toolsTab.addEventListener("click", () => setToolsOpen(true));
 document.getElementById("btn-close-tools").addEventListener("click", () => setToolsOpen(false));
@@ -5058,6 +5135,19 @@ function setToolSourceBusy(busy) {
   toolGeneratedButton.disabled = busy;
 }
 
+function clearNamInspectorResult(message = "Inspection will start after the NAM opens.") {
+  toolInspectorRequestId += 1;
+  if (typeof document === "undefined") return;
+  const prompt = document.getElementById("tool-inspector-prompt");
+  const result = document.getElementById("tool-inspector-result");
+  if (!prompt || !result) return;
+  prompt.classList.remove("is-loading");
+  prompt.textContent = message;
+  result.hidden = true;
+  result.classList.remove("is-error");
+  result.replaceChildren();
+}
+
 async function openToolNamFile(file) {
   if (!file) return;
   if (trainingIsActive()) {
@@ -5065,6 +5155,7 @@ async function openToolNamFile(file) {
     return;
   }
   setToolSourceBusy(true);
+  clearNamInspectorResult(`Opening ${file.name}…`);
   toolInfo.textContent = `Opening ${file.name}…`;
   try {
     const form = new FormData();
@@ -5094,6 +5185,7 @@ toolNamFileInput.addEventListener("change", () => {
 toolGeneratedButton.addEventListener("click", async () => {
   if (trainingIsActive()) { toolInfo.textContent = "Wait for the active training job to finish before changing the source NAM."; return; }
   setToolSourceBusy(true);
+  clearNamInspectorResult("Opening the latest generated NAM…");
   toolInfo.textContent = "Looking for the latest generated NAM…";
   try {
     const response = await fetch("/api/nam/tools/generated");
@@ -5251,7 +5343,7 @@ document.getElementById("btn-tool-cab-embed").addEventListener("click", async ()
   }
 });
 
-// --- "Check for updates" (Settings) -- manual only, never automatic (see /api/update/check's docstring). ---
+// --- "Check for updates" (Settings) -- the manual check; the startup check is below. ---
 const checkUpdateBtn = document.getElementById("btn-check-update");
 const updateCheckStatus = document.getElementById("update-check-status");
 const updateCheckResult = document.getElementById("update-check-result");
@@ -5289,6 +5381,50 @@ if (checkUpdateBtn) {
     }
   });
 }
+
+// --- Startup update check: once per launch, unless turned off in Settings > Advanced. Silent when up to date,
+// offline, or turned off; otherwise a small notice offers the installer for THIS platform (or, running from
+// source, the release page) and "Not now", which points to Settings for later. ---
+function updateNoticeContent(data) {
+  const direct = Boolean(data.is_packaged && data.asset_url);
+  return {
+    title: `NAM Mixer ${data.latest_version} is available (you have ${data.current_version}).`,
+    detail: direct
+      ? "Download it now, or keep working and update later."
+      : data.is_packaged
+        ? "Open the release page to download it, or keep working and update later."
+        : "Running from source: pull the latest code (git pull) and restart, or see the release page.",
+    href: direct ? data.asset_url : data.release_url,
+    action: direct ? `Download ${data.latest_version}` : "View release",
+  };
+}
+
+async function checkForUpdateAtStartup() {
+  const notice = document.getElementById("update-notice");
+  if (!notice) return;
+  try {
+    const data = await (await fetch("/api/update/check?startup=1")).json();
+    if (!data.ok || data.skipped || !data.update_available) return;
+    const content = updateNoticeContent(data);
+    document.getElementById("update-notice-title").textContent = content.title;
+    document.getElementById("update-notice-detail").textContent = content.detail;
+    const download = document.getElementById("update-notice-download");
+    download.href = content.href;
+    download.textContent = content.action;
+    notice.hidden = false;
+  } catch (err) {
+    console.warn("Startup update check failed:", err);   // offline etc.: never interrupt startup
+  }
+}
+document.getElementById("update-notice-dismiss")?.addEventListener("click", () => {
+  document.getElementById("update-notice").hidden = true;
+  setStatus("You can check for updates any time in Settings → Updates.");
+});
+document.getElementById("update-notice-download")?.addEventListener("click", () => {
+  document.getElementById("update-notice").hidden = true;
+  setStatus("Opening the download in your browser. Quit NAM Mixer before installing the new version.");
+});
+checkForUpdateAtStartup();
 
 // Load settings eagerly so saved preferences are reflected immediately,
 // without requiring a detour through the Settings tab first.

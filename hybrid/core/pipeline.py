@@ -112,7 +112,7 @@ def render_pair(
     stress-testing the crossfade beyond whatever level a given DI clip's own
     performance happens to reach -- the DI is a convenience audition
     recording, not something engineered to exercise the amp's full level
-    range (see README "Why the genre/style DI files are included"). Unlike
+    range (see docs/user_guide.md "Why the genre/style DI files are included"). Unlike
     `input_profile_gain_db`, it does NOT represent an instrument/pickup
     identity and is deliberately excluded from `hybrid.modes.design.HybridDesign`
     provenance -- it is purely an audition aid. `source_envelope_db` (used

@@ -35,6 +35,14 @@
     <p class="tagline">Combine two NAM captures into one sound that responds the way you want to play.</p>
   </header>
 
+  <div id="update-notice" class="update-notice" role="status" aria-live="polite" hidden>
+    <div class="update-notice-text"><strong id="update-notice-title"></strong><span id="update-notice-detail"></span></div>
+    <div class="update-notice-actions">
+      <a id="update-notice-download" class="btn btn-primary btn-small" target="_blank" rel="noopener"></a>
+      <button type="button" id="update-notice-dismiss" class="btn btn-secondary btn-small">Not now</button>
+    </div>
+  </div>
+
   <nav class="mode-tabs utility-tabs" aria-label="Utilities">
     <button type="button" class="mode-tab active" id="tab-builder" aria-pressed="true">Builder</button>
     <button type="button" class="mode-tab" id="tab-cg" aria-pressed="false" aria-controls="cg-panel">Continuous Gain</button>
@@ -58,7 +66,7 @@
     <div id="tool-intro" class="tools-intro">
       <div class="tools-intro-copy">
         <h3>Fine-tune an existing NAM capture</h3>
-        <p>Choose one capture, then adjust its output, tidy its metadata, or add a cabinet. Every tool creates a new file—the original NAM is never overwritten.</p>
+        <p>Choose one capture to adjust its output, tidy its metadata, add a cabinet, or inspect its structure. The source NAM is never overwritten; Inspector is read-only.</p>
       </div>
       <div class="tool-capability-grid" aria-label="Available NAM tools">
         <article class="tool-capability">
@@ -72,6 +80,10 @@
         <article class="tool-capability">
           <span class="tool-capability-icon" aria-hidden="true">IR</span>
           <div><strong>Cab Embed</strong><span>Learn a cabinet into a new A2 NAM or create an exact experimental embed.</span></div>
+        </article>
+        <article class="tool-capability">
+          <span class="tool-capability-icon" aria-hidden="true">✓</span>
+          <div><strong>NAM Inspector</strong><span>Inspect and validate a NAM's architecture, calibration, cabinet structure and compatibility.</span></div>
         </article>
       </div>
     </div>
@@ -108,7 +120,7 @@
     <div id="tool-editors" hidden>
       <div class="tools-workspace-heading">
         <div class="tool-step-marker" aria-hidden="true">2</div>
-        <div><div class="eyebrow">NAM ready</div><h3>Choose what you want to change</h3><p>Each action creates a separate new NAM from the source above.</p></div>
+        <div><div class="eyebrow">NAM ready</div><h3>Choose a tool</h3><p>Editors create a separate new NAM; Inspector only reads and reports on the source.</p></div>
       </div>
       <div class="tools-grid">
         <section class="tool-card">
@@ -139,7 +151,6 @@
           <dl id="tool-export-info" class="tool-readonly-list"></dl>
           <div id="tool-calibration-status" class="info" aria-live="polite"></div>
         </section>
-      </div>
       <section class="tool-card tool-cab-embed">
         <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">IR</span><div><div class="eyebrow">Cabinet</div><h3>Cab Embed</h3></div></div>
         <p class="info">Add a cabinet to this capture. Learned mode trains a new broadly compatible A2; exact mode is instant but uses experimental Sequential/Linear support.</p>
@@ -160,6 +171,13 @@
         <div id="tool-cab-result" class="tool-result" hidden aria-live="polite"></div>
         <div id="tool-cab-training-host"></div>
       </section>
+      <section class="tool-card tool-inspector">
+        <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">✓</span><div><div class="eyebrow">Read-only check</div><h3>NAM Inspector</h3></div></div>
+        <p class="info">Inspect and validate a NAM's architecture, calibration, cabinet structure and compatibility.</p>
+        <div id="tool-inspector-prompt" class="tool-inspector-prompt">Choose a NAM above to inspect it. This check never changes the file.</div>
+        <div id="tool-inspector-result" class="tool-inspector-result" hidden aria-live="polite"></div>
+      </section>
+      </div>
     </div>
   </section>
 
@@ -731,10 +749,10 @@
 
   <section id="settings-panel" class="sessions-panel" hidden aria-labelledby="settings-panel-title">
     <div class="session-manager-heading"><div><div class="eyebrow">App configuration</div><h2 id="settings-panel-title">Settings</h2><span id="settings-status" class="info" aria-live="polite"></span></div><button type="button" id="btn-close-settings" class="btn btn-secondary btn-small">Back to builder</button></div>
-    <p class="info">These settings are the same environment variables the app has always read (e.g. <code>NAM_RENDER_EXE</code>); this page just gives you a place to change them without a shell. Values are stored locally, never uploaded anywhere. Settings marked "restart required" only take effect the next time the app starts.</p>
+    <p class="info">Settings are stored locally, never uploaded anywhere. Settings marked "restart required" only take effect the next time the app starts.</p>
     <div class="settings-group">
       <h3>Updates</h3>
-      <p class="info">Checks GitHub for a newer release. Only runs when you click the button -- nothing is checked automatically or reported anywhere.</p>
+      <p class="info">Checks GitHub for a newer release: once when NAM Mixer starts, and whenever you click the button. Nothing about you or your files is sent. To turn off the check at startup, use Advanced below.</p>
       <div class="status-row"><span id="update-check-status" class="info" aria-live="polite">Not checked yet.</span><button type="button" id="btn-check-update" class="btn btn-secondary btn-small">Check for updates</button></div>
       <div id="update-check-result" class="info" aria-live="polite"></div>
     </div>

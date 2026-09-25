@@ -808,6 +808,30 @@ def test_update_check_route_reports_an_available_update(client, monkeypatch):
                     "asset_url": "https://example.invalid/asset.dmg", "is_packaged": False}
 
 
+def test_startup_update_check_can_be_turned_off_without_any_request(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(app_module, "check_for_update", lambda current: calls.append(current))
+    monkeypatch.setattr(app_module, "startup_update_check_enabled", lambda: False)
+    assert client.get("/api/update/check?startup=1").get_json() == {"ok": True, "skipped": True}
+    assert calls == []
+
+
+def test_startup_update_check_runs_by_default_and_manual_check_ignores_the_setting(client, monkeypatch):
+    from hybrid.services.update_check import UpdateCheckResult
+    calls = []
+    def fake(current):
+        calls.append(current)
+        return UpdateCheckResult(current_version=current, latest_version="v9.9.9", update_available=True,
+                                 release_url="https://example.invalid/r", asset_url=None)
+    monkeypatch.setattr(app_module, "check_for_update", fake)
+    monkeypatch.delenv("NAM_MIXER_SKIP_STARTUP_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr("hybrid.services.env_file.read_env_values", lambda names: {})
+    assert client.get("/api/update/check?startup=1").get_json()["update_available"] is True
+    monkeypatch.setattr(app_module, "startup_update_check_enabled", lambda: False)
+    assert client.get("/api/update/check").get_json()["update_available"] is True   # the button always checks
+    assert len(calls) == 2
+
+
 def test_update_check_route_reports_a_ui_safe_error_without_raising(client, monkeypatch):
     from hybrid.services.update_check import UpdateCheckError
     def boom(current):
@@ -996,6 +1020,28 @@ def test_nam_tools_inspect_works_for_embedded_cab_sequential_export(client, tmp_
     assert data["head_scales"] == []
     assert "Sequential" in data["volume_unsupported_reason"]
     assert data["metadata"]["name"] == "British American High Gain + Cab"
+
+
+def test_nam_inspector_endpoint_is_read_only_and_requires_managed_nam(client, tmp_path, monkeypatch):
+    source = tmp_path / "inspector.nam"
+    source.write_text(jsonlib.dumps({
+        "architecture": "WaveNet", "config": {}, "weights": [], "sample_rate": 48000,
+        "metadata": {"name": "Inspect me", "input_level_dbu": 12},
+    }), encoding="utf-8")
+    uploaded = client.post("/api/nam/upload", data={"file": (io.BytesIO(source.read_bytes()), source.name)}).get_json()
+    original = Path(uploaded["path"]).read_bytes()
+    monkeypatch.setattr(app_module, "inspect_nam", lambda path: {
+        "identity": {"filename": Path(path).name}, "validation": {"status": "passed"},
+    })
+
+    response = client.post("/api/nam/tools/nam-inspector", json={"path": uploaded["path"]})
+    assert response.status_code == 200
+    assert response.get_json()["validation"]["status"] == "passed"
+    assert Path(uploaded["path"]).read_bytes() == original
+
+    rejected = client.post("/api/nam/tools/nam-inspector", json={"path": str(source)})
+    assert rejected.status_code == 400
+    assert "choose an uploaded or generated" in rejected.get_json()["error"]
 
 
 def test_wizard_insight_requires_a_rendered_pair(client):

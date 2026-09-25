@@ -1,14 +1,15 @@
-"""Checks GitHub for a newer app release -- manual/opt-in only (see app.py's /api/update/check).
+"""Checks GitHub for a newer app release (see app.py's /api/update/check).
 
-No telemetry: nothing is reported TO GitHub about this install, and this is never called automatically -- only in
-response to the Settings page's "Check for updates" button, matching the app's local-first/no-background-network
-policy (README's "Local-first & private"). It shares the same unauthenticated GitHub releases API and error style
+No telemetry: nothing is reported TO GitHub about this install; the request is one anonymous read of the public
+releases list. It runs when the user clicks Settings > Updates > "Check for updates", and once when the app
+starts unless "Don't check for updates when NAM Mixer starts" is set. It shares the same unauthenticated GitHub releases API and error style
 as hybrid/core/render_bootstrap.py's nam_render downloader, but looks at the app's own `v<major>.<minor>.<patch>` tags
 rather than that module's separate `nam-render-v*` tag namespace.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -21,13 +22,33 @@ _REQUEST_TIMEOUT_SECONDS = 15
 _VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 # The fixed installer names the release workflow publishes (.github/workflows/build-desktop.yml's
-# "Give the installers stable names" step) -- kept here as plain data, one per platform this app runs on;
-# each is a direct-download URL for a specific release once the tag is known.
+# "Give the installers stable names" step), keyed by (sys.platform, normalised CPU, Linux package format).
+# Only builds that actually run on that machine are offered: there is no Intel-Mac or Linux-ARM build, and
+# Windows on ARM runs the x64 installer under emulation. A Linux .deb install is offered the .deb; anything
+# else on Linux (the AppImage, or running from source) the AppImage.
 _ASSET_BY_PLATFORM = {
-    "darwin": "NAM-Mixer-macOS-arm64.dmg",
-    "linux": "NAM-Mixer-Linux-x64.AppImage",
-    "win32": "NAM-Mixer-Windows-x64-setup.exe",
+    ("darwin", "arm64", None): "NAM-Mixer-macOS-arm64.dmg",
+    ("linux", "x86_64", "appimage"): "NAM-Mixer-Linux-x64.AppImage",
+    ("linux", "x86_64", "deb"): "NAM-Mixer-Linux-x64.deb",
+    ("win32", "x86_64", None): "NAM-Mixer-Windows-x64-setup.exe",
+    ("win32", "arm64", None): "NAM-Mixer-Windows-x64-setup.exe",
 }
+
+
+def _linux_package() -> str:
+    """How this Linux copy was installed: the AppImage runtime sets $APPIMAGE; the .deb puts the frozen
+    backend under /usr (e.g. /usr/lib/NAM Mixer/). Anything else gets the portable AppImage."""
+    if os.environ.get("APPIMAGE"):
+        return "appimage"
+    if getattr(sys, "frozen", False) and sys.executable.startswith("/usr/"):
+        return "deb"
+    return "appimage"
+
+
+def installer_asset_name(platform: str, machine: str, linux_package: "str | None" = None) -> "str | None":
+    """The published installer that runs on this machine, or None when no such build exists."""
+    package = (linux_package or "appimage") if platform == "linux" else None
+    return _ASSET_BY_PLATFORM.get((platform, machine, package))
 
 
 class UpdateCheckError(RuntimeError):
@@ -59,7 +80,8 @@ def _fetch_releases() -> list[dict]:
         raise UpdateCheckError(f"Could not reach GitHub to check for updates: {exc}") from exc
 
 
-def check_for_update(current_version: str, *, platform: str = sys.platform) -> UpdateCheckResult:
+def check_for_update(current_version: str, *, platform: str = sys.platform, machine: "str | None" = None,
+                     linux_package: "str | None" = None) -> UpdateCheckResult:
     """Compare `current_version` (an app APP_VERSION string, "v0.3.2") against the newest `v<major>.<minor>.<patch>`
     tag on GitHub. Releases (like nam_render's own) may include OTHER tag namespaces in the same list -- anything
     not matching that exact shape is ignored rather than misread as a version.
@@ -82,7 +104,12 @@ def check_for_update(current_version: str, *, platform: str = sys.platform) -> U
     if best is None or best_release is None:
         raise UpdateCheckError("No published app release was found on GitHub.")
 
-    asset_name = _ASSET_BY_PLATFORM.get(platform)
+    if machine is None:
+        from hybrid.core.render_bootstrap import _machine  # same CPU normalisation (incl. Rosetta) as nam_render's
+        machine = _machine()
+    if linux_package is None and platform == "linux":
+        linux_package = _linux_package()
+    asset_name = installer_asset_name(platform, machine, linux_package)
     asset_url = None
     if asset_name:
         for asset in best_release.get("assets") or []:

@@ -68,6 +68,7 @@ test('choosing a Tools NAM opens it immediately without a second confirmation', 
   }
   const sandbox = {
     trainingIsActive: () => false,
+    toolInspectorRequestId: 0,
     toolInfo: {},
     toolSourceCard: { classList: { toggle() {} } },
     toolChooseFileButton: {},
@@ -89,6 +90,22 @@ test('choosing a Tools NAM opens it immediately without a second confirmation', 
   assert.equal(calls[0].url, '/api/nam/upload');
   assert.deepEqual(calls[0].options.body.entry, ['file', file]);
   assert.deepEqual(sandbox.opened, { data: { path: '/uploads/amp.nam' }, label: 'amp.nam' });
+});
+
+test('selecting a different NAM clears stale Inspector output before upload completes', () => {
+  const prompt = { textContent: '', classList: { remove() {} } };
+  const result = { hidden: false, classList: { remove() {} }, children: [1], replaceChildren(...children) { this.children = children; } };
+  const sandbox = {
+    toolInspectorRequestId: 4,
+    document: { getElementById(id) { return id === 'tool-inspector-prompt' ? prompt : result; } },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function clearNamInspectorResult(', 'async function openToolNamFile('), sandbox);
+  sandbox.clearNamInspectorResult('Opening next.nam…');
+  assert.equal(sandbox.toolInspectorRequestId, 5);
+  assert.equal(prompt.textContent, 'Opening next.nam…');
+  assert.equal(result.hidden, true);
+  assert.deepEqual(result.children, []);
 });
 
 test('Tools results appear inline with a calm collapsed validation note', () => {
@@ -123,6 +140,40 @@ test('Tools results appear inline with a calm collapsed validation note', () => 
   assert.equal(resultEl.children[3].tagName, 'details');
   assert.equal(resultEl.children[3].children[0].textContent, 'About validation reports');
   assert.doesNotMatch(source, /This edited NAM has different bytes from its source/);
+});
+
+test('NAM Inspector is a read-only fourth Tools card with expandable technical detail', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
+  assert.match(html, /<h3>NAM Inspector<\/h3>/);
+  assert.match(html, /Inspect and validate a NAM's architecture, calibration, cabinet structure and compatibility\./);
+  assert.match(html, /tool-inspector-result/);
+  assert.match(html, /tool-inspector-prompt/);
+
+  function element(tagName = 'div') {
+    return {
+      tagName, children: [], className: '', textContent: '', hidden: true,
+      classList: { add() {}, remove() {} },
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+    };
+  }
+  const result = element();
+  const sandbox = { document: { createElement: element } };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function showNamInspectorResult(', 'toolsTab.addEventListener'), sandbox);
+  sandbox.showNamInspectorResult({
+    identity: { filename: 'amp.nam', name: 'Amp' },
+    architecture: { name: 'SlimmableContainer', sample_rate: 48000, input_channels: 1, output_channels: 1, full_lite_supported: true },
+    calibration: { status: 'complete', input_level_dbu: 12, output_level_dbu: -3 },
+    cabinet: { label: 'Amp only / no embedded cabinet detected' }, temporal: {},
+    validation: { status: 'passed', summary: 'NAMCore render passed', branches: { full: { detail: 'Full passed' }, lite: { detail: 'Lite passed' } } },
+  }, result);
+  assert.equal(result.hidden, false);
+  assert.equal(result.children[0].textContent, 'Valid SlimmableContainer');
+  assert.equal(result.children.at(-1).tagName, 'details');
+  assert.equal(result.children.at(-1).children[0].textContent, 'Technical details');
+  assert.match(result.children[2].textContent, /Amp only/);
+  assert.match(result.children.at(-1).children.at(-1).textContent, /Lite passed/);
 });
 
 test('cancelled comparison permits a retry and old completion cannot unlock the new request', async () => {
@@ -660,4 +711,22 @@ test('timing buttons are not transition presets', () => {
   assert.match(source, /const presetButtons = document\.querySelectorAll\("\.preset-btn\[data-value\]"\);/);
   const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
   for (const button of html.match(/<button[^>]*data-timing=[^>]*>/g)) assert.doesNotMatch(button, /data-value/);
+});
+
+test('startup update notice offers this platform installer, the release page, or git pull', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function updateNoticeContent(', 'async function checkForUpdateAtStartup('), sandbox);
+  const base = { latest_version: 'v0.6.0', current_version: 'v0.5.0', release_url: 'https://r', asset_url: 'https://a.dmg' };
+  const packaged = sandbox.updateNoticeContent({ ...base, is_packaged: true });
+  assert.equal(packaged.href, 'https://a.dmg');
+  assert.equal(packaged.action, 'Download v0.6.0');
+  assert.match(packaged.title, /v0\.6\.0 is available \(you have v0\.5\.0\)/);
+  const noInstaller = sandbox.updateNoticeContent({ ...base, asset_url: null, is_packaged: true });
+  assert.equal(noInstaller.href, 'https://r');
+  assert.equal(noInstaller.action, 'View release');
+  const source = sandbox.updateNoticeContent({ ...base, is_packaged: false });
+  assert.equal(source.href, 'https://r');
+  assert.match(source.detail, /git pull/);
+  assert.match(source.detail, /release page/);
 });

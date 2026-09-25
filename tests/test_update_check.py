@@ -102,25 +102,52 @@ def test_unparseable_current_version_raises():
         update_check.check_for_update("not-a-version")
 
 
-@pytest.mark.parametrize("platform,expected_asset", [
-    ("darwin", "NAM-Mixer-macOS-arm64.dmg"),
-    ("linux", "NAM-Mixer-Linux-x64.AppImage"),
-    ("win32", "NAM-Mixer-Windows-x64-setup.exe"),
+ALL_ASSETS = [
+    "NAM-Mixer-macOS-arm64.dmg", "NAM-Mixer-Linux-x64.AppImage", "NAM-Mixer-Linux-x64.deb",
+    "NAM-Mixer-Windows-x64-setup.exe", "NAM-Mixer-Windows-x64.msi",
+]
+
+
+@pytest.mark.parametrize("platform,machine,package,expected_asset", [
+    ("darwin", "arm64", None, "NAM-Mixer-macOS-arm64.dmg"),
+    ("win32", "x86_64", None, "NAM-Mixer-Windows-x64-setup.exe"),
+    ("win32", "arm64", None, "NAM-Mixer-Windows-x64-setup.exe"),     # x64 runs under emulation
+    ("linux", "x86_64", "appimage", "NAM-Mixer-Linux-x64.AppImage"),
+    ("linux", "x86_64", "deb", "NAM-Mixer-Linux-x64.deb"),            # a .deb install gets the .deb
 ])
-def test_asset_url_matches_the_current_platforms_fixed_installer_name(platform, expected_asset):
-    payload = _releases(("v0.3.2", False, False), asset_names_for_last=[
-        "NAM-Mixer-macOS-arm64.dmg", "NAM-Mixer-Linux-x64.AppImage", "NAM-Mixer-Windows-x64-setup.exe",
-    ])
+def test_asset_url_is_the_installer_for_this_machine(platform, machine, package, expected_asset):
+    payload = _releases(("v0.3.2", False, False), asset_names_for_last=ALL_ASSETS)
     with _mock_releases(payload):
-        result = update_check.check_for_update("v0.3.1", platform=platform)
+        result = update_check.check_for_update("v0.3.1", platform=platform, machine=machine, linux_package=package)
     assert result.asset_url == f"https://example.invalid/v0.3.2/{expected_asset}"
 
 
-def test_asset_url_is_none_for_an_unsupported_platform_or_a_release_missing_it():
+@pytest.mark.parametrize("platform,machine", [
+    ("darwin", "x86_64"),   # no Intel-Mac build: the arm64 DMG would not run
+    ("linux", "arm64"),     # no Linux-ARM build
+    ("sunos5", "x86_64"),
+])
+def test_no_installer_is_offered_where_no_build_runs(platform, machine):
+    payload = _releases(("v0.3.2", False, False), asset_names_for_last=ALL_ASSETS)
+    with _mock_releases(payload):
+        assert update_check.check_for_update("v0.3.1", platform=platform, machine=machine).asset_url is None
+
+
+def test_asset_url_is_none_for_a_release_missing_it():
     payload = _releases(("v0.3.2", False, False), asset_names_for_last=["NAM-Mixer-macOS-arm64.dmg"])
     with _mock_releases(payload):
-        assert update_check.check_for_update("v0.3.1", platform="sunos5").asset_url is None
-        assert update_check.check_for_update("v0.3.1", platform="win32").asset_url is None
+        assert update_check.check_for_update("v0.3.1", platform="win32", machine="x86_64").asset_url is None
+
+
+def test_linux_package_detection(monkeypatch):
+    monkeypatch.setenv("APPIMAGE", "/home/u/NAM-Mixer-Linux-x64.AppImage")
+    assert update_check._linux_package() == "appimage"
+    monkeypatch.delenv("APPIMAGE")
+    monkeypatch.setattr(update_check.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_check.sys, "executable", "/usr/lib/NAM Mixer/nam-mixer-backend/nam-mixer-backend")
+    assert update_check._linux_package() == "deb"
+    monkeypatch.setattr(update_check.sys, "executable", "/home/u/src/.venv/bin/python")
+    assert update_check._linux_package() == "appimage"
 
 
 def test_requests_a_full_page_of_releases():
