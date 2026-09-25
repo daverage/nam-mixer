@@ -1369,6 +1369,8 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
   font-size: 0.84rem;
 }
 .cab-finish-summary.is-set { border-style: solid; color: var(--text); }
+.cab-finish-summary .link-btn { margin-left: 0.35rem; font-size: 0.84rem; }
+.cab-strip.is-highlighted { box-shadow: var(--focus-ring); transition: box-shadow 0.2s ease; }
 
 /* Compact switch chips where several options share one line. */
 .recipe-research-controls .checkbox-row,

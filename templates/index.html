@@ -619,7 +619,10 @@
         <div class="finish-tools">
       <section class="card" id="cab-panel">
         <h2>Cabinet in the NAM <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant</span></h2>
-        <p id="cab-finish-summary" class="cab-finish-summary">No cabinet chosen. Choose a cabinet IR in the listening card above to hear it and include it.</p>
+        <div id="cab-finish-summary" class="cab-finish-summary">
+          <span id="cab-finish-text">No cabinet chosen yet. Cabinets are chosen in <strong>Compare the sound</strong> (step 3), so you can hear them.</span>
+          <button type="button" id="btn-cab-go-choose" class="link-btn">Choose a cabinet in Compare the sound</button>
+        </div>
         <p class="info">If you already made training files, click <strong>Create training files</strong> again after changing the cabinet so it is included.</p>
 
         <label class="field-label" for="cab-export-mode">Cabinet in the trained NAM</label>
@@ -640,7 +643,7 @@
       <section class="card" id="output-gain-panel">
         <h2>Output level <span class="hint">(automatic by default)</span> <span class="cost-badge cost-badge-instant" title="Does not prepare the amps again">✓ instant</span></h2>
         <div class="info">
-          Keeps the result at a sensible output level without changing its playing dynamics. The same level is used in preview and in the final model.
+          Keeps the result at a sensible output level without changing its playing dynamics. The same level is used in preview and in the final model. If you find the NAM is quiet when used in a real setting, I would change this to +10db. You can also do this in the Tools section.
         </div>
 
         <label class="checkbox-row">

@@ -873,3 +873,12 @@ test('default choices: clean_mayer DI, guitar, and the vintage/PAF reference pic
   assert.match(section('function populateProfileSelect(', '// Anything that changes'), /profileSelect\.value = defaultProfileFor\(/);
   assert.match(section('function populateWizardProfiles(', 'function updateWizardProfileDescription('), /defaultProfileFor\(wizardInstrument\.value, profiles\)/);
 });
+
+test('Finish & polish names the Compare the sound card and links to its cabinet picker', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
+  assert.doesNotMatch(html + source, /listening card/i);
+  assert.match(html, /id="btn-cab-go-choose"[^>]*>Choose a cabinet in Compare the sound</);
+  const link = section('document.getElementById("btn-cab-go-choose")?.addEventListener', 'cabRemoveButton.addEventListener');
+  assert.match(link, /data-workflow-stage="shape"/);
+  assert.match(link, /scrollIntoView/);
+});
