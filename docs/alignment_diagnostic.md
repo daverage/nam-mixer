@@ -169,8 +169,8 @@ once, by cross-DI verification, and then:
 applied correction: `settings.timing = {"choice": "original" | "corrected",
 "offsetSamples": N | null, "method": "fixed-frozen-offset"}` (a generated
 bundle's session is derived from its frozen design; a legacy enabled design is
-shown as Original). Loading a session never renders and applies nothing. The
-next render of the same Amp A, Amp B and DI runs the normal diagnostic and
+shown as Original). Applying a session's settings applies no correction; the
+Load action then prepares the amps again, and that render (like any later render) of the same Amp A, Amp B and DI runs the normal diagnostic and
 cross-DI verification, and Corrected is restored only if that render verifies
 exactly the saved N. Otherwise the choice stays Original with a note, e.g.
 "Saved timing correction was +7 samples, but this render no longer verifies

@@ -43,6 +43,14 @@
     </div>
   </div>
 
+  <div id="autosave-notice" class="update-notice" role="status" aria-live="polite" hidden>
+    <div class="update-notice-text"><strong>You have unsaved work from last time.</strong><span id="autosave-notice-detail"></span></div>
+    <div class="update-notice-actions">
+      <button type="button" id="autosave-restore" class="btn btn-primary btn-small">Restore</button>
+      <button type="button" id="autosave-discard" class="btn btn-secondary btn-small">Discard</button>
+    </div>
+  </div>
+
   <nav class="mode-tabs utility-tabs" aria-label="Utilities">
     <button type="button" class="mode-tab active" id="tab-builder" aria-pressed="true">Builder</button>
     <button type="button" class="mode-tab" id="tab-cg" aria-pressed="false" aria-controls="cg-panel">Continuous Gain</button>
@@ -631,7 +639,7 @@
           <option value="learned" id="cab-export-option-learned">Learned cab — train the cabinet into the NAM</option>
           <option value="embedded" id="cab-export-option-embedded">Create both — tested head NAM + exact embedded-cab NAM (experimental)</option>
         </select>
-        <div class="info" id="cab-export-mode-info">The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.</div>
+        <div class="info" id="cab-export-mode-info">The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet. You can add a cab to a NAM later in the Tools section. </div>
         <div class="info" id="cab-export-compatibility-hint" hidden>The cabinet version uses NAM Sequential/Linear and may not load in players that accept only A2 architectures. The tested head-only NAM is always provided separately.</div>
 
         <label class="field-label" for="cab-display-name">Cabinet display name <span class="hint">(shown in the exported model's name)</span></label>

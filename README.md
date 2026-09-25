@@ -70,7 +70,8 @@ rules, or you can connect an AI model in **Settings**.
 
 **Continuous Gain** has its own tab: add your captures, let it analyse and
 choose which ones to train on, train, then test and export. Save your work at
-any time in **Sessions**.
+any time in **Sessions**; unsaved Builder work is also autosaved, so you can
+restore it after closing the app.
 
 The [user guide](docs/user_guide.md) covers every step and control in detail.
 
@@ -146,9 +147,9 @@ always uses the official NAM training signal.
 - **The browser shows a 403 error on macOS (running from source).** macOS
   uses port 5000 for AirPlay. NAM Mixer uses port 5001 by default; to pick
   another, run `PORT=5003 scripts/run.sh`.
-- **Loading a session doesn't play anything.** That's intentional: loading
-  never renders by itself. Click **Prepare amps for comparison** to render
-  the pair again.
+- **A loaded session says a file is missing.** Loading prepares the amps
+  straight away; if an amp or cabinet file it used has been deleted, choose
+  it again and prepare the amps.
 
 ## Run from source
 

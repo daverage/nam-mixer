@@ -393,12 +393,21 @@ the selected musical DI at normal or quiet input level. It reconstructs the
 teacher from the saved design, never from current controls.
 
 A session restores the selected settings and app-managed NAM/cabinet file
-references, but it deliberately does not render automatically. After loading,
-use **Render Amps** to rebuild the pair and verify that the referenced files
-are still available. A saved Corrected timing choice comes back only if that
+references, then prepares the amps straight away (when both are set), so the
+pair is ready to hear. If a referenced file is no longer available, that
+Prepare step says so. A saved Corrected timing choice comes back only if that
 render verifies exactly the same fixed offset again; otherwise timing stays
 Original and the Timing result says why. Training manifests under `work/a2` are separate from
 sessions and are not interchangeable with session JSON files.
+
+**Autosave.** Your current Builder settings are kept automatically in one
+"Unsaved work (autosaved)" entry, a moment after each change and when you close
+the app. There is only ever one: it is overwritten each time, never added to.
+It only exists while your settings differ from what you last saved, and it is
+cleared when you save a session, create training files, or load a session. If
+it's there when you start NAM Mixer, a notice offers **Restore** or
+**Discard**; it also appears at the top of the Sessions list. It stores
+settings only, never a trained model.
 
 ## NAM Tools: volume, metadata, cabinet embedding, and inspection
 

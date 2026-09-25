@@ -335,8 +335,11 @@ as the actual input for generating a real A2 training pair; see docs/user_guide.
 
 The **Sessions** tab is a file-backed project library. It stores named,
 portable NAM Mixer JSON records under `work/sessions`; generated bundles also
-carry a session record under `work/a2`. Loading settings never renders them
-automatically, and completed models can be embedded in/exported with a
+carry a session record under `work/a2`. Loading a Builder session applies its
+settings and then starts the normal Prepare (render) when both amps are set;
+applySessionSettings itself never renders. The Builder autosaves to ONE fixed
+record (`nam-mixer-autosave`, settings only), written only while settings differ
+from the last save/load and cleared on save, generate or load. Completed models can be embedded in/exported with a
 session. A validation report is restored only when its model SHA-256 matches
 the embedded NAM. Training manifests are not session files and must not be
 imported as such. A session keeps the Original/Corrected timing intent

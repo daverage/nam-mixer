@@ -340,7 +340,7 @@
       ? "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download."
       : cabMode === "embedded"
         ? "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it."
-        : "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.";
+        : "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet. You can add a cab to a NAM later in the Tools section.";
     const range = [Math.min(...p.anchors_input_gain_db), Math.max(...p.anchors_input_gain_db)];
     const files = card("Training files", `
         <label class="field-label" for="cg-model-name">Model name</label><input class="file-input" id="cg-model-name" maxlength="100" value="${esc(d.project.name)}">

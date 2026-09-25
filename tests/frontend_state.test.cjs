@@ -882,3 +882,49 @@ test('Finish & polish names the Compare the sound card and links to its cabinet 
   assert.match(link, /data-workflow-stage="shape"/);
   assert.match(link, /scrollIntoView/);
 });
+
+test('autosave keeps ONE record, writes only real changes, and clears once work is saved', async () => {
+  const calls = [];
+  let settings = { ampA: { path: null }, ampB: { path: null }, mix: '50' };
+  const sandbox = {
+    collectSessionSettings: () => JSON.parse(JSON.stringify(settings)),
+    fetch: async (url, opts = {}) => { calls.push({ url, method: opts.method, body: opts.body && JSON.parse(opts.body) }); return { ok: true }; },
+    setTimeout: () => 0, clearTimeout: () => {}, console,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('const AUTOSAVE_ID', 'function restoreAutosave(') + '\nthis.autosave = autosave; this.AUTOSAVE_ID = AUTOSAVE_ID;', sandbox);
+  const auto = sandbox.autosave;
+  auto.baseline = auto.snapshot(); auto.ready = true;         // a fresh page
+
+  await auto.flush();
+  assert.equal(calls.length, 0);                               // unchanged fresh page: nothing written
+
+  settings = { ...settings, ampA: { path: '/a.nam' } };
+  await auto.flush(); await auto.flush();
+  settings = { ...settings, mix: '70' };
+  await auto.flush();
+  const posts = calls.filter((c) => c.method === 'POST');
+  assert.equal(posts.length, 3);
+  assert.ok(posts.every((c) => c.body.id === sandbox.AUTOSAVE_ID && c.body.autosave === true));   // always the same record
+  assert.ok(posts.every((c) => c.body.artifact === null));                                          // settings only
+  assert.equal(new Set(posts.map((c) => c.body.id)).size, 1);
+
+  auto.markSaved();                                            // e.g. Save / Create training files / Load
+  await Promise.resolve();
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/api/sessions/${sandbox.AUTOSAVE_ID}`)));
+  const before = calls.length;
+  await auto.flush();
+  assert.equal(calls.length, before);                          // saved state again: nothing new written
+  assert.equal(auto.hasUnsavedWork(), false);
+  settings = { ...settings, mix: '80' };
+  assert.equal(auto.hasUnsavedWork(), true);
+});
+
+test('loading a Builder session prepares the amps when both are set', () => {
+  const load = section('function loadBuilderSession(', 'async function persistActiveSession(');
+  assert.match(load, /applySessionSettings\(session\.settings\);/);
+  assert.match(load, /if \(ampServerPaths\.a && ampServerPaths\.b\) \{[\s\S]*renderPairBtn\.click\(\);/);
+  // Load and Restore both go through it; loading over unsaved work asks first.
+  assert.match(source, /if \(session\.autosave\) \{ restoreAutosave\(session\); return; \}/);
+  assert.match(source, /autosave\.hasUnsavedWork\(\) && !window\.confirm\(/);
+});

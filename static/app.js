@@ -395,7 +395,7 @@ const cabExportMode = document.getElementById("cab-export-mode");
 const cabStatusEl = document.getElementById("cab-status");
 const cabExportModeInfo = document.getElementById("cab-export-mode-info");
 const CAB_EXPORT_MODE_NOTES = {
-  none: "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet.",
+  none: "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet. You can add a cab to a NAM later in the Tools section.",
   learned: "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download.",
   embedded: "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it.",
 };
@@ -3045,6 +3045,7 @@ async function runGenerate() {
     activeSessionGenerated = true;
     try {
       await writeSession(await currentSession(data.model_name, true));
+      autosave.markSaved();
     } catch (err) {
       // Generation is still valid if its convenience session cannot be saved.
       console.warn("Could not save generated session:", err);
@@ -3858,8 +3859,9 @@ function pollKaggleJob(designId, jobId) {
 // ---- Sessions -------------------------------------------------------------
 // File-backed library of named control snapshots. Amp/cab files are NOT
 // re-uploaded -- a session stores the app-managed paths already resolved by
-// /api/nam/upload and /api/cab/upload. Loading never renders automatically,
-// so a stale or missing file is reported by the normal Render Amps flow.
+// /api/nam/upload and /api/cab/upload. Loading applies the settings and then
+// starts the normal Prepare step (see loadBuilderSession), so a stale or missing
+// file is reported by that render.
 
 // applySessionSettings appends " (restored)" to these labels purely for
 // display. collectSessionSettings used to read that same mutated DOM text
@@ -4046,11 +4048,131 @@ async function currentSession(name, generated = activeSessionGenerated) {
   };
 }
 
+// Load a Builder session: apply its settings, then prepare the amps straight away (when both are
+// set) so it is ready to hear. The render is the normal Prepare step: missing files are reported
+// there, and a saved timing correction is re-verified by it.
+function loadBuilderSession(session, { asAutosave = false } = {}) {
+  applySessionSettings(session.settings);
+  lastDesignId = asAutosave ? null : session.designId || null;
+  completedNamArtifact = asAutosave ? null : session.artifact || null;
+  completedValidationReport = asAutosave ? null : session.validationReport || null;
+  invalidateModelComparison("");
+  syncComparisonPanel();
+  if (completedNamArtifact && lastDesignId) document.getElementById("a2-training-section").hidden = false;
+  activeSessionId = asAutosave ? null : session.id;
+  activeSessionName = asAutosave ? null : session.name;
+  activeSessionGenerated = !asAutosave && session.generated === true;
+  const label = asAutosave ? "your unsaved work" : session.name || "session";
+  sessionSettingsStatus.textContent = `Loaded ${label}`;
+  setSessionsOpen(false);
+  setWorkflowStage("configure");
+  if (ampServerPaths.a && ampServerPaths.b) {
+    setStatus(`Loaded ${label}. Preparing the amps…`);
+    renderPairBtn.click();
+  } else {
+    setStatus(`Loaded ${label}. Choose both amps, then prepare them.`);
+  }
+}
+
 async function persistActiveSession() {
   if (!activeSessionId) return;
   const name = document.getElementById("model-name").value.trim() || activeSessionName || "Generated session";
   activeSessionName = name;
   await writeSession(await currentSession(name));
+}
+
+// ---- Autosave: ONE record, always overwritten -----------------------------
+// The Builder's current settings are kept in a single session with a fixed id, so autosaving can
+// never add more sessions. It is written a moment after a change (and when the page is hidden or
+// closed) only while the settings differ from the last saved state; saving, creating training files
+// or loading a session clears it. Only settings are stored -- never a trained model.
+const AUTOSAVE_ID = "nam-mixer-autosave";
+const AUTOSAVE_DELAY_MS = 2000;
+const autosave = {
+  baseline: null,        // JSON of the last saved/loaded settings; null = current work is not saved anywhere
+  exists: false,         // whether the autosave record is on the server
+  timer: null,
+  ready: false,          // set after startup, so page setup never counts as a change
+  snapshot() { return JSON.stringify(collectSessionSettings()); },
+  hasUnsavedWork() { return this.ready && (this.exists || this.baseline === null || this.snapshot() !== this.baseline); },
+  record(settings) {
+    return { type: "nam-mixer-session", version: 1, id: AUTOSAVE_ID, name: "Unsaved work (autosaved)",
+      savedAt: new Date().toISOString(), settings, designId: null, artifact: null, autosave: true };
+  },
+  async flush({ keepalive = false } = {}) {
+    clearTimeout(this.timer);
+    if (!this.ready) return;
+    const current = this.snapshot();
+    if (this.baseline !== null && current === this.baseline) {
+      if (this.exists) await this.discard();
+      return;
+    }
+    const settings = JSON.parse(current);
+    if (!settings.ampA?.path && !settings.ampB?.path) return;   // nothing worth keeping yet
+    try {
+      await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(this.record(settings)), keepalive });
+      this.exists = true;
+    } catch (err) { console.warn("Autosave failed:", err); }
+  },
+  schedule() {
+    if (!this.ready) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.flush(), AUTOSAVE_DELAY_MS);
+  },
+  async discard() {
+    clearTimeout(this.timer);
+    if (!this.exists) return;
+    this.exists = false;
+    try { await fetch(`/api/sessions/${AUTOSAVE_ID}`, { method: "DELETE" }); } catch (_err) { /* already gone */ }
+  },
+  // The current settings are now safely stored elsewhere (a save, generated session, or a load).
+  markSaved() {
+    this.baseline = this.snapshot();
+    this.discard();
+  },
+};
+
+function restoreAutosave(record) {
+  loadBuilderSession(record, { asAutosave: true });
+  autosave.baseline = null;   // restored work is still not saved anywhere else: keep autosaving it
+  autosave.exists = true;
+  document.getElementById("autosave-notice").hidden = true;
+}
+
+// Any change inside the Builder (controls, amp/cab files, mode, polarity, timing) schedules a save.
+["input", "change", "click"].forEach((type) => {
+  document.querySelector(".layout")?.addEventListener(type, () => autosave.schedule());
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") autosave.flush({ keepalive: true });
+});
+window.addEventListener("pagehide", () => autosave.flush({ keepalive: true }));
+
+async function startAutosave() {
+  autosave.baseline = autosave.snapshot();     // a fresh page is not unsaved work
+  try {
+    const sessions = await readSessions();
+    const record = sessions.find((session) => session.id === AUTOSAVE_ID);
+    if (record) {
+      autosave.exists = true;
+      const when = new Date(record.savedAt);
+      const amps = [record.settings?.ampA?.label, record.settings?.ampB?.label].filter(Boolean).join(" / ");
+      document.getElementById("autosave-notice-detail").textContent =
+        `From ${Number.isNaN(when.getTime()) ? "your last visit" : when.toLocaleString()}${amps ? ` · ${amps}` : ""}.`;
+      const notice = document.getElementById("autosave-notice");
+      notice.hidden = false;
+      document.getElementById("autosave-restore").onclick = () => restoreAutosave(record);
+      document.getElementById("autosave-discard").onclick = () => {
+        notice.hidden = true;
+        autosave.discard();
+        setStatus("Unsaved work discarded.");
+      };
+    }
+  } catch (err) {
+    console.warn("Could not check for autosaved work:", err);
+  }
+  autosave.ready = true;
 }
 
 function sessionSummary(session) {
@@ -4125,6 +4247,8 @@ async function renderSessions() {
     sessionList.append(empty);
     return;
   }
+  // Unsaved work first: it is the one thing that isn't saved anywhere else.
+  sessions.sort((x, y) => (y.id === AUTOSAVE_ID) - (x.id === AUTOSAVE_ID));
   for (const session of sessions) {
     const summary = sessionSummary(session);
     const card = document.createElement("article"); card.className = "session-card";
@@ -4137,7 +4261,8 @@ async function renderSessions() {
     const isContinuousGain = session.settings?.mode === "continuous_gain";
     const kind = document.createElement("span");            // what this session IS: its workflow (and so which tab Load opens)
     kind.className = `cost-badge ${isContinuousGain ? "cost-badge-auto" : "cost-badge-instant"} session-kind`;
-    kind.textContent = summary.mode;
+    kind.textContent = session.id === AUTOSAVE_ID ? "Unsaved work" : summary.mode;
+    if (session.id === AUTOSAVE_ID) card.classList.add("is-autosave");
     heading.append(name, kind, saved);
     const actions = document.createElement("div"); actions.className = "session-card-actions";
     const details = document.createElement("div"); details.className = "session-details"; details.hidden = true;
@@ -4166,20 +4291,11 @@ async function renderSessions() {
           window.namContinuousGain.open(session.id);
           return;
         }
-        applySessionSettings(session.settings);
-        lastDesignId = session.designId || null;
-        completedNamArtifact = session.artifact || null;
-        completedValidationReport = session.validationReport || null;
-        invalidateModelComparison("");
-        syncComparisonPanel();
-        if (completedNamArtifact && lastDesignId) document.getElementById("a2-training-section").hidden = false;
-        activeSessionId = session.id;
-        activeSessionName = session.name;
-        activeSessionGenerated = session.generated === true;
-        sessionSettingsStatus.textContent = `Loaded ${session.name || "session"}`;
-        setSessionsOpen(false);
-        setWorkflowStage("configure");
-        setStatus(`Loaded ${session.name || "session"}.`);
+        if (session.autosave) { restoreAutosave(session); return; }
+        if (autosave.hasUnsavedWork() && !window.confirm(
+          `Load “${session.name || "session"}”? Your unsaved changes will be replaced.`)) return;
+        loadBuilderSession(session);
+        autosave.markSaved();
       } catch (err) { sessionManagerStatus.textContent = "Could not load this session: " + err; }
     });
     const deleteButton = document.createElement("button"); deleteButton.type = "button"; deleteButton.className = "btn btn-secondary btn-small"; deleteButton.textContent = "Delete";
@@ -4191,6 +4307,10 @@ async function renderSessions() {
       if (!(await desktopConfirm(deleteMessage, "Delete session"))) return;
       try {
         await deleteSessionCascading(session.id, name);
+        if (session.id === AUTOSAVE_ID) {
+          autosave.exists = false;
+          document.getElementById("autosave-notice").hidden = true;
+        }
         sessionManagerStatus.textContent = "Session deleted.";
         await renderSessions();
       } catch (err) {
@@ -4244,6 +4364,7 @@ document.getElementById("session-save-form").addEventListener("submit", async (e
     activeSessionName = name;
     activeSessionGenerated = false;
     await writeSession(session);
+    autosave.markSaved();
     sessionNameInput.value = "";
     sessionManagerStatus.textContent = `Saved “${name}”.`;
     sessionSettingsStatus.textContent = `Saved ${name}`;
@@ -4257,6 +4378,7 @@ document.getElementById("btn-export-current-session").addEventListener("click", 
     if (!activeSessionId) activeSessionId = sessionId();
     activeSessionName = name;
     const session = await writeSession(await currentSession(name));
+    autosave.markSaved();
     sessionNameInput.value = "";
     sessionManagerStatus.textContent = `Saved and exported “${name}”.`;
     sessionSettingsStatus.textContent = `Saved ${name}`;
@@ -5786,6 +5908,7 @@ checkForUpdateAtStartup();
 // Load settings eagerly so saved preferences are reflected immediately,
 // without requiring a detour through the Settings tab first.
 loadSettings();
+startAutosave();
 
 // --- Lending the training section to another workflow (Continuous Gain) ------------------------------
 // The Kaggle / local training UI above (settings, connection + environment setup, progress, logs, results) is bound to
