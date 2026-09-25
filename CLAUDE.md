@@ -427,3 +427,5 @@ When working on an existing codebase:
 - If memory results are incomplete, stale, or conflict with the source code, treat the source code as authoritative.
 - After significant architectural discoveries or changes, update codebase memory when the MCP supports doing so.
 - Do not invent repository structure, APIs, symbols, or implementation details when they can be retrieved from codebase memory or source.
+
+DONT USE em dashes!
