@@ -6,6 +6,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -162,6 +169,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -312,6 +326,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -439,6 +460,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -566,6 +594,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -1965,6 +2000,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -2128,6 +2170,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -2285,6 +2334,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -2419,6 +2475,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",
@@ -2553,6 +2616,13 @@
    "input.wav": "48000:FLOAT:(48000, 1):5cf4e2884808731dc481dce37e0a72b8a698a2baeb9664774770ddbd8b65af01"
   },
   "manifest": {
+   "alignment_correction": {
+    "applied": false,
+    "description": "no timing correction; Amp B used as rendered",
+    "method": null,
+    "offset_samples": 0
+   },
+   "alignment_diagnostic": null,
    "amp_a": {
     "architecture": "WaveNet",
     "filename": "a.nam",

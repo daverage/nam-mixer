@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 from .blend import DEFAULT_TRANSITION_WIDTH_DB
+from ..core.align import FIXED_FROZEN_OFFSET_METHOD
 from ..core.cab_ir import CabDesign
 from ..core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 
@@ -44,6 +45,14 @@ class HybridDesign:
 
     alignment_enabled: bool = False
     alignment_offset_samples: int = 0
+    # "fixed-frozen-offset" when alignment_offset_samples is the one integer
+    # applied verbatim to Amp B everywhere (hybrid.core.align.frozen_alignment_offset).
+    # None for unaligned designs and for designs written before offsets were frozen.
+    alignment_method: Optional[str] = None
+    # Provenance only: what the timing diagnostic reported when the design was
+    # frozen (hybrid.core.align_diagnostic / align_verification). Never read
+    # back to choose an offset.
+    alignment_diagnostic: Optional[dict] = None
 
     instrument_type: str = "guitar"
     design_reference_profile_id: str = "vintage_humbucker"
@@ -126,6 +135,7 @@ def freeze_design(
     transition_width_db: float,
     alignment_enabled: bool,
     design_di_file: Optional[str] = None,
+    alignment_diagnostic: Optional[dict] = None,
     blend_algorithm: str = "smoothstep-linear",
     envelope_config=None,
     cab: Optional[CabDesign] = None,
@@ -138,6 +148,10 @@ def freeze_design(
     rendered/blended rather than letting a caller hand-assemble a design that
     doesn't match what was heard.
     """
+    if bool(alignment_enabled) != bool(result.alignment_offset_samples):
+        raise ValueError(
+            "alignment_enabled must match the auditioned result: a frozen timing correction is a "
+            f"non-zero offset (got enabled={alignment_enabled}, offset={result.alignment_offset_samples})")
     from ..core.envelope import DEFAULT_BOUNDED_ENVELOPE_CONFIG, bounded_envelope_max_history_ms
 
     envelope_config = envelope_config or DEFAULT_BOUNDED_ENVELOPE_CONFIG
@@ -152,6 +166,8 @@ def freeze_design(
         blend_algorithm=blend_algorithm,
         alignment_enabled=alignment_enabled,
         alignment_offset_samples=result.alignment_offset_samples,
+        alignment_method=FIXED_FROZEN_OFFSET_METHOD if alignment_enabled else None,
+        alignment_diagnostic=alignment_diagnostic,
         instrument_type=pair.instrument_type,
         design_reference_profile_id=pair.input_profile_id,
         design_reference_profile_gain_db=pair.input_profile_gain_db,

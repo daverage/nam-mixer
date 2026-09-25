@@ -32,7 +32,7 @@ from typing import Optional
 import numpy as np
 import soundfile as sf
 
-from ..core.align import align_to_reference
+from ..core.align import apply_fixed_offset, frozen_alignment_offset
 from ..core.calibration import resolve_calibration
 from .fixed_blend import BlendDesign
 from ..core.input_profiles import db_to_amplitude
@@ -50,6 +50,7 @@ from .training_target import (
     compute_receptive_field_record,
     apply_design_output_gain,
     design_output_gain_record,
+    manifest_alignment_record,
     manifest_amp_record,
     manifest_calibration_record,
     manifest_target_record,
@@ -104,6 +105,8 @@ def build_blend_training_manifest(
         "cab": design.cab.to_dict() if design.cab else {"selected": False},
         "output_gain": output_gain or {"mode": design.output_gain_mode, "applied_gain_db": 0.0},
         "receptive_field": receptive_field,
+        "alignment_correction": manifest_alignment_record(design, alignment_offset_samples),
+        "alignment_diagnostic": design.alignment_diagnostic,
         "warnings": warnings,
     }
 
@@ -149,9 +152,9 @@ def generate_blend_training_bundle(
     amp_a_render = render(amp_a, amp_a_input, input_info.sample_rate)
     amp_b_render = render(amp_b, amp_b_input, input_info.sample_rate)
 
-    amp_b_aligned, alignment_offset = align_to_reference(
-        amp_a_render, amp_b_render, enabled=design.alignment_enabled
-    )
+    # The design's frozen integer, applied verbatim -- never re-measured.
+    alignment_offset = frozen_alignment_offset(design)
+    amp_b_aligned = apply_fixed_offset(amp_b_render, alignment_offset, len(amp_a_render))
 
     n = min(len(amp_a_render), len(amp_b_aligned))
     a = amp_a_render[:n]

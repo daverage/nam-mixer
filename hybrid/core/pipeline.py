@@ -17,7 +17,7 @@ from typing import Optional
 
 import numpy as np
 
-from .align import align_to_reference
+from .align import apply_fixed_offset, resolve_alignment_request
 from ..modes.blend import CrossoverConfig, blend
 from .calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU, resolve_calibration
 from .envelope import DEFAULT_BOUNDED_ENVELOPE_CONFIG, BoundedEnvelopeConfig, bounded_causal_envelope_db
@@ -221,6 +221,7 @@ def build_hybrid(
     manual_b_trim_db: float = 0.0,
     align_enabled: bool = False,
     dry_gain_db: float = 0.0,
+    alignment_offset_samples: int = 0,
 ) -> HybridResult:
     """Blend an already-rendered amp pair. Cheap -- safe to call on every
     crossover/transition/trim slider move without re-running NAM inference.
@@ -229,6 +230,10 @@ def build_hybrid(
     `auto_level` is on -- auto-level gives a safe starting point, the manual
     trim is the user's tweak from there, and the two combine rather than one
     replacing the other.
+
+    `align_enabled`/`alignment_offset_samples` apply ONE already-chosen integer
+    timing correction to Amp B (see `hybrid.core.align.apply_fixed_offset`);
+    nothing here measures an offset. Off by default.
 
     `dry_gain_db` is DEPRECATED and TEST-ONLY (kept for regression tests
     exercising the blend/threshold logic in isolation) -- it shifts only the
@@ -240,7 +245,8 @@ def build_hybrid(
     """
     envelope_db = pair.envelope_db + dry_gain_db
 
-    amp_b_render, offset = align_to_reference(pair.amp_a, pair.amp_b, enabled=align_enabled)
+    offset = resolve_alignment_request(align_enabled, alignment_offset_samples)
+    amp_b_render = apply_fixed_offset(pair.amp_b, offset, len(pair.amp_a))
 
     level_match_result: LevelMatchResult | None = None
     auto_trim_db = 0.0
