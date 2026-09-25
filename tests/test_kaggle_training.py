@@ -706,7 +706,7 @@ def test_cleanup_failure_does_not_delete_local_nam(tmp_path, monkeypatch, bundle
 # --- progress parsing (UX-only, never fatal) -----------------------------
 
 def test_parse_progress_extracts_latest_epoch():
-    log = "starting...\nEpoch 3/100 loss=1.2\nEpoch 17/100 loss=0.4\n"
+    log = "starting...\nEpoch 3/99 loss=1.2\nEpoch 16/99 loss=0.4\n"
     progress = KaggleJobManager.parse_progress(log)
     assert progress == {"epoch": 17, "total_epochs": 100}
 

@@ -48,6 +48,7 @@ import numpy as np
 from .a2_training_settings import A2_EPOCH_PRESETS, DEFAULT_EPOCH_PRESET
 from ..modes.character_training_target import check_export_low_level_response
 from .embedded_completion import complete_embedded_artifact
+from .epoch_progress import parse_epoch_progress
 from ..core.nam_loader import load_nam
 from ..paths import REPO_ROOT
 from ..core.render import SLIM_FULL, SLIM_LITE, NamRenderError, render
@@ -1265,14 +1266,7 @@ class KaggleJobManager:
     def parse_progress(log_text: str) -> Optional[dict]:
         """Best-effort epoch-progress extraction -- UX only, never allowed to
         raise or affect job correctness (docs/history/kaggle_training.md)."""
-        try:
-            matches = re.findall(r"[Ee]poch\s+(\d+)\s*/\s*(\d+)", log_text or "")
-            if not matches:
-                return None
-            current, total = matches[-1]
-            return {"epoch": int(current), "total_epochs": int(total)}
-        except (ValueError, TypeError):
-            return None
+        return parse_epoch_progress(log_text)
 
     # -- download + local validation --------------------------------------
 

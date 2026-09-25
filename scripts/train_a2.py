@@ -477,6 +477,32 @@ def _apply_custom_split_patch(core, train_stop: int) -> None:
     core._get_final_latency = lambda la: la.manual
 
 
+def _install_epoch_progress(core) -> None:
+    """Print ``NAM Mixer: epoch N of M`` (1-based) as each epoch starts.
+
+    Lightning's Rich progress bar prints nothing through a pipe or a Kaggle
+    kernel log until training ends, and its ``Epoch X/Y`` is zero-based
+    (a 20-epoch run ends on ``Epoch 19/19``), so the UI parses this line
+    instead (hybrid/training/epoch_progress.py). `core.train()` builds its own
+    Trainer, so the callback is appended via its `get_callbacks`. UX only:
+    skipped, never fatal, if that hook or Lightning is unavailable."""
+    official_get_callbacks = getattr(core, "get_callbacks", None)
+    try:
+        import pytorch_lightning as pl
+    except ImportError:
+        pl = None
+    if official_get_callbacks is None or pl is None:
+        return
+
+    class _EpochProgress(pl.Callback):
+        def on_train_epoch_start(self, trainer, pl_module):
+            total = trainer.max_epochs if trainer.max_epochs and trainer.max_epochs > 0 else "?"
+            stream = sys.__stdout__ or sys.stdout
+            print(f"NAM Mixer: epoch {trainer.current_epoch + 1} of {total}", file=stream, flush=True)
+
+    core.get_callbacks = lambda *args, **kwargs: [*official_get_callbacks(*args, **kwargs), _EpochProgress()]
+
+
 def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path, settings, device: str, manifest: dict) -> Path:
     """Call the official current neural-amp-modeler simplified A2 trainer:
     `nam.train.core.train()`.
@@ -519,6 +545,7 @@ def _run_official_trainer(input_path: Path, target_path: Path, output_dir: Path,
     custom_train_stop = custom_split_train_stop(manifest)
     if custom_train_stop is not None:
         _apply_custom_split_patch(core, custom_train_stop)
+    _install_epoch_progress(core)
     # `settings` (an A2TrainingSettings -- either A2_QUICK_SETTINGS or
     # settings_for_preset(<draft|standard|high_def>)) is shared with
     # cloud/kaggle/train_a2_cloud.py -- see hybrid/training/a2_training_settings.py.

@@ -4,7 +4,6 @@ from __future__ import annotations
 import codecs
 import os
 import json
-import re
 import shutil
 import signal
 import subprocess
@@ -13,6 +12,8 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+
+from .epoch_progress import parse_epoch_progress
 
 
 # neural-amp-modeler==0.13.0 (requirements-training.txt) itself requires
@@ -413,20 +414,10 @@ class LocalTrainingManager:
         with self._lock:
             # The live progress-bar line is appended last, exactly as it
             # would appear on a real terminal -- both for display and so
-            # the epoch/total_epochs regex below can actually see it
-            # (Lightning's own progress bar text is what usually carries
-            # "Epoch X/Y" in the first place).
+            # parse_epoch_progress below can see Lightning's own bar when a
+            # trainer without the epoch marker is running.
             tail = "\n".join(self.log) + (f"\n{self._live_line}" if self._live_line else "")
-        # Lightning's rich progress output is commonly either ``Epoch 3/60``
-        # or ``Epoch 3: 100%|...``.  The latter has no total in the line, so
-        # pair it with the explicit ``--epoch-preset=...: N epochs`` message.
-        matches = re.findall(r"[Ee]poch\s+(\d+)\s*/\s*(\d+)", tail)
-        if matches:
-            progress = {"epoch": int(matches[-1][0]), "total_epochs": int(matches[-1][1])}
-        else:
-            current = re.findall(r"[Ee]poch\s+(\d+)\s*[:|]", tail)
-            totals = re.findall(r"(?:epoch(?:s)?|for)\D{0,20}(\d+)\s+epochs?", tail, flags=re.IGNORECASE)
-            progress = ({"epoch": int(current[-1]), "total_epochs": int(totals[-1])} if current and totals else None)
+        progress = parse_epoch_progress(tail)
         meaningful_lines = [line.strip() for line in tail.splitlines() if line.strip()]
         latest_line = meaningful_lines[-1] if meaningful_lines else ""
         now = time.time()

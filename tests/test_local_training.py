@@ -32,15 +32,15 @@ def test_carriage_return_progress_bar_is_visible_before_the_epoch_finishes(tmp_p
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     manager._start(
         [sys.executable, "-c",
-         "import sys, time; sys.stdout.write('Epoch 3/60: 40%\\r'); sys.stdout.flush(); time.sleep(30)"],
+         "import sys, time; sys.stdout.write('Epoch 2/59: 40%\\r'); sys.stdout.flush(); time.sleep(30)"],
         "training",
     )
     deadline = time.monotonic() + 2
     status = manager.status()
-    while "Epoch 3/60" not in status["log_tail"] and time.monotonic() < deadline:
+    while "Epoch 2/59" not in status["log_tail"] and time.monotonic() < deadline:
         time.sleep(0.01)
         status = manager.status()
-    assert "Epoch 3/60" in status["log_tail"]
+    assert "Epoch 2/59" in status["log_tail"]
     assert status["progress"] == {"epoch": 3, "total_epochs": 60}
     manager.cancel()
 
@@ -49,7 +49,7 @@ def test_lightning_epoch_colon_progress_is_parsed_with_preset_total(tmp_path):
     manager = LocalTrainingManager(tmp_path, tmp_path / "work" / "a2")
     manager._start(
         [sys.executable, "-c",
-         "import sys,time; print('--epoch-preset=standard: 60 epochs.', flush=True); sys.stdout.write('Epoch 3: 40%|####\\r'); sys.stdout.flush(); time.sleep(30)"],
+         "import sys,time; print('--epoch-preset=standard: 60 epochs.', flush=True); sys.stdout.write('Epoch 2: 40%|####\\r'); sys.stdout.flush(); time.sleep(30)"],
         "training",
     )
     deadline = time.monotonic() + 2
@@ -58,7 +58,7 @@ def test_lightning_epoch_colon_progress_is_parsed_with_preset_total(tmp_path):
         time.sleep(0.01)
         status = manager.status()
     assert status["progress"] == {"epoch": 3, "total_epochs": 60}
-    assert status["latest_line"].startswith("Epoch 3: 40%")
+    assert status["latest_line"].startswith("Epoch 2: 40%")
     manager.cancel()
 
 
