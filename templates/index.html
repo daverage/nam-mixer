@@ -83,7 +83,7 @@
         </article>
         <article class="tool-capability">
           <span class="tool-capability-icon" aria-hidden="true">✓</span>
-          <div><strong>NAM Inspector</strong><span>Inspect and validate a NAM's architecture, calibration, cabinet structure and compatibility.</span></div>
+          <div><strong>NAM Inspector</strong><span>See what's inside a NAM (architecture, calibration, cabinet) and check that NAMCore plays it.</span></div>
         </article>
       </div>
     </div>
@@ -118,9 +118,18 @@
     </section>
 
     <div id="tool-editors" hidden>
+      <section class="tool-overview" aria-labelledby="tool-overview-title">
+        <div class="tools-workspace-heading">
+          <div class="tool-step-marker" aria-hidden="true">2</div>
+          <div><div class="eyebrow">NAM Inspector · read-only</div><h3 id="tool-overview-title">About this NAM</h3><p>What's inside the file, and whether NAMCore plays it. Nothing here changes the file.</p></div>
+        </div>
+        <div id="tool-inspector-prompt" class="tool-inspector-prompt">Choose a NAM above to inspect it. This check never changes the file.</div>
+        <div id="tool-inspector-result" class="tool-inspector-result" hidden aria-live="polite"></div>
+      </section>
+
       <div class="tools-workspace-heading">
-        <div class="tool-step-marker" aria-hidden="true">2</div>
-        <div><div class="eyebrow">NAM ready</div><h3>Choose a tool</h3><p>Editors create a separate new NAM; Inspector only reads and reports on the source.</p></div>
+        <div class="tool-step-marker" aria-hidden="true">3</div>
+        <div><div class="eyebrow">Tools</div><h3>Make a changed copy</h3><p>Each tool saves a new NAM. Your original file is never changed.</p></div>
       </div>
       <div class="tools-grid">
         <section class="tool-card">
@@ -133,7 +142,7 @@
         </section>
         <section class="tool-card">
           <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">Aa</span><div><div class="eyebrow">Details</div><h3>Metadata editor</h3></div></div>
-          <p class="info">Edit descriptive information only. Architecture, gear type, and calibration remain read-only because they describe how the capture was actually made.</p>
+          <p class="info">Edit the descriptive details. Architecture, gear type and calibration describe how the capture was made, so they stay as they are (see About this NAM above).</p>
           <label class="field-label" for="tool-meta-name">Name</label><input id="tool-meta-name" class="select-input" placeholder="Optional model name">
           <label class="field-label" for="tool-meta-modeled-by">Modeled by</label><input id="tool-meta-modeled-by" class="select-input">
           <label class="field-label" for="tool-meta-tone-type">Tone type</label><select id="tool-meta-tone-type" class="select-input"><option value="">Not specified</option><option value="clean">Clean</option><option value="overdrive">Overdrive</option><option value="crunch">Crunch</option><option value="hi_gain">High gain</option><option value="fuzz">Fuzz</option></select>
@@ -146,38 +155,34 @@
 
           <button type="button" id="btn-tool-metadata" class="btn btn-primary">Create metadata-edited NAM</button>
           <div id="tool-metadata-result" class="tool-result tool-inline-result" hidden aria-live="polite"></div>
-
-          <h4 class="tool-readonly-heading">Export information <span class="hint">(read-only)</span></h4>
-          <dl id="tool-export-info" class="tool-readonly-list"></dl>
-          <div id="tool-calibration-status" class="info" aria-live="polite"></div>
         </section>
+      </div>
       <section class="tool-card tool-cab-embed">
         <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">IR</span><div><div class="eyebrow">Cabinet</div><h3>Cab Embed</h3></div></div>
         <p class="info">Add a cabinet to this capture. Learned mode trains a new broadly compatible A2; exact mode is instant but uses experimental Sequential/Linear support.</p>
-        <label class="field-label" for="tool-cab-file">Cabinet IR (WAV)</label>
-        <input type="file" id="tool-cab-file" accept=".wav" class="file-input">
-        <div id="tool-cab-info" class="info" aria-live="polite">Choose a cabinet IR.</div>
-        <label class="field-label" for="tool-cab-mode">Cabinet method</label>
-        <select id="tool-cab-mode" class="select-input">
-          <option value="learned">Learn into a new A2 NAM — compatible, requires training</option>
-          <option value="embedded" id="tool-cab-mode-embedded">Exact Sequential embed — instant, experimental</option>
-        </select>
-        <div id="tool-cab-mode-info" class="info">The selected NAM will render the official training signal, then the cabinet will be convolved into the target.</div>
-        <label class="field-label" for="tool-cab-model-name">Model name</label>
-        <input type="text" id="tool-cab-model-name" class="select-input" maxlength="100" placeholder="Defaults to the source NAM name">
-        <label class="field-label" for="tool-cab-display-name">Cabinet display name</label>
-        <input type="text" id="tool-cab-display-name" class="select-input" maxlength="80" placeholder="Defaults to the IR filename">
-        <button type="button" id="btn-tool-cab-embed" class="btn btn-primary btn-block">Create learned-cab training files</button>
+        <div class="tool-cab-fields">
+          <div>
+            <label class="field-label" for="tool-cab-file">Cabinet IR (WAV)</label>
+            <input type="file" id="tool-cab-file" accept=".wav" class="file-input">
+            <div id="tool-cab-info" class="info" aria-live="polite">Choose a cabinet IR.</div>
+            <label class="field-label" for="tool-cab-mode">Cabinet method</label>
+            <select id="tool-cab-mode" class="select-input">
+              <option value="learned">Learn into a new A2 NAM — compatible, requires training</option>
+              <option value="embedded" id="tool-cab-mode-embedded">Exact Sequential embed — instant, experimental</option>
+            </select>
+            <div id="tool-cab-mode-info" class="info">The selected NAM will render the official training signal, then the cabinet will be convolved into the target.</div>
+          </div>
+          <div>
+            <label class="field-label" for="tool-cab-model-name">Model name</label>
+            <input type="text" id="tool-cab-model-name" class="select-input" maxlength="100" placeholder="Defaults to the source NAM name">
+            <label class="field-label" for="tool-cab-display-name">Cabinet display name</label>
+            <input type="text" id="tool-cab-display-name" class="select-input" maxlength="80" placeholder="Defaults to the IR filename">
+            <button type="button" id="btn-tool-cab-embed" class="btn btn-primary btn-block">Create learned-cab training files</button>
+          </div>
+        </div>
         <div id="tool-cab-result" class="tool-result" hidden aria-live="polite"></div>
         <div id="tool-cab-training-host"></div>
       </section>
-      <section class="tool-card tool-inspector">
-        <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">✓</span><div><div class="eyebrow">Read-only check</div><h3>NAM Inspector</h3></div></div>
-        <p class="info">Inspect and validate a NAM's architecture, calibration, cabinet structure and compatibility.</p>
-        <div id="tool-inspector-prompt" class="tool-inspector-prompt">Choose a NAM above to inspect it. This check never changes the file.</div>
-        <div id="tool-inspector-result" class="tool-inspector-result" hidden aria-live="polite"></div>
-      </section>
-      </div>
     </div>
   </section>
 

@@ -3992,7 +3992,6 @@ const toolVolumeSlider = document.getElementById("tool-volume-slider");
 const toolVolumeButton = document.getElementById("btn-tool-volume");
 const toolVolumeValue = document.getElementById("tool-volume-value");
 const toolVolumeBaseline = document.getElementById("tool-volume-baseline");
-const toolCalibrationStatus = document.getElementById("tool-calibration-status");
 const toolCabMode = document.getElementById("tool-cab-mode");
 const toolCabModeEmbedded = document.getElementById("tool-cab-mode-embedded");
 const toolCabModeInfo = document.getElementById("tool-cab-mode-info");
@@ -4202,8 +4201,9 @@ async function setToolNam(data, label) {
   const inspectorRequestId = ++toolInspectorRequestId;
   inspectorResult.hidden = true;
   inspectorResult.replaceChildren();
+  inspectorPrompt.hidden = false;
   inspectorPrompt.classList.add("is-loading");
-  inspectorPrompt.textContent = `Inspecting ${label} with a short NAMCore render…`;
+  inspectorPrompt.textContent = `Checking ${label} with a short NAMCore render…`;
   if (toolCabDesignId && !trainingIsActive()) {
     window.namTrainingHost?.detach();
   }
@@ -4222,32 +4222,20 @@ async function setToolNam(data, label) {
     name: "tool-meta-name", modeled_by: "tool-meta-modeled-by",
     gear_make: "tool-meta-gear-make", gear_model: "tool-meta-gear-model", tone_type: "tool-meta-tone-type",
   };
+  // A tone type outside NAM's standard list (e.g. "metal") gets its own option, so the select shows it and
+  // it is only changed when the user picks another type -- otherwise any metadata edit would silently clear it.
+  const toneSelect = document.getElementById("tool-meta-tone-type");
+  toneSelect.querySelectorAll("option[data-from-file]").forEach((option) => option.remove());
+  const fileTone = originalToolMetadata.tone_type;
+  if (fileTone && ![...toneSelect.options].some((option) => option.value === fileTone)) {
+    const option = document.createElement("option");
+    option.value = fileTone;
+    option.dataset.fromFile = "true";
+    option.textContent = `${fileTone} (from the file)`;
+    toneSelect.append(option);
+  }
   Object.entries(fieldMap).forEach(([key, id]) => { document.getElementById(id).value = originalToolMetadata[key] ?? ""; });
 
-  const readOnly = inspection.read_only_metadata || {};
-  const exportInfo = document.getElementById("tool-export-info");
-  exportInfo.replaceChildren();
-  const rows = [
-    ["Architecture", inspection.architecture || "Unknown"],
-    ["Gear type", readOnly.gear_type || "Not specified"],
-    ["Recognised output scales", String(inspection.head_scales.length)],
-  ];
-  for (const [label, value] of rows) {
-    const dt = document.createElement("dt"); dt.textContent = label;
-    const dd = document.createElement("dd"); dd.textContent = value;
-    exportInfo.append(dt, dd);
-  }
-
-  const calibration = inspection.calibration || {};
-  if (calibration.status === "Calibrated NAM") {
-    toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output ${calibration.output_level_dbu.toFixed(1)} dBu (read-only)`;
-  } else if (calibration.input_level_dbu != null) {
-    toolCalibrationStatus.textContent = `Calibration: input ${calibration.input_level_dbu.toFixed(1)} dBu · output not recorded (read-only). The input level is enough for Auto calibration.`;
-  } else if (calibration.output_level_dbu != null) {
-    toolCalibrationStatus.textContent = `Calibration: output ${calibration.output_level_dbu.toFixed(1)} dBu · input not recorded (read-only). Auto calibration needs the input level.`;
-  } else {
-    toolCalibrationStatus.textContent = "Calibration metadata unavailable. Do not invent these values; a generated hybrid records input calibration only when both source NAMs record an input level.";
-  }
   if (inspection.volume_unsupported_reason) {
     // e.g. an embedded-cab export's "Sequential" architecture -- see
     // hybrid/training/sequential_nam.py. Metadata editing below still works fine;
@@ -4271,7 +4259,7 @@ async function setToolNam(data, label) {
   toolEditors.hidden = false;
   toolsPanel.classList.add("has-source");
   toolSourceCard.classList.add("is-loaded");
-  toolInfo.textContent = `Ready: ${label} — ${inspection.architecture || "NAM"}; ${inspection.head_scales.length} recognised output scale${inspection.head_scales.length === 1 ? "" : "s"}. Choose a tool below.`;
+  toolInfo.textContent = `Open: ${label}. See what's inside it below, or make a changed copy with one of the tools.`;
   document.getElementById("tool-cab-model-name").value = originalToolMetadata.name || inspection.filename.replace(/\.nam$/i, "");
   syncToolCabMode();
   try {
@@ -4282,46 +4270,89 @@ async function setToolNam(data, label) {
     if (inspectorRequestId !== toolInspectorRequestId) return;
     if (!response.ok) throw new Error(result.error || "Inspection failed");
     showNamInspectorResult(result, inspectorResult);
-    inspectorPrompt.textContent = `Read-only inspection for ${label}.`;
+    inspectorPrompt.hidden = true;
   } catch (error) {
     if (inspectorRequestId !== toolInspectorRequestId) return;
     inspectorResult.hidden = false;
     inspectorResult.classList.add("is-error");
     inspectorResult.textContent = error.message || String(error);
-    inspectorPrompt.textContent = "NAM metadata was opened, but the technical inspection could not be completed.";
+    inspectorPrompt.hidden = false;
+    inspectorPrompt.textContent = "The NAM opened, but the inspection could not be completed.";
   } finally {
     if (inspectorRequestId === toolInspectorRequestId) inspectorPrompt.classList.remove("is-loading");
   }
+}
+
+const INSPECTOR_TONE_TYPES = { clean: "Clean", overdrive: "Overdrive", crunch: "Crunch", hi_gain: "High gain", fuzz: "Fuzz" };
+
+function inspectorOverview(result) {
+  const { identity = {}, architecture = {}, calibration = {}, cabinet = {}, validation = {} } = result;
+  const dbu = (value) => `${Number(value).toFixed(1)} dBu`;
+  const status = validation.status === "passed"
+    ? { kind: "passed", label: "✓ Plays in NAMCore" }
+    : validation.status === "warning"
+      ? { kind: "warning", label: `⚠ ${validation.summary || "Check the output"}` }
+      : { kind: "failed", label: `✕ ${validation.summary || "Could not validate"}` };
+  const facts = [
+    ["Architecture", architecture.a2_packed
+      ? `A2 (${architecture.name})${architecture.full_lite_supported ? ", Full + Lite" : ""}`
+      : architecture.name || "Unknown"],
+    ["Sample rate", architecture.sample_rate ? `${architecture.sample_rate / 1000} kHz` : "Not declared"],
+    ["Calibration", calibration.status === "complete"
+      ? `Input ${dbu(calibration.input_level_dbu)} · Output ${dbu(calibration.output_level_dbu)}`
+      : calibration.status === "input-only" ? `Input ${dbu(calibration.input_level_dbu)} (output not recorded)` : "Not recorded"],
+    ["Loudness", calibration.loudness_db == null ? "Not recorded" : `${Number(calibration.loudness_db).toFixed(1)} dB`],
+    ["Cabinet", cabinet.label || "Unknown"],
+    ["Gear", (identity.gear_make && identity.gear_model?.startsWith(identity.gear_make)
+      ? identity.gear_model : [identity.gear_make, identity.gear_model].filter(Boolean).join(" ")) || "Not specified"],
+    ["Gear type", identity.gear_type || "Not specified"],
+    ["Tone type", INSPECTOR_TONE_TYPES[identity.tone_type]
+      || (identity.tone_type ? identity.tone_type[0].toUpperCase() + identity.tone_type.slice(1) : "Not specified")],
+    ["Modeled by", identity.modeled_by || "Not specified"],
+  ];
+  return { title: identity.name || identity.filename || "This NAM", status, facts };
 }
 
 function showNamInspectorResult(result, target) {
   target.replaceChildren();
   target.classList.remove("is-error");
   target.hidden = false;
-  const { identity = {}, architecture = {}, calibration = {}, cabinet = {}, temporal = {}, validation = {} } = result;
+  const { identity = {}, architecture = {}, calibration = {}, temporal = {}, validation = {} } = result;
+  const overview = inspectorOverview(result);
+
+  const head = document.createElement("div");
+  head.className = "inspector-head";
   const title = document.createElement("h4");
-  title.textContent = validation.status === "passed"
-    ? `Valid ${architecture.name || "NAM"}`
-    : validation.status === "warning" ? `Parsed ${architecture.name || "NAM"}` : "Could not validate model";
-  const intro = document.createElement("p");
-  intro.textContent = `${architecture.sample_rate ? `${Math.round(architecture.sample_rate / 1000)} kHz` : "Sample rate unavailable"} · ${architecture.input_channels || 1} → ${architecture.output_channels || 1} channel${(architecture.output_channels || 1) === 1 ? "" : "s"}${architecture.full_lite_supported ? " · Full + Lite" : ""}`;
-  const summary = document.createElement("p");
-  summary.textContent = `${calibration.status === "complete" ? "Input/output calibration present" : calibration.status === "input-only" ? "Input calibration only" : "Calibration metadata absent"} · ${cabinet.label || "Unknown cabinet structure"} · ${validation.summary || "Validation incomplete"}`;
-  target.append(title, intro, summary);
+  title.textContent = overview.title;
+  const badge = document.createElement("span");
+  badge.className = `inspector-status is-${overview.status.kind}`;
+  badge.textContent = overview.status.label;
+  head.append(title, badge);
+
+  const facts = document.createElement("dl");
+  facts.className = "inspector-facts";
+  overview.facts.forEach(([label, value]) => {
+    const item = document.createElement("div");
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    item.append(dt, dd);
+    facts.append(item);
+  });
+  target.append(head, facts);
 
   const details = document.createElement("details");
+  details.className = "inspector-technical";
   const summaryNode = document.createElement("summary");
   summaryNode.textContent = "Technical details";
   details.append(summaryNode);
+  const samples = (n, ms) => (n == null ? null : `${n} samples${ms == null ? "" : ` (${ms} ms)`}`);
   const rows = [
-    ["File", identity.filename], ["Model", identity.name], ["Modeled by", identity.modeled_by],
-    ["Gear", [identity.gear_make, identity.gear_model, identity.gear_type].filter(Boolean).join(" · ")],
-    ["Architecture", architecture.name], ["Format version", identity.format_version],
-    ["Calibration", `Input ${calibration.input_level_dbu ?? "—"} dBu · Output ${calibration.output_level_dbu ?? "—"} dBu`],
-    ["Loudness", calibration.loudness_db == null ? null : `${calibration.loudness_db} dB`],
-    ["Neural receptive field", temporal.neural_receptive_field_samples == null ? null : `${temporal.neural_receptive_field_samples} samples${temporal.neural_receptive_field_ms == null ? "" : ` (${temporal.neural_receptive_field_ms} ms)`}`],
-    ["FIR history", temporal.fir_history_samples == null ? null : `${temporal.fir_history_samples} samples${temporal.fir_history_ms == null ? "" : ` (${temporal.fir_history_ms} ms)`}`],
-    ["Total formal dependency", temporal.total_formal_dependency_samples == null ? null : `${temporal.total_formal_dependency_samples} samples${temporal.total_formal_dependency_ms == null ? "" : ` (${temporal.total_formal_dependency_ms} ms)`}`],
+    ["File", identity.filename], ["Format version", identity.format_version],
+    ["Input / output", `${architecture.input_channels || 1} → ${architecture.output_channels || 1} channel`],
+    ["Calibration (raw)", `Input ${calibration.input_level_dbu ?? "—"} dBu · Output ${calibration.output_level_dbu ?? "—"} dBu`],
+    ["Neural receptive field", samples(temporal.neural_receptive_field_samples, temporal.neural_receptive_field_ms)],
+    ["FIR history", samples(temporal.fir_history_samples, temporal.fir_history_ms)],
+    ["Total formal dependency", samples(temporal.total_formal_dependency_samples, temporal.total_formal_dependency_ms)],
   ].filter(([, value]) => value != null && value !== "");
   const list = document.createElement("dl");
   rows.forEach(([label, value]) => {
@@ -5141,6 +5172,7 @@ function clearNamInspectorResult(message = "Inspection will start after the NAM 
   const prompt = document.getElementById("tool-inspector-prompt");
   const result = document.getElementById("tool-inspector-result");
   if (!prompt || !result) return;
+  prompt.hidden = false;
   prompt.classList.remove("is-loading");
   prompt.textContent = message;
   result.hidden = true;

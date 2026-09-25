@@ -206,14 +206,19 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
 .nam-tools.has-source .tools-intro { display: none; }
 .nam-tools.has-source .tool-source-card { margin-top: 1rem; }
 .tools-workspace-heading { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.9rem; margin: 1.3rem 0 0.8rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
-.tools-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+.tools-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; align-items: start; }
 .tool-card { display: flex; flex-direction: column; min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent); }
 .tool-card-heading { display: flex; align-items: center; gap: 0.7rem; }
 .tool-card-heading .eyebrow { margin-bottom: 0.1rem; }
 .tool-card > .info { min-height: 3.45rem; margin: 0.65rem 0 0.8rem; line-height: 1.45; }
 .tools-grid .btn { margin-top: 0.85rem; }
 .tool-cab-embed { margin-top: 0.85rem; }
-.tool-cab-embed > .btn { margin-top: 0.85rem; }
+.tool-cab-embed > .info { min-height: 0; }
+.tool-cab-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1.25rem; }
+.tool-cab-fields > div { display: flex; flex-direction: column; min-width: 0; }
+.tool-cab-fields .field-label:first-child { margin-top: 0; }
+.tool-cab-fields .btn { margin-top: auto; }
+.tool-cab-fields > div:last-child .btn { margin-top: 1rem; }
 .tool-result { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; background: var(--track); font-size: 0.82rem; line-height: 1.5; }
 .tool-inline-result { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--panel) 92%, var(--accent) 5%); }
 .tool-inline-result.is-error { border-color: color-mix(in srgb, var(--danger) 48%, var(--border)); border-left-color: var(--danger); background: color-mix(in srgb, var(--panel) 94%, var(--danger) 6%); color: var(--danger); }
@@ -225,24 +230,34 @@ h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; font-weight: 650; }
 .tool-advanced { margin: 0.6rem 0; }
 .tool-advanced summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
 .tool-advanced .field-label { margin-top: 0.6rem; }
-.tool-readonly-heading { margin: 1rem 0 0.35rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.tool-readonly-list { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; margin: 0; font-size: 0.82rem; }
-.tool-readonly-list dt { color: var(--text-muted); }
-.tool-readonly-list dd { margin: 0; color: var(--text); }
-.tool-inspector-prompt { margin-top: auto; padding: 0.65rem 0.7rem; border-radius: 7px; background: var(--track); color: var(--text-muted); font-size: 0.8rem; line-height: 1.45; }
+.tool-overview .tools-workspace-heading { margin-top: 1.3rem; }
+.tool-inspector-prompt { padding: 0.65rem 0.7rem; border-radius: 7px; background: var(--track); color: var(--text-muted); font-size: 0.8rem; line-height: 1.45; }
+.tool-inspector-prompt[hidden] { display: none; }
 .tool-inspector-prompt.is-loading { color: var(--accent); }
-.tool-inspector-result { margin-top: 0.75rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--track); font-size: 0.8rem; line-height: 1.45; }
+.tool-inspector-result { padding: 1rem; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); font-size: 0.82rem; line-height: 1.45; }
 .tool-inspector-result.is-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 48%, var(--border)); }
-.tool-inspector-result h4 { margin: 0 0 0.3rem; font-size: 0.96rem; }
-.tool-inspector-result p { margin: 0.25rem 0; color: var(--text-muted); }
-.tool-inspector-result dl { display: grid; grid-template-columns: minmax(6rem, auto) 1fr; gap: 0.18rem 0.65rem; margin: 0.55rem 0; }
-.tool-inspector-result dt { color: var(--text-muted); }
-.tool-inspector-result dd { margin: 0; overflow-wrap: anywhere; }
-.tool-inspector-result details { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
-.tool-inspector-result summary { cursor: pointer; font-weight: 650; }
-.tool-inspector-result .inspector-branch { margin-top: 0.35rem; }
+.inspector-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.inspector-head h4 { margin: 0; font-size: 1rem; color: var(--text); overflow-wrap: anywhere; }
+.inspector-status { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.74rem; font-weight: 700; white-space: nowrap; }
+.inspector-status.is-passed { color: #17794a; background: color-mix(in srgb, #17794a 12%, var(--panel)); }
+.inspector-status.is-warning { color: #9a5a00; background: color-mix(in srgb, #e8a438 16%, var(--panel)); }
+.inspector-status.is-failed { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--panel)); }
+@media (prefers-color-scheme: dark) {
+  .inspector-status.is-passed { color: #5fd49a; }
+  .inspector-status.is-warning { color: #ffca7a; }
+}
+.inspector-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.55rem; margin: 0.85rem 0 0; }
+.inspector-facts > div { padding: 0.55rem 0.65rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); min-width: 0; }
+.inspector-facts dt { color: var(--text-muted); font-size: 0.72rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.03em; }
+.inspector-facts dd { margin: 0.15rem 0 0; color: var(--text); overflow-wrap: anywhere; }
+.inspector-technical { margin-top: 0.85rem; }
+.inspector-technical summary { cursor: pointer; color: var(--text-muted); font-weight: 650; }
+.inspector-technical dl { display: grid; grid-template-columns: minmax(9rem, auto) 1fr; gap: 0.2rem 0.75rem; margin: 0.6rem 0; }
+.inspector-technical dt { color: var(--text-muted); }
+.inspector-technical dd { margin: 0; overflow-wrap: anywhere; }
+.inspector-technical p { margin: 0.3rem 0; color: var(--text-muted); }
 @media (max-width: 720px) {
-  .tool-capability-grid, .tools-grid { grid-template-columns: 1fr; }
+  .tool-capability-grid, .tools-grid, .tool-cab-fields { grid-template-columns: 1fr; }
   .tool-source-options { grid-template-columns: 1fr; }
   .tool-source-divider { justify-content: center; }
   .tool-source-heading { display: block; }

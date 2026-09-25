@@ -142,12 +142,14 @@ test('Tools results appear inline with a calm collapsed validation note', () => 
   assert.doesNotMatch(source, /This edited NAM has different bytes from its source/);
 });
 
-test('NAM Inspector is a read-only fourth Tools card with expandable technical detail', () => {
+test('NAM Inspector is a read-only overview with plain facts and expandable technical detail', () => {
   const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
-  assert.match(html, /<h3>NAM Inspector<\/h3>/);
-  assert.match(html, /Inspect and validate a NAM's architecture, calibration, cabinet structure and compatibility\./);
+  assert.match(html, /<h3 id="tool-overview-title">About this NAM<\/h3>/);
   assert.match(html, /tool-inspector-result/);
   assert.match(html, /tool-inspector-prompt/);
+  assert.doesNotMatch(html, /tool-export-info/);   // no duplicate read-only block in the Metadata card
+  // The overview comes before the editing tools.
+  assert.ok(html.indexOf('tool-inspector-result') < html.indexOf('tool-volume-slider'));
 
   function element(tagName = 'div') {
     return {
@@ -160,20 +162,36 @@ test('NAM Inspector is a read-only fourth Tools card with expandable technical d
   const result = element();
   const sandbox = { document: { createElement: element } };
   vm.createContext(sandbox);
-  vm.runInContext(section('function showNamInspectorResult(', 'toolsTab.addEventListener'), sandbox);
+  vm.runInContext(section('const INSPECTOR_TONE_TYPES', 'toolsTab.addEventListener'), sandbox);
   sandbox.showNamInspectorResult({
-    identity: { filename: 'amp.nam', name: 'Amp' },
-    architecture: { name: 'SlimmableContainer', sample_rate: 48000, input_channels: 1, output_channels: 1, full_lite_supported: true },
+    identity: { filename: 'amp.nam', name: 'Amp', tone_type: 'hi_gain' },
+    architecture: { name: 'SlimmableContainer', sample_rate: 48000, input_channels: 1, output_channels: 1, a2_packed: true, full_lite_supported: true },
     calibration: { status: 'complete', input_level_dbu: 12, output_level_dbu: -3 },
     cabinet: { label: 'Amp only / no embedded cabinet detected' }, temporal: {},
     validation: { status: 'passed', summary: 'NAMCore render passed', branches: { full: { detail: 'Full passed' }, lite: { detail: 'Lite passed' } } },
   }, result);
   assert.equal(result.hidden, false);
-  assert.equal(result.children[0].textContent, 'Valid SlimmableContainer');
-  assert.equal(result.children.at(-1).tagName, 'details');
-  assert.equal(result.children.at(-1).children[0].textContent, 'Technical details');
-  assert.match(result.children[2].textContent, /Amp only/);
-  assert.match(result.children.at(-1).children.at(-1).textContent, /Lite passed/);
+  const [head, facts, details] = result.children;
+  assert.equal(head.children[0].textContent, 'Amp');
+  assert.equal(head.children[1].textContent, '✓ Plays in NAMCore');
+  const fact = (label) => facts.children.find((f) => f.children[0].textContent === label).children[1].textContent;
+  assert.equal(fact('Architecture'), 'A2 (SlimmableContainer), Full + Lite');
+  assert.equal(fact('Sample rate'), '48 kHz');
+  assert.equal(fact('Calibration'), 'Input 12.0 dBu · Output -3.0 dBu');
+  assert.match(fact('Cabinet'), /Amp only/);
+  assert.equal(fact('Tone type'), 'High gain');
+  const other = element();
+  sandbox.showNamInspectorResult({ identity: { gear_make: 'Peavey', gear_model: 'Peavey 6505', tone_type: 'metal' }, validation: { status: 'passed' } }, other);
+  const otherFact = (label) => other.children[1].children.find((f) => f.children[0].textContent === label).children[1].textContent;
+  assert.equal(otherFact('Gear'), 'Peavey 6505');
+  assert.equal(otherFact('Tone type'), 'Metal');
+  assert.equal(details.tagName, 'details');
+  assert.equal(details.children[0].textContent, 'Technical details');
+  assert.match(details.children.at(-1).textContent, /Lite passed/);
+
+  const failed = element();
+  sandbox.showNamInspectorResult({ architecture: { name: 'LSTM' }, validation: { status: 'failed', summary: 'Render failed: bad' } }, failed);
+  assert.equal(failed.children[0].children[1].textContent, '✕ Render failed: bad');
 });
 
 test('cancelled comparison permits a retry and old completion cannot unlock the new request', async () => {
@@ -729,4 +747,12 @@ test('startup update notice offers this platform installer, the release page, or
   assert.equal(source.href, 'https://r');
   assert.match(source.detail, /git pull/);
   assert.match(source.detail, /release page/);
+});
+
+test('a tone type outside the standard list is kept, not silently cleared by a metadata edit', () => {
+  assert.match(source, /option\[data-from-file\]/);
+  assert.match(source, /\(from the file\)/);
+  const setup = source.indexOf('toneSelect.append(option)');
+  const fill = source.indexOf('Object.entries(fieldMap).forEach(([key, id]) => { document.getElementById(id).value = originalToolMetadata[key]');
+  assert.ok(setup > 0 && setup < fill);   // the option exists before the select value is set
 });
