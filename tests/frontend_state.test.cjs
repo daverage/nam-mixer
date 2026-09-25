@@ -515,6 +515,8 @@ test('timing readout wording and Original/Corrected request body', () => {
   // A per-DI fixed offset that cross-DI verification did not confirm is not offered.
   assert.equal(summary('fixed_offset'), 'Timing: No trustworthy fixed timing correction identified');
   assert.equal(summary('insufficient_signal'), 'Timing: Insufficient signal for reliable analysis');
+  assert.match(sandbox.timingChoiceHint(7), /^Optional\. .*Corrected moves Amp B earlier by 7 samples/);
+  assert.match(sandbox.timingChoiceHint(-3), /Corrected moves Amp B later by 3 samples/);
 
   sandbox.setChoice({ available: true, offsetSamples: 7, corrected: false });
   assert.equal(JSON.stringify(sandbox.timingParamsBody()), '{}');
@@ -522,4 +524,140 @@ test('timing readout wording and Original/Corrected request body', () => {
   assert.equal(JSON.stringify(sandbox.timingParamsBody()), '{"alignment_enabled":true,"alignment_offset_samples":7}');
   sandbox.setChoice({ available: false, offsetSamples: null, corrected: true });
   assert.equal(JSON.stringify(sandbox.timingParamsBody()), '{}');
+});
+
+function timingSandbox() {
+  const note = { textContent: '', hidden: true };
+  const readout = {
+    hidden: true, dataset: {},
+    querySelector: (sel) => ({
+      '.timing-readout-note': note,
+      '.timing-readout-summary': {},
+      '.timing-choice': {},
+      '.timing-choice-hint': {},
+      '.timing-readout-body': { textContent: '', appendChild() {} },
+    })[sel],
+  };
+  const sandbox = {
+    ampServerPaths: { a: '/m/a.nam', b: '/m/b.nam' },
+    diSelector: { value: 'moderate_brit.wav' },
+    document: { querySelectorAll: (sel) => (sel === '.timing-readout' ? [readout] : []), createElement: () => ({}) },
+    note,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('let timingChoice', 'function markProfileStale(') +
+    '\nthis.choice = () => timingChoice;', sandbox);
+  return sandbox;
+}
+
+function timingRender(offset) {
+  return {
+    alignment_diagnostic: { status: offset ? 'fixed_offset' : 'ambiguous', reason: '', windows: [],
+      windows_reliable: 0, windows_analysed: 0, agreement_fraction: 0, max_lag_samples: 256 },
+    alignment_verification: null,
+    timing_correction: offset ? { available: true, offset_samples: offset } : { available: false, offset_samples: null },
+  };
+}
+
+const saveTiming = (sb) => JSON.parse(JSON.stringify(sb.timingSessionSettings()));
+
+test('session timing: Original saved -> reload -> Original', () => {
+  const sb = timingSandbox();
+  sb.renderTimingReadout(timingRender(7));                 // verified, user leaves Original
+  const saved = saveTiming(sb);
+  assert.deepEqual(saved, { choice: 'original', offsetSamples: null, method: 'fixed-frozen-offset' });
+  const reloaded = timingSandbox();
+  reloaded.restoreTimingIntent(saved);
+  reloaded.renderTimingReadout(timingRender(7));
+  assert.equal(reloaded.choice().corrected, false);
+  assert.equal(reloaded.note.hidden, true);
+});
+
+test('session timing: Corrected +7 restored only when the new render verifies exactly +7', () => {
+  const sb = timingSandbox();
+  sb.renderTimingReadout(timingRender(7));
+  sb.choice().corrected = true;
+  const saved = saveTiming(sb);
+  assert.deepEqual(saved, { choice: 'corrected', offsetSamples: 7, method: 'fixed-frozen-offset' });
+
+  const reloaded = timingSandbox();
+  reloaded.restoreTimingIntent(saved);
+  assert.equal(reloaded.choice().corrected, false);        // loading alone applies nothing
+  assert.deepEqual(saveTiming(reloaded), saved);           // saving again before a render keeps the intent
+  reloaded.renderTimingReadout(null);                      // the Render click's own invalidation does not consume it
+  reloaded.renderTimingReadout(timingRender(7));
+  assert.equal(reloaded.choice().corrected, true);
+  assert.equal(JSON.stringify(reloaded.timingParamsBody()), '{"alignment_enabled":true,"alignment_offset_samples":7}');
+  assert.match(reloaded.note.textContent, /restored/);
+  reloaded.renderTimingReadout(timingRender(7));           // consumed once: a later render starts at Original
+  assert.equal(reloaded.choice().corrected, false);
+});
+
+test('session timing: Corrected +7 that no longer verifies falls back to Original with an explanation', () => {
+  const message = 'Saved timing correction was +7 samples, but this render no longer verifies that fixed offset. ' +
+    'Original timing has been restored.';
+  for (const render of [timingRender(8), timingRender(null)]) {
+    const sb = timingSandbox();
+    sb.restoreTimingIntent({ choice: 'corrected', offsetSamples: 7, method: 'fixed-frozen-offset' });
+    sb.renderTimingReadout(render);
+    assert.equal(sb.choice().corrected, false);
+    assert.equal(JSON.stringify(sb.timingParamsBody()), '{}');
+    assert.equal(sb.note.textContent, message);
+    assert.equal(sb.note.hidden, false);
+  }
+  // An unknown method is never trusted, even with a matching integer.
+  const sb = timingSandbox();
+  sb.restoreTimingIntent({ choice: 'corrected', offsetSamples: 7, method: 'something-else' });
+  sb.renderTimingReadout(timingRender(7));
+  assert.equal(sb.choice().corrected, false);
+});
+
+test('session timing: old sessions without a timing field behave exactly as before', () => {
+  const sb = timingSandbox();
+  sb.restoreTimingIntent(undefined);
+  sb.renderTimingReadout(timingRender(7));
+  assert.equal(sb.choice().corrected, false);
+  assert.equal(sb.note.hidden, true);
+  assert.equal(sb.note.textContent, '');
+});
+
+test('session timing: a source change invalidates a saved or restored correction', () => {
+  const saved = { choice: 'corrected', offsetSamples: 7, method: 'fixed-frozen-offset' };
+  const sb = timingSandbox();
+  sb.restoreTimingIntent(saved);
+  sb.ampServerPaths.b = '/m/other-b.nam';                  // a different Amp B, which happens to verify +7 too
+  assert.equal(saveTiming(sb).choice, 'original');
+  sb.renderTimingReadout(timingRender(7));
+  assert.equal(sb.choice().corrected, false);
+  assert.match(sb.note.textContent, /different Amp A\/Amp B\/DI/);
+
+  const di = timingSandbox();
+  di.restoreTimingIntent(saved);
+  di.diSelector.value = 'clean_mayer.wav';
+  di.renderTimingReadout(timingRender(7));
+  assert.equal(di.choice().corrected, false);
+
+  const restored = timingSandbox();                        // restored Corrected, then the source changes
+  restored.restoreTimingIntent(saved);
+  restored.renderTimingReadout(timingRender(7));
+  assert.equal(restored.choice().corrected, true);
+  restored.renderTimingReadout(null);                      // markProfileStale's reset
+  assert.equal(restored.choice().corrected, false);
+  assert.equal(JSON.stringify(restored.timingParamsBody()), '{}');
+});
+
+test('loading a session never renders: it only parks the timing intent', () => {
+  const body = section('function applySessionSettings(', 'const sessionSettingsStatus');
+  assert.doesNotMatch(body, /doRenderPair|render_pair|fetch\(/);
+  assert.match(body, /markProfileStale\("Settings restored"\);\s*restoreTimingIntent\(s\.timing\);/);
+  const restore = section('function restoreTimingIntent(', 'function resolveTimingRestore(');
+  assert.doesNotMatch(restore, /fetch\(|scheduleUpdate|timingChoice/);
+});
+
+test('timing buttons are not transition presets', () => {
+  // A plain ".preset-btn" selector made Original/Corrected reset the
+  // transition width and cleared their own pressed state.
+  assert.match(source, /const presetButtons = document\.querySelectorAll\("\.preset-btn\[data-value\]"\);/);
+  const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
+  for (const button of html.match(/<button[^>]*data-timing=[^>]*>/g)) assert.doesNotMatch(button, /data-value/);
 });

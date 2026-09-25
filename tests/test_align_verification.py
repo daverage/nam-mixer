@@ -148,3 +148,27 @@ def test_whole_render_estimate_is_never_consulted(monkeypatch):
     result = _verify(Renderer([7]), _primary(7))
     assert result.status == "verified" and len(seen_lengths) == 3
     assert "whole_render_offset_samples" not in result.to_dict()["per_di"][0]
+
+
+def test_natural_one_sample_lag_is_part_of_the_verified_total():
+    """A pair with a stable natural +1 is 'aligned' and offered nothing. Add a
+    genuine +7 latency and the stable total is +8: +8 verifies and +8 is the
+    correction, applying the whole relationship -- not an off-by-one."""
+    from hybrid.core.align import apply_fixed_offset
+
+    natural = _primary(1)
+    assert natural.status == "aligned"
+    assert _verify(Renderer([1]), natural).status == "not_run"
+
+    primary = _primary(1 + 7)
+    assert (primary.status, primary.recommended_offset_samples) == ("fixed_offset", 8)
+    result = _verify(Renderer([8]), primary)
+    assert (result.status, result.offset_samples) == ("verified", 8)
+
+    dry = _preview_dry()
+    amp_a = np.tanh(2 * dry).astype(np.float32)
+    amp_b = _delay(amp_a, 8)
+    corrected = apply_fixed_offset(amp_b, result.offset_samples, len(amp_a))
+    np.testing.assert_array_equal(corrected[:-8], amp_a[:-8])        # fully aligned
+    partial = apply_fixed_offset(amp_b, 7, len(amp_a))                # only the added part
+    np.testing.assert_array_equal(partial[1:-8], amp_a[:-9])          # would leave B 1 sample late

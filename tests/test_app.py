@@ -2091,6 +2091,88 @@ def test_correction_requires_the_exact_verified_offset(client, tmp_path, monkeyp
         assert response.status_code == 400, offset
 
 
+def _render_pair_with_b_delay(client, tmp_path, monkeypatch, delay):
+    """Re-render the same Amp A/B/DI after Amp B's timing changed (e.g. the
+    referenced file was replaced); the per-DI measurement cache is keyed by
+    source content, so a real replacement would miss it too."""
+    app_module._alignment_measurement_cache.clear()
+    def delayed(model, audio, sample_rate, **_kwargs):
+        audio = np.asarray(audio, dtype=np.float32)
+        if model.path.name == "b.nam" and delay:
+            return np.concatenate([np.zeros(delay, np.float32), audio])[: len(audio)]
+        return audio.copy()
+    monkeypatch.setattr(pipeline, "render", delayed)
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    return client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+
+
+def test_saved_timing_intent_round_trips_and_loading_never_renders(client, tmp_path, monkeypatch):
+    """Sessions store the Original/Corrected intent verbatim; listing/loading
+    them runs no NAM inference (the client re-verifies on its next render)."""
+    session_dir = tmp_path / "sessions"
+    (session_dir / "models").mkdir(parents=True)
+    (tmp_path / "a2").mkdir()
+    monkeypatch.setattr(app_module, "SESSION_DIR", session_dir)
+    monkeypatch.setattr(app_module, "SESSION_MODEL_DIR", session_dir / "models")
+    monkeypatch.setattr(app_module, "A2_OUTPUT_DIR", tmp_path / "a2")
+    def no_inference(*_args, **_kwargs):
+        raise AssertionError("loading a session must not render")
+    for module in (pipeline, training_target, blend_training_target):
+        monkeypatch.setattr(module, "render", no_inference)
+    intents = {
+        "original": {"choice": "original", "offsetSamples": None, "method": "fixed-frozen-offset"},
+        "corrected": {"choice": "corrected", "offsetSamples": 7, "method": "fixed-frozen-offset"},
+        "legacy": None,
+    }
+    for name, timing in intents.items():
+        settings = {"mode": "blend", **({"timing": timing} if timing else {})}
+        assert client.post("/api/sessions", json={
+            "type": "nam-mixer-session", "version": 1, "id": f"timing-{name}", "name": name,
+            "savedAt": "2026-09-25T10:00:00Z", "settings": settings}).status_code == 201
+    listed = {s["id"]: s for s in client.get("/api/sessions").get_json()}
+    assert listed["timing-original"]["settings"]["timing"] == intents["original"]
+    assert listed["timing-corrected"]["settings"]["timing"] == intents["corrected"]
+    assert "timing" not in listed["timing-legacy"]["settings"]  # old sessions load exactly as before
+
+
+def test_restored_correction_is_accepted_only_if_the_new_render_verifies_it(client, tmp_path, monkeypatch):
+    """Saved Corrected +7: a re-render that verifies +7 accepts it; one that
+    verifies a different offset, or none, refuses +7 (the client then stays
+    on Original)."""
+    _write_fake_nam(tmp_path / "a.nam")
+    _write_fake_nam(tmp_path / "b.nam")
+    saved = 7
+    def preview(render_id):
+        return client.post("/api/preview", json={"render_id": render_id, "source": "blend",
+                                                 "alignment_enabled": True, "alignment_offset_samples": saved})
+    same = _render_pair_with_b_delay(client, tmp_path, monkeypatch, 7)
+    assert same["timing_correction"] == {"available": True, "offset_samples": saved}
+    assert preview(same["render_id"]).status_code == 200
+    moved = _render_pair_with_b_delay(client, tmp_path, monkeypatch, 12)
+    assert moved["timing_correction"] == {"available": True, "offset_samples": 12}
+    assert preview(moved["render_id"]).status_code == 400
+    gone = _render_pair_with_b_delay(client, tmp_path, monkeypatch, 0)
+    assert gone["timing_correction"]["available"] is False
+    assert preview(gone["render_id"]).status_code == 400
+
+
+@pytest.mark.parametrize("design, expected", [
+    ({"alignment_enabled": True, "alignment_offset_samples": 7, "alignment_method": "fixed-frozen-offset"},
+     {"choice": "corrected", "offsetSamples": 7, "method": "fixed-frozen-offset"}),
+    ({"alignment_enabled": False, "alignment_offset_samples": 0, "alignment_method": None},
+     {"choice": "original", "offsetSamples": None, "method": "fixed-frozen-offset"}),
+    # A legacy enabled design without the frozen method is never presented as Corrected.
+    ({"alignment_enabled": True, "alignment_offset_samples": 7},
+     {"choice": "original", "offsetSamples": None, "method": "fixed-frozen-offset"}),
+    ({}, {"choice": "original", "offsetSamples": None, "method": "fixed-frozen-offset"}),
+])
+def test_generated_bundle_session_carries_its_frozen_timing_intent(tmp_path, design, expected):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    session = app_module._session_from_manifest({"mode": "blend", "design": design}, bundle)
+    assert session["settings"]["timing"] == expected
+
+
 def test_unverified_diagnostic_cannot_enable_correction(client, tmp_path):
     amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
     _write_fake_nam(amp_a)

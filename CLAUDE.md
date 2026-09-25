@@ -338,7 +338,10 @@ carry a session record under `work/a2`. Loading settings never renders them
 automatically, and completed models can be embedded in/exported with a
 session. A validation report is restored only when its model SHA-256 matches
 the embedded NAM. Training manifests are not session files and must not be
-imported as such.
+imported as such. A session keeps the Original/Corrected timing intent
+(`settings.timing`); Corrected is restored only when the next render of the
+same Amp A/B/DI re-verifies exactly the saved offset (see
+docs/alignment_diagnostic.md).
 
 `assets/nam_models/` holds the user's own `.nam` amp capture files (e.g. a
 Fender clean + a JCM800 high-gain capture) used as Amp A/Amp B inputs. These

@@ -580,6 +580,52 @@ function populateProfileSelect() {
 // chooses Original or Corrected. Corrected sends the verified integer, which
 // the server applies verbatim to preview and freezes into the design.
 let timingChoice = { available: false, offsetSamples: null, corrected: false };
+const TIMING_CORRECTION_METHOD = "fixed-frozen-offset";
+
+// A saved session remembers the user's timing intent, never an applied
+// correction: loading only parks it here. The next render of the SAME Amp A,
+// Amp B and DI consumes it, and Corrected comes back only when that render's
+// own cross-DI verification offers exactly the saved integer.
+let pendingTimingRestore = null;
+
+function timingSources() {
+  return { ampA: ampServerPaths.a || null, ampB: ampServerPaths.b || null, diFile: diSelector.value || null };
+}
+
+function sameTimingSources(x, y) {
+  return !!x && !!y && x.ampA === y.ampA && x.ampB === y.ampB && x.diFile === y.diFile;
+}
+
+function timingSessionSettings() {
+  if (pendingTimingRestore && sameTimingSources(pendingTimingRestore.sources, timingSources())) {
+    return pendingTimingRestore.saved;   // not rendered since loading: keep the saved intent
+  }
+  return timingChoice.available && timingChoice.corrected
+    ? { choice: "corrected", offsetSamples: timingChoice.offsetSamples, method: TIMING_CORRECTION_METHOD }
+    : { choice: "original", offsetSamples: null, method: TIMING_CORRECTION_METHOD };
+}
+
+function restoreTimingIntent(saved) {
+  // Old sessions have no timing field: Original, exactly as before.
+  pendingTimingRestore = saved && saved.choice === "corrected" ? { saved, sources: timingSources() } : null;
+}
+
+function resolveTimingRestore(saved, correction, sameSources) {
+  if (!saved || saved.choice !== "corrected") return { corrected: false, note: "" };
+  const n = saved.offsetSamples;
+  const shown = Number.isInteger(n) ? `${signedSamples(n)} samples` : "an unknown offset";
+  if (!sameSources) {
+    return { corrected: false,
+      note: `Saved timing correction (${shown}) belongs to a different Amp A/Amp B/DI. Original timing is used.` };
+  }
+  if (saved.method === TIMING_CORRECTION_METHOD && Number.isInteger(n) &&
+      correction && correction.available && correction.offset_samples === n) {
+    return { corrected: true, note: `Saved timing correction restored: this render verified the same fixed offset (${shown}).` };
+  }
+  return { corrected: false,
+    note: `Saved timing correction was ${shown}, but this render no longer verifies that fixed offset. ` +
+      "Original timing has been restored." };
+}
 
 function timingParamsBody() {
   return timingChoice.available && timingChoice.corrected
@@ -601,6 +647,11 @@ function timingSummary(render) {
   if (diagnostic.status === "aligned") return "Timing: No stable fixed offset detected";
   if (diagnostic.status === "insufficient_signal") return "Timing: Insufficient signal for reliable analysis";
   return "Timing: No trustworthy fixed timing correction identified";
+}
+
+function timingChoiceHint(n) {
+  return `Optional. Original keeps the renders as they are; Corrected moves Amp B ` +
+    `${n > 0 ? "earlier" : "later"} by ${Math.abs(n)} samples to line it up with Amp A.`;
 }
 
 function timingEvidenceLines(render) {
@@ -643,6 +694,14 @@ function renderTimingReadout(render) {
     offsetSamples: diagnostic && correction.available ? correction.offset_samples : null,
     corrected: false,
   };
+  let note = "";
+  if (render && pendingTimingRestore) {
+    const restore = resolveTimingRestore(pendingTimingRestore.saved, timingChoice.available ? correction : null,
+      sameTimingSources(pendingTimingRestore.sources, timingSources()));
+    timingChoice.corrected = restore.corrected && timingChoice.available;
+    note = restore.note;
+    pendingTimingRestore = null;
+  }
   document.querySelectorAll(".timing-readout").forEach((el) => {
     if (!diagnostic) {
       el.hidden = true;
@@ -652,6 +711,12 @@ function renderTimingReadout(render) {
     el.dataset.status = timingChoice.available ? "fixed_offset" : diagnostic.status;
     el.querySelector(".timing-readout-summary").textContent = timingSummary(render);
     el.querySelector(".timing-choice").hidden = !timingChoice.available;
+    const hintEl = el.querySelector(".timing-choice-hint");
+    hintEl.hidden = !timingChoice.available;
+    hintEl.textContent = timingChoice.available ? timingChoiceHint(timingChoice.offsetSamples) : "";
+    const noteEl = el.querySelector(".timing-readout-note");
+    noteEl.textContent = note;
+    noteEl.hidden = !note;
     const body = el.querySelector(".timing-readout-body");
     body.textContent = "";
     timingEvidenceLines(render).forEach((line) => {
@@ -668,6 +733,7 @@ document.querySelectorAll(".timing-choice [data-timing]").forEach((button) => {
     const corrected = button.dataset.timing === "corrected";
     if (!timingChoice.available || corrected === timingChoice.corrected) return;
     timingChoice.corrected = corrected;
+    document.querySelectorAll(".timing-readout-note").forEach((noteEl) => { noteEl.hidden = true; });
     syncTimingChoiceButtons();
     invalidateLiveAudition("Timing changed — start live blend again to load the matching stems.");
     scheduleUpdate();
@@ -926,7 +992,9 @@ transitionSlider.addEventListener("input", () => {
 
 syncCrossoverKnobFromDb();
 
-const presetButtons = document.querySelectorAll(".preset-btn");
+// Transition presets only: the Original/Corrected timing buttons share the
+// .preset-btn look but must never drive (or be reset by) the transition.
+const presetButtons = document.querySelectorAll(".preset-btn[data-value]");
 function syncPresetButtonStates() {
   presetButtons.forEach((btn) => {
     const active = parseFloat(btn.dataset.value) === parseFloat(transitionSlider.value);
@@ -3514,6 +3582,7 @@ function collectSessionSettings() {
     outputGainAuto: outputGainAutoCheckbox.checked,
     outputGainManualDb: outputGainManualSlider.value,
     modelName: document.getElementById("model-name").value,
+    timing: timingSessionSettings(),
   };
 }
 
@@ -3596,6 +3665,7 @@ function applySessionSettings(s) {
   // hasn't run this session).  Use the normal invalidation path so playback,
   // cached audition audio, and the server capability all become unavailable.
   markProfileStale("Settings restored");
+  restoreTimingIntent(s.timing);
   updateCoverage();
 }
 

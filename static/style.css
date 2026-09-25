@@ -572,6 +572,8 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .timing-readout-summary { font-variant-numeric: tabular-nums; }
 .timing-readout[data-status="fixed_offset"] .timing-readout-summary { color: var(--text); }
 .timing-readout-body > div + div { margin-top: 0.35rem; }
+.timing-readout-note { margin-top: 0.35rem; }
+.timing-choice-hint { margin-top: 0.35rem; }
 
 .trim-readout {
   margin-top: 0.75rem;

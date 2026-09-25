@@ -52,7 +52,7 @@ from hybrid.modes.character_analysis import (
 from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
 from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
 from hybrid.modes.cab_embed_training_target import CabEmbedDesign, generate_cab_embed_training_bundle
-from hybrid.core.align import apply_fixed_offset
+from hybrid.core.align import FIXED_FROZEN_OFFSET_METHOD, apply_fixed_offset
 from hybrid.core.align_diagnostic import DIAGNOSTIC_METHOD, analyse_alignment
 from hybrid.core.align_verification import verify_fixed_offset_across_dis
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
@@ -1194,6 +1194,16 @@ def _sync_generated_session_name(session: dict, bundle_dir: Path) -> None:
     session["name"] = requested_name
 
 
+def _session_timing_from_design(design: dict) -> dict:
+    """The saved timing intent of a generated bundle. Only a frozen fixed
+    offset counts as Corrected; the client re-verifies it on the next render."""
+    offset = design.get("alignment_offset_samples")
+    if (design.get("alignment_enabled") and design.get("alignment_method") == FIXED_FROZEN_OFFSET_METHOD
+            and isinstance(offset, int) and not isinstance(offset, bool) and offset != 0):
+        return {"choice": "corrected", "offsetSamples": offset, "method": FIXED_FROZEN_OFFSET_METHOD}
+    return {"choice": "original", "offsetSamples": None, "method": FIXED_FROZEN_OFFSET_METHOD}
+
+
 def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
     """Convert an existing A2 bundle into the canonical session record once."""
     design = manifest.get("design") or {}
@@ -1225,6 +1235,7 @@ def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
         "autoLevelMatch": True, "ampBTrim": str(number(design.get("manual_trim_db"))),
         "cab": {"path": None, "label": "", "previewEnabled": False, "baked": bool((manifest.get("cab") or {}).get("baked", False))},
         "outputGainAuto": True, "outputGainManualDb": "0", "modelName": manifest.get("model_name", bundle_dir.name),
+        "timing": _session_timing_from_design(design),
     }
     artifact = None
     validation_report = None

@@ -165,6 +165,19 @@ once, by cross-DI verification, and then:
      "description": "fixed timing offset correction: ... not a phase correction"}
    ```
 
+**Sessions.** A saved session stores the user's timing *intent*, not an
+applied correction: `settings.timing = {"choice": "original" | "corrected",
+"offsetSamples": N | null, "method": "fixed-frozen-offset"}` (a generated
+bundle's session is derived from its frozen design; a legacy enabled design is
+shown as Original). Loading a session never renders and applies nothing. The
+next render of the same Amp A, Amp B and DI runs the normal diagnostic and
+cross-DI verification, and Corrected is restored only if that render verifies
+exactly the saved N. Otherwise the choice stays Original with a note, e.g.
+"Saved timing correction was +7 samples, but this render no longer verifies
+that fixed offset. Original timing has been restored." A different Amp A/B/DI,
+any later render, and any source change reset it to Original as before. Old
+sessions without `timing` load exactly as before (Original).
+
 **Backward compatibility.** Unaligned designs (`alignment_enabled: false`)
 produce bit-for-bit identical targets: regenerating the bundle-generator
 golden snapshots changed nothing except two added manifest keys
@@ -217,6 +230,12 @@ for the targets):
   0/+1 without injection), so the true totals are about +8 and +33. Correcting
   by 8 or 33 gives the undelayed model advanced by exactly 1 sample, bit for
   bit, in preview and in the generated target.
+  This is intended, not an off-by-one: the ±1 "aligned" tolerance only
+  decides whether a pair *on its own* is offered a correction. Once a larger
+  fixed offset verifies, the correction applies the complete verified
+  relationship (natural +1 plus the added +7 = +8), never just the part that
+  was added. `tests/test_align_verification.py::test_natural_one_sample_lag_is_part_of_the_verified_total`
+  locks this in.
 - For the other pairs, the corrected preview equals the undelayed render bit
   for bit, the generated target equals the undelayed target (max difference
   0.0), and the Parallel and Hybrid teacher reconstructions equal the

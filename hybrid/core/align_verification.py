@@ -156,6 +156,9 @@ def verify_fixed_offset_across_dis(
                     f"Only {len(counted)} verification DI(s) had enough signal (need {MIN_AGREEING_DIS}); "
                     "no correction recommended.")
 
+    # The consensus is the complete stable A/B relationship, including any
+    # natural +/-1 the diagnostic alone would call "aligned" (e.g. natural +1
+    # plus a genuine +7 latency verifies as +8, and +8 is what is corrected).
     offsets = [primary.recommended_offset_samples] + [v.recommended_offset_samples for v in counted]
     consensus = _round_half_toward_zero(float(np.median(offsets)))
     if any(abs(o - consensus) > CROSS_DI_TOLERANCE_SAMPLES for o in offsets):

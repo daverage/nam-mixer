@@ -61,6 +61,10 @@ MIN_WINDOW_CORRELATION = 0.9
 AGREEMENT_TOLERANCE_SAMPLES = 1  # |offset - median| within this -> the region agrees
 MIN_AGREEMENT_FRACTION = 0.8     # agreeing regions / signal-bearing regions
 ZERO_OFFSET_TOLERANCE_SAMPLES = 1  # |median| within this -> "aligned" (21 us at 48 kHz)
+# A stable natural +/-1 is therefore "aligned" and never offered on its own.
+# It is still part of the pair's real relationship: if a genuine +7 latency is
+# added on top, the stable total measures +8, and correcting +8 (the whole
+# verified relationship) is right -- not an off-by-one to be "fixed" to +7.
 
 DIAGNOSTIC_METHOD = "multi-region-v1"
 
