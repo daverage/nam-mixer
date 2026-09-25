@@ -303,7 +303,7 @@
         <label class="field-label" for="di-selector">Test performance (DI)</label>
         <select id="di-selector" class="select-input">
           {% for f in di_files %}
-            <option value="{{ f }}">{{ f }}</option>
+            <option value="{{ f }}"{% if f == default_di_file %} selected{% endif %}>{{ f }}</option>
           {% endfor %}
         </select>
         <div class="info">A DI is a dry performance used to compare the amps fairly. Choose one that suits the playing you expect.</div>

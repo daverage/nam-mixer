@@ -859,3 +859,17 @@ test('invalidating an idle live mix says nothing', () => {
   sandbox.invalidateLiveAudition('Design mode changed — live blend stopped.');
   assert.equal(sandbox.liveBlendStatus.textContent, 'before');
 });
+
+test('default choices: clean_mayer DI, guitar, and the vintage/PAF reference pickup', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
+  assert.match(html, /\{% if f == default_di_file %\} selected\{% endif %\}/);
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('const DEFAULT_PROFILE_BY_INSTRUMENT', 'function populateProfileSelect('), sandbox);
+  const guitar = [{ id: 'vintage_single' }, { id: 'standard_single' }, { id: 'vintage_humbucker' }];
+  assert.equal(sandbox.defaultProfileFor('guitar', guitar), 'vintage_humbucker');   // not simply the first entry
+  assert.equal(sandbox.defaultProfileFor('bass', [{ id: 'standard_jp' }, { id: 'modern_passive' }]), 'standard_jp');
+  assert.equal(sandbox.defaultProfileFor('guitar', [{ id: 'p90' }]), 'p90');         // falls back if missing
+  assert.match(section('function populateProfileSelect(', '// Anything that changes'), /profileSelect\.value = defaultProfileFor\(/);
+  assert.match(section('function populateWizardProfiles(', 'function updateWizardProfileDescription('), /defaultProfileFor\(wizardInstrument\.value, profiles\)/);
+});

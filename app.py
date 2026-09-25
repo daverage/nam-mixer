@@ -405,12 +405,20 @@ def _profile_options(instrument_type: str) -> list[dict]:
     ]
 
 
+# The test performance, instrument and pickup a fresh page starts with: a clean guitar DI through the
+# guitar reference pickup (vintage/PAF humbucker, 0 dB).
+DEFAULT_DI_FILE = "clean_mayer.wav"
+DEFAULT_INSTRUMENT = "guitar"
+DEFAULT_INPUT_PROFILE_ID = "vintage_humbucker"
+
+
 @app.route("/")
 def index():
     di_files = sorted(p.name for p in DI_DIR.glob("*.wav"))
     return render_template(
         "index.html",
         di_files=di_files,
+        default_di_file=DEFAULT_DI_FILE if DEFAULT_DI_FILE in di_files else (di_files[0] if di_files else ""),
         transition_presets=TRANSITION_WIDTH_PRESETS_DB,
         default_transition_width_db=DEFAULT_TRANSITION_WIDTH_DB,
         guitar_profiles=_profile_options("guitar"),
@@ -1229,9 +1237,9 @@ def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
         "mode": mode,
         "ampA": {"path": amp_a.get("path"), "label": amp_a.get("filename", "Amp A")},
         "ampB": {"path": amp_b.get("path"), "label": amp_b.get("filename", "Amp B")},
-        "diFile": design.get("design_di_file", ""),
+        "diFile": design.get("design_di_file") or DEFAULT_DI_FILE,
         "instrument": design.get("instrument_type", "guitar"),
-        "inputProfileId": design.get("design_reference_profile_id", "vintage_humbucker"),
+        "inputProfileId": design.get("design_reference_profile_id", DEFAULT_INPUT_PROFILE_ID),
         "customGainDb": "0", "calibrationMode": (manifest.get("calibration") or {}).get("requested_mode", "auto"),
         "referenceDbu": str((manifest.get("calibration") or {}).get("reference_input_level_dbu", 12.0)),
         "testGainDb": "0", "ampAInputGainDb": str(number(design.get("amp_a_input_gain_db"))),
@@ -2230,7 +2238,7 @@ def api_render_pair():
         return jsonify({"error": "amp_a_path, amp_b_path, and di_file are all required"}), 400
 
     instrument_type = data.get("instrument_type", "guitar")
-    input_profile_id = data.get("input_profile_id", "vintage_humbucker")
+    input_profile_id = data.get("input_profile_id", DEFAULT_INPUT_PROFILE_ID)
     custom_input_gain_db = data.get("custom_input_gain_db")
     calibration_mode = data.get("calibration_mode", "auto")
     try:

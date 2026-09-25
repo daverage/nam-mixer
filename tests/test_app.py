@@ -2407,3 +2407,9 @@ def test_render_survives_a_failing_cross_di_verification(client, tmp_path, monke
 def test_templates_reload_when_changed_on_disk():
     """app.js is always served fresh; a cached, older index.html would pair with it and break the page."""
     assert app_module.app.config["TEMPLATES_AUTO_RELOAD"] is True
+
+
+def test_page_defaults_to_clean_mayer_guitar_and_the_paf_reference(client):
+    html = client.get("/").get_data(as_text=True)
+    assert '<option value="clean_mayer.wav" selected>' in html
+    assert app_module.DEFAULT_INSTRUMENT == "guitar" and app_module.DEFAULT_INPUT_PROFILE_ID == "vintage_humbucker"

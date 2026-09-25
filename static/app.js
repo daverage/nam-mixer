@@ -576,6 +576,13 @@ function updateProfileDescription() {
   customGainSlider.hidden = !profile.requires_custom_gain;
 }
 
+// Each instrument's 0 dB reference pickup is the default choice (guitar: vintage/PAF humbucker).
+const DEFAULT_PROFILE_BY_INSTRUMENT = { guitar: "vintage_humbucker", bass: "standard_jp" };
+function defaultProfileFor(instrument, profiles) {
+  const preferred = DEFAULT_PROFILE_BY_INSTRUMENT[instrument];
+  return profiles.some((p) => p.id === preferred) ? preferred : profiles[0]?.id || "";
+}
+
 function populateProfileSelect() {
   const profiles = profilesData[instrumentSelect.value] || [];
   profileSelect.innerHTML = "";
@@ -585,6 +592,7 @@ function populateProfileSelect() {
     opt.textContent = p.requires_custom_gain ? `${p.label} -- Custom` : `${p.label} (${fmtSigned(p.gain_db)} dB)`;
     profileSelect.appendChild(opt);
   });
+  profileSelect.value = defaultProfileFor(instrumentSelect.value, profiles);
   updateProfileDescription();
 }
 
@@ -1406,7 +1414,7 @@ function showWizardResult(message, nextStepLabel = "") {
 function populateWizardProfiles({ preserveCurrent = true } = {}) {
   const profiles = profilesData[wizardInstrument.value] || [];
   const desired = preserveCurrent && instrumentSelect.value === wizardInstrument.value
-    ? profileSelect.value : profiles[0]?.id;
+    ? profileSelect.value : defaultProfileFor(wizardInstrument.value, profiles);
   wizardProfile.innerHTML = "";
   profiles.forEach((profile) => {
     const option = document.createElement("option");
