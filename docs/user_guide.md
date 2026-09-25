@@ -265,7 +265,16 @@ mode. Two further modes are available from the same mode selector:
   no crossover envelope at all. Its own auto level-match uses the DI's
   ACTIVE playing material (silence excluded) rather than a crossover band,
   since there's no crossover region to match around (see
-  `hybrid.modes.fixed_blend.compute_active_trim`).
+  `hybrid.modes.fixed_blend.compute_active_trim`). After the amps are prepared,
+  **Parallel compatibility** measures the actual weighted sum across active
+  frequency bands. It reports whether both amps have material level and whether
+  their sum shows strong repeatable cancellation on the selected performance.
+  If reversing Amp B's polarity clearly removes a measured cancellation, the
+  panel recommends it and lets you play **Original polarity** and **Amp B
+  flipped** directly through the shared **Compare the sound** player. The
+  panel then offers a check across two more performances. Nothing is changed
+  automatically; the selected choice is frozen into preview, training,
+  validation, and export.
 - **Character Blend** (`hybrid/modes/character_blend.py`): uses a continuous,
   residual-bounded nonlinear carrier plus measured EQ and compression
   corrections to produce a deterministic teacher design. Tone, Feel, and

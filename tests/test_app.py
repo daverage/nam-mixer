@@ -2100,6 +2100,98 @@ def test_verified_fixed_offset_is_offered_but_not_applied(client, tmp_path, monk
     assert info["alignment_offset_samples"] == 0
 
 
+def test_parallel_polarity_can_be_auditioned_without_rerendering(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    data = client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+    body = {"source": "blend", "mix_b": 0.5, "auto_level": False,
+            "output_gain_mode": "manual", "manual_output_gain_db": 0.0}
+    original, original_headers = _preview(client, data["render_id"], **body)
+    inverted, inverted_headers = _preview(client, data["render_id"], invert_b_polarity=True, **body)
+    assert original_headers["X-Amp-B-Polarity-Inverted"] == "false"
+    assert inverted_headers["X-Amp-B-Polarity-Inverted"] == "true"
+    assert np.max(np.abs(original)) > 0.01
+    assert np.max(np.abs(inverted)) < 1e-6
+
+    info = client.post("/api/mix_info", json={
+        "render_id": data["render_id"], "mode": "blend", "mix_b": 0.5,
+        "auto_level": False, "invert_b_polarity": True,
+    }).get_json()
+    assert info["invert_b_polarity"] is True
+    assert info["parallel_compatibility"]["status"] == "problem"
+
+
+def test_parallel_compatibility_can_be_confirmed_across_independent_dis(client, tmp_path, monkeypatch):
+    calls = []
+
+    def counting_identity(model, audio, sample_rate):
+        calls.append(model.path.name)
+        return np.asarray(audio, dtype=np.float32).copy()
+
+    monkeypatch.setattr(pipeline, "render", counting_identity)
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    data = client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+    initial_calls = len(calls)
+    response = client.post("/api/parallel_compatibility/verify", json={
+        "render_id": data["render_id"], "mix_b": 0.5, "auto_level": False,
+    })
+    assert response.status_code == 200, response.get_json()
+    verified = response.get_json()
+    assert verified["status"] == "confirmed_safe"
+    assert verified["performances_usable"] == 3
+    assert len(calls) == initial_calls + 4  # two additional DIs, two amps each
+
+
+def test_cross_di_check_confirms_a_repeatable_polarity_fix(client, tmp_path, monkeypatch):
+    def opposite_b(model, audio, sample_rate):
+        audio = np.asarray(audio, dtype=np.float32)
+        return -audio if model.path.name == "b.nam" else audio.copy()
+
+    monkeypatch.setattr(pipeline, "render", opposite_b)
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    data = client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+    response = client.post("/api/parallel_compatibility/verify", json={
+        "render_id": data["render_id"], "mix_b": 0.5, "auto_level": False,
+    })
+    assert response.status_code == 200, response.get_json()
+    verified = response.get_json()
+    assert verified["status"] == "confirmed_problem"
+    assert verified["recommended_polarity"] == "inverted"
+    assert verified["polarity_recommended"] is True
+
+
+def test_parallel_verification_does_not_call_one_bad_performance_repeatable():
+    reports = [
+        {"status": "colouration", "recommended_polarity": None},
+        {"status": "problem", "recommended_polarity": "inverted"},
+        {"status": "safe", "recommended_polarity": None},
+    ]
+    verdict = app_module._summarise_parallel_verification(reports)
+    assert verdict["status"] == "performance_dependent_problem"
+    assert verdict["problem_count"] == 1
+    assert "1 of 3" in verdict["summary"]
+    assert "not consistently safe" in verdict["summary"]
+    assert "repeats" not in verdict["summary"]
+    assert verdict["recommended_polarity"] is None
+
+
+def test_parallel_verification_counts_repeatable_failures_truthfully():
+    reports = [
+        {"status": "problem", "recommended_polarity": None},
+        {"status": "problem", "recommended_polarity": None},
+        {"status": "safe", "recommended_polarity": None},
+    ]
+    verdict = app_module._summarise_parallel_verification(reports)
+    assert verdict["status"] == "confirmed_problem"
+    assert verdict["problem_count"] == 2
+    assert "2 of 3" in verdict["summary"]
+
+
 def test_corrected_preview_removes_the_offset_and_switching_never_rerenders(client, tmp_path, monkeypatch):
     calls = []
     data = _render_delayed_pair(client, tmp_path, monkeypatch, calls)
@@ -2219,6 +2311,15 @@ def test_generated_bundle_session_carries_its_frozen_timing_intent(tmp_path, des
     assert session["settings"]["timing"] == expected
 
 
+def test_generated_parallel_session_carries_frozen_polarity(tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    session = app_module._session_from_manifest({
+        "mode": "blend", "design": {"mix_b": 0.5, "invert_b_polarity": True},
+    }, bundle)
+    assert session["settings"]["parallelPolarityInverted"] is True
+
+
 def test_unverified_diagnostic_cannot_enable_correction(client, tmp_path):
     amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
     _write_fake_nam(amp_a)
@@ -2301,3 +2402,8 @@ def test_render_survives_a_failing_cross_di_verification(client, tmp_path, monke
     assert data["alignment_diagnostic"]["status"] == "fixed_offset"
     assert data["alignment_verification"] is None
     assert data["timing_correction"] == {"available": False, "offset_samples": None}
+
+
+def test_templates_reload_when_changed_on_disk():
+    """app.js is always served fresh; a cached, older index.html would pair with it and break the page."""
+    assert app_module.app.config["TEMPLATES_AUTO_RELOAD"] is True

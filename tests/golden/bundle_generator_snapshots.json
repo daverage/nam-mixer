@@ -88,6 +88,7 @@
     "design_reference_profile_id": "vintage_humbucker",
     "frozen_effective_b_trim_db": -0.5,
     "instrument_type": "guitar",
+    "invert_b_polarity": false,
     "manual_trim_db": 0.5,
     "mix_a": 0.65,
     "mix_b": 0.35,
@@ -108,6 +109,7 @@
     "peak_before_output_gain_dbfs": -10.628799985,
     "requested_manual_gain_db": null
    },
+   "parallel_compatibility": null,
    "receptive_field": {
     "base_required_samples": null,
     "branch_samples": {
@@ -251,6 +253,7 @@
     "design_reference_profile_id": "vintage_humbucker",
     "frozen_effective_b_trim_db": -0.5,
     "instrument_type": "guitar",
+    "invert_b_polarity": false,
     "manual_trim_db": 0.5,
     "mix_a": 0.65,
     "mix_b": 0.35,
@@ -265,6 +268,7 @@
     "peak_before_output_gain_dbfs": -5.506169358,
     "requested_manual_gain_db": null
    },
+   "parallel_compatibility": null,
    "receptive_field": {
     "base_required_samples": null,
     "branch_samples": {
@@ -385,6 +389,7 @@
     "design_reference_profile_id": "vintage_humbucker",
     "frozen_effective_b_trim_db": -0.5,
     "instrument_type": "guitar",
+    "invert_b_polarity": false,
     "manual_trim_db": 0.5,
     "mix_a": 0.65,
     "mix_b": 0.35,
@@ -399,6 +404,7 @@
     "peak_before_output_gain_dbfs": -10.628799985,
     "requested_manual_gain_db": null
    },
+   "parallel_compatibility": null,
    "receptive_field": {
     "base_required_samples": null,
     "branch_samples": {
@@ -519,6 +525,7 @@
     "design_reference_profile_id": "vintage_humbucker",
     "frozen_effective_b_trim_db": -0.5,
     "instrument_type": "guitar",
+    "invert_b_polarity": false,
     "manual_trim_db": 0.5,
     "mix_a": 0.65,
     "mix_b": 0.35,
@@ -533,6 +540,7 @@
     "peak_before_output_gain_dbfs": -10.628799985,
     "requested_manual_gain_db": 3.0
    },
+   "parallel_compatibility": null,
    "receptive_field": {
     "base_required_samples": null,
     "branch_samples": {
@@ -653,6 +661,7 @@
     "design_reference_profile_id": "vintage_humbucker",
     "frozen_effective_b_trim_db": -0.5,
     "instrument_type": "guitar",
+    "invert_b_polarity": false,
     "manual_trim_db": 0.5,
     "mix_a": 0.65,
     "mix_b": 0.35,
@@ -667,6 +676,7 @@
     "peak_before_output_gain_dbfs": -10.628799985,
     "requested_manual_gain_db": 0.0
    },
+   "parallel_compatibility": null,
    "receptive_field": {
     "base_required_samples": null,
     "branch_samples": {

@@ -54,7 +54,7 @@ from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SEC
 from hybrid.modes.cab_embed_training_target import CabEmbedDesign, generate_cab_embed_training_bundle
 from hybrid.core.align import FIXED_FROZEN_OFFSET_METHOD, apply_fixed_offset
 from hybrid.core.align_diagnostic import DIAGNOSTIC_METHOD, analyse_alignment
-from hybrid.core.align_verification import verify_fixed_offset_across_dis
+from hybrid.core.align_verification import verification_di_files, verify_fixed_offset_across_dis
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.core.coverage import (
@@ -186,6 +186,9 @@ app = Flask(__name__)
 # training input while preventing an accidental or hostile unbounded upload
 # from exhausting the local process's memory/disk.
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024 * 1024
+# Re-read templates when they change on disk. app.js/style.css are always served fresh, so a long-running
+# server that kept an older index.html would pair it with newer scripts and break the page.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -1236,6 +1239,7 @@ def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
         "crossover": str(number(design.get("crossover_dbfs"), -20.0)),
         "transition": str(number(design.get("transition_width_db"), 8.0)),
         "mix": str(round(fraction(design.get("mix_b")) * 100)),
+        "parallelPolarityInverted": bool(design.get("invert_b_polarity", False)),
         "character": {"tone": str(round(fraction(design.get("tone_mix_b")) * 100)), "feel": str(round(fraction(design.get("feel_mix_b")) * 100)), "drive": str(round(fraction(design.get("drive_mix_b")) * 100))},
         "driveMorphEnabled": bool(design.get("drive_low_mix_b") is not None),
         "autoLevelMatch": True, "ampBTrim": str(number(design.get("manual_trim_db"))),
@@ -2662,7 +2666,8 @@ def api_mix_info():
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
-                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset)
+                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
+                                   invert_b_polarity=data.get("invert_b_polarity") is True)
         return jsonify({
             "mode": "blend",
             "mix_b": result.mix_b,
@@ -2671,6 +2676,8 @@ def api_mix_info():
             "manual_trim_db": result.manual_trim_db,
             "effective_b_trim_db": result.effective_b_trim_db,
             "alignment_offset_samples": result.alignment_offset_samples,
+            "invert_b_polarity": result.invert_b_polarity,
+            "parallel_compatibility": result.compatibility.to_dict() if result.compatibility else None,
         })
     elif mode == "character":
         try:
@@ -2701,6 +2708,125 @@ def api_mix_info():
         })
     else:
         return jsonify({"error": f"unknown mode: {mode!r} (expected 'hybrid', 'blend', or 'character')"}), 400
+
+
+def _summarise_parallel_verification(reports: list[dict]) -> dict:
+    """Turn per-performance checks into one truthful, actionable verdict."""
+    unusable_statuses = {"insufficient_signal", "insufficient_overlap"}
+    usable = [report for report in reports if report["status"] not in unusable_statuses]
+    tested = len(reports)
+    if len(usable) < 3:
+        return {
+            "status": "insufficient_evidence",
+            "summary": f"Only {len(usable)} of {tested} performances were usable, so no final safety verdict is available.",
+            "performances_usable": len(usable), "performances_tested": tested,
+            "problem_count": sum(report["status"] == "problem" for report in usable),
+            "recommended_polarity": None,
+        }
+
+    problem_count = sum(report["status"] == "problem" for report in usable)
+    colouration_count = sum(report["status"] == "colouration" for report in usable)
+    polarity_choices = {report["recommended_polarity"] for report in usable}
+    recommended_polarity = polarity_choices.pop() if len(polarity_choices) == 1 else None
+
+    if problem_count >= 2:
+        status = "confirmed_problem"
+        summary = f"Strong cancellation was found in {problem_count} of {len(usable)} performances."
+    elif problem_count == 1:
+        status = "performance_dependent_problem"
+        summary = (
+            f"Strong cancellation appeared in 1 of {len(usable)} performances. "
+            "The risk depends on what is played, so this mix is not consistently safe."
+        )
+    elif colouration_count:
+        status = "confirmed_colouration"
+        summary = (
+            f"Moderate phase coloration appeared in {colouration_count} of {len(usable)} performances, "
+            "but no strong cancellation was found."
+        )
+    else:
+        status = "confirmed_safe"
+        summary = f"No strong cancellation was found across all {len(usable)} performances."
+
+    if problem_count:
+        if recommended_polarity == "inverted":
+            summary += " Flipping Amp B fixed every checked performance and is the recommended choice."
+        elif recommended_polarity == "original":
+            summary += " Original Amp B polarity fixed every checked performance and is the recommended choice."
+        else:
+            summary += " Neither polarity was consistently safer."
+
+    return {
+        "status": status, "summary": summary,
+        "performances_usable": len(usable), "performances_tested": tested,
+        "problem_count": problem_count,
+        "recommended_polarity": recommended_polarity,
+    }
+
+
+@app.post("/api/parallel_compatibility/verify")
+@require_current_render_id
+def api_verify_parallel_compatibility():
+    """Confirm the current Parallel sum on independent bundled performances.
+
+    This is deliberately explicit and potentially slow: unlike `/api/mix_info`,
+    it performs NAM inference for two additional DIs.  The preview DI's exact
+    effective trim, mix, timing, and polarity are held fixed so this verifies
+    the design the user heard rather than quietly redesigning it per clip.
+    """
+    snapshot = _request_render_snapshot()
+    pair: RenderedPair = snapshot["pair"]
+    data = request.get_json(force=True)
+    try:
+        mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
+        align_enabled, alignment_offset = _parse_alignment_choice(data, snapshot)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    inverted = data.get("invert_b_polarity") is True
+    primary = build_fixed_blend(
+        pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+        align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
+        invert_b_polarity=inverted,
+    )
+
+    settings = snapshot["settings"]
+    render_kwargs = {
+        key: settings[key]
+        for key in (
+            "instrument_type", "input_profile_id", "input_profile_gain_db", "test_gain_db",
+            "calibration_mode", "reference_input_level_dbu", "amp_a_input_gain_db", "amp_b_input_gain_db",
+        )
+    }
+    try:
+        amp_a = load_nam(snapshot["amp_a_path"])
+        amp_b = load_nam(snapshot["amp_b_path"])
+    except (OSError, ValueError) as exc:
+        return jsonify({"error": f"could not reload retained amp sources for verification: {exc}"}), 400
+    reports = [{"di_file": snapshot["di_file"], **primary.compatibility.to_dict()}]
+    for di_file in verification_di_files(snapshot["di_file"])[:2]:
+        try:
+            dry, sample_rate = _load_di(di_file)
+            if sample_rate != pair.sample_rate:
+                continue
+            dry = dry[: int(20.0 * sample_rate)]
+            verification_pair = render_pair(amp_a, amp_b, dry, sample_rate, **render_kwargs)
+        except (OSError, ValueError, NamRenderError) as exc:
+            app.logger.warning("parallel compatibility verification failed for %s: %s", di_file, exc)
+            continue
+        result = build_fixed_blend(
+            verification_pair, mix_b=mix_b, auto_level=False,
+            manual_b_trim_db=primary.effective_b_trim_db,
+            align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
+            invert_b_polarity=inverted,
+        )
+        reports.append({"di_file": di_file, **result.compatibility.to_dict()})
+
+    verdict = _summarise_parallel_verification(reports)
+    return jsonify({
+        **verdict,
+        "polarity_recommended": verdict["recommended_polarity"] == "inverted",
+        "per_di": reports,
+    })
 
 
 @app.route("/api/blend_curve", methods=["POST"])
@@ -2815,7 +2941,9 @@ def api_preview():
             return jsonify({"error": str(exc)}), 400
 
         result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
-                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset)
+                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
+                                   invert_b_polarity=data.get("invert_b_polarity") is True,
+                                   analyse_compatibility=False)   # the verdict comes from /api/mix_info
         audio = result.blend
         headers = {
             "X-Mix-B": f"{result.mix_b:.4f}",
@@ -2823,6 +2951,7 @@ def api_preview():
             "X-Manual-Trim-Db": f"{result.manual_trim_db:.3f}",
             "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
             "X-Alignment-Offset-Samples": str(result.alignment_offset_samples),
+            "X-Amp-B-Polarity-Inverted": "true" if result.invert_b_polarity else "false",
         }
     elif source == "character":
         try:
@@ -2911,11 +3040,14 @@ def api_live_blend_stems():
     result = build_fixed_blend(
         pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
         align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
+        invert_b_polarity=data.get("invert_b_polarity") is True, analyse_compatibility=False,
     )
     n = min(len(pair.amp_a), len(pair.amp_b), len(pair.envelope_db))
     amp_a = pair.amp_a[:n].astype(np.float32)
     amp_b_timed = apply_fixed_offset(pair.amp_b, result.alignment_offset_samples, len(pair.amp_a))
     amp_b = amp_b_timed[:n].astype(np.float32) * (10.0 ** (result.effective_b_trim_db / 20.0))
+    if result.invert_b_polarity:
+        amp_b = -amp_b
 
     try:
         cab = _parse_cab_params(data, pair.sample_rate)
@@ -2951,6 +3083,7 @@ def api_live_blend_stems():
     return Response(buf.read(), mimetype="audio/wav", headers={
         "X-Auto-Trim-Db": f"{result.auto_trim_db:.3f}",
         "X-Effective-Trim-Db": f"{result.effective_b_trim_db:.3f}",
+        "X-Amp-B-Polarity-Inverted": "true" if result.invert_b_polarity else "false",
         "X-Output-Gain-Mode": output_gain_mode,
         "X-Output-Gain-Db": f"{output_gain_db:.3f}",
         "X-Live-Audition": "fixed-blend-stems",
@@ -3178,7 +3311,8 @@ def api_generate():
         # The exact auditioned timing choice is frozen; target generation
         # applies that integer verbatim (hybrid/core/align.py).
         result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
-                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset)
+                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
+                                   invert_b_polarity=data.get("invert_b_polarity") is True)
         design = freeze_blend_design(
             pair, result,
             amp_a_path=amp_a_path, amp_b_path=amp_b_path,

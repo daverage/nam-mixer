@@ -92,6 +92,7 @@ def build_blend_training_manifest(
             "original_auto_trim_db": design.auto_trim_db,
             "manual_trim_db": design.manual_b_trim_db,
             "frozen_effective_b_trim_db": design.effective_b_trim_db,
+            "invert_b_polarity": design.invert_b_polarity,
             "alignment_enabled": design.alignment_enabled,
             "alignment_offset_samples": alignment_offset_samples,
             "design_di_file": design.design_di_file,
@@ -107,6 +108,7 @@ def build_blend_training_manifest(
         "receptive_field": receptive_field,
         "alignment_correction": manifest_alignment_record(design, alignment_offset_samples),
         "alignment_diagnostic": design.alignment_diagnostic,
+        "parallel_compatibility": design.parallel_compatibility,
         "warnings": warnings,
     }
 
@@ -159,6 +161,8 @@ def generate_blend_training_bundle(
     n = min(len(amp_a_render), len(amp_b_aligned))
     a = amp_a_render[:n]
     b = amp_b_aligned[:n] * (10.0 ** (design.effective_b_trim_db / 20.0))  # frozen -- not recomputed
+    if design.invert_b_polarity:
+        b = -b
     mix_b = design.mix_b
     blend_raw = (a * (1.0 - mix_b) + b * mix_b).astype(np.float32)
 

@@ -155,7 +155,8 @@ def render_reference_blend(design: BlendDesign, dry: np.ndarray, sample_rate: in
     pair = SimpleNamespace(dry=dry, amp_a=a, amp_b=b, envelope_db=np.zeros(len(dry)), sample_rate=sample_rate)
     offset = frozen_alignment_offset(design)
     result = build_fixed_blend(pair, mix_b=design.mix_b, auto_level=False, manual_b_trim_db=design.effective_b_trim_db,
-                               align_enabled=bool(offset), alignment_offset_samples=offset)
+                               align_enabled=bool(offset), alignment_offset_samples=offset,
+                               invert_b_polarity=design.invert_b_polarity, analyse_compatibility=False)
     return ReferenceHybridResult(result.blend, a, b, np.zeros(len(result.blend)), result.alignment_offset_samples)
 
 

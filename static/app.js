@@ -254,12 +254,16 @@ function applyModeVisibility() {
   modePanels.forEach((el) => {
     el.hidden = el.dataset.modePanel !== currentMode;
   });
-  btnPreviewMix.textContent = currentMode === "blend" ? "Blend" : currentMode === "character" ? "Character" : "Hybrid";
+  btnPreviewMix.textContent = currentMode === "blend" ? "Parallel mix" : currentMode === "character" ? "Character" : "Hybrid";
   autoLevelMatchLabel.textContent = currentMode === "blend" ? BLEND_LEVEL_MATCH_LABEL : HYBRID_LEVEL_MATCH_LABEL;
   createA2Title.textContent = currentMode === "blend" ? "Make a Blend A2" : currentMode === "character" ? "Make a Character A2" : "Make a Hybrid A2";
   createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : currentMode === "character" ? CHARACTER_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
   const auditionMode = document.getElementById("audition-mode");
   auditionMode.textContent = currentMode === "blend" ? "Always mixed" : currentMode === "character" ? "Combine tone and feel" : "Changes as you play harder";
+  const auditionIntro = document.getElementById("audition-intro-shape");
+  auditionIntro.textContent = currentMode === "blend"
+    ? "Use this player to compare Amp A, the Parallel mix, and Amp B. The polarity controls in Always-on mix also play their choice here."
+    : "Adjust the controls below, then compare Amp A, your result, and Amp B at the same level.";
   modeDescription.textContent = currentMode === "blend"
     ? "Both amps are present all the time at one fixed ratio. Use this for a permanent mixed rig."
     : currentMode === "character"
@@ -657,15 +661,16 @@ function timingChoiceHint(n) {
 function timingEvidenceLines(render) {
   const diagnostic = render.alignment_diagnostic;
   const verification = render.alignment_verification;
-  const regions = diagnostic.windows.length
-    ? diagnostic.windows.map((w) => `${signedSamples(w.offset_samples)}${w.reliable ? "" : "*"}`).join(", ")
-    : "none";
+  const reliableRegions = diagnostic.windows.filter((w) => w.reliable);
+  const regions = reliableRegions.length
+    ? reliableRegions.map((w) => signedSamples(w.offset_samples)).join(", ")
+    : "none — rejected comparisons are hidden because their offsets are not meaningful";
   const lines = [
     `Preview DI: ${diagnostic.reason}`,
-    `Amp B offset per region (samples; + = Amp B later than Amp A): ${regions}` +
-      (diagnostic.windows.some((w) => !w.reliable) ? " — * too dissimilar to count" : ""),
+    `Usable Amp B offsets (samples; + = Amp B later than Amp A): ${regions}`,
     `${diagnostic.windows_reliable} of ${diagnostic.windows_analysed} regions usable, ` +
-      `agreement ${Math.round(diagnostic.agreement_fraction * 100)}%, search ±${diagnostic.max_lag_samples} samples.`,
+      `${diagnostic.windows_reliable ? `agreement ${Math.round(diagnostic.agreement_fraction * 100)}%` : "agreement not applicable"}, ` +
+      `search ±${diagnostic.max_lag_samples} samples.`,
   ];
   if (verification && verification.status !== "not_run") {
     lines.push(`Other DIs: ${verification.reason}`);
@@ -742,6 +747,7 @@ document.querySelectorAll(".timing-choice [data-timing]").forEach((button) => {
 });
 
 function markProfileStale(reason, { preserveAudition = false } = {}) {
+  clearParallelVerification();
   const wasCurrentPreview = havePair;
   if (!preserveAudition) pendingAuditionResume = null;
   resetGeneratedModel("The source or input settings changed. Create new training files when you are happy with the new sound.");
@@ -1016,6 +1022,215 @@ syncPresetButtonStates();
 
 const mixSlider = document.getElementById("mix-slider");
 const mixValue = document.getElementById("mix-value");
+let parallelPolarityInverted = false;
+const parallelCompatibility = document.getElementById("parallel-compatibility");
+const parallelCompatibilitySummary = document.getElementById("parallel-compatibility-summary");
+const parallelCompatibilityExplanation = document.getElementById("parallel-compatibility-explanation");
+const parallelPresenceSummary = document.getElementById("parallel-presence-summary");
+const parallelPolarityRecommendation = document.getElementById("parallel-polarity-recommendation");
+const parallelCompatibilityDetails = document.getElementById("parallel-compatibility-details");
+const parallelPlayButton = document.getElementById("btn-parallel-play");
+const parallelPlayerHint = document.getElementById("parallel-player-hint");
+const parallelVerifyButton = document.getElementById("btn-parallel-verify");
+const parallelVerificationResult = document.getElementById("parallel-verification-result");
+const parallelNextAction = document.getElementById("parallel-next-action");
+const parallelNextActionTitle = document.getElementById("parallel-next-action-title");
+const parallelNextActionText = document.getElementById("parallel-next-action-text");
+const parallelApplyPolarityButton = document.getElementById("btn-parallel-apply-polarity");
+const parallelRatioActions = document.getElementById("parallel-ratio-actions");
+let parallelVerificationRequestId = 0;
+let recommendedParallelPolarity = null;
+
+function clearParallelVerification() {
+  parallelVerificationRequestId += 1;
+  parallelVerificationResult.hidden = true;
+  parallelVerificationResult.textContent = "";
+  parallelVerificationResult.removeAttribute("data-status");
+  parallelNextAction.hidden = true;
+  parallelApplyPolarityButton.hidden = true;
+  parallelRatioActions.hidden = true;
+  recommendedParallelPolarity = null;
+}
+
+function syncParallelPolarityButtons() {
+  document.querySelectorAll("[data-parallel-polarity]").forEach((button) => {
+    const inverted = button.dataset.parallelPolarity === "inverted";
+    button.setAttribute("aria-pressed", String(inverted === parallelPolarityInverted));
+  });
+}
+
+function renderParallelCompatibility(report) {
+  if (!report) {
+    parallelCompatibility.hidden = true;
+    return;
+  }
+  parallelCompatibility.hidden = false;
+  parallelVerifyButton.disabled = false;
+  parallelPlayButton.disabled = false;
+  parallelCompatibility.dataset.status = report.status;
+  const verdictLabels = {
+    safe: "First check: no strong cancellation in this clip",
+    colouration: "First check: some phase coloration",
+    problem: "First check: cancellation needs attention",
+  };
+  parallelCompatibilitySummary.textContent = verdictLabels[report.status] || "First check: not enough evidence";
+  parallelCompatibilityExplanation.textContent =
+    `${report.summary} This is not the final verdict; run the full safety check below.`;
+  parallelPresenceSummary.textContent = report.presence_summary;
+  parallelPolarityRecommendation.hidden = false;
+  if (report.recommended_polarity === "inverted") {
+    parallelPolarityRecommendation.textContent = parallelPolarityInverted
+      ? "Recommended fix selected: Amp B polarity is flipped for this parallel mix."
+      : "Suggested fix: flip Amp B polarity. It removes the strong cancellation on this performance; compare both choices by ear.";
+  } else if (report.recommended_polarity === "original") {
+    parallelPolarityRecommendation.textContent = parallelPolarityInverted
+      ? "Suggested fix: restore Original polarity. It removes the strong cancellation on this performance; compare both choices by ear."
+      : "Recommended polarity is selected: Original avoids the measured cancellation.";
+  } else if (parallelPolarityInverted) {
+    parallelPolarityRecommendation.textContent =
+      "Flipped polarity is selected, but the analyser did not find it clearly safer than Original on this performance. Compare both by ear.";
+  } else {
+    parallelPolarityRecommendation.hidden = true;
+    parallelPolarityRecommendation.textContent = "";
+  }
+  const worst = report.worst_band;
+  const worstText = worst
+    ? `Worst shared band: ${worst.low_hz}–${worst.high_hz} Hz, ${worst.interaction_db.toFixed(1)} dB interaction.`
+    : "No shared band could be scored reliably.";
+  parallelCompatibilityDetails.textContent =
+    `${worstText} Analysed ${report.frames_analysed} active frames from this performance. ` +
+    "This checks the actual weighted sum; run the full safety check to confirm it on other performances.";
+  syncParallelPolarityButtons();
+}
+
+document.querySelectorAll("[data-parallel-polarity]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const inverted = button.dataset.parallelPolarity === "inverted";
+    const changed = inverted !== parallelPolarityInverted;
+    if (changed) {
+      parallelPolarityInverted = inverted;
+      syncParallelPolarityButtons();
+      scheduleUpdate();
+    }
+    parallelPlayerHint.textContent = `Loading ${inverted ? "flipped Amp B" : "Original polarity"} in the player…`;
+    if (liveAudition.active) startLiveBlend();
+    else preview("mix", { playWhenReady: true });
+  });
+});
+syncParallelPolarityButtons();
+
+function showParallelRatioActions() {
+  const currentB = parseInt(mixSlider.value, 10);
+  parallelRatioActions.querySelectorAll("[data-parallel-ratio-delta]").forEach((button) => {
+    const nextB = Math.max(10, Math.min(90, currentB + parseInt(button.dataset.parallelRatioDelta, 10)));
+    button.dataset.parallelRatioValue = String(nextB);
+    button.textContent = nextB < currentB
+      ? `Try more Amp A (${100 - nextB}/${nextB})`
+      : `Try more Amp B (${100 - nextB}/${nextB})`;
+    button.disabled = nextB === currentB;
+  });
+  parallelRatioActions.hidden = false;
+}
+
+function renderParallelVerification(data) {
+  const labels = {
+    confirmed_safe: "Full check: no strong cancellation found",
+    confirmed_colouration: "Full check: some coloration, no strong cancellation",
+    performance_dependent_problem: "Full check: not consistently safe",
+    confirmed_problem: "Full check: strong cancellation",
+    insufficient_evidence: "Full check: not enough evidence",
+  };
+  const problem = data.status === "confirmed_problem" || data.status === "performance_dependent_problem";
+  parallelCompatibility.dataset.status = problem ? "problem" : data.status === "confirmed_colouration" ? "colouration" : "safe";
+  parallelCompatibilitySummary.textContent = labels[data.status] || "Full check complete";
+  parallelCompatibilityExplanation.textContent = data.summary;
+  parallelPolarityRecommendation.hidden = true;
+  parallelPolarityRecommendation.textContent = "";
+  parallelVerificationResult.dataset.status = data.status;
+  parallelVerificationResult.textContent =
+    `${data.performances_usable} of ${data.performances_tested} performances assessed.`;
+  parallelNextAction.hidden = false;
+  parallelApplyPolarityButton.hidden = true;
+  parallelRatioActions.hidden = true;
+  recommendedParallelPolarity = data.recommended_polarity || null;
+
+  if (recommendedParallelPolarity) {
+    const wantsInverted = recommendedParallelPolarity === "inverted";
+    const alreadySelected = wantsInverted === parallelPolarityInverted;
+    parallelNextActionTitle.textContent = alreadySelected ? "Recommended fix is selected" : "Recommended next action";
+    parallelNextActionText.textContent = alreadySelected
+      ? `Keep ${wantsInverted ? "Amp B flipped" : "Original polarity"}; it was the safer choice on every checked performance.`
+      : `Apply ${wantsInverted ? "Amp B flipped" : "Original polarity"}. It was the safer choice on every checked performance.`;
+    if (!alreadySelected) {
+      parallelApplyPolarityButton.hidden = false;
+      parallelApplyPolarityButton.textContent = `Apply and play ${wantsInverted ? "Amp B flipped" : "Original polarity"}`;
+    }
+  } else if (problem) {
+    parallelNextActionTitle.textContent = "Next: reduce the overlap, then re-check";
+    parallelNextActionText.textContent =
+      "Neither polarity was consistently safer. Choose which amp should lead; the tool will move the mix 10% toward it and play the result. Then run the full safety check again.";
+    showParallelRatioActions();
+  } else if (data.status === "insufficient_evidence") {
+    parallelNextActionTitle.textContent = "Use your ears for this pair";
+    parallelNextActionText.textContent =
+      "The tool could not gather enough usable evidence. Compare Original and Amp B flipped above and keep the fuller, more stable result.";
+  } else {
+    parallelNextActionTitle.textContent = "No correction required";
+    parallelNextActionText.textContent =
+      "Keep the current mix. You can still compare both polarity choices by ear if you prefer the sound of one.";
+  }
+}
+
+parallelApplyPolarityButton.addEventListener("click", () => {
+  if (!recommendedParallelPolarity) return;
+  const button = document.querySelector(`[data-parallel-polarity="${recommendedParallelPolarity}"]`);
+  if (button) button.click();
+});
+
+parallelRatioActions.querySelectorAll("[data-parallel-ratio-delta]").forEach((button) => {
+  button.addEventListener("click", () => {
+    mixSlider.value = button.dataset.parallelRatioValue;
+    updateMixValueLabel();
+    if (liveAudition.active) liveAudition.setMix(parseInt(mixSlider.value, 10) / 100.0);
+    scheduleUpdate();
+    parallelPlayerHint.textContent = "Loading the adjusted Parallel mix in the player…";
+    preview("mix", { playWhenReady: true });
+  });
+});
+
+parallelPlayButton.addEventListener("click", () => {
+  if (!havePair) return;
+  parallelPlayerHint.textContent = "Loading the current Parallel mix in the player…";
+  preview("mix", { playWhenReady: true });
+});
+
+parallelVerifyButton.addEventListener("click", async () => {
+  if (!havePair) return;
+  const requestId = ++parallelVerificationRequestId;
+  parallelVerifyButton.disabled = true;
+  parallelVerificationResult.hidden = false;
+  parallelVerificationResult.textContent = "Checking two independent performances…";
+  try {
+    const response = await fetch("/api/parallel_compatibility/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ render_id: activeRenderId, ...blendParamsBody() }),
+    });
+    const data = await response.json();
+    if (requestId !== parallelVerificationRequestId) return;
+    if (!response.ok) throw new Error(data.error || "verification failed");
+    renderParallelVerification(data);
+    parallelCompatibilityDetails.textContent = parallelCompatibilityDetails.textContent.replace(/ Cross-performance check:.*/, "") +
+      ` Cross-performance check: ${data.performances_usable}/${data.performances_tested} performances usable — ${data.summary}`;
+  } catch (error) {
+    if (requestId !== parallelVerificationRequestId) return;
+    parallelVerificationResult.dataset.status = "error";
+    parallelVerificationResult.textContent = "Could not confirm the blend: " + error.message;
+  } finally {
+    if (requestId === parallelVerificationRequestId) parallelVerifyButton.disabled = !havePair;
+  }
+});
+
 function updateMixValueLabel() {
   const b = parseInt(mixSlider.value, 10);
   mixValue.textContent = `Amp A ${100 - b}% / Amp B ${b}%`;
@@ -1136,13 +1351,15 @@ function recipeAiStatusView(data, ok = true) {
 
 function showRecipeAiStatus(view) {
   localRecipeAiAvailable = view.ready;
+  if (!recipeAiStatus || !recipeAiStatusText || !recipeAiSettingsButton) return;   // page markup older than this script
   recipeAiStatus.dataset.state = view.state;
   recipeAiStatusText.textContent = view.text;
   recipeAiSettingsButton.hidden = !view.settings;
   [recipeUseWebResearch, recipeUseTone3000, recipeTone3000RigScope, recipeTone3000Author].forEach((control) => {
     control.disabled = !view.ready;
   });
-  document.querySelector(".recipe-research-controls").title = view.ready ? "" : "Research needs an AI that's ready.";
+  const researchControls = document.querySelector(".recipe-research-controls");
+  if (researchControls) researchControls.title = view.ready ? "" : "Research needs an AI that's ready.";
   recipePromptApplyButton.textContent = view.ready ? "Ask AI" : "Create recipe";
 }
 
@@ -1155,7 +1372,7 @@ async function loadLocalRecipeAiStatus() {
     showRecipeAiStatus(recipeAiStatusView(null, false));
   }
 }
-recipeAiSettingsButton.addEventListener("click", () => document.getElementById("tab-settings").click());
+recipeAiSettingsButton?.addEventListener("click", () => document.getElementById("tab-settings").click());
 loadLocalRecipeAiStatus();
 
 function selectedWizardBehaviour() {
@@ -1754,10 +1971,18 @@ function clearAudition() {
   lastSourcePlayed = null;
 }
 
+// Set when a control changes while the player is paused: the loaded audio no longer matches the controls
+// (e.g. a cabinet was just added), so the next press of play fetches the current version first.
+let auditionNeedsRefresh = false;
+
 function scheduleAuditionRefresh(source = lastPreviewSource) {
   // Refresh can follow an explicit play action, but controls must never cause
   // sound to start by themselves.
-  if (!source || !havePair || !autoAuditionToggle.checked || liveAudition.active || player.paused) return;
+  if (!source || !havePair || !autoAuditionToggle.checked || liveAudition.active) return;
+  if (player.paused) {
+    auditionNeedsRefresh = true;
+    return;
+  }
   clearTimeout(auditionRefreshTimer);
   auditionRefreshTimer = setTimeout(() => preview(source, { preservePosition: true, quiet: true }), 140);
 }
@@ -1937,6 +2162,7 @@ function blendParamsBody() {
     mix_b: parseInt(mixSlider.value, 10) / 100.0,
     auto_level: document.getElementById("auto-level-match").checked,
     manual_b_trim_db: parseFloat(ampBTrimSlider.value) || 0.0,
+    invert_b_polarity: parallelPolarityInverted,
     ...timingParamsBody(),
   };
 }
@@ -2038,6 +2264,7 @@ function updateOutputGainReadout(headers) {
 
 function scheduleUpdate() {
   resetGeneratedModel("The sound changed. Create new training files before starting another training run.");
+  if (currentMode === "blend") clearParallelVerification();
   if (!havePair) return;
   clearTimeout(updateTimer);
   updateTimer = setTimeout(() => {
@@ -2064,7 +2291,10 @@ async function updateTrimReadout() {
     if (data.mode === "character") {
       document.getElementById("character-readout").textContent =
         `Drive donor trajectory: ${Math.round(data.drive_weight_b_min * 100)}–${Math.round(data.drive_weight_b_max * 100)}% Amp B.`;
-    } else trimReadout.textContent = `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
+    } else {
+      trimReadout.textContent = `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
+      if (data.mode === "blend") renderParallelCompatibility(data.parallel_compatibility);
+    }
   } catch (err) {
     trimReadout.textContent = "Trim update failed: " + err;
   }
@@ -2328,7 +2558,14 @@ journeyCanvas.addEventListener("mouseleave", () => {
 });
 
 player.addEventListener("timeupdate", () => { if (lastSourcePlayed) drawJourney(); });
-player.addEventListener("play", () => drawJourney());
+player.addEventListener("play", () => {
+  drawJourney();
+  if (auditionNeedsRefresh && lastPreviewSource && havePair && !liveAudition.active) {
+    // Don't play stale audio: stop, fetch the audio for the current controls, then play from the same spot.
+    player.pause();
+    preview(lastPreviewSource, { preservePosition: true, quiet: true, playWhenReady: true });
+  }
+});
 player.addEventListener("pause", () => drawJourney());
 player.addEventListener("ended", () => drawJourney());
 window.addEventListener("resize", () => drawJourney());
@@ -2490,12 +2727,13 @@ renderPairBtn.addEventListener("click", async () => {
 
 let lastPreviewSource = null;
 
-async function preview(requestedSource, { preservePosition = false, quiet = false, resumeState = null } = {}) {
+async function preview(requestedSource, { preservePosition = false, quiet = false, resumeState = null, playWhenReady = false } = {}) {
   if (!havePair || !activeRenderId) return;
   // "mix" means "whichever design mode's combined result is active" --
   // resolves to the active design source without a separate approximation.
   const source = requestedSource === "mix" ? currentMode : requestedSource;
   lastPreviewSource = requestedSource;
+  auditionNeedsRefresh = false;
   const requestId = ++previewRequestId;
   const wasPlaying = resumeState ? resumeState.playing : !player.paused;
   const resumeAt = resumeState ? resumeState.position : preservePosition && Number.isFinite(player.currentTime) ? player.currentTime : 0;
@@ -2534,7 +2772,14 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
     player.onloadedmetadata = () => {
       if (requestId !== previewRequestId) return;
       if (resumeAt > 0 && player.duration) player.currentTime = Math.min(resumeAt, Math.max(0, player.duration - 0.02));
-      if (wasPlaying) player.play();
+      if (wasPlaying || playWhenReady) {
+        const playRequest = player.play();
+        if (playRequest && typeof playRequest.catch === "function") {
+          playRequest.catch(() => {
+            if (!quiet) setStatus("The preview is ready in the player. Press play to hear it.");
+          });
+        }
+      }
     };
     if (!quiet) setStatus(`Playing ${source.toUpperCase()}.`);
   } catch (err) {
@@ -2543,9 +2788,9 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
   }
 }
 
-document.getElementById("btn-preview-a").addEventListener("click", () => preview("a"));
-document.getElementById("btn-preview-mix").addEventListener("click", () => preview("mix"));
-document.getElementById("btn-preview-b").addEventListener("click", () => preview("b"));
+document.getElementById("btn-preview-a").addEventListener("click", () => preview("a", { playWhenReady: true }));
+document.getElementById("btn-preview-mix").addEventListener("click", () => preview("mix", { playWhenReady: true }));
+document.getElementById("btn-preview-b").addEventListener("click", () => preview("b", { playWhenReady: true }));
 liveBlendButton.addEventListener("click", startLiveBlend);
 const trainingInputFile = document.getElementById("training-input-file");
 const trainingInputStatus = document.getElementById("training-input-status");
@@ -3590,6 +3835,7 @@ function collectSessionSettings() {
     crossover: crossoverSlider.value,
     transition: transitionSlider.value,
     mix: mixSlider.value,
+    parallelPolarityInverted,
     character: Object.fromEntries(
       characterSliders.map((name) => [name, document.getElementById(`${name}-slider`).value])
     ),
@@ -3645,6 +3891,8 @@ function applySessionSettings(s) {
   syncPresetButtonStates();
   mixSlider.value = s.mix;
   updateMixValueLabel();
+  parallelPolarityInverted = s.parallelPolarityInverted === true;
+  syncParallelPolarityButtons();
 
   characterSliders.forEach((name) => {
     const slider = document.getElementById(`${name}-slider`);

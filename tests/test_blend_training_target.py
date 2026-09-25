@@ -92,6 +92,22 @@ def test_manifest_records_mode_blend_and_mix(tmp_path):
     assert abs(bundle.manifest["design"]["mix_a"] - 0.65) < 1e-9
 
 
+def test_frozen_polarity_flip_is_applied_to_target_and_manifest(tmp_path):
+    amp_a, amp_b = _write_nam(tmp_path / "a.nam"), _write_nam(tmp_path / "b.nam")
+    training_input = _write_training_input(tmp_path / "input.wav")
+    design = _design(
+        amp_a, amp_b, mix_b=1.0, auto_trim_db=0.0, manual_b_trim_db=0.0,
+        effective_b_trim_db=0.0, invert_b_polarity=True,
+    )
+
+    bundle = generate_blend_training_bundle(design, training_input, tmp_path / "bundle")
+    official_input, _ = sf.read(training_input, dtype="float32")
+    target, _ = sf.read(bundle.hybrid_target_raw_path, dtype="float32")
+    np.testing.assert_allclose(target, -official_input, atol=1e-6)
+    assert bundle.manifest["design"]["invert_b_polarity"] is True
+    assert "parallel_compatibility" in bundle.manifest
+
+
 def test_frozen_effective_trim_is_reused_not_recomputed(tmp_path):
     """Target generation must use design.effective_b_trim_db verbatim, never
     recompute an active-playing trim against the official training input."""

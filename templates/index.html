@@ -445,15 +445,71 @@
         <div class="info">
           Both amps stay present at this ratio, no matter how hard you play.
         </div>
-        <div class="timing-readout" aria-live="polite" hidden>
-          <div class="timing-readout-summary"></div>
-          <div class="timing-readout-note" hidden></div>
-          <div class="preset-row timing-choice" role="group" aria-label="Amp B timing" hidden>
-            <button type="button" class="preset-btn" data-timing="original" aria-pressed="true">Original</button>
-            <button type="button" class="preset-btn" data-timing="corrected" aria-pressed="false">Corrected</button>
+        <div id="parallel-compatibility" class="parallel-compatibility" aria-live="polite" hidden>
+          <div class="parallel-verdict">
+            <div class="eyebrow">Parallel safety</div>
+            <div id="parallel-compatibility-summary" class="parallel-compatibility-summary"></div>
+            <div id="parallel-compatibility-explanation" class="parallel-compatibility-explanation"></div>
+            <div id="parallel-presence-summary" class="parallel-presence-summary"></div>
           </div>
-          <div class="timing-choice-hint" hidden></div>
-          <details class="advanced timing-readout-details"><summary>Timing evidence</summary><div class="info timing-readout-body"></div></details>
+
+          <div class="parallel-step">
+            <span class="parallel-step-number" aria-hidden="true">1</span>
+            <div class="parallel-step-content">
+              <strong>Hear both amps together</strong>
+              <p>Play the current Parallel mix in the main player below. Use headphones or monitors and listen for hollow, thin, or swirly changes.</p>
+              <button type="button" id="btn-parallel-play" class="btn btn-primary">Play current Parallel mix</button>
+              <span id="parallel-player-hint" class="parallel-player-hint" aria-live="polite">Playback opens in the Compare the sound player.</span>
+            </div>
+          </div>
+
+          <div class="parallel-step">
+            <span class="parallel-step-number" aria-hidden="true">2</span>
+            <div class="parallel-step-content">
+              <strong>Compare polarity</strong>
+              <p>If the verdict warns about cancellation—or the mix sounds hollow—play both choices. Keep the fuller, more stable sound.</p>
+              <div id="parallel-polarity-recommendation" class="parallel-action-note" hidden></div>
+              <div class="preset-row parallel-polarity-choice" role="group" aria-label="Play Amp B polarity choices">
+                <button type="button" class="preset-btn" data-parallel-polarity="original" aria-pressed="true">▶ Play Original</button>
+                <button type="button" class="preset-btn" data-parallel-polarity="inverted" aria-pressed="false">▶ Play Amp B flipped</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="parallel-step">
+            <span class="parallel-step-number" aria-hidden="true">3</span>
+            <div class="parallel-step-content">
+              <strong>Get the final safety verdict</strong>
+              <p>The first result only covers the preview clip. Check two more performances before deciding that the mix is safe.</p>
+              <button type="button" id="btn-parallel-verify" class="btn btn-primary" disabled>Run full safety check</button>
+              <div id="parallel-verification-result" class="parallel-action-note" hidden></div>
+              <div id="parallel-next-action" class="parallel-next-action" hidden>
+                <strong id="parallel-next-action-title"></strong>
+                <p id="parallel-next-action-text"></p>
+                <button type="button" id="btn-parallel-apply-polarity" class="btn btn-primary" hidden></button>
+                <div id="parallel-ratio-actions" class="preset-row" hidden>
+                  <button type="button" class="preset-btn" data-parallel-ratio-delta="-10"></button>
+                  <button type="button" class="preset-btn" data-parallel-ratio-delta="10"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <details class="advanced parallel-evidence">
+            <summary>Technical evidence</summary>
+            <div id="parallel-compatibility-details" class="info"></div>
+            <div class="parallel-fixed-latency-label">Fixed latency</div>
+            <div class="timing-readout" aria-live="polite" hidden>
+              <div class="timing-readout-summary"></div>
+              <div class="timing-readout-note" hidden></div>
+              <div class="preset-row timing-choice" role="group" aria-label="Amp B timing" hidden>
+                <button type="button" class="preset-btn" data-timing="original" aria-pressed="true">Original timing</button>
+                <button type="button" class="preset-btn" data-timing="corrected" aria-pressed="false">Corrected timing</button>
+              </div>
+              <div class="timing-choice-hint" hidden></div>
+              <div class="info timing-readout-body"></div>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -509,7 +565,7 @@
       <section class="card audition-card workflow-stage workflow-compare workflow-shape">
         <div class="audition-heading"><div><div class="eyebrow compare-only">Start here</div><div class="eyebrow shape-only">Compare the sound</div><h2><span class="compare-only">Hear your two amps</span><span class="shape-only">Compare the sound</span></h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
         <p class="audition-intro compare-only">Listen to each amp on the same performance before deciding how they should combine.</p>
-        <p class="audition-intro shape-only">Adjust the controls below, then compare Amp A, your result, and Amp B at the same level.</p>
+        <p id="audition-intro-shape" class="audition-intro shape-only">Adjust the controls below, then compare Amp A, your result, and Amp B at the same level.</p>
         <div class="preview-row">
           <button id="btn-preview-a" class="btn btn-amp" disabled><span class="dot dot-a"></span>Amp A</button>
           <button id="btn-preview-mix" class="btn btn-amp btn-hybrid shape-only" disabled>Hybrid</button>

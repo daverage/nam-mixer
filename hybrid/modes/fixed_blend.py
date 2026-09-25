@@ -30,6 +30,7 @@ from .blend import DEFAULT_TRANSITION_WIDTH_DB  # noqa: F401 -- re-exported for 
 from ..core.cab_ir import CabDesign
 from ..core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from ..core.coverage import ACTIVE_SIGNAL_THRESHOLD_DBFS, active_signal_mask
+from ..core.parallel_phase import ParallelCompatibility, analyse_parallel_with_polarity_choice
 
 @dataclass
 class BlendLevelMatchResult:
@@ -81,6 +82,8 @@ class BlendResult:
     manual_trim_db: float
     effective_b_trim_db: float
     alignment_offset_samples: int
+    invert_b_polarity: bool
+    compatibility: Optional[ParallelCompatibility]
     level_match: Optional[BlendLevelMatchResult]
 
 
@@ -91,6 +94,8 @@ def build_fixed_blend(
     manual_b_trim_db: float = 0.0,
     align_enabled: bool = False,
     alignment_offset_samples: int = 0,
+    invert_b_polarity: bool = False,
+    analyse_compatibility: bool = True,
 ) -> BlendResult:
     """Combine an already-rendered amp pair at a FIXED mix ratio. Cheap --
     pure numpy, safe to call on every mix-slider move without re-running NAM
@@ -116,9 +121,16 @@ def build_fixed_blend(
         auto_trim_db = level_match_result.suggested_b_trim_db
 
     effective_b_trim_db = auto_trim_db + manual_b_trim_db
-    b_trimmed = b * (10.0 ** (effective_b_trim_db / 20.0))
+    b_trimmed_original = b * (10.0 ** (effective_b_trim_db / 20.0))
+    b_trimmed = -b_trimmed_original if invert_b_polarity else b_trimmed_original
 
     blended = a * (1.0 - mix_b) + b_trimmed * mix_b
+    compatibility = None
+    if analyse_compatibility:
+        compatibility = analyse_parallel_with_polarity_choice(
+            a * (1.0 - mix_b), b_trimmed_original * mix_b, pair.sample_rate,
+            polarity_inverted=bool(invert_b_polarity),
+        )
 
     return BlendResult(
         blend=blended,
@@ -127,6 +139,8 @@ def build_fixed_blend(
         manual_trim_db=manual_b_trim_db,
         effective_b_trim_db=effective_b_trim_db,
         alignment_offset_samples=offset,
+        invert_b_polarity=bool(invert_b_polarity),
+        compatibility=compatibility,
         level_match=level_match_result,
     )
 
@@ -153,6 +167,10 @@ class BlendDesign:
     auto_trim_db: float = 0.0
     manual_b_trim_db: float = 0.0
     effective_b_trim_db: float = 0.0
+    invert_b_polarity: bool = False
+    # Provenance from the auditioned DI at the frozen ratio/trim/polarity.
+    # Never used to alter a regenerated target.
+    parallel_compatibility: Optional[dict] = None
 
     alignment_enabled: bool = False
     alignment_offset_samples: int = 0
@@ -251,6 +269,8 @@ def freeze_blend_design(
         auto_trim_db=result.auto_trim_db,
         manual_b_trim_db=result.manual_trim_db,
         effective_b_trim_db=result.effective_b_trim_db,
+        invert_b_polarity=result.invert_b_polarity,
+        parallel_compatibility=result.compatibility.to_dict() if result.compatibility else None,
         alignment_enabled=alignment_enabled,
         alignment_offset_samples=result.alignment_offset_samples,
         alignment_method=FIXED_FROZEN_OFFSET_METHOD if alignment_enabled else None,

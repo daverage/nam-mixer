@@ -782,3 +782,34 @@ test('AI Assistant states which AI it uses and whether it is ready; there is no 
   // The AI is used whenever it is ready -- no separate opt-in.
   assert.match(source, /if \(localRecipeAiAvailable && prompt\.trim\(\)\) \{/);
 });
+
+test('AI status code tolerates page markup without the status elements', () => {
+  assert.match(source, /recipeAiSettingsButton\?\.addEventListener\("click"/);
+  const sandbox = { localRecipeAiAvailable: false, recipeAiStatus: null, recipeAiStatusText: null, recipeAiSettingsButton: null };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function showRecipeAiStatus(', 'async function loadLocalRecipeAiStatus('), sandbox);
+  sandbox.showRecipeAiStatus({ ready: true, state: 'ready', text: 'x', settings: false });   // must not throw
+  assert.equal(vm.runInContext('localRecipeAiAvailable', sandbox), true);
+});
+
+test('a change made while paused is fetched when play is pressed, never played stale', () => {
+  const sandbox = {
+    havePair: true, lastPreviewSource: 'mix', autoAuditionToggle: { checked: true },
+    liveAudition: { active: false }, player: { paused: true }, auditionRefreshTimer: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('let auditionNeedsRefresh', '// NAM rendering remains server-side'), sandbox);
+  sandbox.scheduleAuditionRefresh();                       // e.g. a cabinet added while paused
+  assert.equal(vm.runInContext('auditionNeedsRefresh', sandbox), true);
+  // The play handler fetches the current audio instead of replaying the old blob.
+  const play = section('player.addEventListener("play", () => {', 'player.addEventListener("pause"');
+  assert.match(play, /auditionNeedsRefresh && lastPreviewSource && havePair && !liveAudition\.active/);
+  assert.match(play, /preview\(lastPreviewSource, \{ preservePosition: true, quiet: true, playWhenReady: true \}\)/);
+  // Any fresh preview clears the flag.
+  assert.match(section('async function preview(', 'const requestId = ++previewRequestId;'), /auditionNeedsRefresh = false;/);
+  // Controls still never start sound by themselves: with audio playing, the normal refresh runs instead.
+  vm.runInContext('auditionNeedsRefresh = false; player.paused = false;', sandbox);
+  sandbox.scheduleAuditionRefresh();
+  assert.equal(vm.runInContext('auditionNeedsRefresh', sandbox), false);
+});

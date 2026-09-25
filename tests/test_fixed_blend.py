@@ -79,6 +79,17 @@ def test_manual_trim_shifts_amp_b_before_mixing():
     assert result.effective_b_trim_db == 20.0
 
 
+def test_polarity_flip_is_applied_before_parallel_sum_and_frozen():
+    a = np.full(4096, 0.25, dtype=np.float32)
+    b = np.full(4096, -0.25, dtype=np.float32)
+    pair = _pair(a, b)
+    result = build_fixed_blend(pair, mix_b=0.5, auto_level=False, invert_b_polarity=True)
+    np.testing.assert_allclose(result.blend, np.full(4096, 0.25), atol=1e-6)
+    design = freeze_blend_design(pair, result, amp_a_path="a.nam", amp_b_path="b.nam", alignment_enabled=False)
+    assert design.invert_b_polarity is True
+    assert design.parallel_compatibility == result.compatibility.to_dict()
+
+
 def test_active_level_match_uses_active_playing_not_crossover_region():
     """compute_active_trim must ignore silent samples and NOT depend on any
     crossover config -- it only needs an active-signal mask over the whole
