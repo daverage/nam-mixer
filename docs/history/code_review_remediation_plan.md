@@ -13,7 +13,7 @@ changing the audio/training behaviour.
 - Baseline result: 343 passed, 7 skipped, 1 failed.
 - Do not overwrite unrelated, currently uncommitted work.
 
-## Phase 1 — Correct the request-validation defect
+## Phase 1 - Correct the request-validation defect
 
 ### Problem
 
@@ -37,7 +37,7 @@ HTML 500 response instead of the API's normal JSON 400 validation response.
 - The response is JSON with HTTP 400.
 - Existing valid render-pair tests remain green.
 
-## Phase 2 — Make the test suite hermetic and easy to invoke
+## Phase 2 - Make the test suite hermetic and easy to invoke
 
 ### Problem A: environment-dependent Kaggle test
 
@@ -76,7 +76,7 @@ The standalone `pytest` launcher does not put this repository on `sys.path`;
 - The full suite is green, with skipped tests explicitly reported rather than
   silently deselected.
 
-## Phase 3 — Consolidate safe duplicated primitives
+## Phase 3 - Consolidate safe duplicated primitives
 
 ### Scope
 
@@ -110,7 +110,7 @@ must either be stdlib-only and staged with it, or remain intentionally local.
 - Cloud training still runs from its staged files without importing the Flask
   application or unrelated local dependencies.
 
-## Phase 4 — Remove confirmed dead artifacts and reduce test duplication
+## Phase 4 - Remove confirmed dead artifacts and reduce test duplication
 
 ### Changes
 
@@ -132,7 +132,7 @@ must either be stdlib-only and staged with it, or remain intentionally local.
 - Tests remain readable and retain their scenario-specific assertions.
 - No undocumented external API is removed.
 
-## Phase 5 — Reduce orchestration complexity without a behavioural rewrite
+## Phase 5 - Reduce orchestration complexity without a behavioural rewrite
 
 ### Problem
 
@@ -162,7 +162,7 @@ unit-level failure cases.
 - Existing UI/API contract tests remain green.
 - Cache scope and concurrency expectations are documented.
 
-## Phase 6 — De-risk local/cloud receptive-field policy drift
+## Phase 6 - De-risk local/cloud receptive-field policy drift
 
 ### Problem
 

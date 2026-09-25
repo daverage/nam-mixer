@@ -267,13 +267,13 @@ Some Fishman Fluence pickups additionally provide a selectable 6 dB output reduc
 Therefore add:
 
 ```text
-Active / Buffered — Custom
+Active / Buffered - Custom
 ```
 
 for guitar and:
 
 ```text
-Active / Preamped Bass — Custom
+Active / Preamped Bass - Custom
 ```
 
 for bass.
@@ -457,7 +457,7 @@ Do not have two different user-facing concepts that both look like “input gain
 
 ---
 
-# 9. NAM calibration — implement this in the same milestone
+# 9. NAM calibration - implement this in the same milestone
 
 This is important.
 
@@ -714,7 +714,7 @@ P90
 Medium / modern humbucker
 Hot humbucker
 Extreme passive
-Active / buffered — Custom
+Active / buffered - Custom
 Custom
 ```
 
@@ -724,7 +724,7 @@ For Bass:
 Standard Jazz / Precision bass
 Modern / hotter passive bass
 Very high-output passive bass
-Active / preamped — Custom
+Active / preamped - Custom
 Custom
 ```
 
@@ -740,7 +740,7 @@ Make it visually obvious that choosing another input profile requires re-renderi
 For example:
 
 ```text
-Input profile changed — render amps again
+Input profile changed - render amps again
 ```
 
 Disable/mark stale previews until rerender completes.

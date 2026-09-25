@@ -294,7 +294,7 @@ modeTabs.forEach((tab) => {
     setToolsOpen(false);
     setSessionsOpen(false);
     currentMode = tab.dataset.mode;
-    invalidateLiveAudition("Design mode changed — live blend stopped.");
+    invalidateLiveAudition("Design mode changed - live blend stopped.");
     modeTabs.forEach((t) => {
       t.classList.toggle("active", t === tab);
       t.setAttribute("aria-pressed", t === tab ? "true" : "false");
@@ -396,7 +396,7 @@ const cabStatusEl = document.getElementById("cab-status");
 const cabExportModeInfo = document.getElementById("cab-export-mode-info");
 const CAB_EXPORT_MODE_NOTES = {
   none: "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet. You can add a cab to a NAM later in the Tools section.",
-  learned: "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download.",
+  learned: "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested - with the cabinet - and that is the one you download.",
   embedded: "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it.",
 };
 
@@ -527,7 +527,7 @@ cabPreviewEnabled.addEventListener("change", () => {
   // invalidation boundary as the cab-file-upload handler above, see
   // resetGeneratedModel's docstring.
   resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
-  invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
+  invalidateLiveAudition("Cabinet setting changed - start live blend again to load the matching stems.");
   if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
 cabExportMode.addEventListener("change", () => {
@@ -551,7 +551,7 @@ cabExportMode.addEventListener("change", () => {
   // is also enabled" -- docs/history/blend-mode.md "CAB UI".
   updateCabStatus();
   resetGeneratedModel("The cabinet setting changed. Create new training files before starting another training run.");
-  invalidateLiveAudition("Cabinet setting changed — start live blend again to load the matching stems.");
+  invalidateLiveAudition("Cabinet setting changed - start live blend again to load the matching stems.");
   if (lastPreviewSource) scheduleAuditionRefresh(lastPreviewSource);
 });
 updateCabStatus();
@@ -686,7 +686,7 @@ function timingSummary(render) {
   const correction = render.timing_correction || {};
   if (correction.available) {
     const n = correction.offset_samples;
-    return `Timing: Fixed offset detected — Amp B ${n > 0 ? "lags" : "leads"} Amp A by ${Math.abs(n)} samples`;
+    return `Timing: Fixed offset detected - Amp B ${n > 0 ? "lags" : "leads"} Amp A by ${Math.abs(n)} samples`;
   }
   if (diagnostic.status === "aligned") return "Timing: No stable fixed offset detected";
   if (diagnostic.status === "insufficient_signal") return "Timing: Insufficient signal for reliable analysis";
@@ -704,7 +704,7 @@ function timingEvidenceLines(render) {
   const reliableRegions = diagnostic.windows.filter((w) => w.reliable);
   const regions = reliableRegions.length
     ? reliableRegions.map((w) => signedSamples(w.offset_samples)).join(", ")
-    : "none — rejected comparisons are hidden because their offsets are not meaningful";
+    : "none - rejected comparisons are hidden because their offsets are not meaningful";
   const lines = [
     `Preview DI: ${diagnostic.reason}`,
     `Usable Amp B offsets (samples; + = Amp B later than Amp A): ${regions}`,
@@ -783,7 +783,7 @@ document.querySelectorAll(".timing-choice [data-timing]").forEach((button) => {
     timingChoice.corrected = corrected;
     document.querySelectorAll(".timing-readout-note").forEach((noteEl) => { noteEl.hidden = true; });
     syncTimingChoiceButtons();
-    invalidateLiveAudition("Timing changed — start live blend again to load the matching stems.");
+    invalidateLiveAudition("Timing changed - start live blend again to load the matching stems.");
     scheduleUpdate();
     scheduleAuditionRefresh();
   });
@@ -801,7 +801,7 @@ function markProfileStale(reason, { preserveAudition = false } = {}) {
   havePair = false;
   renderTimingReadout(null);
   clearAudition();
-  invalidateLiveAudition("Amp pair changed — start live blend again after rendering.");
+  invalidateLiveAudition("Amp pair changed - start live blend again after rendering.");
   previewButtons.forEach((btn) => (btn.disabled = true));
   liveBlendButton.disabled = true;
   document.getElementById("btn-character-low-level-check").disabled = true;
@@ -1264,7 +1264,7 @@ parallelVerifyButton.addEventListener("click", async () => {
     if (!response.ok) throw new Error(data.error || "verification failed");
     renderParallelVerification(data);
     parallelCompatibilityDetails.textContent = parallelCompatibilityDetails.textContent.replace(/ Cross-performance check:.*/, "") +
-      ` Cross-performance check: ${data.performances_usable}/${data.performances_tested} performances usable — ${data.summary}`;
+      ` Cross-performance check: ${data.performances_usable}/${data.performances_tested} performances usable - ${data.summary}`;
   } catch (error) {
     if (requestId !== parallelVerificationRequestId) return;
     parallelVerificationResult.dataset.status = "error";
@@ -1459,7 +1459,7 @@ function updateWizardLabels() {
 }
 function setModeFromWizard(mode) {
   currentMode = mode;
-  invalidateLiveAudition("Design mode changed — live blend stopped.");
+  invalidateLiveAudition("Design mode changed - live blend stopped.");
   modeTabs.forEach((tab) => {
     const active = tab.dataset.mode === mode;
     tab.classList.toggle("active", active);
@@ -1673,14 +1673,14 @@ function appendTone3000DiscussButtonsToLastMessage(results) {
     row.className = "ai-tone3000-candidate-row";
     const label = document.createElement("span");
     label.className = "ai-tone3000-candidate-label";
-    label.textContent = `${result.title} — ${result.creator}${Number.isFinite(result.match_score) ? ` · ${result.match_score}% metadata fit` : ""}`;
+    label.textContent = `${result.title} - ${result.creator}${Number.isFinite(result.match_score) ? ` · ${result.match_score}% metadata fit` : ""}`;
     row.append(label, createTone3000DiscussButton(result));
     container.append(row);
   });
   if (container.children.length) message.append(container);
 }
 
-function applyRecipe(recipe, prefix = "", { showMessage = true, noRecipeMessage = "I couldn't identify a blend direction yet. Try naming what should stay from Amp A and what should take over from Amp B—for example, ‘keep Amp A's EQ and feel; let its gain become Amp B crunch as I play harder.’" } = {}) {
+function applyRecipe(recipe, prefix = "", { showMessage = true, noRecipeMessage = "I couldn't identify a blend direction yet. Try naming what should stay from Amp A and what should take over from Amp B-for example, ‘keep Amp A's EQ and feel; let its gain become Amp B crunch as I play harder.’" } = {}) {
   if (!recipe) {
     if (showMessage) addRecipeConversationMessage("assistant", noRecipeMessage);
     return;
@@ -1728,7 +1728,7 @@ async function applyRecipeFromPrompt() {
     addRecipeConversationMessage("user", prompt);
     promptWasAdded = true;
     recipePromptApplyButton.disabled = true;
-    const stopActivity = beginActivity("AI is working — preparing your recipe and research…");
+    const stopActivity = beginActivity("AI is working - preparing your recipe and research…");
     try {
       // An explicit amp-family change in the current brief is a deliberate
       // source-plan revision, not a follow-up tweak to the old pair.
@@ -1770,7 +1770,7 @@ async function applyRecipeFromPrompt() {
         : "";
       const tone3000Candidates = (data.tone3000_results || []).length
         ? `\n\nTONE3000 capture candidates:\n${data.tone3000_results.map((match) => (
-          `- ${match.title} — ${match.creator}${match.query ? ` (searched: ${match.query})` : ""}`
+          `- ${match.title} - ${match.creator}${match.query ? ` (searched: ${match.query})` : ""}`
         )).join("\n")}`
         : "";
       recipeConversationHistory.push({ role: "user", content: prompt }, { role: "assistant", content: assistantContent });
@@ -1914,7 +1914,7 @@ characterSliders.forEach((name) => {
 document.getElementById("drive-morph-enabled").addEventListener("change", () => { scheduleUpdate(); scheduleAuditionRefresh(); });
 
 document.getElementById("auto-level-match").addEventListener("change", () => {
-  invalidateLiveAudition("Level-match setting changed — start live blend again to load the matching stems.");
+  invalidateLiveAudition("Level-match setting changed - start live blend again to load the matching stems.");
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
@@ -1923,7 +1923,7 @@ const ampBTrimSlider = document.getElementById("amp-b-trim");
 const ampBTrimValue = document.getElementById("amp-b-trim-value");
 ampBTrimSlider.addEventListener("input", () => {
   ampBTrimValue.textContent = `${fmtSigned(ampBTrimSlider.value)} dB`;
-  invalidateLiveAudition("Level trim changed — start live blend again to load the matching stems.");
+  invalidateLiveAudition("Level trim changed - start live blend again to load the matching stems.");
   scheduleUpdate();
   scheduleAuditionRefresh();
 });
@@ -2687,7 +2687,7 @@ async function doRenderPair() {
 function applyRenderResult(data, { applySuggestedCrossover }) {
   if (liveAudition.active) {
     liveAudition.stop();
-    liveBlendStatus.textContent = "Amp pair changed — start live blend again to load the new stems.";
+    liveBlendStatus.textContent = "Amp pair changed - start live blend again to load the new stems.";
   }
   renderPairBtn.classList.remove("btn-render-stale");
   updateCrossoverKnobCalibration(data.blend_envelope_percentiles);
@@ -2755,7 +2755,7 @@ renderPairBtn.addEventListener("click", async () => {
   const requestGeneration = renderGeneration;
   renderPairBtn.disabled = true;
   setRenderBusy(true);
-  const stopActivity = beginActivity("Rendering both amps — this can take a moment…");
+  const stopActivity = beginActivity("Rendering both amps - this can take a moment…");
   renderWarnings.hidden = true;
   previewButtons.forEach((btn) => (btn.disabled = true));
   document.getElementById("btn-character-low-level-check").disabled = true;
@@ -2973,7 +2973,7 @@ async function runGenerate() {
   generationPending = true;
   syncTrainingControls();
   const requestGeneration = renderGeneration;
-  const stopActivity = beginActivity("Creating training files — processing the official input…");
+  const stopActivity = beginActivity("Creating training files - processing the official input…");
   generateResult.hidden = true;
   try {
     const resp = await fetch("/api/generate", {
@@ -3257,7 +3257,7 @@ function selectComparisonSource(id) {
 
 function comparisonMetricsHtml(data) {
   return data.variants.filter((item) => item.id !== "teacher").map((item) => {
-    if (!item.metrics) return `<div><strong>${escapeHtml(item.id)}:</strong> unavailable — ${escapeHtml(item.error || "not exported")}</div>`;
+    if (!item.metrics) return `<div><strong>${escapeHtml(item.id)}:</strong> unavailable - ${escapeHtml(item.error || "not exported")}</div>`;
     return `<div><strong>${escapeHtml(item.id)}:</strong> raw ESR ${Number(item.metrics.raw_esr).toFixed(4)} · gain-normalized ESR ${Number(item.metrics.gain_normalized_esr).toFixed(4)} · RMS difference ${Number(item.metrics.rms_difference).toFixed(5)} · peak difference ${Number(item.metrics.peak_difference).toFixed(5)}</div>`;
   }).join("");
 }
@@ -3327,7 +3327,7 @@ function validationSummaryHtml(report) {
   const detailRows = (report.checks || []).map((check) => {
     const metrics = check.metrics && Object.keys(check.metrics).length
       ? `<pre class="log-tail">${escapeHtml(JSON.stringify(check.metrics, null, 2))}</pre>` : "";
-    return `<div><strong>${escapeHtml(check.id).replaceAll("_", " ")} — ${escapeHtml(check.state)}</strong><br><span>${escapeHtml(check.reason || "")}</span>${metrics}</div>`;
+    return `<div><strong>${escapeHtml(check.id).replaceAll("_", " ")} - ${escapeHtml(check.state)}</strong><br><span>${escapeHtml(check.reason || "")}</span>${metrics}</div>`;
   }).join("");
   const cabinet = report.cabinet?.note ? `<div><strong>Cabinet:</strong> ${escapeHtml(report.cabinet.note)}</div>` : "";
   // Reports before schema 3 rendered "Full" and "Lite" with the slim values swapped.
@@ -3415,7 +3415,7 @@ async function refreshLocalTraining() {
     localTrainingActive = ["setting_up", "training", "cancelling"].includes(data.state);
     if (localTrainingActive) {
       const phase = data.state === "setting_up" ? "Setting up local training" : data.state === "cancelling" ? "Stopping local training" : "Training model";
-      const detail = data.progress ? ` — epoch ${data.progress.epoch}/${data.progress.total_epochs}` : " — preparing the trainer";
+      const detail = data.progress ? ` - epoch ${data.progress.epoch}/${data.progress.total_epochs}` : " - preparing the trainer";
       if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity(`${phase}${detail}…`);
       else localTrainingActivityStop.update(`${phase}${detail}…`);
     } else if (localTrainingActivityStop) {
@@ -3453,7 +3453,7 @@ async function refreshLocalTraining() {
 localSetupBtn.addEventListener("click", async () => {
   localSetupBtn.disabled = true;
   localTrainingStatus.textContent = "Creating the dedicated environment and installing training packages…";
-  if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity("Setting up local training — installing the dedicated environment…");
+  if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity("Setting up local training - installing the dedicated environment…");
   let setupError = "";
   try {
     const resp = await fetch("/api/local_training/setup", { method: "POST" });
@@ -3480,7 +3480,7 @@ localTrainBtn.addEventListener("click", async () => {
   localTrainBtn.disabled = true;
   localResultEl.hidden = true;
   localTrainingDesignId = lastDesignId;
-  if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity("Training model — preparing the first epoch…");
+  if (!localTrainingActivityStop) localTrainingActivityStop = beginActivity("Training model - preparing the first epoch…");
   try {
     const resp = await fetch("/api/local_training/start", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -3595,7 +3595,7 @@ function renderKaggleProgress(stateLabel, data) {
     kaggleProgressBarTrack.hidden = true;
     kaggleProgressBarFill.style.width = "0%";
   }
-  kaggleProgressMeta.textContent = metaParts.join(" — ");
+  kaggleProgressMeta.textContent = metaParts.join(" - ");
 
   if (data && typeof data.log_tail === "string") {
     kaggleLogTail.textContent = data.log_tail.trim() || "(no log output yet)";
@@ -3611,7 +3611,7 @@ function renderKaggleProgress(stateLabel, data) {
 
   const state = data?.state;
   if (state && KAGGLE_ACTIVE_STATES.has(state)) {
-    const detail = data.progress ? ` — epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "";
+    const detail = data.progress ? ` - epoch ${data.progress.epoch}/${data.progress.total_epochs}` : "";
     if (!kaggleActivityStop) kaggleActivityStop = beginActivity(`${stateLabel}${detail}`);
     else kaggleActivityStop.update(`${stateLabel}${detail}`);
   } else if (state && kaggleActivityStop) {
@@ -4268,19 +4268,19 @@ async function renderSessions() {
     const details = document.createElement("div"); details.className = "session-details"; details.hidden = true;
     const settings = session.settings || {};
     const shape = settings.mode === "blend"
-      ? `Mix: ${settings.mix ?? "—"}% Amp B`
+      ? `Mix: ${settings.mix ?? "-"}% Amp B`
       : settings.mode === "character"
-        ? `Tone: ${settings.character?.tone ?? "—"}% Amp B; Feel: ${settings.character?.feel ?? "—"}% Amp B; Drive: ${settings.character?.drive ?? "—"}% Amp B`
-        : `Changeover: ${settings.crossover ?? "—"} dBFS; Transition: ${settings.transition ?? "—"} dB`;
+        ? `Tone: ${settings.character?.tone ?? "-"}% Amp B; Feel: ${settings.character?.feel ?? "-"}% Amp B; Drive: ${settings.character?.drive ?? "-"}% Amp B`
+        : `Changeover: ${settings.crossover ?? "-"} dBFS; Transition: ${settings.transition ?? "-"} dB`;
     const validationText = summary.validation
-      ? ` · Validation: ${summary.validation.state || "unavailable"} — ${summary.validation.summary || "no summary"}`
+      ? ` · Validation: ${summary.validation.state || "unavailable"} - ${summary.validation.summary || "no summary"}`
       : summary.artifact ? " · Validation report unavailable" : "";
     if (isContinuousGain) {
       const cg = settings.continuousGain || {};
       const stage = { captures: "captures added", analysed: "analysed", planned: "training plan ready", files: "training files created", trained: "trained", validated: "trained and validated" }[cg.stage] || cg.stage;
-      details.textContent = `Workflow: Continuous Gain (one amp → one NAM) · Amp: ${[cg.amp, cg.channel].filter(Boolean).join(" ") || "—"} · ${cg.captures ?? 0} captures · Selected: ${cg.selected ? cg.selected.map((g) => "G" + g).join(", ") : "not planned yet"} · Input gain anchors: ${cg.anchors ? cg.anchors.join(", ") + " dB" : "—"} · Stage: ${stage}${cg.backend ? ` · Trained on: ${cg.backend}${cg.epochs ? ` (${cg.epochs} epochs)` : ""}` : ""}${validationText}`;
+      details.textContent = `Workflow: Continuous Gain (one amp → one NAM) · Amp: ${[cg.amp, cg.channel].filter(Boolean).join(" ") || "-"} · ${cg.captures ?? 0} captures · Selected: ${cg.selected ? cg.selected.map((g) => "G" + g).join(", ") : "not planned yet"} · Input gain anchors: ${cg.anchors ? cg.anchors.join(", ") + " dB" : "-"} · Stage: ${stage}${cg.backend ? ` · Trained on: ${cg.backend}${cg.epochs ? ` (${cg.epochs} epochs)` : ""}` : ""}${validationText}`;
     } else
-    details.textContent = `Mode: ${summary.mode} · Amps: ${summary.amps} · Test performance: ${summary.di} · Input profile: ${settings.inputProfileId || "—"} · ${shape} · Level match: ${settings.autoLevelMatch ? "on" : "off"} · Cabinet: ${settings.cab?.path ? "selected" : "off"}${summary.artifact ? ` · NAM: ${summary.artifact.filename || "available"}` : " · No completed NAM recorded"}${validationText}`;
+    details.textContent = `Mode: ${summary.mode} · Amps: ${summary.amps} · Test performance: ${summary.di} · Input profile: ${settings.inputProfileId || "-"} · ${shape} · Level match: ${settings.autoLevelMatch ? "on" : "off"} · Cabinet: ${settings.cab?.path ? "selected" : "off"}${summary.artifact ? ` · NAM: ${summary.artifact.filename || "available"}` : " · No completed NAM recorded"}${validationText}`;
     const detailButton = document.createElement("button"); detailButton.type = "button"; detailButton.className = "btn btn-secondary btn-small"; detailButton.textContent = "Details";
     detailButton.addEventListener("click", () => { details.hidden = !details.hidden; detailButton.textContent = details.hidden ? "Details" : "Hide details"; });
     const loadButton = document.createElement("button"); loadButton.type = "button"; loadButton.className = "btn btn-primary btn-small"; loadButton.textContent = "Load";
@@ -4796,7 +4796,7 @@ function showNamInspectorResult(result, target) {
   const rows = [
     ["File", identity.filename], ["Format version", identity.format_version],
     ["Input / output", `${architecture.input_channels || 1} → ${architecture.output_channels || 1} channel`],
-    ["Calibration (raw)", `Input ${calibration.input_level_dbu ?? "—"} dBu · Output ${calibration.output_level_dbu ?? "—"} dBu`],
+    ["Calibration (raw)", `Input ${calibration.input_level_dbu ?? "-"} dBu · Output ${calibration.output_level_dbu ?? "-"} dBu`],
     ["Neural receptive field", samples(temporal.neural_receptive_field_samples, temporal.neural_receptive_field_ms)],
     ["FIR history", samples(temporal.fir_history_samples, temporal.fir_history_ms)],
     ["Total formal dependency", samples(temporal.total_formal_dependency_samples, temporal.total_formal_dependency_ms)],
@@ -5035,7 +5035,7 @@ function renderSettings() {
         // The real value never comes back from the server (see
         // hybrid/services/settings.py's get_settings); leaving this blank on save
         // means "unchanged", not "clear it".
-        input.placeholder = field.has_value ? "Currently set — leave blank to keep unchanged" : (field.placeholder || "");
+        input.placeholder = field.has_value ? "Currently set - leave blank to keep unchanged" : (field.placeholder || "");
         input.value = "";
         desc.textContent = field.description + (field.has_value ? (field.is_valid === false ? " (the saved key is invalid and needs replacing)" : " (a key is currently saved)") : "");
       } else if (field.kind === "checkbox") {
@@ -5470,10 +5470,10 @@ async function refreshTone3000Status() {
     tone3000ApiKeyConfigured = Boolean(field && field.has_value);
     tone3000Status.textContent = tone3000ApiKeyConfigured
       ? ""
-      : "Not set up — add a TONE3000 API key in Settings to search captures.";
+      : "Not set up - add a TONE3000 API key in Settings to search captures.";
   } catch (_error) {
     tone3000ApiKeyConfigured = false;
-    tone3000Status.textContent = "Could not check TONE3000 setup — see Settings.";
+    tone3000Status.textContent = "Could not check TONE3000 setup - see Settings.";
   }
 }
 refreshTone3000Status();

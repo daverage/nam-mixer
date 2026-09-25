@@ -1,4 +1,4 @@
-# Continuous Gain — Fixed Virtual-Gain Playability Test
+# Continuous Gain - Fixed Virtual-Gain Playability Test
 
 ## Mission
 

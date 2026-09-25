@@ -1,4 +1,4 @@
-# Phase 4 — Reliable design state, causal targets, and trustworthy validation
+# Phase 4 - Reliable design state, causal targets, and trustworthy validation
 
 ## Objective
 

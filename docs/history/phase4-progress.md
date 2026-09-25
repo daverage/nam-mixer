@@ -6,13 +6,13 @@ claim of perceptual equivalence. No cloud training job was launched.
 
 ## Milestone status
 
-1. **Complete — source identity and UI invalidation.** Every cached-pair consumer
+1. **Complete - source identity and UI invalidation.** Every cached-pair consumer
    requires an opaque render ID. Render snapshots bind retained source bytes,
    hashes, DI, profile/calibration, test gain, and per-amp trims. Frontend
    invalidation stops old playback and uses generation counters to reject late
    render, preview, diagnostic, generation, and live-decode responses. Cheap
    shape controls continue to reuse the valid pair.
-2. **Complete — causal Character Blend target.** Teacher semantics v2 uses a
+2. **Complete - causal Character Blend target.** Teacher semantics v2 uses a
    causal donor-weight ramp starting at each detected change and restarts a
    reversal from the current weight. Legacy version 1 remains readable and
    reproducible; unknown versions are rejected. Prefix, boundary, constant,
@@ -20,26 +20,26 @@ claim of perceptual equivalence. No cloud training job was launched.
    Temporal reporting includes envelope, drive/compensation smoothing, donor
    settling, and correction FIR. Repeated mid-ramp reversals are honestly
    recorded as stateful rather than assigned a false finite history bound.
-3. **Complete — equivalent quiet-playing validation.** Reference schema v2
+3. **Complete - equivalent quiet-playing validation.** Reference schema v2
    selects a deterministic energetic excerpt with warm-up/context and hashes
    its source, model sources, and cabinet. The frozen teacher receives a baked
    cabinet and the fixed output/safety gains exactly once. Full and Lite are
    scored separately for raw/gain-normalized ESR, absolute level offset,
    response-shape error, and extra quiet attenuation. Invalid, tampered,
    legacy, silent, or insufficient evidence is unavailable rather than passed.
-4. **Complete — completion versus validation quality.** Shared validation
+4. **Complete - completion versus validation quality.** Shared validation
    report schema v2 has passed/failed/unavailable checks and a documented v1
    policy. Local and Kaggle paths persist the same Full/Lite/quiet results;
    operational failures are separate from computed poor quality and retained
    exports remain downloadable. Result panels expose summaries plus expandable
    metrics. Sessions restore reports only when the embedded NAM hash matches;
    NAM Tools explicitly invalidates prior validation.
-5. **Complete — real-render regression harness.** The opt-in schema-v2 harness
+5. **Complete - real-render regression harness.** The opt-in schema-v2 harness
    accepts explicit renderer/source/DI/cab/export paths, records hashes and
    runtime/build identity, covers all modes, cab on/off, -12/0/+12 dB input,
    invariants, determinism, and frozen-teacher equivalence, and never trains.
    Developer runs record unavailable prerequisites; release runs fail them.
-6. **Complete — held-out musical listening comparison.** Completed models can
+6. **Complete - held-out musical listening comparison.** Completed models can
    render a saved frozen teacher and Full/Lite on the selected musical DI at
    normal or -24 dB external input gain. One multichannel WAV provides
    synchronized raw-level switching. The teacher alone receives frozen
@@ -47,7 +47,7 @@ claim of perceptual equivalence. No cloud training job was launched.
    Metrics use the shared validation code. Cache identity binds manifest,
    design, model, DI, cabinet, level, sample rate, and hashes. Missing imported
    teacher assets return a stable explanation while preserving the NAM.
-7. **Complete — renderer readiness and recovery.** A cheap `--help` probe
+7. **Complete - renderer readiness and recovery.** A cheap `--help` probe
    distinguishes missing, found-but-unusable, and verified executables before
    inference. The UI provides expandable path/build help and an explicit retry;
    it never installs or compiles as a status-check side effect. API and

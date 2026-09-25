@@ -1,4 +1,4 @@
-# Continuous Gain — NAM Mixer UI proposal
+# Continuous Gain - NAM Mixer UI proposal
 
 **Status:** Initial product/UI proposal, not an implemented feature.  
 **Goal:** Turn multiple fixed-gain captures from **one amplifier and channel** into **one portable standard `.nam`**, whose useful gain range is explored with an ordinary NAM player's **Input gain** control.
@@ -17,7 +17,7 @@ Add a **Continuous Gain** tab with four stages: **Add captures → Analyse & sel
 - Reuse the existing training workflow rather than adding a separate trainer. Keep most research settings hidden behind an Advanced section.
 - Add a final **whole-amplifier audition** stage. The key question is whether the single NAM covers the amplifier's useful range and replaces frequent switching among captures.
 
-## Stage 1 — Add captures
+## Stage 1 - Add captures
 
 ![Proposed capture-import layout](images/01_add_captures.svg)
 
@@ -38,7 +38,7 @@ Add a **Continuous Gain** tab with four stages: **Add captures → Analyse & sel
 - A short consistency summary: “N captures; positions X–Y; Z need review.”
 - **Analyse captures** button enabled only after the required metadata and blocking checks pass.
 
-## Stage 2 — Analyse & select
+## Stage 2 - Analyse & select
 
 ![Proposed analysis and selection layout](images/02_analyse_select.svg)
 
@@ -76,7 +76,7 @@ These are **illustrative explanations**, not automatic conclusions about any spe
 - Explicitly mark unsupported control ranges (for instance, an intended anchor below a particular player's minimum Input gain). Do not silently apply external gain correction and present it as ordinary player behaviour.
 - **Review training plan** button should freeze or snapshot the selected sources, anchors, calibration and analysis settings into a reproducible manifest.
 
-## Stage 3 — Train
+## Stage 3 - Train
 
 ![Proposed training panel](images/03_train.svg)
 
@@ -99,7 +99,7 @@ Expose only parameters already supported and understood by the current training 
 
 Before starting, display the selected source hashes/identities, physical positions, anchor settings, QA findings, target-build method and intended playback calibration. Make the training run reproducible and resumable where existing infrastructure permits. Keep the original captures untouched.
 
-## Stage 4 — Test & export
+## Stage 4 - Test & export
 
 ![Proposed test and export panel](images/04_test_export.svg)
 

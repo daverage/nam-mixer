@@ -576,9 +576,9 @@ test('timing readout wording and Original/Corrected request body', () => {
     alignment_diagnostic: { status }, timing_correction: correction || { available: false, offset_samples: null },
   });
   assert.equal(summary('fixed_offset', { available: true, offset_samples: 7 }),
-    'Timing: Fixed offset detected — Amp B lags Amp A by 7 samples');
+    'Timing: Fixed offset detected - Amp B lags Amp A by 7 samples');
   assert.equal(summary('fixed_offset', { available: true, offset_samples: -3 }),
-    'Timing: Fixed offset detected — Amp B leads Amp A by 3 samples');
+    'Timing: Fixed offset detected - Amp B leads Amp A by 3 samples');
   assert.equal(summary('aligned'), 'Timing: No stable fixed offset detected');
   assert.equal(summary('ambiguous'), 'Timing: No trustworthy fixed timing correction identified');
   // A per-DI fixed offset that cross-DI verification did not confirm is not offered.
@@ -856,7 +856,7 @@ test('invalidating an idle live mix says nothing', () => {
   const sandbox = { liveAudition: { active: false, requestId: 3, loadingRequest: null, stop() { this.requestId += 1; } }, liveBlendStatus: { textContent: 'before' } };
   vm.createContext(sandbox);
   vm.runInContext(section('function invalidateLiveAudition(', 'async function startLiveBlend('), sandbox);
-  sandbox.invalidateLiveAudition('Design mode changed — live blend stopped.');
+  sandbox.invalidateLiveAudition('Design mode changed - live blend stopped.');
   assert.equal(sandbox.liveBlendStatus.textContent, 'before');
 });
 

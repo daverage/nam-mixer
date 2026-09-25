@@ -113,7 +113,7 @@ Absolutely. Here is a detailed build prompt you can hand to Claude/Codex for the
 >
 > ---
 >
-> # Phase 1 — analyse the two source amplifiers
+> # Phase 1 - analyse the two source amplifiers
 >
 > Add an analysis layer that probes Amp A and Amp B using the existing native NAMCore renderer.
 >
@@ -196,7 +196,7 @@ Absolutely. Here is a detailed build prompt you can hand to Claude/Codex for the
 >
 > ---
 >
-> # Phase 2 — broad frequency-response character
+> # Phase 2 - broad frequency-response character
 >
 > Character Blend should explicitly derive each amp's broad EQ response.
 >
@@ -247,7 +247,7 @@ Absolutely. Here is a detailed build prompt you can hand to Claude/Codex for the
 >
 > ---
 >
-> # Phase 3 — dynamic feel / compression curve
+> # Phase 3 - dynamic feel / compression curve
 >
 > Measure each amplifier's level transfer behaviour.
 >
@@ -295,7 +295,7 @@ Absolutely. Here is a detailed build prompt you can hand to Claude/Codex for the
 >
 > ---
 >
-> # Phase 4 — nonlinear / drive character
+> # Phase 4 - nonlinear / drive character
 >
 > This is the hardest part and should be implemented conservatively.
 >
@@ -354,7 +354,7 @@ Absolutely. Here is a detailed build prompt you can hand to Claude/Codex for the
 >
 > ---
 >
-> # Phase 5 — deterministic teacher construction
+> # Phase 5 - deterministic teacher construction
 >
 > Add a new module such as:
 >

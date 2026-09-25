@@ -1,4 +1,4 @@
-# Phase 4E — Train and validate the best practical single continuous-gain NAM
+# Phase 4E - Train and validate the best practical single continuous-gain NAM
 
 ## 1. Objective
 
@@ -38,14 +38,14 @@ Use only capture audio eligible under Phase 4A. Keep original audio intact; use 
 
 ## 5. Train the two primary configurations per amplifier
 
-**Configuration A — selected captures, original fixed physical-position spacing**
+**Configuration A - selected captures, original fixed physical-position spacing**
 
 | Amplifier | Training anchors (dB) |
 |---|---|
 | JCM800 G1/G2/G4/G10 | G1 −22, G2 −18, G4 −10, G10 +14 |
 | Vibrolux G1/G2/G3/G4/G7/G10 | G1 −22, G2 −18, G3 −14, G4 −10, G7 +2, G10 +14 |
 
-**Configuration B — same captures, response-distance training spacing**
+**Configuration B - same captures, response-distance training spacing**
 
 | Amplifier | Training anchors (dB) |
 |---|---|

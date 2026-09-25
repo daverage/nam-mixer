@@ -103,7 +103,7 @@
           <div>
             <div class="eyebrow">Get started</div>
             <h3 id="tool-source-title">Choose the NAM you want to work on</h3>
-            <p>Select a file from your computer—it opens automatically—or continue with the most recent NAM created in this app.</p>
+            <p>Select a file from your computer-it opens automatically-or continue with the most recent NAM created in this app.</p>
           </div>
           <span class="tool-safety-badge">Source stays unchanged</span>
         </div>
@@ -143,7 +143,7 @@
         <section class="tool-card">
           <div class="tool-card-heading"><span class="tool-card-icon" aria-hidden="true">dB</span><div><div class="eyebrow">Level</div><h3>Output volume</h3></div></div>
           <p class="info">Set this capture's final output level. This changes recognised output scaling and loudness metadata, not its tone, weights, or input behaviour.</p>
-          <label class="field-label" for="tool-volume-slider">Target output loudness <span id="tool-volume-value" class="value-chip">—</span></label><input id="tool-volume-slider" type="range" min="-60" max="12" step="0.1" value="0" class="slider" disabled>
+          <label class="field-label" for="tool-volume-slider">Target output loudness <span id="tool-volume-value" class="value-chip">-</span></label><input id="tool-volume-slider" type="range" min="-60" max="12" step="0.1" value="0" class="slider" disabled>
           <div id="tool-volume-baseline" class="info"></div>
           <button type="button" id="btn-tool-volume" class="btn btn-primary">Create volume-adjusted NAM</button>
           <div id="tool-volume-result" class="tool-result tool-inline-result" hidden aria-live="polite"></div>
@@ -175,8 +175,8 @@
             <div id="tool-cab-info" class="info" aria-live="polite">Choose a cabinet IR.</div>
             <label class="field-label" for="tool-cab-mode">Cabinet method</label>
             <select id="tool-cab-mode" class="select-input">
-              <option value="learned">Learn into a new A2 NAM — compatible, requires training</option>
-              <option value="embedded" id="tool-cab-mode-embedded">Exact Sequential embed — instant, experimental</option>
+              <option value="learned">Learn into a new A2 NAM - compatible, requires training</option>
+              <option value="embedded" id="tool-cab-mode-embedded">Exact Sequential embed - instant, experimental</option>
             </select>
             <div id="tool-cab-mode-info" class="info">The selected NAM will render the official training signal, then the cabinet will be convolved into the target.</div>
           </div>
@@ -263,7 +263,7 @@
         <fieldset><legend>How should the two amps behave?</legend>
           <label><input type="radio" name="wizard-behaviour" value="dynamic" checked> Clean-to-driven as I turn up</label><label><input type="radio" name="wizard-behaviour" value="smooth"> A broad, smooth dynamic blend</label><label><input type="radio" name="wizard-behaviour" value="fixed"> A constant A/B mix</label><label><input type="radio" name="wizard-behaviour" value="character"> Take tone from one amp and feel/drive from the other</label>
         </fieldset>
-        <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend><label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label><input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover"><div class="info">This is calibrated against the DI after rendering—not a claim about a particular pot taper.</div></fieldset>
+        <fieldset id="wizard-dynamic-question"><legend>Where should it wake up?</legend><label for="wizard-switch">Guitar volume <output id="wizard-switch-value">7.0 / 10</output></label><input type="range" id="wizard-switch" min="0" max="10" step="0.1" value="7" class="slider slider-crossover"><div class="info">This is calibrated against the DI after rendering-not a claim about a particular pot taper.</div></fieldset>
         <fieldset id="wizard-full-question"><legend>At full volume, which amp leads?</legend><label for="wizard-more-b">More of Amp A <output id="wizard-more-b-value">60% Amp B</output> More of Amp B</label><input type="range" id="wizard-more-b" min="0" max="100" step="5" value="60" class="slider slider-mix"></fieldset>
         <div id="wizard-dynamic-role-note" class="info">Dynamic Hybrid is deliberately Amp A when quiet and Amp B when loud. Put the amp you want at full guitar volume in the Amp B slot; this keeps the hand-off deterministic.</div>
         <fieldset id="wizard-character-question" hidden><legend>Build a combined character</legend><label for="wizard-tone-source">Broad tone / EQ comes from</label><select id="wizard-tone-source" class="select-input"><option value="a">Amp A</option><option value="b">Amp B</option></select><label for="wizard-drive-source">Feel and drive response comes from</label><select id="wizard-drive-source" class="select-input"><option value="b">Amp B</option><option value="a">Amp A</option></select><div class="info">Choose which source supplies the broad tone and which supplies the feel/drive response.</div></fieldset>
@@ -478,7 +478,7 @@
             <span class="parallel-step-number" aria-hidden="true">2</span>
             <div class="parallel-step-content">
               <strong>Compare polarity</strong>
-              <p>If the verdict warns about cancellation—or the mix sounds hollow—play both choices. Keep the fuller, more stable sound.</p>
+              <p>If the verdict warns about cancellation-or the mix sounds hollow-play both choices. Keep the fuller, more stable sound.</p>
               <div id="parallel-polarity-recommendation" class="parallel-action-note" hidden></div>
               <div class="preset-row parallel-polarity-choice" role="group" aria-label="Play Amp B polarity choices">
                 <button type="button" class="preset-btn" data-parallel-polarity="original" aria-pressed="true">▶ Play Original</button>
@@ -602,7 +602,7 @@
           </div>
           <label class="checkbox-row">
             <input type="checkbox" id="cab-preview-enabled" disabled>
-            <span class="checkbox-text">Hear through this cabinet<span class="checkbox-hint">Instant — the amps are not prepared again</span></span>
+            <span class="checkbox-text">Hear through this cabinet<span class="checkbox-hint">Instant - the amps are not prepared again</span></span>
           </label>
         </div>
 
@@ -635,9 +635,9 @@
 
         <label class="field-label" for="cab-export-mode">Cabinet in the trained NAM</label>
         <select id="cab-export-mode" class="select-input" disabled>
-          <option value="none">Amp only — no cabinet in the NAM</option>
-          <option value="learned" id="cab-export-option-learned">Learned cab — train the cabinet into the NAM</option>
-          <option value="embedded" id="cab-export-option-embedded">Create both — tested head NAM + exact embedded-cab NAM (experimental)</option>
+          <option value="none">Amp only - no cabinet in the NAM</option>
+          <option value="learned" id="cab-export-option-learned">Learned cab - train the cabinet into the NAM</option>
+          <option value="embedded" id="cab-export-option-embedded">Create both - tested head NAM + exact embedded-cab NAM (experimental)</option>
         </select>
         <div class="info" id="cab-export-mode-info">The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet. You can add a cab to a NAM later in the Tools section. </div>
         <div class="info" id="cab-export-compatibility-hint" hidden>The cabinet version uses NAM Sequential/Linear and may not load in players that accept only A2 architectures. The tested head-only NAM is always provided separately.</div>

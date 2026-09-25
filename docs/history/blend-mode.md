@@ -98,7 +98,7 @@ Switching between Hybrid and Blend MUST NOT re-run NAM inference.
 The already-rendered Amp A and Amp B pair should be reusable by either design mode.
 
 
-TAB 1 — DYNAMIC HYBRID
+TAB 1 - DYNAMIC HYBRID
 ======================
 
 This is the existing product.
@@ -126,7 +126,7 @@ Current conceptual behaviour remains:
 The existing Hybrid tab without a cab must remain regression-compatible with current output.
 
 
-TAB 2 — FIXED BLEND
+TAB 2 - FIXED BLEND
 ===================
 
 Add a new Fixed Blend mode.
@@ -358,11 +358,11 @@ If Bake is later disabled, Preview may remain enabled.
 
 Make the status very clear:
 
-    Cab: preview only — exported A2 remains amp/head only
+    Cab: preview only - exported A2 remains amp/head only
 
 or:
 
-    Cab: baked — exported A2 will include this cabinet
+    Cab: baked - exported A2 will include this cabinet
 
 or:
 
@@ -472,7 +472,7 @@ Return useful metadata such as:
 Do not trust arbitrary client filesystem paths.
 
 
-RECEPTIVE FIELD — IMPORTANT
+RECEPTIVE FIELD - IMPORTANT
 ============================
 
 Do NOT ignore the existing receptive-field safety model.

@@ -15,7 +15,7 @@ out. For what the app does, see the [README](../README.md) and the
 
 ## Run from source
 
-Every platform needs **Python 3.10+** plus a working `nam_render` — the
+Every platform needs **Python 3.10+** plus a working `nam_render` - the
 native NAM inference executable. You don't need a C++ compiler to get one:
 CI builds `nam_render` for macOS, Linux, and Windows on renderer releases (see
 `.github/workflows/build-nam-render.yml`). Version tags such as `v0.2.0` also
@@ -26,7 +26,7 @@ platform/architecture CI doesn't cover or if you'd rather not run a
 downloaded binary.
 
 After first-time setup below, `scripts/run.sh` (macOS/Linux) or
-`scripts/run.ps1` (Windows) is a one-line way to relaunch later — it creates/
+`scripts/run.ps1` (Windows) is a one-line way to relaunch later - it creates/
 activates `.venv`, installs/updates dependencies only when
 `requirements.txt` has changed, opens the browser on the selected local port,
 and starts the app; it does not fetch `nam_render` for you.
@@ -112,7 +112,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run.ps1
 If `Activate.ps1` is blocked, run PowerShell as: `powershell -ExecutionPolicy Bypass`.
 
 > **Don't double-click `nam_render.exe`.** It's a command-line helper tool
-> that `hybrid/core/render.py` calls automatically with the right arguments — it's
+> that `hybrid/core/render.py` calls automatically with the right arguments - it's
 > not the app. Double-clicking it in File Explorer runs it with no
 > arguments, so it prints a usage error and the console window closes
 > instantly, which looks like a crash but isn't one. Always launch the app
@@ -139,18 +139,18 @@ both conventional NAM and Sequential/Linear NAM models.
 </details>
 </details>
 
-Then run `scripts/run.sh` (macOS/Linux) or `scripts/run.ps1` (Windows) — the
+Then run `scripts/run.sh` (macOS/Linux) or `scripts/run.ps1` (Windows) - the
 launcher opens the browser on the selected local port, and the app discovers
 the `nam_render` executable it just downloaded/built automatically, wherever
 it landed for your platform. From here:
 
-- **Live preview/design/audition works immediately** — no further setup.
+- **Live preview/design/audition works immediately** - no further setup.
 - **Local A2 training** needs a separate, dedicated training environment
-  (never the app's own Python environment — see `requirements-training.txt`):
+  (never the app's own Python environment - see `requirements-training.txt`):
   run `scripts/setup_a2_env.sh` (macOS/Linux) or `scripts/setup_a2_env.ps1`
   (Windows) to create it, then follow the Torch install command it prints
   for your platform/GPU.
-- **Kaggle GPU training** needs no local training environment at all — see
+- **Kaggle GPU training** needs no local training environment at all - see
   [Setting up Kaggle GPU training](user_guide.md#setting-up-kaggle-gpu-training) in the user guide.
 
 ### Optional: local AI tone recipes
@@ -169,7 +169,7 @@ your untracked `.env`; `.env.example` documents the available defaults.
 The base URL must be a loopback HTTP URL (`localhost`, `127.0.0.1`, or `::1`)
 and is deliberately read only from the process environment. The browser cannot
 choose an endpoint. Only the written tone request and a fixed recipe schema
-are sent to the local service—never NAM files or audio. If the model is down,
+are sent to the local service-never NAM files or audio. If the model is down,
 slow, or returns invalid settings, NAM Mixer uses its built-in recipe rules.
 
 ## Desktop builds
@@ -214,7 +214,7 @@ The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
 `hybrid/modes/blend_training_target.py`, `hybrid/modes/character_blend.py`,
 `hybrid/modes/character_training_target.py`, `hybrid/core/cab_ir.py`,
 `hybrid/core/receptive_field.py`, `hybrid/training/a2_training_settings.py`, and
-`hybrid/training/kaggle_training.py` against synthetic signals and mocked renders —
+`hybrid/training/kaggle_training.py` against synthetic signals and mocked renders -
 none of it requires torch, `neural-amp-modeler`, or the native `nam_render`
 tool to be built. `tests/test_render.py` exercises real NAM inference and is
 skipped automatically unless both `native/nam_render` has been built (see its
@@ -243,7 +243,7 @@ release mode: 6 cases and 36 listenable artifacts passed, with no invariant or
 determinism failures. Calibration combinations remain explicitly unavailable
 when both source models lack `input_level_dbu` metadata.
 
-`torch`/`neural-amp-modeler` are no longer in `requirements.txt` — inference
+`torch`/`neural-amp-modeler` are no longer in `requirements.txt` - inference
 is handled entirely by the native `nam_render` tool now. They only matter for
 local A2 training, and live in `requirements-training.txt`
 instead (install into a separate, supported-Python-version environment when
@@ -350,13 +350,13 @@ hybrid-nam-builder/
   account and network access; neither is required to run the preview UI.
 - **Continuous Gain** reproduces its frozen reference configurations
   bit-for-bit and has been exercised end to end with local and Kaggle GPU
-  training in the browser — see
+  training in the browser - see
   [`docs/continuous_gain_tab.md`](continuous_gain_tab.md). Training
   measurements are technical checks, not a substitute for listening to the
   exported model with your own captures and playing setup.
 - Uploaded amp/cab files and internal render-source copies are only freed
   when the session(s) that used them are deleted (a startup sweep also clears
-  render copies that never became a saved session) — see `app.py`'s
+  render copies that never became a saved session) - see `app.py`'s
   `_sweep_orphaned_uploads`/`_sweep_orphaned_render_sources`.
 
 ## Relationship to NAMtoClo
@@ -364,7 +364,7 @@ hybrid-nam-builder/
 This project reuses the genre/style DI WAV files bundled in the
 [NAMtoClo](https://github.com/Goaltoday/NamtoClo) fork this repository's author
 also maintains, purely as audio fixtures (see `assets/di/README.md`). It shares
-no code with NAMtoClo and solves a completely different problem — NAMtoClo
+no code with NAMtoClo and solves a completely different problem - NAMtoClo
 converts a single existing NAM model to Valeton hardware's CLO format; this
 project builds new hybrid NAM training material out of two existing NAM
 models. Nothing here depends on NAMtoClo at runtime.

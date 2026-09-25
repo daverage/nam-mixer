@@ -343,7 +343,7 @@ class LocalTrainingManager:
                 raise RuntimeError("No local setup or training process is running.")
             self.cancel_requested = True
             self.state = "cancelling"
-            self.log.append("Cancellation requested — stopping local process…")
+            self.log.append("Cancellation requested - stopping local process…")
         if os.name == "nt":
             process.terminate()
         else:

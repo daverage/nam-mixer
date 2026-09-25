@@ -191,7 +191,7 @@
     const fileStatus = {}; Object.entries(idx).forEach(([p, fn]) => { fileStatus[fn] = st[p]; });
     const rows = caps.map(([fn, c]) => {
       const a = fileStatus[fn];
-      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name — please confirm</div>` : ""}</td>
+      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name - please confirm</div>` : ""}</td>
         <td>${a ? badge(a.status === "VALID" || a.status === "CORRECTED" ? "instant" : "bad", a.status) : `<span class="info">not analysed</span>`}</td>
         <td><button type="button" class="btn btn-secondary btn-small" data-cg-remove="${esc(fn)}">Remove</button></td></tr>`;
     }).join("");
@@ -287,7 +287,7 @@
       + card("Why each capture", table(["Capture", "Role", "Audit", "Measured reason"], rows))
       + card("Measured coverage of the omitted captures", table(["Group", "Mean error", "Max error", "Working tolerance", ""], phys || `<tr><td colspan="5">Every eligible capture is selected, so nothing is omitted.</td></tr>`)
         + `<p class="info">Tolerances are working values, not perceptual measurements. Objective J = ${fmt(cov.J, 3)}.</p>
-        <button type="button" class="btn btn-primary btn-block" id="cg-accept">Review complete — continue to Train</button>`);
+        <button type="button" class="btn btn-primary btn-block" id="cg-accept">Review complete - continue to Train</button>`);
     return cols(setup, main);
   }
   function bindStage2() {
@@ -337,7 +337,7 @@
     const stale = b && ((b.plan && b.plan.planned !== p.planned) || currentCabSha !== bundledCabSha ||
       (currentCabSha && ((S.cabDisplayName || "") !== (bundledCab.display_name || "") || cabMode !== bundledCab.export_mode)));
     const cabNote = cabMode === "learned"
-      ? "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested — with the cabinet — and that is the one you download."
+      ? "The cabinet is fixed into the trained NAM, which makes it a full-rig capture (amp + cab). One NAM is trained and tested - with the cabinet - and that is the one you download."
       : cabMode === "embedded"
         ? "Experimental: the NAM is trained and tested without the cabinet, then a second NAM adds this exact cabinet as a separate NAM Sequential/Linear stage. Players that accept only A2 models may reject it."
         : "The NAM is trained without a cabinet (amp only). Load an IR in your player for the cabinet. You can add a cab to a NAM later in the Tools section.";
@@ -349,22 +349,22 @@
         <div id="cg-cab-info" class="info">${S.cab ? `${esc(S.cab.filename || "Cabinet IR")} selected.` : "No cabinet selected."}</div>
         <label class="field-label" for="cg-cab-mode">Cabinet in the NAM</label>
         <select id="cg-cab-mode" class="select-input" ${S.cab ? "" : "disabled"}>
-          <option value="none" ${cabMode === "none" ? "selected" : ""}>Amp only — no cabinet in the NAM</option>
-          <option value="learned" ${cabMode === "learned" ? "selected" : ""}>Learned cab — train the cabinet into the NAM</option>
-          ${d.experimental_architectures ? `<option value="embedded" ${cabMode === "embedded" ? "selected" : ""}>Create both — tested amp NAM + exact embedded-cab NAM (experimental)</option>` : ""}
+          <option value="none" ${cabMode === "none" ? "selected" : ""}>Amp only - no cabinet in the NAM</option>
+          <option value="learned" ${cabMode === "learned" ? "selected" : ""}>Learned cab - train the cabinet into the NAM</option>
+          ${d.experimental_architectures ? `<option value="embedded" ${cabMode === "embedded" ? "selected" : ""}>Create both - tested amp NAM + exact embedded-cab NAM (experimental)</option>` : ""}
         </select>
         <label class="field-label" for="cg-cab-name">Cabinet display name</label>
         <input class="file-input" id="cg-cab-name" maxlength="80" value="${esc(S.cabDisplayName)}" ${cabMode !== "none" ? "" : "disabled"} placeholder="e.g. Modern Boutique 4x12">
         <p class="info">${cabNote}</p>
         <button type="button" class="btn btn-primary btn-block" id="cg-generate" ${S.job ? "disabled" : ""}>${b ? "Recreate training files" : "Create training files"}</button>
         <p class="info">Renders the training audio through the ${p.selected.length} selected capture(s), in parallel -- usually ${formatDuration(estimateSeconds("generate", p.selected.length))}.</p>
-        ${stale ? `<p class="info"><strong>The plan changed since these files were created — recreate them before training.</strong></p>` : ""}${jobBox()}
-        ${b && t && t.core ? `<p class="info">Design <code>${esc(b.design_id)}</code><br>input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code> · target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code><br>output scale ${fmt(t.core.output_scale_c, 4)} — set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB.</p>` : ""}`);
+        ${stale ? `<p class="info"><strong>The plan changed since these files were created - recreate them before training.</strong></p>` : ""}${jobBox()}
+        ${b && t && t.core ? `<p class="info">Design <code>${esc(b.design_id)}</code><br>input <code>${esc(t.core.input_audio_sha256.slice(0, 12))}…</code> · target <code>${esc(t.core.target_audio_sha256.slice(0, 12))}…</code><br>output scale ${fmt(t.core.output_scale_c, 4)} - set the player's Output gain to ${fmt(t.core.peak_ceiling_gain_reduction_db, 1)} dB.</p>` : ""}`);
     const train = b && !stale ? card("Train", `<div id="cg-train-slot"></div>${t && t.trained ? `<p class="info">${badge("instant", "trained")} <code>${esc(t.output_nam_path.split("/").pop())}</code></p><button type="button" class="btn btn-primary btn-block" id="cg-goto4">Continue to Test &amp; export</button>` : ""}`) : "";
     const plan = card("Training plan", table([], `
           <tr><td>Amplifier</td><td>${esc(d.project.amp || "-")} ${esc(d.project.channel)}</td></tr>
           <tr><td>Captures</td><td>${Object.keys(d.project.captures).length} uploaded · ${p.selected.length} selected for training (${p.selected.map((g) => "G" + g).join(", ")})</td></tr>
-          <tr><td>Input gain range</td><td>${fmt(range[0])} to ${fmt(range[1])} dB (${p.anchor_method === "fc" ? "FC response-distance anchors" : "fixed 4 dB spacing — Advanced"})</td></tr>
+          <tr><td>Input gain range</td><td>${fmt(range[0])} to ${fmt(range[1])} dB (${p.anchor_method === "fc" ? "FC response-distance anchors" : "fixed 4 dB spacing - Advanced"})</td></tr>
           <tr><td>Output compensation</td><td>${b ? "recorded in the training files (below)" : "one constant, computed when the training target is built"}</td></tr>
           <tr><td>Result</td><td>One standard <code>.nam</code>, a manifest and a player guide</td></tr>`))
       + card("Anchors", table(["Position", "Input gain", "Kind"], p.mapping.filter((m) => m.kind === "training_anchor").map((m) => `<tr><td>G${m.position}</td><td>${fmt(m.input_gain_db)} dB</td><td>training anchor</td></tr>`).join("")));
@@ -433,7 +433,7 @@
     const chip = (ok, yes, no) => badge(ok ? "instant" : "bad", ok ? yes : no);
     const setup = actions
       + card("Standard NAM compatibility", `<p>${chip(c.standard_nam, "standard .nam", "not verified")} ${chip(c.full.rendered_ok, "Full renders", "Full failed")} ${chip(c.lite && c.lite.rendered_ok, "Lite renders", "Lite failed")}</p><p class="info">architecture ${esc(c.architecture)} · sample rate ${esc(c.sample_rate)} · no extra runtime processing required</p>`)
-      + card("Output safety", `<p class="info">Set the player's <strong>Output gain to ${fmt(sf.recommended_output_gain_db, 1)} dB</strong> and leave it. ${sf.scaled_peak_over_0dbfs_at_input_gain_db.length ? `<strong>Peaks above 0 dBFS at Input gain ${sf.scaled_peak_over_0dbfs_at_input_gain_db.join(", ")} dB</strong> with this DI — lower the output or the Input gain there.` : "No peaks above 0 dBFS across the Input-gain range on this DI."}</p>`);
+      + card("Output safety", `<p class="info">Set the player's <strong>Output gain to ${fmt(sf.recommended_output_gain_db, 1)} dB</strong> and leave it. ${sf.scaled_peak_over_0dbfs_at_input_gain_db.length ? `<strong>Peaks above 0 dBFS at Input gain ${sf.scaled_peak_over_0dbfs_at_input_gain_db.join(", ")} dB</strong> with this DI - lower the output or the Input gain there.` : "No peaks above 0 dBFS across the Input-gain range on this DI."}</p>`);
     const au = v.audition, cov = v.coverage;
     const main = card("Gain progression vs your captures", table(["Position", "Input gain", "Role", "Level Δ dB", "HF Δ", "Crest Δ", "Dyn. range Δ", "EQ max Δ", "Level-matched ESR"],
           pg.positions.map((r) => `<tr><td>G${r.position}</td><td>${fmt(r.input_gain_db)} dB</td><td>${r.role === "training" ? badge("auto", "training") : `<span class="value-chip">reference</span>`}</td><td>${fmt(r.level_db, 2)}</td><td>${fmt(r.hf_db, 2)}</td><td>${fmt(r.crest_db, 2)}</td><td>${fmt(r.dyn_range_db, 2)}</td><td>${fmt(r.eq_max_db, 2)}</td><td>${fmt(r.lm_esr, 4)}</td></tr>`).join(""))

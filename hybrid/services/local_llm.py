@@ -1002,7 +1002,7 @@ with an actual amplifier's gain knob or guaranteed amount of distortion.
 Never describe high Amp B values as preserving Amp A. Use visible UI control
 labels in prose, not internal JSON keys.
 
-MODES — choose by requested signal behaviour, not genre/artist keywords:
+MODES - choose by requested signal behaviour, not genre/artist keywords:
 - blend ('{CONTROL_LABELS['mode_blend']}'): both sources run at one FIXED mix,
   regardless of input level. Required recipe fields: mode='blend', mixB (0-100
   percent toward Amp B), explanation.

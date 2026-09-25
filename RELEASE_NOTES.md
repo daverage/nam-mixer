@@ -3,6 +3,49 @@
 The GitHub release page is the published record; drafts for the next release go
 under an "Unreleased" heading.
 
+## v0.5.2
+
+### Your work is kept
+
+- **Autosave.** Unsaved Builder work is saved automatically as you go, in a
+  single "Unsaved work" entry that is overwritten, never multiplied. If it's
+  there when you start NAM Mixer, you can **Restore** or **Discard** it. It's
+  cleared when you save, create training files, or load a session.
+- **Loading a session prepares the amps straight away**, so it's ready to
+  hear.
+
+### Parallel Blend (Always mixed) phase safety
+
+- A **Parallel safety** check measures whether the two amps cancel each other
+  out in the actual mix, and whether both can still be heard.
+- **Original / Amp B flipped** polarity, played in the same player. Flipping
+  is only recommended when it clearly removes a measured cancellation, and is
+  never applied automatically. A **full safety check** confirms the result on
+  two more performances. The choice is carried into training, validation and
+  sessions.
+
+### Easier to use
+
+- Every mode leads with plain language; measurements and fine-tuning are in
+  sections marked **Advanced**. Controls that do nothing in a mode are hidden.
+- **Check quiet playing** (Combined character) now gives a clear verdict.
+- **Tools:** the NAM Inspector is an "About this NAM" overview at the top, with
+  the editing tools below.
+- **AI Assistant** shows which AI it's using and whether it's ready, instead
+  of an on/off box.
+- New pages start with the clean guitar performance, Guitar and the
+  Vintage / PAF pickup.
+- Finish & polish links straight to the cabinet picker.
+
+### Fixes
+
+- The player no longer plays out-of-date audio after a change made while
+  paused (for example, adding a cabinet).
+- The page no longer breaks when a running copy of the app serves an older
+  page with newer scripts.
+- A non-standard tone type in a NAM file is kept instead of being cleared by a
+  metadata edit.
+
 ## v0.5.0
 
 ### Update notifications

@@ -1,4 +1,4 @@
-# NAM Mixer — Train One Standard NAM From a Physical Gain Sweep
+# NAM Mixer - Train One Standard NAM From a Physical Gain Sweep
 
 ## Mission
 
@@ -6,7 +6,7 @@ Return the Continuous Gain project to its original objective.
 
 **Train one new, conventional NAM model using captures of the same amplifier at multiple physical Gain settings, so that changing the input gain in an ordinary NAM player produces a response resembling the real amplifier as its physical Gain knob is changed.**
 
-The finished result must be one newly trained, standard `.nam` file—not a collection of NAM anchors, a runtime interpolation system, an external calibration profile or a custom player.
+The finished result must be one newly trained, standard `.nam` file-not a collection of NAM anchors, a runtime interpolation system, an external calibration profile or a custom player.
 
 Begin with the complete ten-position JCM800 gain sweep. Establish whether the objective is achievable using all ten captures before investigating how few captures are needed.
 
@@ -331,7 +331,7 @@ They are not assumed to be necessary.
 
 Test the following approaches where technically supported:
 
-### Method A — Direct multi-gain training
+### Method A - Direct multi-gain training
 
 Use the original real capture responses at G1–G10 as the training targets.
 
@@ -339,7 +339,7 @@ No Hybrid or Blended processing is applied.
 
 This establishes whether the conventional NAM architecture can learn the requested response directly from the available physical-gain examples.
 
-### Method B — Hybrid-assisted training
+### Method B - Hybrid-assisted training
 
 Use the existing Hybrid method to create intermediate training targets between adjacent physical-gain captures.
 
@@ -361,7 +361,7 @@ Require continuity at the shared endpoints.
 
 The resulting targets may be used to train one final NAM, but Hybrid must not remain part of the playback signal path.
 
-### Method C — Blended-assisted training
+### Method C - Blended-assisted training
 
 Evaluate the existing Blended approach in the same controlled manner, if its implementation can produce suitable training targets.
 
@@ -484,13 +484,13 @@ The only intended control changing between test positions is the ordinary input 
 
 Compare the newly trained ten-capture model against:
 
-**Baseline 1 — Original G5 NAM with ordinary input gain**
+**Baseline 1 - Original G5 NAM with ordinary input gain**
 
 Use the original G5 capture and the same predefined input-gain control law.
 
 This tests whether training across the gain sweep adds value beyond simply driving the existing G5 capture harder or softer.
 
-**Baseline 2 — Original G5 NAM with its calibrated input-gain mapping**
+**Baseline 2 - Original G5 NAM with its calibrated input-gain mapping**
 
 Use the best previously established calibrated-G5 approach.
 
@@ -498,11 +498,11 @@ Label it clearly as a separately calibrated baseline.
 
 This establishes whether the newly trained model improves on the shortcut identified in the previous research.
 
-**Baseline 3 — Original real G1–G10 NAM captures**
+**Baseline 3 - Original real G1–G10 NAM captures**
 
 These are the ground-truth references.
 
-**Optional diagnostic — Direct Hybrid / Blended rendering**
+**Optional diagnostic - Direct Hybrid / Blended rendering**
 
 Use only to identify errors introduced by the training-target generation method.
 
@@ -652,7 +652,7 @@ Suggested configurations:
 
 The subset positions are starting configurations, not assumptions that evenly spaced or endpoint captures are always optimal.
 
-If the results justify it, compare alternative three-capture sets—for example, one targeting the amplifier's most nonlinear response region.
+If the results justify it, compare alternative three-capture sets-for example, one targeting the amplifier's most nonlinear response region.
 
 Do not optimise subset positions against the final held-out reference set and then claim that set remains independent.
 
@@ -772,7 +772,7 @@ Do not automatically conclude that more equally spaced captures are the solution
 
 The highest-value additional capture may be near a nonlinear response knee rather than in the largest numerical gap.
 
-The objective is the minimum capture count that produces a newly trained NAM whose complete gain response remains close to the real amplifier—not the minimum capture count needed to reproduce a synthetic Hybrid sweep.
+The objective is the minimum capture count that produces a newly trained NAM whose complete gain response remains close to the real amplifier-not the minimum capture count needed to reproduce a synthetic Hybrid sweep.
 
 ---
 

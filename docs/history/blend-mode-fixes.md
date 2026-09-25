@@ -86,7 +86,7 @@
 >
 > ---
 >
-> # Phase 1 — replace the current triangular weighting
+> # Phase 1 - replace the current triangular weighting
 >
 > Replace the existing all-level triangular basis interpolation with an explicit adjacent-level interpolation.
 >
@@ -137,7 +137,7 @@
 >
 > ---
 >
-> # Phase 2 — test well outside the analysis range
+> # Phase 2 - test well outside the analysis range
 >
 > Add unit tests for envelope values including:
 >
@@ -176,7 +176,7 @@
 >
 > ---
 >
-> # Phase 3 — add a low-level response regression test
+> # Phase 3 - add a low-level response regression test
 >
 > Create a synthetic test where both source amps are guaranteed to produce non-zero output for any non-zero input.
 >
@@ -217,7 +217,7 @@
 >
 > ---
 >
-> # Phase 4 — add a real teacher-response sanity check
+> # Phase 4 - add a real teacher-response sanity check
 >
 > Before generating a Character Blend A2 bundle, evaluate the finished teacher using a fixed reference DI at several gains:
 >
@@ -267,7 +267,7 @@
 >
 > ---
 >
-> # Phase 5 — add a Character Blend export gate
+> # Phase 5 - add a Character Blend export gate
 >
 > Do not allow training-bundle generation to silently proceed when the teacher has a hard low-level collapse.
 >
@@ -307,7 +307,7 @@
 >
 > ---
 >
-> # Phase 6 — show the result in the UI
+> # Phase 6 - show the result in the UI
 >
 > In the Character Blend design or Create A2 section, show:
 >
@@ -340,7 +340,7 @@
 >
 > ---
 >
-> # Phase 7 — ensure preview and training use identical logic
+> # Phase 7 - ensure preview and training use identical logic
 >
 > The same `build_character_blend()` implementation must continue to power:
 >
@@ -356,7 +356,7 @@
 >
 > ---
 >
-> # Phase 8 — inspect the Drive control separately
+> # Phase 8 - inspect the Drive control separately
 >
 > While reviewing `character_blend.py`, also document the current Drive behaviour.
 >
@@ -389,7 +389,7 @@
 >
 > ---
 >
-> # Phase 9 — validate using the actual failing design
+> # Phase 9 - validate using the actual failing design
 >
 > Reproduce the design from the current real test:
 >
@@ -438,7 +438,7 @@
 >
 > ---
 >
-> # Phase 10 — validate the trained NAM
+> # Phase 10 - validate the trained NAM
 >
 > After training, run the exact same gain sweep through the exported Full A2:
 >
@@ -473,7 +473,7 @@
 >
 > ---
 >
-> # Phase 11 — add permanent post-training validation
+> # Phase 11 - add permanent post-training validation
 >
 > Add this low-level sweep to the existing A2 validation system.
 >

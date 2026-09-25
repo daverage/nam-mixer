@@ -17,11 +17,11 @@ audible in the selected mix.
 
 Parallel Blend will report three independent facts:
 
-1. **Parallel compatibility** — whether the actual weighted sum shows strong,
+1. **Parallel compatibility** - whether the actual weighted sum shows strong,
    repeatable destructive interaction in musically important bands.
-2. **Amp presence** — whether both weighted amp contributions remain material
+2. **Amp presence** - whether both weighted amp contributions remain material
    at the selected ratio, or one is likely to be obscured.
-3. **Fixed latency** — the existing conservative fixed-offset result, retained
+3. **Fixed latency** - the existing conservative fixed-offset result, retained
    as advanced evidence and never presented as the overall blend verdict.
 
 The wording must distinguish `safe`, `some coloration`, `strong cancellation`,
@@ -73,7 +73,7 @@ repeatable.  When no polarity is consistently safer, the UI offers explicit
 
 ## Delivery stages
 
-### Stage 1 — auditioned-performance safety (implemented with this plan)
+### Stage 1 - auditioned-performance safety (implemented with this plan)
 
 - Add deterministic band-energy cancellation and weighted-presence analysis.
 - Return it from `/api/mix_info` for the current ratio/trim/timing/polarity.
@@ -85,7 +85,7 @@ repeatable.  When no polarity is consistently safer, the UI offers explicit
 - Move rejected per-region timing guesses behind advanced evidence and display
   `agreement not applicable` when no timing regions were usable.
 
-### Stage 2 — independent-DI confirmation (implemented with this plan)
+### Stage 2 - independent-DI confirmation (implemented with this plan)
 
 - Re-run compatibility and polarity comparison on demand across two independent
   bundled DIs in addition to the preview DI.
@@ -93,7 +93,7 @@ repeatable.  When no polarity is consistently safer, the UI offers explicit
   only when all usable DIs agree; otherwise keep the choice available for
   audition but remove the recommendation.
 
-### Stage 3 — phase-optimised delay audition
+### Stage 3 - phase-optimised delay audition
 
 - Search a small bounded integer-delay range against the cancellation score,
   independently of the latency detector.
