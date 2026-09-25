@@ -17,6 +17,9 @@ NAM inference is wired in and we've established what latency guarantees (if
 any) the official inference API actually makes, pass `enabled=False` to
 `align_to_reference` to skip correction (renders are still truncated/padded to
 match length) rather than trusting this cross-correlation blind.
+
+`hybrid.core.align_diagnostic.analyse_alignment` is the read-only check for
+whether a stable fixed offset actually exists; see docs/alignment_diagnostic.md.
 """
 from __future__ import annotations
 
