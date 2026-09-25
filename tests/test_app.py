@@ -1969,3 +1969,40 @@ def test_embedded_nam_download_requires_experimental_architectures(client, tmp_p
     assert resp.status_code == status
     if not enabled:
         assert "experimental" in resp.get_json()["error"]
+
+
+def test_render_pair_reports_alignment_diagnostic_without_extra_inference(client, tmp_path, monkeypatch):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    calls = []
+
+    def counting_render(model, audio, sample_rate):
+        calls.append(model)
+        return np.asarray(audio, dtype=np.float32).copy()
+
+    monkeypatch.setattr(pipeline, "render", counting_render)
+    data = client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+    assert len(calls) == 2
+    diagnostic = data["alignment_diagnostic"]
+    assert diagnostic["status"] == "aligned"  # identical renders
+    assert diagnostic["recommended_offset_samples"] == 0
+    assert diagnostic["per_window_offsets"] and set(diagnostic["per_window_offsets"]) == {0}
+    assert diagnostic["reason"]
+    # Report only: preview/mix info stays uncorrected.
+    info = client.post("/api/mix_info", json={"render_id": data["render_id"], "mode": "blend", "mix_b": 0.5}).get_json()
+    assert info["alignment_offset_samples"] == 0
+
+
+def test_render_pair_survives_a_failing_alignment_diagnostic(client, tmp_path, monkeypatch):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app_module, "analyse_alignment", broken)
+    response = client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
+    assert response.status_code == 200
+    assert response.get_json()["alignment_diagnostic"] is None

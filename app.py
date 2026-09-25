@@ -52,6 +52,7 @@ from hybrid.modes.character_analysis import (
 from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
 from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
 from hybrid.modes.cab_embed_training_target import CabEmbedDesign, generate_cab_embed_training_bundle
+from hybrid.core.align_diagnostic import analyse_alignment
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.core.coverage import (
@@ -2205,6 +2206,15 @@ def api_render_pair():
 
     suggested_crossover = suggest_crossover_dbfs(pair.source_envelope_db)
 
+    # Read-only timing diagnostic on the renders just produced (no further
+    # inference, and it never changes what is previewed or generated --
+    # alignment stays off; see hybrid/core/align_diagnostic.py).
+    try:
+        alignment_diagnostic = analyse_alignment(pair.amp_a, pair.amp_b, pair.profiled_dry, sample_rate).to_dict()
+    except Exception as exc:  # diagnostic only: never fail a render over it
+        app.logger.warning("alignment diagnostic failed: %s", exc)
+        alignment_diagnostic = None
+
     return jsonify({
         "render_id": snapshot["render_id"],
         "source_hashes": snapshot["source_hashes"],
@@ -2242,6 +2252,8 @@ def api_render_pair():
         # -- used to calibrate the "guitar volume feel" 0-10 crossover knob
         # against real signal levels for THIS render, not a guessed constant.
         "blend_envelope_percentiles": envelope_percentiles(pair.envelope_db[pair.envelope_db > -50.0]),
+
+        "alignment_diagnostic": alignment_diagnostic,
 
         "warnings": warnings,
     })

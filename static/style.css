@@ -564,6 +564,15 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .checkbox-text { display: flex; flex-direction: column; gap: 0.15rem; }
 .checkbox-hint { color: var(--text-muted); font-size: 0.75rem; font-weight: 450; }
 
+.timing-readout {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.timing-readout-summary { font-variant-numeric: tabular-nums; }
+.timing-readout[data-status="fixed_offset"] .timing-readout-summary { color: var(--text); }
+.timing-readout-body > div + div { margin-top: 0.35rem; }
+
 .trim-readout {
   margin-top: 0.75rem;
   font-size: 0.8rem;

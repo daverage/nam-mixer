@@ -575,6 +575,45 @@ function populateProfileSelect() {
 // staleness impossible to miss: preview buttons disable, the Render Amps
 // button gets a pulsing highlight, and the status line names WHAT changed
 // (not a generic "input profile changed" for every case).
+// Read-only A/B timing diagnostic from /api/render_pair
+// (hybrid/core/align_diagnostic.py). It only reports; alignment is never
+// applied to preview or training targets.
+const TIMING_SUMMARY = {
+  aligned: () => "Aligned — no fixed offset detected",
+  fixed_offset: (d) => `Fixed offset detected: Amp B ${d.recommended_offset_samples > 0 ? "+" : ""}${d.recommended_offset_samples} samples (not applied)`,
+  ambiguous: () => "Ambiguous — no correction recommended",
+  insufficient_signal: () => "Could not analyse reliably",
+};
+
+function renderTimingReadout(diagnostic) {
+  document.querySelectorAll(".timing-readout").forEach((el) => {
+    if (!diagnostic || !TIMING_SUMMARY[diagnostic.status]) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.dataset.status = diagnostic.status;
+    el.querySelector(".timing-readout-summary").textContent = `Timing: ${TIMING_SUMMARY[diagnostic.status](diagnostic)}`;
+    const offsets = diagnostic.per_window_offsets.length
+      ? diagnostic.windows.map((w) => `${w.offset_samples > 0 ? "+" : ""}${w.offset_samples}${w.reliable ? "" : "*"}`).join(", ")
+      : "none";
+    const body = el.querySelector(".timing-readout-body");
+    body.textContent = "";
+    [
+      diagnostic.reason,
+      `Amp B offset per region (samples, + = Amp B later): ${offsets}` +
+        (diagnostic.windows.some((w) => !w.reliable) ? " — * too dissimilar to count" : ""),
+      `${diagnostic.windows_reliable} of ${diagnostic.windows_analysed} regions usable, ` +
+        `agreement ${Math.round(diagnostic.agreement_fraction * 100)}%, search ±${diagnostic.max_lag_samples} samples. ` +
+        `Single whole-clip estimate: ${diagnostic.whole_render_offset_samples ?? "n/a"}.`,
+    ].forEach((line) => {
+      const p = document.createElement("div");
+      p.textContent = line;
+      body.appendChild(p);
+    });
+  });
+}
+
 function markProfileStale(reason, { preserveAudition = false } = {}) {
   const wasCurrentPreview = havePair;
   if (!preserveAudition) pendingAuditionResume = null;
@@ -584,6 +623,7 @@ function markProfileStale(reason, { preserveAudition = false } = {}) {
   renderGeneration += 1;
   activeRenderId = null;
   havePair = false;
+  renderTimingReadout(null);
   clearAudition();
   invalidateLiveAudition("Amp pair changed — start live blend again after rendering.");
   previewButtons.forEach((btn) => (btn.disabled = true));
@@ -2239,6 +2279,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
     }
   }
 
+  renderTimingReadout(data.alignment_diagnostic);
   activeRenderId = data.render_id;
   previewButtons.forEach((btn) => (btn.disabled = false));
   liveBlendButton.disabled = false;
