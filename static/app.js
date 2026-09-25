@@ -575,44 +575,105 @@ function populateProfileSelect() {
 // staleness impossible to miss: preview buttons disable, the Render Amps
 // button gets a pulsing highlight, and the status line names WHAT changed
 // (not a generic "input profile changed" for every case).
-// Read-only A/B timing diagnostic from /api/render_pair
-// (hybrid/core/align_diagnostic.py). It only reports; alignment is never
-// applied to preview or training targets.
-const TIMING_SUMMARY = {
-  aligned: () => "Aligned — no fixed offset detected",
-  fixed_offset: (d) => `Fixed offset detected: Amp B ${d.recommended_offset_samples > 0 ? "+" : ""}${d.recommended_offset_samples} samples (not applied)`,
-  ambiguous: () => "Ambiguous — no correction recommended",
-  insufficient_signal: () => "Could not analyse reliably",
-};
+// A/B timing from /api/render_pair: the diagnostic measures, cross-DI
+// verification decides whether a fixed offset may be offered, and the user
+// chooses Original or Corrected. Corrected sends the verified integer, which
+// the server applies verbatim to preview and freezes into the design.
+let timingChoice = { available: false, offsetSamples: null, corrected: false };
 
-function renderTimingReadout(diagnostic) {
+function timingParamsBody() {
+  return timingChoice.available && timingChoice.corrected
+    ? { alignment_enabled: true, alignment_offset_samples: timingChoice.offsetSamples }
+    : {};
+}
+
+function signedSamples(n) {
+  return `${n > 0 ? "+" : ""}${n}`;
+}
+
+function timingSummary(render) {
+  const diagnostic = render.alignment_diagnostic;
+  const correction = render.timing_correction || {};
+  if (correction.available) {
+    const n = correction.offset_samples;
+    return `Timing: Fixed offset detected — Amp B ${n > 0 ? "lags" : "leads"} Amp A by ${Math.abs(n)} samples`;
+  }
+  if (diagnostic.status === "aligned") return "Timing: No stable fixed offset detected";
+  if (diagnostic.status === "insufficient_signal") return "Timing: Insufficient signal for reliable analysis";
+  return "Timing: No trustworthy fixed timing correction identified";
+}
+
+function timingEvidenceLines(render) {
+  const diagnostic = render.alignment_diagnostic;
+  const verification = render.alignment_verification;
+  const regions = diagnostic.windows.length
+    ? diagnostic.windows.map((w) => `${signedSamples(w.offset_samples)}${w.reliable ? "" : "*"}`).join(", ")
+    : "none";
+  const lines = [
+    `Preview DI: ${diagnostic.reason}`,
+    `Amp B offset per region (samples; + = Amp B later than Amp A): ${regions}` +
+      (diagnostic.windows.some((w) => !w.reliable) ? " — * too dissimilar to count" : ""),
+    `${diagnostic.windows_reliable} of ${diagnostic.windows_analysed} regions usable, ` +
+      `agreement ${Math.round(diagnostic.agreement_fraction * 100)}%, search ±${diagnostic.max_lag_samples} samples.`,
+  ];
+  if (verification && verification.status !== "not_run") {
+    lines.push(`Other DIs: ${verification.reason}`);
+    verification.per_di.forEach((d) => {
+      lines.push(`${d.di_file}: ${d.status.replace("_", " ")}` +
+        (d.status === "fixed_offset" ? ` ${signedSamples(d.recommended_offset_samples)} samples` : "") +
+        ` (${d.windows_reliable}/${d.windows_analysed} regions)`);
+    });
+  }
+  return lines;
+}
+
+function syncTimingChoiceButtons() {
+  document.querySelectorAll(".timing-choice [data-timing]").forEach((button) => {
+    const corrected = button.dataset.timing === "corrected";
+    button.setAttribute("aria-pressed", String(corrected === timingChoice.corrected));
+  });
+}
+
+function renderTimingReadout(render) {
+  const diagnostic = render && render.alignment_diagnostic;
+  const correction = (render && render.timing_correction) || {};
+  // Every new render starts from Original timing.
+  timingChoice = {
+    available: !!(diagnostic && correction.available),
+    offsetSamples: diagnostic && correction.available ? correction.offset_samples : null,
+    corrected: false,
+  };
   document.querySelectorAll(".timing-readout").forEach((el) => {
-    if (!diagnostic || !TIMING_SUMMARY[diagnostic.status]) {
+    if (!diagnostic) {
       el.hidden = true;
       return;
     }
     el.hidden = false;
-    el.dataset.status = diagnostic.status;
-    el.querySelector(".timing-readout-summary").textContent = `Timing: ${TIMING_SUMMARY[diagnostic.status](diagnostic)}`;
-    const offsets = diagnostic.per_window_offsets.length
-      ? diagnostic.windows.map((w) => `${w.offset_samples > 0 ? "+" : ""}${w.offset_samples}${w.reliable ? "" : "*"}`).join(", ")
-      : "none";
+    el.dataset.status = timingChoice.available ? "fixed_offset" : diagnostic.status;
+    el.querySelector(".timing-readout-summary").textContent = timingSummary(render);
+    el.querySelector(".timing-choice").hidden = !timingChoice.available;
     const body = el.querySelector(".timing-readout-body");
     body.textContent = "";
-    [
-      diagnostic.reason,
-      `Amp B offset per region (samples, + = Amp B later): ${offsets}` +
-        (diagnostic.windows.some((w) => !w.reliable) ? " — * too dissimilar to count" : ""),
-      `${diagnostic.windows_reliable} of ${diagnostic.windows_analysed} regions usable, ` +
-        `agreement ${Math.round(diagnostic.agreement_fraction * 100)}%, search ±${diagnostic.max_lag_samples} samples. ` +
-        `Single whole-clip estimate: ${diagnostic.whole_render_offset_samples ?? "n/a"}.`,
-    ].forEach((line) => {
-      const p = document.createElement("div");
-      p.textContent = line;
-      body.appendChild(p);
+    timingEvidenceLines(render).forEach((line) => {
+      const div = document.createElement("div");
+      div.textContent = line;
+      body.appendChild(div);
     });
   });
+  syncTimingChoiceButtons();
 }
+
+document.querySelectorAll(".timing-choice [data-timing]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const corrected = button.dataset.timing === "corrected";
+    if (!timingChoice.available || corrected === timingChoice.corrected) return;
+    timingChoice.corrected = corrected;
+    syncTimingChoiceButtons();
+    invalidateLiveAudition("Timing changed — start live blend again to load the matching stems.");
+    scheduleUpdate();
+    scheduleAuditionRefresh();
+  });
+});
 
 function markProfileStale(reason, { preserveAudition = false } = {}) {
   const wasCurrentPreview = havePair;
@@ -1776,6 +1837,7 @@ function hybridParamsBody() {
     transition_width_db: parseFloat(transitionSlider.value),
     auto_level: document.getElementById("auto-level-match").checked,
     manual_b_trim_db: parseFloat(ampBTrimSlider.value) || 0.0,
+    ...timingParamsBody(),
   };
 }
 
@@ -1784,6 +1846,7 @@ function blendParamsBody() {
     mix_b: parseInt(mixSlider.value, 10) / 100.0,
     auto_level: document.getElementById("auto-level-match").checked,
     manual_b_trim_db: parseFloat(ampBTrimSlider.value) || 0.0,
+    ...timingParamsBody(),
   };
 }
 
@@ -2279,7 +2342,7 @@ function applyRenderResult(data, { applySuggestedCrossover }) {
     }
   }
 
-  renderTimingReadout(data.alignment_diagnostic);
+  renderTimingReadout(data);
   activeRenderId = data.render_id;
   previewButtons.forEach((btn) => (btn.disabled = false));
   liveBlendButton.disabled = false;

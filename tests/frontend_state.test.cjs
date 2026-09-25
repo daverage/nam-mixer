@@ -498,3 +498,28 @@ test('Continuous Gain step estimates come from one timing table and keep their m
   assert.equal(sandbox.estimateSeconds('validate', 4), 15 + 12);
   assert.doesNotMatch(cg, /formatDuration\(\d+ \+/);                    // no inline formula left
 });
+
+test('timing readout wording and Original/Corrected request body', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('let timingChoice', 'function timingEvidenceLines(') + '\nthis.setChoice = (c) => { timingChoice = c; };', sandbox);
+  const summary = (status, correction) => sandbox.timingSummary({
+    alignment_diagnostic: { status }, timing_correction: correction || { available: false, offset_samples: null },
+  });
+  assert.equal(summary('fixed_offset', { available: true, offset_samples: 7 }),
+    'Timing: Fixed offset detected — Amp B lags Amp A by 7 samples');
+  assert.equal(summary('fixed_offset', { available: true, offset_samples: -3 }),
+    'Timing: Fixed offset detected — Amp B leads Amp A by 3 samples');
+  assert.equal(summary('aligned'), 'Timing: No stable fixed offset detected');
+  assert.equal(summary('ambiguous'), 'Timing: No trustworthy fixed timing correction identified');
+  // A per-DI fixed offset that cross-DI verification did not confirm is not offered.
+  assert.equal(summary('fixed_offset'), 'Timing: No trustworthy fixed timing correction identified');
+  assert.equal(summary('insufficient_signal'), 'Timing: Insufficient signal for reliable analysis');
+
+  sandbox.setChoice({ available: true, offsetSamples: 7, corrected: false });
+  assert.equal(JSON.stringify(sandbox.timingParamsBody()), '{}');
+  sandbox.setChoice({ available: true, offsetSamples: 7, corrected: true });
+  assert.equal(JSON.stringify(sandbox.timingParamsBody()), '{"alignment_enabled":true,"alignment_offset_samples":7}');
+  sandbox.setChoice({ available: false, offsetSamples: null, corrected: true });
+  assert.equal(JSON.stringify(sandbox.timingParamsBody()), '{}');
+});

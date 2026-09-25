@@ -2006,3 +2006,170 @@ def test_render_pair_survives_a_failing_alignment_diagnostic(client, tmp_path, m
     response = client.post("/api/render_pair", json=_render_body(amp_a, amp_b))
     assert response.status_code == 200
     assert response.get_json()["alignment_diagnostic"] is None
+
+
+# --- fixed A/B timing correction ----------------------------------------------
+
+TIMING_DELAY = 7
+
+
+def _delay_b_render(monkeypatch, calls=None):
+    """Amp B's 'model' has a genuine fixed latency of TIMING_DELAY samples."""
+    def delayed(model, audio, sample_rate, **_kwargs):
+        if calls is not None:
+            calls.append(model.path.name)
+        audio = np.asarray(audio, dtype=np.float32)
+        if model.path.name == "b.nam":
+            return np.concatenate([np.zeros(TIMING_DELAY, np.float32), audio])[: len(audio)]
+        return audio.copy()
+    for module in (pipeline, training_target, blend_training_target):
+        monkeypatch.setattr(module, "render", delayed)
+
+
+def _render_delayed_pair(client, tmp_path, monkeypatch, calls=None):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    _delay_b_render(monkeypatch, calls)
+    return client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+
+
+def _preview(client, render_id, **body):
+    import soundfile as sf
+    response = client.post("/api/preview", json={"render_id": render_id, **body})
+    assert response.status_code == 200, response.get_json()
+    audio, _ = sf.read(io.BytesIO(response.data), dtype="float32")
+    return audio, response.headers
+
+
+def test_verified_fixed_offset_is_offered_but_not_applied(client, tmp_path, monkeypatch):
+    calls = []
+    data = _render_delayed_pair(client, tmp_path, monkeypatch, calls)
+    assert data["alignment_diagnostic"]["status"] == "fixed_offset"
+    assert data["alignment_verification"]["status"] == "verified"
+    assert data["timing_correction"] == {"available": True, "offset_samples": TIMING_DELAY}
+    assert len(calls) == 2 + 2 * 3  # preview pair + 3 verification DIs
+    # Original is the default: nothing corrected unless explicitly requested.
+    info = client.post("/api/mix_info", json={"render_id": data["render_id"], "mode": "blend"}).get_json()
+    assert info["alignment_offset_samples"] == 0
+
+
+def test_corrected_preview_removes_the_offset_and_switching_never_rerenders(client, tmp_path, monkeypatch):
+    calls = []
+    data = _render_delayed_pair(client, tmp_path, monkeypatch, calls)
+    rendered = len(calls)
+    body = {"source": "blend", "mix_b": 1.0, "auto_level": False, "manual_b_trim_db": 0.0,
+            "output_gain_mode": "manual", "manual_output_gain_db": 0.0}
+    amp_a, _ = _preview(client, data["render_id"], source="a")
+    original, h_original = _preview(client, data["render_id"], **body)
+    corrected, h_corrected = _preview(client, data["render_id"], alignment_enabled=True,
+                                      alignment_offset_samples=TIMING_DELAY, **body)
+    again, _ = _preview(client, data["render_id"], **body)
+    assert len(calls) == rendered  # Original/Corrected switching is cheap
+    assert h_original["X-Alignment-Offset-Samples"] == "0"
+    assert h_corrected["X-Alignment-Offset-Samples"] == str(TIMING_DELAY)
+    np.testing.assert_array_equal(corrected[:-TIMING_DELAY], amp_a[:-TIMING_DELAY])
+    np.testing.assert_array_equal(original[TIMING_DELAY:], amp_a[:-TIMING_DELAY])
+    np.testing.assert_array_equal(again, original)
+
+
+def test_hybrid_preview_and_info_apply_the_verified_offset(client, tmp_path, monkeypatch):
+    data = _render_delayed_pair(client, tmp_path, monkeypatch)
+    body = {"render_id": data["render_id"], "crossover_dbfs": -22.0, "transition_width_db": 8.0,
+            "alignment_enabled": True, "alignment_offset_samples": TIMING_DELAY}
+    assert client.post("/api/blend_info", json=body).get_json()["alignment_offset_samples"] == TIMING_DELAY
+    assert client.post("/api/mix_info", json={**body, "mode": "hybrid"}).get_json()["alignment_offset_samples"] == TIMING_DELAY
+    _, headers = _preview(client, data["render_id"], source="hybrid", **{k: v for k, v in body.items() if k != "render_id"})
+    assert headers["X-Alignment-Offset-Samples"] == str(TIMING_DELAY)
+
+
+def test_correction_requires_the_exact_verified_offset(client, tmp_path, monkeypatch):
+    data = _render_delayed_pair(client, tmp_path, monkeypatch)
+    for offset in (TIMING_DELAY + 1, -TIMING_DELAY, 0, "7", 7.0, None):
+        response = client.post("/api/preview", json={"render_id": data["render_id"], "source": "blend",
+                                                     "alignment_enabled": True, "alignment_offset_samples": offset})
+        assert response.status_code == 400, offset
+
+
+def test_unverified_diagnostic_cannot_enable_correction(client, tmp_path):
+    amp_a, amp_b = tmp_path / "a.nam", tmp_path / "b.nam"
+    _write_fake_nam(amp_a)
+    _write_fake_nam(amp_b)
+    data = client.post("/api/render_pair", json=_render_body(amp_a, amp_b)).get_json()
+    assert data["timing_correction"] == {"available": False, "offset_samples": None}
+    assert data["alignment_verification"]["status"] == "not_run"
+    for route, extra in (("/api/preview", {"source": "blend"}), ("/api/mix_info", {"mode": "blend"}),
+                         ("/api/live_blend_stems", {}), ("/api/generate", {"mode": "blend"})):
+        response = client.post(route, json={"render_id": data["render_id"], "alignment_enabled": True,
+                                            "alignment_offset_samples": 0, **extra})
+        assert response.status_code == 400, route
+
+
+def test_live_stems_carry_the_corrected_amp_b(client, tmp_path, monkeypatch):
+    import soundfile as sf
+    data = _render_delayed_pair(client, tmp_path, monkeypatch)
+    body = {"render_id": data["render_id"], "mix_b": 0.5, "auto_level": False,
+            "output_gain_mode": "manual", "manual_output_gain_db": 0.0}
+    original = client.post("/api/live_blend_stems", json=body)
+    corrected = client.post("/api/live_blend_stems", json={**body, "alignment_enabled": True,
+                                                          "alignment_offset_samples": TIMING_DELAY})
+    o, _ = sf.read(io.BytesIO(original.data), dtype="float32")
+    c, _ = sf.read(io.BytesIO(corrected.data), dtype="float32")
+    np.testing.assert_array_equal(c[:, 0], o[:, 0])
+    np.testing.assert_array_equal(c[:-TIMING_DELAY, 1], c[:-TIMING_DELAY, 0])
+    np.testing.assert_array_equal(o[TIMING_DELAY:, 1], o[:-TIMING_DELAY, 0])
+
+
+@pytest.mark.parametrize("mode,design_file,extra", [
+    ("blend", "blend_design.json", {"mix_b": 0.5}),
+    ("hybrid", "hybrid_design.json", {"crossover_dbfs": -22.0, "transition_width_db": 8.0}),
+])
+def test_generate_freezes_and_applies_the_exact_verified_offset(client, tmp_path, monkeypatch, isolated_training_paths,
+                                                                mode, design_file, extra):
+    import soundfile as sf
+    training_path, _ = isolated_training_paths
+    _write_training_wav(training_path)
+    data = _render_delayed_pair(client, tmp_path, monkeypatch)
+    response = client.post("/api/generate", json={
+        "render_id": data["render_id"], "mode": mode, "model_name": f"timing {mode}", "auto_level": False,
+        "output_gain_mode": "manual", "manual_output_gain_db": 0.0,
+        "alignment_enabled": True, "alignment_offset_samples": TIMING_DELAY, **extra})
+    assert response.status_code == 200, response.get_json()
+    bundle_dir = Path(response.get_json()["bundle_dir"])
+    design = jsonlib.loads((bundle_dir / design_file).read_text())
+    assert (design["alignment_enabled"], design["alignment_offset_samples"]) == (True, TIMING_DELAY)
+    assert design["alignment_method"] == "fixed-frozen-offset"
+    assert design["alignment_diagnostic"]["verification"]["status"] == "verified"
+    manifest = jsonlib.loads((bundle_dir / "training_manifest.json").read_text())
+    assert manifest["alignment_correction"]["applied"] is True
+    assert manifest["alignment_correction"]["offset_samples"] == TIMING_DELAY
+    assert manifest["alignment_correction"]["method"] == "fixed-frozen-offset"
+    # The corrected Amp B lines up with Amp A in the generated target: with
+    # identity A and 7-sample-late B, the corrected mix is the input itself.
+    x, _ = sf.read(bundle_dir / "input.wav", dtype="float32")
+    raw, _ = sf.read(bundle_dir / "hybrid_target_raw.wav", dtype="float32")
+    if mode == "blend":
+        np.testing.assert_allclose(raw[:-TIMING_DELAY], x[:-TIMING_DELAY], atol=1e-6)
+
+
+def test_generate_without_correction_stays_unaligned(client, tmp_path, monkeypatch, isolated_training_paths):
+    training_path, _ = isolated_training_paths
+    _write_training_wav(training_path)
+    data = _render_delayed_pair(client, tmp_path, monkeypatch)
+    response = client.post("/api/generate", json={"render_id": data["render_id"], "mode": "blend", "model_name": "timing orig"})
+    bundle_dir = Path(response.get_json()["bundle_dir"])
+    design = jsonlib.loads((bundle_dir / "blend_design.json").read_text())
+    assert (design["alignment_enabled"], design["alignment_offset_samples"], design["alignment_method"]) == (False, 0, None)
+    assert design["alignment_diagnostic"]["recommended_offset_samples"] == TIMING_DELAY  # provenance only
+    manifest = jsonlib.loads((bundle_dir / "training_manifest.json").read_text())
+    assert manifest["alignment_correction"]["applied"] is False
+
+
+def test_render_survives_a_failing_cross_di_verification(client, tmp_path, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(app_module, "verify_fixed_offset_across_dis", broken)
+    data = _render_delayed_pair(client, tmp_path, monkeypatch)
+    assert data["alignment_diagnostic"]["status"] == "fixed_offset"
+    assert data["alignment_verification"] is None
+    assert data["timing_correction"] == {"available": False, "offset_samples": None}
