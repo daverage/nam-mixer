@@ -84,6 +84,7 @@ teacher. Always listen to and validate exported models.
 - [How the blend works](#why-the-dry-inputs-level-controls-the-transition):
   [dry-input level](#why-the-dry-inputs-level-controls-the-transition),
   [level matching](#why-automatic-level-matching-is-needed),
+  [A/B timing](#ab-timing-fixed-offsets-phase-response-and-why-nothing-is-auto-aligned),
   [input profile vs. crossover vs. calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
 - [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
 - [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Continuous Gain](#continuous-gain-one-amp-one-nam) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
@@ -161,6 +162,42 @@ guarantee anything about how they compare specifically **at the crossover
 point**, where it actually matters), this project measures each amp's loudness
 using only the portion of the render that falls near the chosen crossover level
 and computes a trim from that. See `hybrid/core/level_match.py`.
+
+## A/B timing: fixed offsets, phase response, and why nothing is auto-aligned
+
+When two amp captures are mixed (Parallel Blend) or crossfaded (Dynamic
+Hybrid), their timing matters. Two very different things can make Amp B
+look "late" compared with Amp A:
+
+- **A fixed timing offset.** The whole capture is delayed by the same number
+  of samples, e.g. from a latency setting when it was captured. It is the
+  same on every note and every piece of material, and shifting Amp B by that
+  exact amount fixes it completely.
+- **Phase response.** Real amps delay low, mid and high frequencies by
+  different amounts. That is part of how an amp sounds, not a mistake, and
+  it changes with what you play. No single shift can "fix" it; forcing one
+  just trades one comb-filtered frequency region for another.
+
+**NAM Mixer does NOT blindly phase-align captures.** After **Render Amps**
+it shows a **Timing** result. It measures the timing on several separate
+note attacks, and when those agree it re-checks the same two amps on other,
+independent DIs. A correction is offered only when every check agrees on one
+repeatable fixed offset. That is what a real latency looks like, and phase
+response does not pass it. The possible results are:
+
+- **Fixed offset detected — Amp B lags/leads Amp A by N samples:** you get an
+  optional **Original / Corrected** choice.
+- **No stable fixed offset detected:** the amps are already lined up.
+- **No trustworthy fixed timing correction identified:** the difference
+  looks like phase response or is inconsistent, so nothing is offered.
+
+There is **no automatic correction**. Original is always the default;
+Corrected is only ever your explicit choice. If you choose it, that exact
+sample count is frozen into the design and reused unchanged for preview,
+the training target, validation and export, and it is never re-measured.
+A saved session remembers the choice, but restores Corrected only after the
+next render verifies the same offset again. The technical details are in
+[docs/alignment_diagnostic.md](docs/alignment_diagnostic.md).
 
 ## Input profile vs. crossover vs. NAM calibration — three separate knobs
 
@@ -325,7 +362,9 @@ teacher from the saved design, never from current controls.
 A session restores the selected settings and app-managed NAM/cabinet file
 references, but it deliberately does not render automatically. After loading,
 use **Render Amps** to rebuild the pair and verify that the referenced files
-are still available. Training manifests under `work/a2` are separate from
+are still available. A saved Corrected timing choice comes back only if that
+render verifies exactly the same fixed offset again; otherwise timing stays
+Original and the Timing result says why. Training manifests under `work/a2` are separate from
 sessions and are not interchangeable with session JSON files.
 
 ## Continuous Gain: one amp, one NAM
