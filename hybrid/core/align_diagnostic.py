@@ -62,6 +62,8 @@ AGREEMENT_TOLERANCE_SAMPLES = 1  # |offset - median| within this -> the region a
 MIN_AGREEMENT_FRACTION = 0.8     # agreeing regions / signal-bearing regions
 ZERO_OFFSET_TOLERANCE_SAMPLES = 1  # |median| within this -> "aligned" (21 us at 48 kHz)
 
+DIAGNOSTIC_METHOD = "multi-region-v1"
+
 STATUS_ALIGNED = "aligned"
 STATUS_FIXED_OFFSET = "fixed_offset"
 STATUS_AMBIGUOUS = "ambiguous"
