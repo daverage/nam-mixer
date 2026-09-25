@@ -737,8 +737,13 @@ anywhere.
   listen to every preview and validate every exported model against its target.
 - **A/B alignment is deliberately off by default.**
   `hybrid/core/align.py` cross-correlates the two rendered signals, so a tonal or
-  phase difference between dissimilar amps can look like latency. Enable it
-  only when the timing behavior of the source models is known.
+  phase difference between dissimilar amps can look like latency. Different
+  amps naturally delay different frequencies differently; that is part of
+  their sound and must not be "corrected" by shifting samples. The **Timing**
+  readout (`hybrid/core/align_diagnostic.py`) measures the offset in several
+  independent regions and reports a fixed offset only when they agree with
+  high correlation. It never applies a correction. On real captures, no pair
+  has yet shown a stable fixed offset; see docs/alignment_diagnostic.md.
 - Character Blend is a deterministic teacher design, not a perceptual-match
   guarantee. No automated system judges tone, feel, or musical quality; the
   checks can only catch mechanical problems such as clipping, discontinuities,
@@ -784,6 +789,7 @@ hybrid-nam-builder/
 │   │   ├── envelope.py         -- dry-input level/envelope extraction
 │   │   ├── level_match.py      -- crossover-region auto level-match trim
 │   │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
+│   │   ├── align_diagnostic.py -- read-only multi-region A/B timing diagnostic
 │   │   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
 │   │   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
 │   │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
@@ -822,7 +828,7 @@ python3 -m pytest -q
 ```
 
 The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
-`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/safety.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/safety.py`,
 `hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
 `hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
 `hybrid/modes/training_target.py`, `hybrid/modes/fixed_blend.py`,
