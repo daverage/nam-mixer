@@ -756,3 +756,29 @@ test('a tone type outside the standard list is kept, not silently cleared by a m
   const fill = source.indexOf('Object.entries(fieldMap).forEach(([key, id]) => { document.getElementById(id).value = originalToolMetadata[key]');
   assert.ok(setup > 0 && setup < fill);   // the option exists before the select value is set
 });
+
+test('AI Assistant states which AI it uses and whether it is ready; there is no on/off checkbox', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
+  assert.doesNotMatch(html, /recipe-use-local-ai/);
+  assert.match(html, /id="recipe-ai-status"/);
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('const AI_PROVIDER_NAMES', 'function showRecipeAiStatus('), sandbox);
+  const ready = sandbox.recipeAiStatusView({ enabled: true, provider: 'local', model: 'gemma4:e4b', reachable: true });
+  assert.equal(ready.ready, true);
+  assert.equal(ready.text, 'Using Local AI: gemma4:e4b. Ready.');
+  assert.equal(ready.settings, false);
+  const cloud = sandbox.recipeAiStatusView({ enabled: true, provider: 'cloudflare', model: '@cf/x', reachable: true });
+  assert.match(cloud.text, /Cloudflare Workers AI: @cf\/x/);
+  const down = sandbox.recipeAiStatusView({ enabled: true, provider: 'local', model: 'gemma4:e4b', reachable: false });
+  assert.equal(down.ready, false);
+  assert.equal(down.state, 'unavailable');
+  assert.match(down.text, /isn't responding.*Ollama.*built-in rules/);
+  const off = sandbox.recipeAiStatusView({ enabled: false, provider: 'local' });
+  assert.equal(off.state, 'off');
+  assert.match(off.text, /No AI set up.*built-in rules/);
+  assert.equal(off.settings, true);
+  assert.equal(sandbox.recipeAiStatusView(null, false).ready, false);
+  // The AI is used whenever it is ready -- no separate opt-in.
+  assert.match(source, /if \(localRecipeAiAvailable && prompt\.trim\(\)\) \{/);
+});

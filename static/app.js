@@ -1051,9 +1051,9 @@ const wizardNextStepButton = document.getElementById("btn-wizard-next-step");
 const wizardAnalyseButton = document.getElementById("btn-wizard-analyse");
 const recipePromptInput = document.getElementById("recipe-prompt-input");
 const recipePromptApplyButton = document.getElementById("btn-recipe-prompt-apply");
-const recipeUseLocalAi = document.getElementById("recipe-use-local-ai");
-const recipeAiProviderLabel = document.getElementById("recipe-ai-provider-label");
 const recipeAiStatus = document.getElementById("recipe-ai-status");
+const recipeAiStatusText = document.getElementById("recipe-ai-status-text");
+const recipeAiSettingsButton = document.getElementById("btn-recipe-ai-settings");
 const recipeUseWebResearch = document.getElementById("recipe-use-web-research");
 const recipeUseTone3000 = document.getElementById("recipe-use-tone3000");
 const recipeTone3000RigScope = document.getElementById("recipe-tone3000-rig-scope");
@@ -1108,31 +1108,54 @@ let recipeSourcePlan = null;
 let selectedTone3000Capture = null;
 const aiTone3000Context = document.getElementById("ai-tone3000-context");
 
+const AI_PROVIDER_NAMES = { local: "Local AI", cloudflare: "Cloudflare Workers AI", custom: "Custom AI" };
+
+// What the AI Assistant tells the user about its AI: which one, and whether it can be used right now. The AI is
+// used whenever it is ready; otherwise the built-in recipe rules answer and the research options (which only the
+// AI uses) are unavailable.
+function recipeAiStatusView(data, ok = true) {
+  if (!ok || !data) {
+    return { state: "unavailable", ready: false,
+      text: "Couldn't check the AI. Using the built-in recipe rules for now.", settings: true };
+  }
+  const name = AI_PROVIDER_NAMES[data.provider] || "AI";
+  if (!data.enabled) {
+    return { state: "off", ready: false,
+      text: "No AI set up. Recipes come from the built-in rules; add an AI in Settings for conversation and research.",
+      settings: true };
+  }
+  if (data.reachable === false) {
+    return { state: "unavailable", ready: false,
+      text: data.provider === "local"
+        ? `${name} (${data.model}) isn't responding. Start your local AI app (e.g. Ollama); until then the built-in rules are used.`
+        : `${name} (${data.model}) isn't responding. Check Settings; until then the built-in rules are used.`,
+      settings: true };
+  }
+  return { state: "ready", ready: true, text: `Using ${name}: ${data.model}. Ready.`, settings: false };
+}
+
+function showRecipeAiStatus(view) {
+  localRecipeAiAvailable = view.ready;
+  recipeAiStatus.dataset.state = view.state;
+  recipeAiStatusText.textContent = view.text;
+  recipeAiSettingsButton.hidden = !view.settings;
+  [recipeUseWebResearch, recipeUseTone3000, recipeTone3000RigScope, recipeTone3000Author].forEach((control) => {
+    control.disabled = !view.ready;
+  });
+  document.querySelector(".recipe-research-controls").title = view.ready ? "" : "Research needs an AI that's ready.";
+  recipePromptApplyButton.textContent = view.ready ? "Ask AI" : "Create recipe";
+}
+
 async function loadLocalRecipeAiStatus() {
   try {
     const response = await fetch("/api/local_llm/status");
     const data = await response.json();
-    const configured = Boolean(response.ok && data.enabled);
-    const providerLabel = data.provider === "cloudflare"
-      ? "Use Cloudflare Workers AI"
-      : data.provider === "custom" ? "Use custom AI" : "Use local AI";
-    if (recipeAiProviderLabel) recipeAiProviderLabel.textContent = providerLabel;
-    localRecipeAiAvailable = configured && data.reachable !== false;
-    recipeUseLocalAi.disabled = !localRecipeAiAvailable;
-    recipeUseLocalAi.checked = localRecipeAiAvailable;
-    if (!configured) {
-      recipeAiStatus.textContent = "(not configured — choose a provider and save it in Settings > AI Assistant)";
-    } else if (data.reachable === false) {
-      recipeAiStatus.textContent = `(configured for ${data.base_url}, but nothing responded — start your local LLM host, or check Settings)`;
-    } else {
-      recipeAiStatus.textContent = `(ready: ${data.model})`;
-    }
+    showRecipeAiStatus(recipeAiStatusView(data, response.ok));
   } catch (_error) {
-    localRecipeAiAvailable = false;
-    if (recipeAiProviderLabel) recipeAiProviderLabel.textContent = "Use AI";
-    recipeAiStatus.textContent = "(could not check status — see Settings > AI Assistant to set it up)";
+    showRecipeAiStatus(recipeAiStatusView(null, false));
   }
 }
+recipeAiSettingsButton.addEventListener("click", () => document.getElementById("tab-settings").click());
 loadLocalRecipeAiStatus();
 
 function selectedWizardBehaviour() {
@@ -1441,7 +1464,7 @@ async function applyRecipeFromPrompt() {
   let recipe = recipeFromPrompt(prompt);
   let prefix = "";
   let promptWasAdded = false;
-  if (localRecipeAiAvailable && recipeUseLocalAi.checked && prompt.trim()) {
+  if (localRecipeAiAvailable && prompt.trim()) {
     addRecipeConversationMessage("user", prompt);
     promptWasAdded = true;
     recipePromptApplyButton.disabled = true;

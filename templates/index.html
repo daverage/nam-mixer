@@ -207,10 +207,15 @@
 
   <section id="ai-assistant-panel" class="tone-wizard utility-panel" hidden aria-labelledby="ai-assistant-title">
     <div class="tone-wizard-heading">
-      <div><div class="eyebrow">Local conversation</div><h2 id="ai-assistant-title">AI Assistant</h2></div>
+      <div><div class="eyebrow">Tone conversation</div><h2 id="ai-assistant-title">AI Assistant</h2></div>
       <button type="button" id="btn-close-ai-assistant" class="btn btn-secondary btn-small">Back to builder</button>
     </div>
     <p class="wizard-intro">Describe the sound you want, ask how a setting works, or refine the previous recipe.</p>
+    <div id="recipe-ai-status" class="recipe-ai-status" data-state="checking" aria-live="polite">
+      <span class="recipe-ai-dot" aria-hidden="true"></span>
+      <span id="recipe-ai-status-text">Checking which AI is set up…</span>
+      <button type="button" id="btn-recipe-ai-settings" class="link-btn" hidden>Set up in Settings</button>
+    </div>
     <div class="recipe-prompt">
       <aside id="ai-tone3000-context" class="ai-tone3000-context" hidden aria-live="polite"></aside>
       <label for="recipe-prompt-input">What would you like to create or change?</label>
@@ -218,7 +223,6 @@
       <div class="recipe-prompt-footer">
         <span class="info">This suggests editable settings; it never changes either source amp.</span>
         <div class="recipe-research-controls" aria-label="Assistant research options">
-          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-local-ai" disabled> <span id="recipe-ai-provider-label">Use AI</span> <span id="recipe-ai-status">(not configured)</span></label>
           <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-web-research" checked> Web research</label>
           <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="recipe-use-tone3000"> Search TONE3000</label>
           <label class="recipe-search-option">Rigs <select id="recipe-tone3000-rig-scope" class="select-input"><option value="heads">Heads only</option><option value="anything">Anything</option></select></label>
