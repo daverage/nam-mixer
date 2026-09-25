@@ -735,15 +735,17 @@ anywhere.
   pipeline tests still use mocked renders. Other real source-model
   combinations can still expose latency, calibration, or musical problems;
   listen to every preview and validate every exported model against its target.
-- **A/B alignment is deliberately off by default.**
-  `hybrid/core/align.py` cross-correlates the two rendered signals, so a tonal or
-  phase difference between dissimilar amps can look like latency. Different
-  amps naturally delay different frequencies differently; that is part of
-  their sound and must not be "corrected" by shifting samples. The **Timing**
-  readout (`hybrid/core/align_diagnostic.py`) measures the offset in several
-  independent regions and reports a fixed offset only when they agree with
-  high correlation. It never applies a correction. On real captures, no pair
-  has yet shown a stable fixed offset; see docs/alignment_diagnostic.md.
+- **A/B timing correction is optional and off by default.**
+  Different amps naturally delay different frequencies differently; that is
+  part of their sound and is never "corrected". The **Timing** readout
+  measures the A/B offset in several regions of the DI
+  (`hybrid/core/align_diagnostic.py`), then re-checks it on three other DIs
+  (`hybrid/core/align_verification.py`). Only when all of them agree on one
+  integer does it offer **Original / Corrected**. Corrected shifts Amp B by
+  that exact integer in preview, and the same integer is frozen into the
+  design and applied verbatim to the training target and validation, never
+  re-measured. No natural capture pair tested so far has been offered a
+  correction; see docs/alignment_diagnostic.md.
 - Character Blend is a deterministic teacher design, not a perceptual-match
   guarantee. No automated system judges tone, feel, or musical quality; the
   checks can only catch mechanical problems such as clipping, discontinuities,
@@ -788,8 +790,9 @@ hybrid-nam-builder/
 │   │   ├── render_bootstrap.py -- in-app "download nam_render" for Settings
 │   │   ├── envelope.py         -- dry-input level/envelope extraction
 │   │   ├── level_match.py      -- crossover-region auto level-match trim
-│   │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
+│   │   ├── align.py            -- offset measurement + apply_fixed_offset (frozen integer, off by default)
 │   │   ├── align_diagnostic.py -- read-only multi-region A/B timing diagnostic
+│   │   ├── align_verification.py -- cross-DI verification of a fixed A/B offset
 │   │   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
 │   │   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
 │   │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
@@ -828,7 +831,7 @@ python3 -m pytest -q
 ```
 
 The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
-`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/safety.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/align_verification.py`, `hybrid/core/safety.py`,
 `hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
 `hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
 `hybrid/modes/training_target.py`, `hybrid/modes/fixed_blend.py`,

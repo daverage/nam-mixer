@@ -154,7 +154,7 @@ python -m pytest tests/test_blend.py::test_name -v  # single test
 ```
 
 The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
-`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/safety.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/align_verification.py`, `hybrid/core/safety.py`,
 `hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
 `hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
 `hybrid/modes/training_target.py`, `hybrid/training/a2_training_settings.py`,
@@ -356,13 +356,16 @@ project fixtures like `assets/di/*.wav`.
 - `hybrid/core/align.py`'s `align_to_reference` cross-correlates Amp A's render
   directly against Amp B's render, which can misread a genuine tonal/phase
   difference between dissimilar amps (e.g. clean vs. heavily distorted) as
-  latency. Pass `enabled=False` (skips correction, still length-matches) until
-  a valid latency policy has been established and the renderer's latency
-  behavior is understood — see the module docstring.
-  `hybrid/core/align_diagnostic.py`'s `analyse_alignment` is the read-only
-  multi-region check (shown as the Timing readout, computed in
-  `/api/render_pair`); it never alters audio, and no real capture pair has
-  yet shown a stable fixed offset (docs/alignment_diagnostic.md).
+  latency, and it re-measures on whatever audio it is given.
+  Production code never calls it (or `estimate_offset`): the Timing readout
+  measures with `align_diagnostic.analyse_alignment` and
+  `align_verification.verify_fixed_offset_across_dis` (cross-DI), and only a
+  verified integer can be chosen (Original/Corrected, default Original). That
+  integer is applied with `apply_fixed_offset`, frozen into the design
+  (`alignment_method: "fixed-frozen-offset"`), and reused verbatim by target
+  generation and validation via `frozen_alignment_offset`; an enabled design
+  without that method is refused, never re-estimated. See
+  docs/alignment_diagnostic.md.
 - The bundled `assets/di/*.wav` genre clips were found to be mostly
   normalized around a common RMS level by their original source, so their
   waveform cannot tell you what pickup actually produced them. Input
