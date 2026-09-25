@@ -813,3 +813,49 @@ test('a change made while paused is fetched when play is pressed, never played s
   sandbox.scheduleAuditionRefresh();
   assert.equal(vm.runInContext('auditionNeedsRefresh', sandbox), false);
 });
+
+test('mode panels: plain level readout, advanced detail labelled, no controls that do nothing', () => {
+  const sandbox = { fmtSigned: (v) => `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(1)}` };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function trimReadoutText(', 'function applyModeVisibility('), sandbox);
+  assert.equal(sandbox.trimReadoutText(-9.6, -9.6), 'Amp B is turned down 9.6 dB to match Amp A.');
+  assert.equal(sandbox.trimReadoutText(-9.6, -8.6), 'Amp B is turned down 8.6 dB (automatic -9.6 dB, plus your +1.0 dB).');
+  assert.equal(sandbox.trimReadoutText(0, 0), "Amp B's level is unchanged to match Amp A.");
+
+  const visibility = section('function applyModeVisibility(', 'createA2Title.textContent');
+  assert.match(visibility, /getElementById\("level-match-card"\)\.hidden = currentMode === "character"/);
+  assert.match(visibility, /getElementById\("btn-live-blend"\)\.hidden = currentMode !== "blend"/);
+  // applyModeVisibility runs at startup: it must not touch consts declared after that call.
+  const firstCall = source.indexOf('\napplyModeVisibility();');
+  for (const name of [...visibility.matchAll(/\b([a-zA-Z]\w+)\.(?:hidden|textContent)\s*=/g)].map((m) => m[1])) {
+    const decl = source.indexOf(`\nconst ${name} =`);   // top-level declarations only
+    assert.ok(decl === -1 || decl < firstCall, `${name} is declared after the startup applyModeVisibility() call`);
+  }
+
+  const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
+  for (const summary of ['Advanced: timing between the amps', "Advanced: fine-tune Amp B's level",
+    'Advanced: change the drive as you play harder', 'Advanced: training input', 'Advanced: technical evidence']) {
+    assert.ok(html.includes(`<summary>${summary}</summary>`), summary);
+  }
+  assert.doesNotMatch(html, /byte-identical/);
+  assert.doesNotMatch(source, /Drive donor trajectory|LOW-LEVEL RESPONSE|High definition training|Live mix: Always-on mix only/);
+});
+
+test('quiet-playing result leads with a plain verdict and keeps numbers under Advanced', () => {
+  const sandbox = { fmtSigned: (v) => `${v}` };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function renderLowLevelResponseHtml(', '// Mode-aware params'), sandbox);
+  const check = { ok: true, levels_db: [-30, -20], output_rms_dbfs: [-40, -30], max_step_error_db: 0.4 };
+  const ok = sandbox.renderLowLevelResponseHtml(check);
+  assert.ok(ok.indexOf('Quiet playing works') < ok.indexOf('Advanced: measurements'));
+  const bad = sandbox.renderLowLevelResponseHtml({ ...check, ok: false, max_step_error_db: 12 });
+  assert.match(bad, /drops out when you play softly/);
+});
+
+test('invalidating an idle live mix says nothing', () => {
+  const sandbox = { liveAudition: { active: false, requestId: 3, loadingRequest: null, stop() { this.requestId += 1; } }, liveBlendStatus: { textContent: 'before' } };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function invalidateLiveAudition(', 'async function startLiveBlend('), sandbox);
+  sandbox.invalidateLiveAudition('Design mode changed — live blend stopped.');
+  assert.equal(sandbox.liveBlendStatus.textContent, 'before');
+});

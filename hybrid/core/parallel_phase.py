@@ -109,7 +109,7 @@ def _presence(a: np.ndarray, b: np.ndarray) -> tuple[str, str, float | None, flo
         return "amp_b_obscured", f"Amp B is {abs(delta):.1f} dB below Amp A and may be hard to hear.", a_db, b_db
     if delta < -PRESENCE_LIMIT_DB:
         return "amp_a_obscured", f"Amp A is {abs(delta):.1f} dB below Amp B and may be hard to hear.", a_db, b_db
-    return "both_present", f"Both amps have material level in this mix ({abs(delta):.1f} dB apart).", a_db, b_db
+    return "both_present", f"Both amps can be heard in this mix ({abs(delta):.1f} dB apart).", a_db, b_db
 
 
 def analyse_parallel_compatibility(

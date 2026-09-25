@@ -248,15 +248,31 @@ const BLEND_A2_DESCRIPTION =
   "Your pickup choice shapes preview only; it is not baked into the training input.";
 const CHARACTER_A2_DESCRIPTION =
   "Uses the current tone, feel, and drive choices to make a training target from the official NAM input. " +
-  "Character Blend usually benefits from High definition training.";
+  "Character Blend usually benefits from Maximum detail training.";
+
+// Plain-language summary of the Amp B level change (the dB breakdown lives under Advanced).
+function trimReadoutText(autoDb, effectiveDb) {
+  const auto = Number(autoDb) || 0;
+  const effective = Number(effectiveDb) || 0;
+  const manual = effective - auto;
+  const direction = Math.abs(effective) < 0.05 ? "Amp B's level is unchanged"
+    : `Amp B is turned ${effective < 0 ? "down" : "up"} ${Math.abs(effective).toFixed(1)} dB`;
+  if (Math.abs(manual) < 0.05) return `${direction} to match Amp A.`;
+  return `${direction} (automatic ${fmtSigned(auto)} dB, plus your ${fmtSigned(manual)} dB).`;
+}
 
 function applyModeVisibility() {
   modePanels.forEach((el) => {
     el.hidden = el.dataset.modePanel !== currentMode;
   });
+  // Character Blend has no level match or Amp B trim (its donor path is level-matched internally).
+  document.getElementById("level-match-card").hidden = currentMode === "character";
+  // Live mix adjustment only exists for Always mixed. (By id: this also runs at startup, before
+  // liveBlendButton's const is declared further down.)
+  document.getElementById("btn-live-blend").hidden = currentMode !== "blend";
   btnPreviewMix.textContent = currentMode === "blend" ? "Parallel mix" : currentMode === "character" ? "Character" : "Hybrid";
   autoLevelMatchLabel.textContent = currentMode === "blend" ? BLEND_LEVEL_MATCH_LABEL : HYBRID_LEVEL_MATCH_LABEL;
-  createA2Title.textContent = currentMode === "blend" ? "Make a Blend A2" : currentMode === "character" ? "Make a Character A2" : "Make a Hybrid A2";
+  createA2Title.textContent = currentMode === "blend" ? "Make your Always mixed model" : currentMode === "character" ? "Make your Combined character model" : "Make your Dynamic Hybrid model";
   createA2Description.textContent = currentMode === "blend" ? BLEND_A2_DESCRIPTION : currentMode === "character" ? CHARACTER_A2_DESCRIPTION : HYBRID_A2_DESCRIPTION;
   const auditionMode = document.getElementById("audition-mode");
   auditionMode.textContent = currentMode === "blend" ? "Always mixed" : currentMode === "character" ? "Combine tone and feel" : "Changes as you play harder";
@@ -716,6 +732,9 @@ function renderTimingReadout(render) {
     el.dataset.status = timingChoice.available ? "fixed_offset" : diagnostic.status;
     el.querySelector(".timing-readout-summary").textContent = timingSummary(render);
     el.querySelector(".timing-choice").hidden = !timingChoice.available;
+    if (timingChoice.available || note) {
+      for (let d = el.closest?.("details"); d; d = d.parentElement?.closest("details")) d.open = true;
+    }
     const hintEl = el.querySelector(".timing-choice-hint");
     hintEl.hidden = !timingChoice.available;
     hintEl.textContent = timingChoice.available ? timingChoiceHint(timingChoice.offsetSamples) : "";
@@ -966,8 +985,8 @@ function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
   }
   crossoverKnobCalibration = { minDb: p10, maxDb: p90, calibrated: true };
   crossoverKnobNote.textContent =
-    `Calibrated from this performance: 0 is about ${p10.toFixed(1)} dBFS (quiet), ` +
-    `10 is about ${p90.toFixed(1)} dBFS (loud). This is a useful playing guide, not a simulation of a particular guitar's volume pot.`;
+    "0 is the softest playing in this test performance and 10 the hardest. " +
+    `It's a playing guide, not a guitar volume knob. (Advanced: ${p10.toFixed(1)} to ${p90.toFixed(1)} dBFS.)`;
   syncCrossoverKnobFromDb();
 }
 
@@ -1993,6 +2012,7 @@ function scheduleAuditionRefresh(source = lastPreviewSource) {
 const liveAudition = {
   active: false,
   requestId: 0,
+  loadingRequest: null,   // requestId of stems still loading, so invalidation can say it stopped them
   context: null,
   sourceA: null,
   sourceB: null,
@@ -2061,7 +2081,7 @@ const liveAudition = {
 
 function updateLiveAuditionButton() {
   if (liveAudition.active) liveBlendButton.textContent = "Stop live mix adjustment";
-  else liveBlendButton.textContent = currentMode === "blend" ? "Adjust the mix while listening" : "Live mix: Always-on mix only";
+  else liveBlendButton.textContent = "Adjust the mix while listening";   // only shown in Always mixed
 }
 
 function splitStereoBuffer(context, decoded, channel) {
@@ -2071,8 +2091,10 @@ function splitStereoBuffer(context, decoded, channel) {
 }
 
 function invalidateLiveAudition(message) {
+  // Only report a stop when a live mix was playing or loading; otherwise the message is noise.
+  const wasBusy = liveAudition.active || liveAudition.loadingRequest === liveAudition.requestId;
   liveAudition.stop();
-  liveBlendStatus.textContent = message;
+  if (wasBusy) liveBlendStatus.textContent = message;
 }
 
 async function startLiveBlend() {
@@ -2088,6 +2110,7 @@ async function startLiveBlend() {
   }
   liveBlendButton.disabled = true;
   const requestId = ++liveAudition.requestId;
+  liveAudition.loadingRequest = requestId;
   liveBlendStatus.textContent = "Loading the prepared amps...";
   try {
     const resp = await fetch("/api/live_blend_stems", {
@@ -2143,6 +2166,7 @@ async function startLiveBlend() {
     liveAudition.stop();
     liveBlendStatus.textContent = "Live blend unavailable: " + err.message;
   } finally {
+    if (liveAudition.loadingRequest === requestId) liveAudition.loadingRequest = null;
     if (requestId === liveAudition.requestId) liveBlendButton.disabled = !havePair;
   }
 }
@@ -2184,12 +2208,14 @@ function renderLowLevelResponseHtml(check) {
     .map((lv, i) => `<tr><td>${fmtSigned(lv)} dB</td><td>${check.output_rms_dbfs[i].toFixed(1)} dBFS</td></tr>`)
     .join("");
   const verdict = check.ok
-    ? `<div class="ok-line">&#10003; continuous low-level response, no dead zone</div>`
-    : `<div class="warning-box">&#10007; low-level collapse detected (max step error ${check.max_step_error_db.toFixed(1)} dB). Do not train this design: it would bake silence at quiet playing into the model. Change the Drive settings or the amps and check again.</div>`;
+    ? `<div class="ok-line">&#10003; Quiet playing works: the sound stays responsive when you play softly.</div>`
+    : `<div class="warning-box">&#10007; The sound drops out when you play softly. Don't train this design yet: the model would learn that silence. Change the Drive settings or the amps, then check again.</div>`;
   return `
-    <div><strong>LOW-LEVEL RESPONSE</strong></div>
-    <table class="coverage-table"><tbody>${rows}</tbody></table>
     ${verdict}
+    <details class="advanced"><summary>Advanced: measurements</summary>
+      <table class="coverage-table"><thead><tr><th>Input level</th><th>Output level</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="info">Largest jump between steps: ${check.max_step_error_db.toFixed(1)} dB.</div>
+    </details>
   `;
 }
 
@@ -2289,10 +2315,13 @@ async function updateTrimReadout() {
       return;
     }
     if (data.mode === "character") {
-      document.getElementById("character-readout").textContent =
-        `Drive donor trajectory: ${Math.round(data.drive_weight_b_min * 100)}–${Math.round(data.drive_weight_b_max * 100)}% Amp B.`;
+      const lo = Math.round(data.drive_weight_b_min * 100);
+      const hi = Math.round(data.drive_weight_b_max * 100);
+      document.getElementById("character-readout").textContent = lo === hi
+        ? `Drive: ${lo}% from Amp B.`
+        : `Drive: moves from ${lo}% to ${hi}% Amp B as you play harder.`;
     } else {
-      trimReadout.textContent = `Auto match ${fmtSigned(data.auto_trim_db)} dB  ·  effective trim ${fmtSigned(data.effective_b_trim_db)} dB`;
+      trimReadout.textContent = trimReadoutText(data.auto_trim_db, data.effective_b_trim_db);
       if (data.mode === "blend") renderParallelCompatibility(data.parallel_compatibility);
     }
   } catch (err) {
@@ -2759,8 +2788,7 @@ async function preview(requestedSource, { preservePosition = false, quiet = fals
     if (source === "hybrid" || source === "blend") {
       const auto = resp.headers.get("X-Auto-Trim-Db");
       const effective = resp.headers.get("X-Effective-Trim-Db");
-      trimReadout.textContent =
-        `Auto match ${fmtSigned(auto)} dB  ·  effective trim ${fmtSigned(effective)} dB`;
+      trimReadout.textContent = trimReadoutText(auto, effective);
     }
     updateOutputGainReadout(resp.headers);
     const blob = await resp.blob();
@@ -2812,8 +2840,10 @@ async function refreshTrainingInputStatus() {
     // bundled file silently in place with no indication it's the default.
     if (trainingInputDefaultNote) trainingInputDefaultNote.hidden = !data.ready;
     trainingInputStatus.textContent = data.ready
-      ? `Ready: valid training input loaded (${data.sample_rate / 1000} kHz)`
-      : "Add the official NAM training input to continue.";
+      ? `Training input ready (official NAM input, ${data.sample_rate / 1000} kHz).`
+      : "Add the official NAM training input to continue (see Advanced: training input).";
+    const trainingInputAdvanced = document.getElementById("training-input-advanced");
+    if (trainingInputAdvanced && !data.ready) trainingInputAdvanced.open = true;
   } catch (err) {
     trainingInputStatus.textContent = "Could not check training input status: " + err;
     trainingInputReady = false;

@@ -11,7 +11,7 @@ original captures aren't needed once it's trained.
 **Status: Beta.** It runs on your own computer. Your captures and audio stay there unless you
 choose to train on your own free Kaggle GPU account.
 
-![NAM Mixer's Builder, with the guided Tone Wizard open](assets/screenshot.png)
+![NAM Mixer's Builder: choose two amps, then compare, shape and make a model](assets/screenshot.png)
 
 **[⬇ Download](#download)** · [What you can make](#what-you-can-make) ·
 [How it works](#how-it-works) · [Good to know](#good-to-know) ·

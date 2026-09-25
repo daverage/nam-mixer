@@ -422,16 +422,19 @@
           <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
           <div id="suggested-crossover-note" class="info"></div>
         </details>
-        <div class="timing-readout" aria-live="polite" hidden>
-          <div class="timing-readout-summary"></div>
-          <div class="timing-readout-note" hidden></div>
-          <div class="preset-row timing-choice" role="group" aria-label="Amp B timing" hidden>
-            <button type="button" class="preset-btn" data-timing="original" aria-pressed="true">Original</button>
-            <button type="button" class="preset-btn" data-timing="corrected" aria-pressed="false">Corrected</button>
+        <details class="advanced timing-advanced">
+          <summary>Advanced: timing between the amps</summary>
+          <div class="timing-readout" aria-live="polite" hidden>
+            <div class="timing-readout-summary"></div>
+            <div class="timing-readout-note" hidden></div>
+            <div class="preset-row timing-choice" role="group" aria-label="Amp B timing" hidden>
+              <button type="button" class="preset-btn" data-timing="original" aria-pressed="true">Original</button>
+              <button type="button" class="preset-btn" data-timing="corrected" aria-pressed="false">Corrected</button>
+            </div>
+            <div class="timing-choice-hint" hidden></div>
+            <details class="advanced timing-readout-details"><summary>Measurements</summary><div class="info timing-readout-body"></div></details>
           </div>
-          <div class="timing-choice-hint" hidden></div>
-          <details class="advanced timing-readout-details"><summary>Timing evidence</summary><div class="info timing-readout-body"></div></details>
-        </div>
+        </details>
       </section>
 
       <section class="card workflow-stage workflow-shape" id="blend-panel-mix" data-mode-panel="blend" hidden>
@@ -496,7 +499,7 @@
           </div>
 
           <details class="advanced parallel-evidence">
-            <summary>Technical evidence</summary>
+            <summary>Advanced: technical evidence</summary>
             <div id="parallel-compatibility-details" class="info"></div>
             <div class="parallel-fixed-latency-label">Fixed latency</div>
             <div class="timing-readout" aria-live="polite" hidden>
@@ -523,11 +526,11 @@
         <div class="slider-row"><label for="drive-slider">Drive: Amp A / Amp B</label><span id="drive-value" class="value-chip">50% B</span></div>
         <input type="range" id="drive-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
         <div class="hint">For a clear result, favour one amp for each control. At 50% Drive, Amp B supplies the driven response.</div>
-        <details class="advanced"><summary>Advanced: drive morph by input level</summary>
-          <div class="slider-row"><label for="drive-low-slider">Low input</label><span id="drive-low-value" class="value-chip">20% B</span></div><input type="range" id="drive-low-slider" min="0" max="100" step="1" value="20" class="slider slider-mix">
-          <div class="slider-row"><label for="drive-mid-slider">Mid input</label><span id="drive-mid-value" class="value-chip">50% B</span></div><input type="range" id="drive-mid-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
-          <div class="slider-row"><label for="drive-high-slider">High input</label><span id="drive-high-value" class="value-chip">80% B</span></div><input type="range" id="drive-high-slider" min="0" max="100" step="1" value="80" class="slider slider-mix">
-          <label class="checkbox-row"><input type="checkbox" id="drive-morph-enabled"> Drive morph by input level</label>
+        <details class="advanced"><summary>Advanced: change the drive as you play harder</summary>
+          <label class="checkbox-row"><input type="checkbox" id="drive-morph-enabled"> Use different drive amounts for soft, medium and hard playing</label>
+          <div class="slider-row"><label for="drive-low-slider">Soft playing</label><span id="drive-low-value" class="value-chip">20% B</span></div><input type="range" id="drive-low-slider" min="0" max="100" step="1" value="20" class="slider slider-mix">
+          <div class="slider-row"><label for="drive-mid-slider">Medium playing</label><span id="drive-mid-value" class="value-chip">50% B</span></div><input type="range" id="drive-mid-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
+          <div class="slider-row"><label for="drive-high-slider">Hard playing</label><span id="drive-high-value" class="value-chip">80% B</span></div><input type="range" id="drive-high-slider" min="0" max="100" step="1" value="80" class="slider slider-mix">
         </details>
         <div id="character-readout" class="trim-readout" aria-live="polite">Tone, feel, and drive analyses run from the rendered pair.</div>
 
@@ -538,7 +541,7 @@
         <div id="character-low-level-result" class="generate-result" hidden aria-live="polite"></div>
       </section>
 
-      <section class="card workflow-stage workflow-shape">
+      <section class="card workflow-stage workflow-shape" id="level-match-card">
         <h2>Keep the level steady <span class="cost-badge cost-badge-instant" title="Uses the prepared amps; no new NAM rendering">✓ instant</span></h2>
 
         <label class="checkbox-row">
@@ -546,14 +549,17 @@
           <span id="auto-level-match-label">Keep Amp B as loud as Amp A at the changeover</span>
         </label>
 
-        <div class="slider-row">
-          <label for="amp-b-trim">Amp B gain trim</label>
-          <span id="amp-b-trim-value" class="value-chip">+0.0 dB</span>
-        </div>
-        <input type="range" id="amp-b-trim" min="-24" max="24" step="0.1" value="0" class="slider slider-trim">
-        <div class="info">Added on top of the auto match -- 0&nbsp;dB means use the auto match as-is.</div>
-
         <div id="trim-readout" class="trim-readout" aria-live="polite"></div>
+
+        <details class="advanced">
+          <summary>Advanced: fine-tune Amp B's level</summary>
+          <div class="slider-row">
+            <label for="amp-b-trim">Extra Amp B level</label>
+            <span id="amp-b-trim-value" class="value-chip">+0.0 dB</span>
+          </div>
+          <input type="range" id="amp-b-trim" min="-24" max="24" step="0.1" value="0" class="slider slider-trim">
+          <div class="info">Added on top of the automatic match. 0&nbsp;dB keeps the automatic match as it is.</div>
+        </details>
       </section>
 
     </aside>
@@ -563,7 +569,7 @@
       <div class="group-label workflow-stage workflow-compare">Compare your amp choices</div>
 
       <section class="card audition-card workflow-stage workflow-compare workflow-shape">
-        <div class="audition-heading"><div><div class="eyebrow compare-only">Start here</div><div class="eyebrow shape-only">Compare the sound</div><h2><span class="compare-only">Hear your two amps</span><span class="shape-only">Compare the sound</span></h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
+        <div class="audition-heading"><div><div class="eyebrow compare-only">Start here</div><h2><span class="compare-only">Hear your two amps</span><span class="shape-only">Compare the sound</span></h2></div><span id="audition-mode" class="audition-mode">Dynamic Hybrid</span></div>
         <p class="audition-intro compare-only">Listen to each amp on the same performance before deciding how they should combine.</p>
         <p id="audition-intro-shape" class="audition-intro shape-only">Adjust the controls below, then compare Amp A, your result, and Amp B at the same level.</p>
         <div class="preview-row">
@@ -694,16 +700,19 @@
       <div class="group-label workflow-stage workflow-create">Create a training target</div>
 
       <section class="card workflow-stage workflow-create">
-        <h2><span id="create-a2-title">Make a Hybrid A2</span></h2>
+        <h2><span id="create-a2-title">Make your Dynamic Hybrid model</span></h2>
         <div class="info" id="create-a2-description">
           Turn the sound you chose into training audio for a single NAM model.
         </div>
 
-        <label class="field-label" for="training-input-file">Official NAM training input (48&nbsp;kHz mono WAV)</label>
-        <div id="training-input-default-note" class="info" hidden>The official NAM v3.0.0 training input is bundled with this app and already loaded below -- you don't need to upload anything to continue.</div>
-        <input type="file" id="training-input-file" accept=".wav" class="file-input">
         <div id="training-input-status" class="info" aria-live="polite">Checking...</div>
-        <div class="warning-box">Replacing it with your own reamp/training sweep is only usable if it is byte-identical to the official NAM v3.0.0 input file -- any other file (including a similar-looking custom sweep) will be rejected, since the crossover timing and A2 receptive-field checks in this pipeline are only validated against that exact excitation signal.</div>
+        <details class="advanced" id="training-input-advanced">
+          <summary>Advanced: training input</summary>
+          <div id="training-input-default-note" class="info" hidden>The official NAM v3.0.0 training input is bundled with this app and already loaded. You don't need to upload anything.</div>
+          <label class="field-label" for="training-input-file">Official NAM training input (48&nbsp;kHz mono WAV)</label>
+          <input type="file" id="training-input-file" accept=".wav" class="file-input">
+          <div class="warning-box">Only an exact copy of the official NAM v3.0.0 input file is accepted. Any other file, even a similar-looking sweep, is rejected, because the timing and receptive-field checks are validated against that exact signal.</div>
+        </details>
 
         <label class="field-label" for="model-name">Model name</label>
         <input type="text" id="model-name" class="file-input" maxlength="100" placeholder="e.g. Mesa Mark V Clean + JCM800 Crunch" autocomplete="off">
