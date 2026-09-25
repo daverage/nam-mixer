@@ -13,6 +13,7 @@ Everything NAM Mixer can do, in detail. New here? Start with the
   - [Input profile vs. crossover vs. NAM calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
   - [Preview DIs vs. NAM training material](#preview-dis-vs-nam-training-material--an-important-distinction)
 - [The Builder, step by step](#the-builder-step-by-step) · [Kaggle GPU setup](#setting-up-kaggle-gpu-training)
+- [Starting points: Wizard, AI Assistant and TONE3000](#starting-points-wizard-ai-assistant-and-tone3000)
 - [Design modes and the shared Cabinet stage](#design-modes-and-the-shared-cabinet-stage)
 - [Continuous Gain](#continuous-gain-one-amp-one-nam)
 - [Sessions](#sessions)
@@ -250,6 +251,46 @@ and re-validates it locally before calling the job complete - see
 the in-app setup checklist for the mechanics, troubleshooting, and how to
 recover a job that trained but failed to download. Kaggle's free T4 quota is weekly and account-wide; the "Create A2"
 card shows your remaining quota before you submit.
+
+## Starting points: Wizard, AI Assistant and TONE3000
+
+These three tabs help you find amps and a first set of Builder settings. None
+of them changes your source `.nam` files, and everything they set stays
+editable in the Builder. **Back to builder** returns you to where you were.
+
+### Wizard
+
+Answer a few musical questions: your instrument and pickup, how the two amps
+should behave (clean-to-driven as you play harder, a broad smooth blend, a
+constant A/B mix, or one amp's tone with the other's feel), where the change
+should happen on your guitar's volume, and which amp leads at full volume.
+**Apply this starting point** picks the design mode and sets its controls.
+Once the amps are prepared, **Explain my rendered amps** describes what it
+measured. The Wizard needs no AI service. For Dynamic Hybrid, put the amp
+you want at full volume in the Amp B slot.
+
+### AI Assistant
+
+Describe the sound you want ("keep the Vox EQ and feel, then move to Marshall
+crunch as I play harder"), ask how a setting works, or refine the last
+suggestion. The assistant turns your request into editable settings. It can
+optionally use **Web research** and **Search TONE3000** to suggest which
+captures to use as Amp A and Amp B. **Save conversation as Markdown** exports
+the conversation, optionally with a debug appendix (never API keys).
+
+Set up an AI provider (Local, Cloudflare Workers AI or a custom
+OpenAI-compatible endpoint) under [Settings](#settings). Without one, or if
+the provider's answer can't be used, the built-in suggestion rules handle
+requests that name what should come from Amp A and what from Amp B.
+
+### TONE3000
+
+Search [TONE3000](https://www.tone3000.com) for NAM captures by amp or tone,
+optionally limited to **Heads only** (for pairing with your own cabinet IR)
+or to one creator. Each result shows how well its metadata fits your search.
+**See files / ask AI which to use** lists the pack's NAM files for download
+and lets the AI Assistant recommend one and whether it suits Amp A or Amp B.
+Search needs a TONE3000 API key in [Settings](#settings).
 
 ## Design modes and the shared Cabinet stage
 

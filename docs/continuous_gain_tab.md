@@ -27,7 +27,8 @@ corrections only. Fixed 4 dB v3 anchors exist only as an explicit Advanced optio
 The training input is the official NAM file plus DI segments, so the manifest declares `training_input.custom_split` and
 `train_stop_samples`. `scripts/train_a2.py` and `cloud/kaggle/train_a2_cloud.py` apply the same data-config patch the FC models were
 trained with (`tests/test_cg_trainer_parity.py`), check the input by its recorded SHA-256 instead of the official MD5, and gate on the
-core receptive field recorded per capture. Continuous Gain bundles are excluded from the Sessions list.
+core receptive field recorded per capture. Each project appears in Sessions through its own record (see [Sessions](#sessions)), not as a
+standalone training bundle.
 
 ## Reproduction of the frozen JCM800 / Vibrolux FC configurations
 `scripts/cg_reproduce_fc.py <amp>` (needs the archived `work/p4`, `work/p4e`, and your captures). Verified: capture sets, anchors,
@@ -37,7 +38,7 @@ Exported structure matches the frozen FC `.nam` (same architecture, layer sizes 
 carries standard NAM user metadata (name, modeled_by).
 
 ## Where the research scripts went
-The Phase 2-5 research scripts (`p4*`, `fc_*`, `p5_*`, `pl_*`, `tr_*`, v3 `cg_*`, `single_nam_*`, `continuous_gain_*`) were removed from `scripts/` on 2026-09-21. They are in `~/Documents/hybrid-nam-builder-archive/research_scripts_2026-09-21.tar.gz` (extract repo-relative) and in git history. `scripts/` keeps the app infrastructure plus `single_nam_common.py` and `cg_reproduce_fc.py`, which the frozen-configuration reproduction still uses.
+The Phase 2-5 research scripts (`p4*`, `fc_*`, `p5_*`, `pl_*`, `tr_*`, v3 `cg_*`, `single_nam_*`, `continuous_gain_*`) were removed from `scripts/` on 2026-09-21. They remain available in git history (any commit before that date). `scripts/` keeps the app infrastructure plus `single_nam_common.py` and `cg_reproduce_fc.py`, which the frozen-configuration reproduction still uses.
 
 ## Sessions
 Each project keeps a normal Sessions record (`work/sessions/<project id>.nam-mixer.json`, written by `routes.continuous_gain.sync_session` through the

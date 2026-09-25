@@ -6,7 +6,7 @@ out. For what the app does, see the [README](../README.md) and the
 
 ## Contents
 
-- [Run from source](#run-from-source) (macOS, Linux, Windows) · [Optional local AI](#optional-local-ai-tone-recipes)
+- [Run from source](#run-from-source) (macOS, Linux, Windows) · [Optional AI providers](#optional-ai-assistant-providers)
 - [Desktop builds](#desktop-builds)
 - [Running the app and the tests](#running-it)
 - [Project layout](#project-layout)
@@ -153,24 +153,31 @@ it landed for your platform. From here:
 - **Kaggle GPU training** needs no local training environment at all - see
   [Setting up Kaggle GPU training](user_guide.md#setting-up-kaggle-gpu-training) in the user guide.
 
-### Optional: local AI tone recipes
+### Optional: AI Assistant providers
 
-The Tone Wizard works without an AI service. The provided `.env` enables its
-optional local-AI suggestion with your local Ollama model (`gemma4:e4b` at
-`http://127.0.0.1:11434/v1`). Start Ollama, then launch NAM Mixer with:
+The Wizard works without an AI service; the AI Assistant falls back to
+built-in suggestion rules when no provider is set up. To enable a provider,
+use **Settings → AI Assistant** in the app, which offers **Local**,
+**Cloudflare Workers AI** and **Custom OpenAI-compatible** endpoints (see
+[Settings](user_guide.md#settings) in the user guide). Settings are written
+to the checkout's untracked `.env` and applied to the running process.
 
-```bash
-scripts/run.sh
-```
+To configure by hand instead, copy `.env.example` to `.env`. It sets up the
+Local provider with Ollama (`gemma4:e4b` at `http://127.0.0.1:11434/v1`) and
+documents the optional `TONE3000_API_KEY`. The launchers (`scripts/run.sh`,
+`scripts/run.ps1`) read `.env` automatically.
 
-The launcher reads `.env` automatically. To change machines or models, edit
-your untracked `.env`; `.env.example` documents the available defaults.
-
-The base URL must be a loopback HTTP URL (`localhost`, `127.0.0.1`, or `::1`)
-and is deliberately read only from the process environment. The browser cannot
-choose an endpoint. Only the written tone request and a fixed recipe schema
-are sent to the local service-never NAM files or audio. If the model is down,
-slow, or returns invalid settings, NAM Mixer uses its built-in recipe rules.
+Endpoint rules, enforced in `hybrid/services/local_llm.py`: the Local
+provider must use a loopback HTTP URL (`localhost`, `127.0.0.1` or `::1`);
+Custom endpoints must use HTTPS and may not resolve to private, loopback,
+link-local or reserved addresses; Cloudflare's URL is built from the account
+ID. The endpoint is always read from the saved settings on the server, never
+from an individual assistant request, so the web UI can't be used as an
+arbitrary HTTP proxy. API tokens are scoped per provider and are never sent
+back to the browser. Only the written request, conversation history, optional
+research results and a fixed recipe schema reach the provider; never NAM
+files or audio. If the provider is down, slow or returns invalid settings,
+NAM Mixer uses its built-in rules.
 
 ## Desktop builds
 

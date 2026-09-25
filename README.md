@@ -168,14 +168,25 @@ code layout, see the [developer guide](docs/developer_guide.md).
 
 ## Documentation
 
-| Document | What's in it |
-| --- | --- |
-| [User guide](docs/user_guide.md) | Every step, design mode, cabinet option, Continuous Gain, Sessions, NAM Tools and Settings in detail, plus how the blending works |
-| [Developer guide](docs/developer_guide.md) | Running from source on every OS, building `nam_render`, tests, project layout, current status and limitations |
-| [Continuous Gain](docs/continuous_gain_tab.md) | The design and the frozen configurations behind the Continuous Gain tab |
-| [A/B timing](docs/alignment_diagnostic.md) | How the Timing check and the optional fixed-offset correction work, with measurements |
-| [Release notes](RELEASE_NOTES.md) | Changes not yet in a published release |
-| [Desktop app](desktop/README.md) · [Renderer](native/nam_render/README.md) · [DI clips](assets/di/README.md) | Building the desktop app, the native renderer, and credits for the bundled DI recordings |
+**For users**
+
+- [User guide](docs/user_guide.md): every step, design mode, cabinet option, Continuous Gain, the Wizard, AI Assistant and TONE3000 tabs, Sessions, NAM Tools and Settings, plus how the blending works
+- [Release notes](RELEASE_NOTES.md): what changed in recent releases, and upcoming changes under "Unreleased"
+
+**For contributors**
+
+- [Developer guide](docs/developer_guide.md): running from source on every OS, building `nam_render`, tests, project layout, current status and limitations
+
+**Technical notes**
+
+- [Continuous Gain](docs/continuous_gain_tab.md): the design and the frozen configurations behind the Continuous Gain tab
+- [A/B timing](docs/alignment_diagnostic.md): how the Timing check and the optional fixed-offset correction work, with measurements
+
+**Component references**
+
+- [Desktop app](desktop/README.md): building and bundling the desktop app
+- [Renderer](native/nam_render/README.md): building the native `nam_render` tool and its NAMCore pin
+- [DI clips](assets/di/README.md): provenance, credits and limitations of the bundled DI recordings
 
 ## Status
 
