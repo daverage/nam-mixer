@@ -29,7 +29,7 @@ from typing import Optional
 import numpy as np
 import soundfile as sf
 
-from ..core.align import align_to_reference
+from ..core.align import FIXED_FROZEN_OFFSET_METHOD, apply_fixed_offset, frozen_alignment_offset
 from .blend import CrossoverConfig, blend
 from ..core.cab_ir import CabDesign, CabIrError, apply_cab_ir
 from ..core.calibration import CalibrationResult, resolve_calibration
@@ -249,6 +249,21 @@ def _hybrid_metadata_dict(design: HybridDesign) -> dict:
 # Each mode's own sections (design, character analysis, training note) stay
 # in its own builder.
 
+def manifest_alignment_record(design, applied_offset_samples: int) -> dict:
+    """What timing correction the target actually contains. A fixed timing
+    offset correction is one integer shift of Amp B; it does not alter either
+    amp's phase response."""
+    applied = bool(design.alignment_enabled)
+    return {
+        "applied": applied,
+        "offset_samples": int(applied_offset_samples),
+        "method": FIXED_FROZEN_OFFSET_METHOD if applied else None,
+        "description": ("fixed timing offset correction: Amp B shifted by a frozen integer number "
+                        "of samples (positive = Amp B lagged Amp A); not a phase correction")
+                       if applied else "no timing correction; Amp B used as rendered",
+    }
+
+
 def manifest_amp_record(path: str, model: NamModel, sha256: str) -> dict:
     """One source amp's manifest record, with the capture's own calibration
     metadata. Character Blend manifests written before 2026-09-24 have no
@@ -366,6 +381,8 @@ def build_training_manifest(
         "cab": design.cab.to_dict() if design.cab else {"selected": False},
         "output_gain": output_gain or {"mode": design.output_gain_mode, "applied_gain_db": 0.0},
         "receptive_field": receptive_field,
+        "alignment_correction": manifest_alignment_record(design, alignment_offset_samples),
+        "alignment_diagnostic": design.alignment_diagnostic,
         "warnings": warnings,
     }
 
@@ -680,9 +697,10 @@ def generate_training_bundle(
     # BEFORE the per-model calibration split above (docs/history/phase3.md section 8).
     envelope_db = bounded_causal_envelope_db(official_input, input_info.sample_rate, envelope_config)
 
-    amp_b_aligned, alignment_offset = align_to_reference(
-        amp_a_render, amp_b_render, enabled=design.alignment_enabled
-    )
+    # The design's frozen integer, applied verbatim -- never re-measured on
+    # the training input (hybrid.core.align.frozen_alignment_offset).
+    alignment_offset = frozen_alignment_offset(design)
+    amp_b_aligned = apply_fixed_offset(amp_b_render, alignment_offset, len(amp_a_render))
 
     config = CrossoverConfig(
         crossover_dbfs=design.crossover_dbfs,

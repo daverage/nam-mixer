@@ -17,6 +17,9 @@ NAM inference is wired in and we've established what latency guarantees (if
 any) the official inference API actually makes, pass `enabled=False` to
 `align_to_reference` to skip correction (renders are still truncated/padded to
 match length) rather than trusting this cross-correlation blind.
+
+`hybrid.core.align_diagnostic.analyse_alignment` is the read-only check for
+whether a stable fixed offset actually exists; see docs/alignment_diagnostic.md.
 """
 from __future__ import annotations
 
@@ -75,6 +78,74 @@ def estimate_offset(reference: np.ndarray, other: np.ndarray, max_lag: int = _MA
     return int(lags[int(np.argmax(scores))])
 
 
+# `alignment_method` recorded in a design whose Amp B timing correction is a
+# single integer chosen at design time and applied verbatim everywhere after.
+FIXED_FROZEN_OFFSET_METHOD = "fixed-frozen-offset"
+
+
+class LegacyAlignmentDesignError(ValueError):
+    """A design with alignment enabled but no frozen-offset method: its original
+    semantics re-estimated the offset on each audio it was applied to."""
+
+
+def apply_fixed_offset(audio: np.ndarray, offset_samples: int, output_length: int) -> np.ndarray:
+    """Apply an already-chosen integer timing correction to Amp B. Pure and
+    deterministic: nothing is measured here.
+
+    Same sign convention as `estimate_offset`: a positive offset means Amp B
+    lags Amp A, so the correction trims `offset_samples` from B's start; a
+    negative offset pads B's start with zeros. The result is always exactly
+    `output_length` samples (zero-padded or truncated at the end) and keeps
+    `audio`'s dtype.
+    """
+    if isinstance(offset_samples, (bool, np.bool_)) or not isinstance(offset_samples, (int, np.integer)):
+        raise TypeError(f"offset_samples must be an integer, got {offset_samples!r}")
+    if output_length < 0:
+        raise ValueError(f"output_length must be >= 0, got {output_length}")
+    audio = np.asarray(audio)
+    offset = int(offset_samples)
+    if offset > 0:
+        shifted = audio[offset:]
+    elif offset < 0:
+        shifted = np.concatenate([np.zeros(-offset, dtype=audio.dtype), audio])
+    else:
+        shifted = audio
+    if len(shifted) < output_length:
+        return np.pad(shifted, (0, output_length - len(shifted)))
+    return shifted[:output_length]
+
+
+def resolve_alignment_request(align_enabled: bool, alignment_offset_samples: int) -> int:
+    """The offset to apply for an (enabled, offset) pair: 0 when disabled.
+    A non-zero offset with alignment disabled is a caller bug, not a request."""
+    if not align_enabled:
+        if alignment_offset_samples:
+            raise ValueError("alignment_offset_samples is set but alignment is disabled")
+        return 0
+    return int(alignment_offset_samples)
+
+
+def frozen_alignment_offset(design) -> int:
+    """The integer offset a frozen design says to apply to Amp B (0 when
+    alignment is off). Target generation, teacher reconstruction and
+    validation use this instead of measuring anything.
+
+    A design with `alignment_enabled=True` but no `alignment_method` predates
+    frozen offsets: its original meaning was "re-estimate on whatever audio
+    this is applied to". That is refused rather than silently reinterpreted.
+    """
+    if not getattr(design, "alignment_enabled", False):
+        return 0
+    method = getattr(design, "alignment_method", None)
+    if method != FIXED_FROZEN_OFFSET_METHOD:
+        raise LegacyAlignmentDesignError(
+            "This design has alignment enabled from before fixed timing offsets were frozen "
+            f"(alignment_method={method!r}). Its original behaviour re-estimated the offset on "
+            "each audio it was applied to, so it is not reinterpreted as a fixed offset. "
+            "Recreate the design to choose a verified fixed timing offset correction.")
+    return int(design.alignment_offset_samples)
+
+
 def align_to_reference(
     reference: np.ndarray,
     other: np.ndarray,
@@ -82,6 +153,10 @@ def align_to_reference(
     enabled: bool = False,
 ) -> tuple[np.ndarray, int]:
     """Shift `other` to align with `reference`; returns (aligned_other, offset_applied).
+
+    MEASURES and applies in one step, so no production path uses it: preview,
+    target generation and validation apply a frozen integer with
+    `apply_fixed_offset` instead (see `frozen_alignment_offset`).
 
     Aligned output is truncated/zero-padded to the same length as `reference`
     so downstream blending never has to worry about length mismatches.
@@ -94,32 +169,10 @@ def align_to_reference(
     """
     n = len(reference)
     if not enabled:
-        aligned = other[:n]
-        if len(aligned) < n:
-            aligned = np.pad(aligned, (0, n - len(aligned)))
         logger.debug("align: disabled, skipping cross-correlation")
-        return aligned, 0
+        return apply_fixed_offset(other, 0, n), 0
 
     offset = estimate_offset(reference, other, max_lag=max_lag)
-
-    if offset == 0:
-        logger.debug("align: no correction needed (offset=0)")
-        aligned = other[:n]
-        if len(aligned) < n:
-            aligned = np.pad(aligned, (0, n - len(aligned)))
-        return aligned, 0
-
-    if offset > 0:
-        # other lags reference: drop `offset` samples from the front of other
-        shifted = other[offset:]
-    else:
-        # other leads reference: pad the front of other
-        shifted = np.concatenate([np.zeros(-offset, dtype=other.dtype), other])
-
-    if len(shifted) < n:
-        shifted = np.pad(shifted, (0, n - len(shifted)))
-    else:
-        shifted = shifted[:n]
-
-    logger.info("align: corrected offset of %d samples between renders", offset)
-    return shifted, offset
+    if offset:
+        logger.info("align: corrected offset of %d samples between renders", offset)
+    return apply_fixed_offset(other, offset, n), offset

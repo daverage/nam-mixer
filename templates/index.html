@@ -395,6 +395,16 @@
           <input type="range" id="crossover-slider" min="-40" max="0" step="0.5" value="-22" class="slider slider-crossover">
           <div id="suggested-crossover-note" class="info"></div>
         </details>
+        <div class="timing-readout" aria-live="polite" hidden>
+          <div class="timing-readout-summary"></div>
+          <div class="timing-readout-note" hidden></div>
+          <div class="preset-row timing-choice" role="group" aria-label="Amp B timing" hidden>
+            <button type="button" class="preset-btn" data-timing="original" aria-pressed="true">Original</button>
+            <button type="button" class="preset-btn" data-timing="corrected" aria-pressed="false">Corrected</button>
+          </div>
+          <div class="timing-choice-hint" hidden></div>
+          <details class="advanced timing-readout-details"><summary>Timing evidence</summary><div class="info timing-readout-body"></div></details>
+        </div>
       </section>
 
       <section class="card workflow-stage workflow-shape" id="blend-panel-mix" data-mode-panel="blend" hidden>
@@ -407,6 +417,16 @@
         <input type="range" id="mix-slider" min="0" max="100" step="1" value="50" class="slider slider-mix">
         <div class="info">
           Both amps stay present at this ratio, no matter how hard you play.
+        </div>
+        <div class="timing-readout" aria-live="polite" hidden>
+          <div class="timing-readout-summary"></div>
+          <div class="timing-readout-note" hidden></div>
+          <div class="preset-row timing-choice" role="group" aria-label="Amp B timing" hidden>
+            <button type="button" class="preset-btn" data-timing="original" aria-pressed="true">Original</button>
+            <button type="button" class="preset-btn" data-timing="corrected" aria-pressed="false">Corrected</button>
+          </div>
+          <div class="timing-choice-hint" hidden></div>
+          <details class="advanced timing-readout-details"><summary>Timing evidence</summary><div class="info timing-readout-body"></div></details>
         </div>
       </section>
 

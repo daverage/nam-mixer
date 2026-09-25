@@ -24,7 +24,7 @@ from typing import Optional
 
 import numpy as np
 
-from ..core.align import align_to_reference
+from ..core.align import FIXED_FROZEN_OFFSET_METHOD, apply_fixed_offset, resolve_alignment_request
 from ..core.audio_metrics import is_audible_dbfs, rms_dbfs as _rms_dbfs
 from .blend import DEFAULT_TRANSITION_WIDTH_DB  # noqa: F401 -- re-exported for symmetry, unused here
 from ..core.cab_ir import CabDesign
@@ -90,16 +90,20 @@ def build_fixed_blend(
     auto_level: bool = True,
     manual_b_trim_db: float = 0.0,
     align_enabled: bool = False,
+    alignment_offset_samples: int = 0,
 ) -> BlendResult:
     """Combine an already-rendered amp pair at a FIXED mix ratio. Cheap --
     pure numpy, safe to call on every mix-slider move without re-running NAM
     inference (see hybrid/core/pipeline.py's cost split).
 
     `mix_b` is clamped to [0, 1]: 0.0 -> 100% Amp A, 1.0 -> 100% Amp B.
+    `align_enabled`/`alignment_offset_samples` apply one frozen integer timing
+    correction to Amp B; nothing here measures an offset.
     """
     mix_b = max(0.0, min(1.0, float(mix_b)))
 
-    amp_b_render, offset = align_to_reference(pair.amp_a, pair.amp_b, enabled=align_enabled)
+    offset = resolve_alignment_request(align_enabled, alignment_offset_samples)
+    amp_b_render = apply_fixed_offset(pair.amp_b, offset, len(pair.amp_a))
 
     n = min(len(pair.amp_a), len(amp_b_render), len(pair.envelope_db))
     a = pair.amp_a[:n]
@@ -152,6 +156,14 @@ class BlendDesign:
 
     alignment_enabled: bool = False
     alignment_offset_samples: int = 0
+    # "fixed-frozen-offset" when alignment_offset_samples is the one integer
+    # applied verbatim to Amp B everywhere (hybrid.core.align.frozen_alignment_offset).
+    # None for unaligned designs and for designs written before offsets were frozen.
+    alignment_method: Optional[str] = None
+    # Provenance only: what the timing diagnostic reported when the design was
+    # frozen (hybrid.core.align_diagnostic / align_verification). Never read
+    # back to choose an offset.
+    alignment_diagnostic: Optional[dict] = None
 
     instrument_type: str = "guitar"
     design_reference_profile_id: str = "vintage_humbucker"
@@ -220,6 +232,7 @@ def freeze_blend_design(
     amp_b_path: str,
     alignment_enabled: bool,
     design_di_file: Optional[str] = None,
+    alignment_diagnostic: Optional[dict] = None,
     cab: Optional[CabDesign] = None,
     output_gain_mode: str = "auto",
     manual_output_gain_db: float = 0.0,
@@ -227,6 +240,10 @@ def freeze_blend_design(
     """Build a `BlendDesign` from a `RenderedPair`/`BlendResult` the user
     actually auditioned -- the only intended way to construct a real
     (non-test) `BlendDesign`, mirroring `hybrid.modes.design.freeze_design`."""
+    if bool(alignment_enabled) != bool(result.alignment_offset_samples):
+        raise ValueError(
+            "alignment_enabled must match the auditioned result: a frozen timing correction is a "
+            f"non-zero offset (got enabled={alignment_enabled}, offset={result.alignment_offset_samples})")
     return BlendDesign(
         amp_a_path=str(amp_a_path),
         amp_b_path=str(amp_b_path),
@@ -236,6 +253,8 @@ def freeze_blend_design(
         effective_b_trim_db=result.effective_b_trim_db,
         alignment_enabled=alignment_enabled,
         alignment_offset_samples=result.alignment_offset_samples,
+        alignment_method=FIXED_FROZEN_OFFSET_METHOD if alignment_enabled else None,
+        alignment_diagnostic=alignment_diagnostic,
         instrument_type=pair.instrument_type,
         design_reference_profile_id=pair.input_profile_id,
         design_reference_profile_gain_db=pair.input_profile_gain_db,

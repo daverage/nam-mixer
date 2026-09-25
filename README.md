@@ -84,6 +84,7 @@ teacher. Always listen to and validate exported models.
 - [How the blend works](#why-the-dry-inputs-level-controls-the-transition):
   [dry-input level](#why-the-dry-inputs-level-controls-the-transition),
   [level matching](#why-automatic-level-matching-is-needed),
+  [A/B timing](#ab-timing-fixed-offsets-phase-response-and-why-nothing-is-auto-aligned),
   [input profile vs. crossover vs. calibration](#input-profile-vs-crossover-vs-nam-calibration--three-separate-knobs)
 - [Preview DIs vs. training material](#preview-dis-vs-nam-training-material--an-important-distinction)
 - [Workflow](#workflow) (incl. [Kaggle GPU setup](#setting-up-kaggle-gpu-training)) · [Sessions](#sessions) · [Continuous Gain](#continuous-gain-one-amp-one-nam) · [Design modes & Cabinet IR](#design-modes-and-the-shared-cabinet-stage)
@@ -161,6 +162,42 @@ guarantee anything about how they compare specifically **at the crossover
 point**, where it actually matters), this project measures each amp's loudness
 using only the portion of the render that falls near the chosen crossover level
 and computes a trim from that. See `hybrid/core/level_match.py`.
+
+## A/B timing: fixed offsets, phase response, and why nothing is auto-aligned
+
+When two amp captures are mixed (Parallel Blend) or crossfaded (Dynamic
+Hybrid), their timing matters. Two very different things can make Amp B
+look "late" compared with Amp A:
+
+- **A fixed timing offset.** The whole capture is delayed by the same number
+  of samples, e.g. from a latency setting when it was captured. It is the
+  same on every note and every piece of material, and shifting Amp B by that
+  exact amount fixes it completely.
+- **Phase response.** Real amps delay low, mid and high frequencies by
+  different amounts. That is part of how an amp sounds, not a mistake, and
+  it changes with what you play. No single shift can "fix" it; forcing one
+  just trades one comb-filtered frequency region for another.
+
+**NAM Mixer does NOT blindly phase-align captures.** After **Render Amps**
+it shows a **Timing** result. It measures the timing on several separate
+note attacks, and when those agree it re-checks the same two amps on other,
+independent DIs. A correction is offered only when every check agrees on one
+repeatable fixed offset. That is what a real latency looks like, and phase
+response does not pass it. The possible results are:
+
+- **Fixed offset detected — Amp B lags/leads Amp A by N samples:** you get an
+  optional **Original / Corrected** choice.
+- **No stable fixed offset detected:** the amps are already lined up.
+- **No trustworthy fixed timing correction identified:** the difference
+  looks like phase response or is inconsistent, so nothing is offered.
+
+There is **no automatic correction**. Original is always the default;
+Corrected is only ever your explicit choice. If you choose it, that exact
+sample count is frozen into the design and reused unchanged for preview,
+the training target, validation and export, and it is never re-measured.
+A saved session remembers the choice, but restores Corrected only after the
+next render verifies the same offset again. The technical details are in
+[docs/alignment_diagnostic.md](docs/alignment_diagnostic.md).
 
 ## Input profile vs. crossover vs. NAM calibration — three separate knobs
 
@@ -325,7 +362,9 @@ teacher from the saved design, never from current controls.
 A session restores the selected settings and app-managed NAM/cabinet file
 references, but it deliberately does not render automatically. After loading,
 use **Render Amps** to rebuild the pair and verify that the referenced files
-are still available. Training manifests under `work/a2` are separate from
+are still available. A saved Corrected timing choice comes back only if that
+render verifies exactly the same fixed offset again; otherwise timing stays
+Original and the Timing result says why. Training manifests under `work/a2` are separate from
 sessions and are not interchangeable with session JSON files.
 
 ## Continuous Gain: one amp, one NAM
@@ -735,10 +774,17 @@ anywhere.
   pipeline tests still use mocked renders. Other real source-model
   combinations can still expose latency, calibration, or musical problems;
   listen to every preview and validate every exported model against its target.
-- **A/B alignment is deliberately off by default.**
-  `hybrid/core/align.py` cross-correlates the two rendered signals, so a tonal or
-  phase difference between dissimilar amps can look like latency. Enable it
-  only when the timing behavior of the source models is known.
+- **A/B timing correction is optional and off by default.**
+  Different amps naturally delay different frequencies differently; that is
+  part of their sound and is never "corrected". The **Timing** readout
+  measures the A/B offset in several regions of the DI
+  (`hybrid/core/align_diagnostic.py`), then re-checks it on three other DIs
+  (`hybrid/core/align_verification.py`). Only when all of them agree on one
+  integer does it offer **Original / Corrected**. Corrected shifts Amp B by
+  that exact integer in preview, and the same integer is frozen into the
+  design and applied verbatim to the training target and validation, never
+  re-measured. No natural capture pair tested so far has been offered a
+  correction; see docs/alignment_diagnostic.md.
 - Character Blend is a deterministic teacher design, not a perceptual-match
   guarantee. No automated system judges tone, feel, or musical quality; the
   checks can only catch mechanical problems such as clipping, discontinuities,
@@ -783,7 +829,9 @@ hybrid-nam-builder/
 │   │   ├── render_bootstrap.py -- in-app "download nam_render" for Settings
 │   │   ├── envelope.py         -- dry-input level/envelope extraction
 │   │   ├── level_match.py      -- crossover-region auto level-match trim
-│   │   ├── align.py            -- sample-offset detection/correction (optional, off by default)
+│   │   ├── align.py            -- offset measurement + apply_fixed_offset (frozen integer, off by default)
+│   │   ├── align_diagnostic.py -- read-only multi-region A/B timing diagnostic
+│   │   ├── align_verification.py -- cross-DI verification of a fixed A/B offset
 │   │   ├── cab_ir.py           -- shared cabinet IR convolution (preview + baked target)
 │   │   ├── receptive_field.py  -- mode/cab-aware temporal-dependency accounting
 │   │   ├── safety.py           -- NaN/clip checks, non-limiting peak ceiling
@@ -822,7 +870,7 @@ python3 -m pytest -q
 ```
 
 The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
-`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/safety.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/align_verification.py`, `hybrid/core/safety.py`,
 `hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
 `hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
 `hybrid/modes/training_target.py`, `hybrid/modes/fixed_blend.py`,

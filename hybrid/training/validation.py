@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from ..core.align import align_to_reference
+from ..core.align import apply_fixed_offset, frozen_alignment_offset
 from ..modes.blend import CrossoverConfig, blend
 from ..core.calibration import resolve_calibration
 from ..modes.design import HybridDesign
@@ -117,8 +117,8 @@ def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: 
     """Render the LIVE two-NAM reference hybrid for held-out validation,
     reusing the frozen `design` exactly as auditioned -- same crossover,
     transition, fixed B trim, calibration rule, and envelope config as
-    `hybrid.core.pipeline.render_pair`/`build_hybrid`, alignment OFF unless the
-    design says otherwise. `dry` may already have a real input-profile gain
+    `hybrid.core.pipeline.render_pair`/`build_hybrid`, and the design's frozen
+    Amp B timing offset (0 unless the design enabled one) -- never re-measured. `dry` may already have a real input-profile gain
     applied by the caller (docs/history/phase3.md section 25 -- unlike target
     generation, validation DOES apply real profile gains, as actual audio,
     never the deprecated envelope-only `dry_gain_db`).
@@ -133,7 +133,8 @@ def render_reference_hybrid(design: HybridDesign, dry: np.ndarray, sample_rate: 
     )
     envelope_db = bounded_causal_envelope_db(dry, sample_rate, envelope_config)
 
-    amp_b_aligned, offset = align_to_reference(amp_a_render, amp_b_render, enabled=design.alignment_enabled)
+    offset = frozen_alignment_offset(design)
+    amp_b_aligned = apply_fixed_offset(amp_b_render, offset, len(amp_a_render))
 
     config = CrossoverConfig(
         crossover_dbfs=design.crossover_dbfs,
@@ -152,7 +153,9 @@ def render_reference_blend(design: BlendDesign, dry: np.ndarray, sample_rate: in
     """Frozen Parallel Blend teacher for held-out Full/Lite comparisons."""
     dry, a, b = _render_frozen_sources(design, dry, sample_rate)
     pair = SimpleNamespace(dry=dry, amp_a=a, amp_b=b, envelope_db=np.zeros(len(dry)), sample_rate=sample_rate)
-    result = build_fixed_blend(pair, mix_b=design.mix_b, auto_level=False, manual_b_trim_db=design.effective_b_trim_db)
+    offset = frozen_alignment_offset(design)
+    result = build_fixed_blend(pair, mix_b=design.mix_b, auto_level=False, manual_b_trim_db=design.effective_b_trim_db,
+                               align_enabled=bool(offset), alignment_offset_samples=offset)
     return ReferenceHybridResult(result.blend, a, b, np.zeros(len(result.blend)), result.alignment_offset_samples)
 
 

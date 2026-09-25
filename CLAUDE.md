@@ -154,7 +154,7 @@ python -m pytest tests/test_blend.py::test_name -v  # single test
 ```
 
 The test suite exercises `hybrid/core/envelope.py`, `hybrid/modes/blend.py`,
-`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/safety.py`,
+`hybrid/core/level_match.py`, `hybrid/core/align.py`, `hybrid/core/align_diagnostic.py`, `hybrid/core/align_verification.py`, `hybrid/core/safety.py`,
 `hybrid/core/nam_loader.py`, `hybrid/core/input_profiles.py`, `hybrid/core/calibration.py`,
 `hybrid/core/coverage.py`, `hybrid/core/pipeline.py`, `hybrid/modes/design.py`,
 `hybrid/modes/training_target.py`, `hybrid/training/a2_training_settings.py`,
@@ -338,7 +338,10 @@ carry a session record under `work/a2`. Loading settings never renders them
 automatically, and completed models can be embedded in/exported with a
 session. A validation report is restored only when its model SHA-256 matches
 the embedded NAM. Training manifests are not session files and must not be
-imported as such.
+imported as such. A session keeps the Original/Corrected timing intent
+(`settings.timing`); Corrected is restored only when the next render of the
+same Amp A/B/DI re-verifies exactly the saved offset (see
+docs/alignment_diagnostic.md).
 
 `assets/nam_models/` holds the user's own `.nam` amp capture files (e.g. a
 Fender clean + a JCM800 high-gain capture) used as Amp A/Amp B inputs. These
@@ -356,9 +359,16 @@ project fixtures like `assets/di/*.wav`.
 - `hybrid/core/align.py`'s `align_to_reference` cross-correlates Amp A's render
   directly against Amp B's render, which can misread a genuine tonal/phase
   difference between dissimilar amps (e.g. clean vs. heavily distorted) as
-  latency. Pass `enabled=False` (skips correction, still length-matches) until
-  a valid latency policy has been established and the renderer's latency
-  behavior is understood — see the module docstring.
+  latency, and it re-measures on whatever audio it is given.
+  Production code never calls it (or `estimate_offset`): the Timing readout
+  measures with `align_diagnostic.analyse_alignment` and
+  `align_verification.verify_fixed_offset_across_dis` (cross-DI), and only a
+  verified integer can be chosen (Original/Corrected, default Original). That
+  integer is applied with `apply_fixed_offset`, frozen into the design
+  (`alignment_method: "fixed-frozen-offset"`), and reused verbatim by target
+  generation and validation via `frozen_alignment_offset`; an enabled design
+  without that method is refused, never re-estimated. See
+  docs/alignment_diagnostic.md.
 - The bundled `assets/di/*.wav` genre clips were found to be mostly
   normalized around a common RMS level by their original source, so their
   waveform cannot tell you what pickup actually produced them. Input

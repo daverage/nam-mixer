@@ -52,6 +52,9 @@ from hybrid.modes.character_analysis import (
 from hybrid.modes.character_blend import CharacterBlendDesign, build_character_blend, evaluate_low_level_response, freeze_character_design
 from hybrid.modes.character_training_target import LOW_LEVEL_CHECK_REFERENCE_SECONDS, generate_character_training_bundle
 from hybrid.modes.cab_embed_training_target import CabEmbedDesign, generate_cab_embed_training_bundle
+from hybrid.core.align import FIXED_FROZEN_OFFSET_METHOD, apply_fixed_offset
+from hybrid.core.align_diagnostic import DIAGNOSTIC_METHOD, analyse_alignment
+from hybrid.core.align_verification import verify_fixed_offset_across_dis
 from hybrid.core.cab_ir import CabIrError, cab_design_from_prepared, get_prepared_cab_ir
 from hybrid.core.calibration import DEFAULT_REFERENCE_INPUT_LEVEL_DBU
 from hybrid.core.coverage import (
@@ -242,9 +245,10 @@ def _retain_render_source(path: str | Path) -> tuple[Path, str]:
             temporary.unlink(missing_ok=True)
 
 
-def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: str, amp_b_path: str, di_file: str, settings: dict, source_hashes: dict, source_paths: dict) -> dict:
+def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: str, amp_b_path: str, di_file: str, settings: dict, source_hashes: dict, source_paths: dict, timing: dict | None = None) -> dict:
     """Atomically publish a complete pair only after both renders succeeded."""
     snapshot = {
+        "timing": timing or _empty_timing(),
         "render_id": uuid.uuid4().hex,
         "pair": pair,
         "amp_a_path": amp_a_path,
@@ -262,6 +266,86 @@ def _publish_render_snapshot(pair: RenderedPair, amp_a, amp_b, *, amp_a_path: st
         _rendered_pair_cache.update(snapshot)
         _rendered_pair_cache["snapshot"] = snapshot
     return snapshot
+
+
+# Per-DI cross-DI verification measurements, keyed by source content hashes
+# and every setting that changes what the amps receive. The verdict itself is
+# recomputed from these each render (hybrid/core/align_verification.py).
+_alignment_measurement_cache: dict = {}
+_alignment_measurement_lock = threading.Lock()
+_MAX_ALIGNMENT_MEASUREMENTS = 64
+
+
+def _empty_timing() -> dict:
+    return {"diagnostic": None, "verification": None, "correction_available": False, "correction_offset_samples": None}
+
+
+def _analyse_render_timing(pair: RenderedPair, amp_a, amp_b, *, di_file: str, source_hashes: dict, render_kwargs: dict) -> dict:
+    """Timing diagnostic for a fresh render, plus cross-DI verification when
+    the preview DI shows a fixed offset. Report only: this never alters audio,
+    and a failure here never fails the render."""
+    timing = _empty_timing()
+    try:
+        diagnostic = analyse_alignment(pair.amp_a, pair.amp_b, pair.profiled_dry, pair.sample_rate)
+    except Exception as exc:  # diagnostic only
+        app.logger.warning("alignment diagnostic failed: %s", exc)
+        return timing
+    timing["diagnostic"] = diagnostic.to_dict()
+
+    def render_for_verification(dry, sample_rate):
+        verification_pair = render_pair(amp_a, amp_b, dry, sample_rate, **render_kwargs)
+        return verification_pair.amp_a, verification_pair.amp_b, verification_pair.profiled_dry
+
+    cache_key = (source_hashes["amp_a"], source_hashes["amp_b"], tuple(sorted(render_kwargs.items())))
+    try:
+        with _alignment_measurement_lock:
+            if len(_alignment_measurement_cache) > _MAX_ALIGNMENT_MEASUREMENTS:
+                _alignment_measurement_cache.clear()
+            verification = verify_fixed_offset_across_dis(
+                render_for_verification, DI_DIR, pair.sample_rate, primary=diagnostic,
+                preview_di_file=di_file, measurement_cache=_alignment_measurement_cache, cache_key=cache_key)
+    except Exception as exc:  # diagnostic only
+        app.logger.warning("cross-DI alignment verification failed: %s", exc)
+        return timing
+    timing["verification"] = verification.to_dict()
+    timing["correction_available"] = verification.verified
+    timing["correction_offset_samples"] = verification.offset_samples if verification.verified else None
+    return timing
+
+
+def _alignment_provenance(snapshot: dict) -> dict | None:
+    """What the timing diagnostic said when a design was frozen. Provenance
+    only -- never used to choose an offset."""
+    timing = snapshot.get("timing") or {}
+    diagnostic = timing.get("diagnostic")
+    if diagnostic is None:
+        return None
+    return {
+        "diagnostic_method": DIAGNOSTIC_METHOD,
+        "preview_di_file": snapshot.get("di_file"),
+        "status": diagnostic["status"],
+        "recommended_offset_samples": diagnostic["recommended_offset_samples"],
+        "per_window_offsets": diagnostic["per_window_offsets"],
+        "agreement_fraction": diagnostic["agreement_fraction"],
+        "median_correlation": diagnostic["median_correlation"],
+        "verification": timing.get("verification"),
+    }
+
+
+def _parse_alignment_choice(data: dict, snapshot: dict) -> tuple[bool, int]:
+    """Original vs. Corrected timing for this request. Corrected is accepted
+    only with the exact offset this render's cross-DI verification produced,
+    so an ambiguous or unverified diagnostic can never enable a correction."""
+    if data.get("alignment_enabled") is not True:
+        return False, 0
+    timing = snapshot.get("timing") or {}
+    offset = data.get("alignment_offset_samples")
+    if not timing.get("correction_available"):
+        raise ValueError("Timing correction is only available when a fixed offset has been verified across DIs.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset != timing["correction_offset_samples"]:
+        raise ValueError(
+            f"alignment_offset_samples must be the verified offset ({timing['correction_offset_samples']}).")
+    return True, offset
 
 
 def _require_render_snapshot(data: dict):
@@ -1110,6 +1194,16 @@ def _sync_generated_session_name(session: dict, bundle_dir: Path) -> None:
     session["name"] = requested_name
 
 
+def _session_timing_from_design(design: dict) -> dict:
+    """The saved timing intent of a generated bundle. Only a frozen fixed
+    offset counts as Corrected; the client re-verifies it on the next render."""
+    offset = design.get("alignment_offset_samples")
+    if (design.get("alignment_enabled") and design.get("alignment_method") == FIXED_FROZEN_OFFSET_METHOD
+            and isinstance(offset, int) and not isinstance(offset, bool) and offset != 0):
+        return {"choice": "corrected", "offsetSamples": offset, "method": FIXED_FROZEN_OFFSET_METHOD}
+    return {"choice": "original", "offsetSamples": None, "method": FIXED_FROZEN_OFFSET_METHOD}
+
+
 def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
     """Convert an existing A2 bundle into the canonical session record once."""
     design = manifest.get("design") or {}
@@ -1141,6 +1235,7 @@ def _session_from_manifest(manifest: dict, bundle_dir: Path) -> dict:
         "autoLevelMatch": True, "ampBTrim": str(number(design.get("manual_trim_db"))),
         "cab": {"path": None, "label": "", "previewEnabled": False, "baked": bool((manifest.get("cab") or {}).get("baked", False))},
         "outputGainAuto": True, "outputGainManualDb": "0", "modelName": manifest.get("model_name", bundle_dir.name),
+        "timing": _session_timing_from_design(design),
     }
     artifact = None
     validation_report = None
@@ -2178,9 +2273,20 @@ def api_render_pair():
     except NamRenderError as exc:
         return jsonify({"error": str(exc)}), 500
 
+    source_hashes = {"amp_a": amp_a_hash, "amp_b": amp_b_hash, "di": di_hash}
+    timing = _analyse_render_timing(
+        pair, amp_a, amp_b, di_file=di_file, source_hashes=source_hashes,
+        render_kwargs=dict(
+            instrument_type=instrument_type, input_profile_id=input_profile_id,
+            input_profile_gain_db=input_profile_gain_db, test_gain_db=test_gain_db,
+            calibration_mode=calibration_mode, reference_input_level_dbu=reference_input_level_dbu,
+            amp_a_input_gain_db=amp_a_input_gain_db, amp_b_input_gain_db=amp_b_input_gain_db,
+        ),
+    )
     snapshot = _publish_render_snapshot(
         pair, amp_a, amp_b, amp_a_path=str(amp_a_path), amp_b_path=str(amp_b_path), di_file=di_file,
-        source_hashes={"amp_a": amp_a_hash, "amp_b": amp_b_hash, "di": di_hash},
+        timing=timing,
+        source_hashes=source_hashes,
         source_paths={"amp_a": str(amp_a_path), "amp_b": str(amp_b_path), "di": str(di_path)},
         settings={
             "instrument_type": instrument_type, "input_profile_id": input_profile_id,
@@ -2242,6 +2348,16 @@ def api_render_pair():
         # -- used to calibrate the "guitar volume feel" 0-10 crossover knob
         # against real signal levels for THIS render, not a guessed constant.
         "blend_envelope_percentiles": envelope_percentiles(pair.envelope_db[pair.envelope_db > -50.0]),
+
+        # Timing: the diagnostic measures, cross-DI verification decides
+        # whether a correction may be offered. Nothing here alters audio;
+        # correction is a separate, explicit per-request choice.
+        "alignment_diagnostic": timing["diagnostic"],
+        "alignment_verification": timing["verification"],
+        "timing_correction": {
+            "available": timing["correction_available"],
+            "offset_samples": timing["correction_offset_samples"],
+        },
 
         "warnings": warnings,
     })
@@ -2481,12 +2597,19 @@ def api_blend_info():
     except (TypeError, ValueError):
         return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
 
+    try:
+        align_enabled, alignment_offset = _parse_alignment_choice(data, _request_render_snapshot())
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     result = build_hybrid(
         pair,
         crossover_dbfs=crossover_dbfs,
         transition_width_db=transition_width_db,
         auto_level=auto_level,
         manual_b_trim_db=manual_b_trim_db,
+        align_enabled=align_enabled,
+        alignment_offset_samples=alignment_offset,
     )
     return jsonify({
         "auto_trim_db": result.auto_trim_db,
@@ -2516,7 +2639,12 @@ def api_mix_info():
             mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
         except (TypeError, ValueError):
             return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
-        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db)
+        try:
+            align_enabled, alignment_offset = _parse_alignment_choice(data, _request_render_snapshot())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset)
         return jsonify({
             "mode": "blend",
             "mix_b": result.mix_b,
@@ -2537,9 +2665,14 @@ def api_mix_info():
             crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
         except (TypeError, ValueError):
             return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+        try:
+            align_enabled, alignment_offset = _parse_alignment_choice(data, _request_render_snapshot())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         result = build_hybrid(
             pair, crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
             auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+            align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
         )
         return jsonify({
             "mode": "hybrid",
@@ -2632,6 +2765,10 @@ def api_preview():
             crossover_dbfs, transition_width_db, manual_b_trim_db, auto_level = _parse_hybrid_params(data)
         except (TypeError, ValueError):
             return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
+        try:
+            align_enabled, alignment_offset = _parse_alignment_choice(data, snapshot)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
         result = build_hybrid(
             pair,
@@ -2639,6 +2776,8 @@ def api_preview():
             transition_width_db=transition_width_db,
             auto_level=auto_level,
             manual_b_trim_db=manual_b_trim_db,
+            align_enabled=align_enabled,
+            alignment_offset_samples=alignment_offset,
         )
         audio = result.hybrid
         headers = {
@@ -2652,8 +2791,13 @@ def api_preview():
             mix_b, manual_b_trim_db, auto_level = _parse_blend_params(data)
         except (TypeError, ValueError):
             return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
+        try:
+            align_enabled, alignment_offset = _parse_alignment_choice(data, snapshot)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
-        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db)
+        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset)
         audio = result.blend
         headers = {
             "X-Mix-B": f"{result.mix_b:.4f}",
@@ -2739,15 +2883,21 @@ def api_live_blend_stems():
     except (TypeError, ValueError):
         return jsonify({"error": "mix_b/manual_b_trim_db must be numbers"}), 400
 
+    try:
+        align_enabled, alignment_offset = _parse_alignment_choice(data, snapshot)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     # `mix_b` is irrelevant to the stems themselves, but calling the canonical
-    # builder means its trim/length policy cannot drift from the exported A2.
+    # builder means its trim/length/timing policy cannot drift from the exported A2.
     result = build_fixed_blend(
         pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
-        align_enabled=False,
+        align_enabled=align_enabled, alignment_offset_samples=alignment_offset,
     )
     n = min(len(pair.amp_a), len(pair.amp_b), len(pair.envelope_db))
     amp_a = pair.amp_a[:n].astype(np.float32)
-    amp_b = pair.amp_b[:n].astype(np.float32) * (10.0 ** (result.effective_b_trim_db / 20.0))
+    amp_b_timed = apply_fixed_offset(pair.amp_b, result.alignment_offset_samples, len(pair.amp_a))
+    amp_b = amp_b_timed[:n].astype(np.float32) * (10.0 ** (result.effective_b_trim_db / 20.0))
 
     try:
         cab = _parse_cab_params(data, pair.sample_rate)
@@ -3003,12 +3153,19 @@ def api_generate():
             output_gain_mode, manual_output_gain_db = _parse_output_gain_params(data)
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
-        # Alignment is never exposed as a UI control, matching Hybrid mode.
-        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db, align_enabled=False)
+        try:
+            align_enabled, alignment_offset = _parse_alignment_choice(data, snapshot)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        # The exact auditioned timing choice is frozen; target generation
+        # applies that integer verbatim (hybrid/core/align.py).
+        result = build_fixed_blend(pair, mix_b=mix_b, auto_level=auto_level, manual_b_trim_db=manual_b_trim_db,
+                                   align_enabled=align_enabled, alignment_offset_samples=alignment_offset)
         design = freeze_blend_design(
             pair, result,
             amp_a_path=amp_a_path, amp_b_path=amp_b_path,
-            alignment_enabled=False, design_di_file=di_file, cab=cab,
+            alignment_enabled=align_enabled, alignment_diagnostic=_alignment_provenance(snapshot),
+            design_di_file=di_file, cab=cab,
             output_gain_mode=output_gain_mode, manual_output_gain_db=manual_output_gain_db,
         )
         try:
@@ -3022,16 +3179,20 @@ def api_generate():
         except (TypeError, ValueError):
             return jsonify({"error": "crossover_dbfs/transition_width_db/manual_b_trim_db must be numbers"}), 400
 
-        # Alignment is never exposed as a UI control (see freeze_design/build_hybrid
-        # call sites) -- it stays off, matching every other build_hybrid() call in
-        # this app.
+        try:
+            align_enabled, alignment_offset = _parse_alignment_choice(data, snapshot)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        # The exact auditioned timing choice is frozen; target generation
+        # applies that integer verbatim (hybrid/core/align.py).
         result = build_hybrid(
             pair,
             crossover_dbfs=crossover_dbfs,
             transition_width_db=transition_width_db,
             auto_level=auto_level,
             manual_b_trim_db=manual_b_trim_db,
-            align_enabled=False,
+            align_enabled=align_enabled,
+            alignment_offset_samples=alignment_offset,
         )
 
         try:
@@ -3042,7 +3203,8 @@ def api_generate():
             pair, result,
             amp_a_path=amp_a_path, amp_b_path=amp_b_path,
             crossover_dbfs=crossover_dbfs, transition_width_db=transition_width_db,
-            alignment_enabled=False, design_di_file=di_file, cab=cab,
+            alignment_enabled=align_enabled, alignment_diagnostic=_alignment_provenance(snapshot),
+            design_di_file=di_file, cab=cab,
             output_gain_mode=output_gain_mode, manual_output_gain_db=manual_output_gain_db,
         )
 
