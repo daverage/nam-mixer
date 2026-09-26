@@ -5,6 +5,7 @@ Everything NAM Mixer can do, in detail. New here? Start with the
 
 ## Contents
 
+- [Keyboard and screen-reader use](#keyboard-and-screen-reader-use)
 - [How NAM Mixer works](#how-nam-mixer-works)
   - [This is NOT model-weight merging](#this-is-not-model-weight-merging)
   - [Why the dry input's level controls the transition](#why-the-dry-inputs-level-controls-the-transition)
@@ -606,3 +607,12 @@ fixed gain reduction is applied to the whole file instead
 preview_safety_limiter`) exists only as a speaker/headphone safety net on the
 live preview/playback path and must never touch a file destined to become (or
 derive) a training target.
+## Keyboard and screen-reader use
+
+Use Tab and Shift+Tab to move between controls, Enter or Space to activate buttons, and the arrow keys to adjust sliders and radio choices. The Skip to main content link appears when it receives keyboard focus. Utility buttons at the top open Builder, Continuous Gain, Wizard, AI Assistant, TONE3000, Tools, Sessions, and Settings; the current choice is announced as pressed.
+
+In Builder, choose Amp A and Amp B with their native NAM file pickers. Prepare the amps, then use the numbered workflow buttons to compare, shape, finish, and create a model. A step that needs prepared amps explains the block in a status message. The audio source buttons identify Amp A, the current result, and Amp B. Playback uses the player in Compare the sound. Adjust range controls with arrow keys; their spoken values include the displayed units or proportions.
+
+In Continuous Gain, create a project and choose multiple NAM captures with the native file picker. The capture table has individually named gain-position and Remove controls. After analysis, use View chart data under each graph to read the exact source measurements and input-gain mapping as tables. You can use those tables without interpreting the image. Training progress is visible in its panel; meaningful stage changes are announced, and detailed logs are available under Show detailed log. When training and validation finish, move to Test & export for the model download.
+
+This guide describes the intended keyboard flow. Screen-reader support still needs end-to-end NVDA and VoiceOver verification; see [the accessibility review](accessibility_review.md) for the remaining work.

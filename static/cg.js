@@ -126,6 +126,8 @@
     try {
       const j = await api(startPath, { method: "POST", json: payload || {} });
       S.job = { id: j.job_id, pid, message: "starting", log: [] };
+      S.lastJobAnnouncementAt = 0;
+      say("Continuous Gain job started.");
       render();
       clearInterval(S.pollTimer);
       let busy = false;                      // a slow tick must not overlap the next one and finish the job twice
@@ -141,6 +143,10 @@
             if (S.id === pid) await load(pid);
             if (failed) say(st.error || "The job failed", true); else if (after) await after(st, pid);
           } else {
+            if (st.message !== S.job?.message && Date.now() - S.lastJobAnnouncementAt >= 20000) {
+              say(st.message);
+              S.lastJobAnnouncementAt = Date.now();
+            }
             S.job = { id: j.job_id, pid, message: st.message, log: st.log, elapsed: st.elapsed };
             const el = document.getElementById("cg-job-log"); if (el) { el.textContent = st.log.join("\n"); el.scrollTop = el.scrollHeight; } const m = document.getElementById("cg-job-msg"); if (m) m.textContent = `${st.message} (${Math.round(st.elapsed)} s)`;
           }
@@ -149,7 +155,7 @@
       }, 1500);
     } catch (e) { say(e.message, true); }
   }
-  const jobBox = () => S.job && S.job.pid === S.id ? `<div class="training-activity-card" aria-live="polite"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details" open><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
+  const jobBox = () => S.job && S.job.pid === S.id ? `<div class="training-activity-card"><div class="training-activity-title" id="cg-job-msg">${esc(S.job.message)}</div><details class="training-log-details"><summary>Show detailed log</summary><pre class="log-tail" id="cg-job-log">${esc((S.job.log || []).join("\n"))}</pre></details></div>` : "";
 
   // ---------- charts (inline SVG, theme variables)
   function chart({ xs, series, xLabel, yLabel, height = 220, width = 460, xTicks, shade = [], points = [] }) {
@@ -161,8 +167,7 @@
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     const X = (v) => m.l + ((v - x0) / (x1 - x0 || 1)) * (width - m.l - m.r);
     const Y = (v) => height - m.b - ((v - y0) / (y1 - y0)) * (height - m.t - m.b);
-    const pointSummary = points.map((p) => p.title || `${fmt(p.x)} ${xLabel}, ${fmt(p.y)} ${yLabel}`).join("; ");
-    let out = `<svg class="cg-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(yLabel)} against ${esc(xLabel)}. ${esc(pointSummary || "No marked captures; use the adjacent measurements for exact values.")}">`;
+    let out = `<svg class="cg-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(yLabel)} against ${esc(xLabel)}. Exact values follow in the chart data table.">`;
     shade.forEach((s) => { out += `<rect x="${X(s[0])}" y="${m.t}" width="${Math.max(0, X(s[1]) - X(s[0]))}" height="${height - m.t - m.b}" fill="${s[2]}" opacity="0.25"/>`; });
     for (let i = 0; i <= 4; i++) { const v = y0 + ((y1 - y0) * i) / 4; out += `<line x1="${m.l}" x2="${width - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)"/><text x="${m.l - 6}" y="${Y(v) + 4}" text-anchor="end">${fmt(v, Math.abs(y1 - y0) < 5 ? 2 : 1)}</text>`; }
     (xTicks || xs).forEach((v) => { out += `<line x1="${X(v)}" x2="${X(v)}" y1="${height - m.b}" y2="${height - m.b + 4}" stroke="var(--text-muted)"/><text x="${X(v)}" y="${height - m.b + 16}" text-anchor="middle">${fmt(v, Number.isInteger(v) ? 0 : 1)}</text>`; });
@@ -179,6 +184,7 @@
   const badge = (kind, text) => `<span class="cost-badge cost-badge-${kind} cg-chip">${esc(text)}</span>`;
   const card = (title, inner, right = "") => `<section class="card"><h2>${title}${right}</h2>${inner}</section>`;
   const table = (head, rows) => `<div class="table-wrap"><table class="coverage-table cg-wrap">${head.length ? `<thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead>` : ""}<tbody>${rows}</tbody></table></div>`;
+  const chartData = (id, caption, headers, rows) => `<details id="${id}" class="advanced" ${S.chartDataOpen?.[id] ? "open" : ""}><summary>View chart data: ${esc(caption)}</summary>${table(headers, rows)}</details>`;
   const cols = (...parts) => parts.join("");          // one centred column of cards, in flow order (the Builder's layout)
   const HINTS = { 1: "Upload every fixed-gain capture of one amp and channel", 2: "See what each capture adds and how Input gain will map", 3: "Generate the training files and train", 4: "Check the result against your captures and export" };
 
@@ -192,7 +198,7 @@
     const fileStatus = {}; Object.entries(idx).forEach(([p, fn]) => { fileStatus[fn] = st[p]; });
     const rows = caps.map(([fn, c]) => {
       const a = fileStatus[fn];
-      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" aria-label="Physical gain position for ${esc(fn)}" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name - please confirm</div>` : ""}</td>
+      return `<tr><th scope="row">${esc(fn)}</th><td><input type="number" step="any" class="file-input" aria-label="Physical gain position for ${esc(fn)}" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name - please confirm</div>` : ""}</td>
         <td>${a ? badge(a.status === "VALID" || a.status === "CORRECTED" ? "instant" : "bad", a.status) : `<span class="info">not analysed</span>`}</td>
         <td><button type="button" class="btn btn-secondary btn-small" data-cg-remove="${esc(fn)}" aria-label="Remove ${esc(fn)}">Remove</button></td></tr>`;
     }).join("");
@@ -260,6 +266,7 @@
         return { x: g, y: ser.values[i], r: role === "selected" ? 6 : 4, fill: role === "selected" ? "var(--accent)" : (role === "needs_review" ? "var(--danger)" : "var(--panel)"), stroke: rel[i] ? "var(--text)" : "var(--danger)", title: `Position ${g}: ${fmt(ser.values[i], 2)} ${ser.unit} (${role || "reference"})` };
       }),
     });
+    const seriesRows = gains.map((g, i) => `<tr><th scope="row">${esc(g)}</th><td>${fmt(ser.values[i], 2)} ${esc(ser.unit)}</td><td>${esc(roleOf(g) || "reference")}</td><td>${rel[i] ? "Reliable" : "Check measurement"}</td></tr>`).join("");
     const map = plan.mapping;
     const anchors = map.filter((m) => m.kind === "training_anchor").sort((x, y) => x.input_gain_db - y.input_gain_db);
     const shade = []; for (let i = 0; i + 1 < anchors.length; i++) shade.push([anchors[i].input_gain_db, anchors[i + 1].input_gain_db, i % 2 ? "var(--accent)" : "var(--amp-b)"]);
@@ -268,11 +275,12 @@
       series: [{ ys: [Math.min(...map.map((m) => m.position)), Math.max(...map.map((m) => m.position))], line: false }],
       points: map.map((m) => ({ x: m.input_gain_db, y: m.position, r: m.kind === "training_anchor" ? 6 : 3.5, fill: m.kind === "training_anchor" ? "var(--accent)" : "var(--panel)", label: m.kind === "training_anchor" ? `G${m.position}` : "", title: `Position ${m.position} → ${fmt(m.input_gain_db)} dB (${m.kind === "training_anchor" ? "training anchor" : "interpolated"})` })),
     });
+    const mapRows = [...map].sort((x, y) => x.input_gain_db - y.input_gain_db).map((m) => `<tr><th scope="row">${esc(m.position)}</th><td>${fmt(m.input_gain_db)} dB</td><td>${esc(m.kind === "training_anchor" ? "Training anchor" : "Interpolated")}</td></tr>`).join("");
     const audit = a.audit;
     const rows = gains.filter((g) => cov.reasons[String(g)]).map((g) => {
       const r = cov.reasons[String(g)], au = audit[String(g)] || { status: "?" };
       const kind = r.role === "selected" ? "auto" : (r.role === "needs_review" ? "bad" : "instant");
-      return `<tr><td>${plan.mode === "custom" ? `<input type="checkbox" data-cg-cust="${g}" ${sel.has(g) ? "checked" : ""}> ` : ""}G${g}</td><td>${badge(kind, r.role.replace("_", " "))}</td><td>${esc(au.status)}</td><td>${esc(r.reason)}</td></tr>`;
+      return `<tr><th scope="row">${plan.mode === "custom" ? `<label><input type="checkbox" data-cg-cust="${g}" ${sel.has(g) ? "checked" : ""}> G${g}</label>` : `G${g}`}</th><td>${badge(kind, r.role.replace("_", " "))}</td><td>${esc(au.status)}</td><td>${esc(r.reason)}</td></tr>`;
     }).join("");
     const phys = Object.entries(cov.phys || {}).filter(([, v]) => v.tol !== null).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${fmt(v.mean, 2)}</td><td>${fmt(v.max, 2)}</td><td>${v.tol}</td><td>${badge(v.max <= v.tol ? "instant" : "bad", v.max <= v.tol ? "within" : "outside")}</td></tr>`).join("");
     const modes = `<div class="mode-tabs cg-modes" role="group" aria-label="Selection mode">${[["automatic", "Automatic"], ["use_all", "Use all"], ["custom", "Custom"]].map(([v, l]) => `<button type="button" class="mode-tab ${plan.mode === v ? "active" : ""}" data-cg-mode="${v}" aria-pressed="${plan.mode === v}">${l}</button>`).join("")}</div>`;
@@ -283,8 +291,8 @@
           <label class="field-label" for="cg-anchors">Anchor method</label><select id="cg-anchors" class="select-input"><option value="fc" ${plan.anchor_method === "fc" ? "selected" : ""}>FC response-distance anchors (default, production recipe)</option><option value="fixed" ${plan.anchor_method === "fixed" ? "selected" : ""}>Fixed 4 dB spacing (v3 alternative)</option></select></details>
 `);
     const main = card("How the source amp changes", `<p class="info">Measured on the fit DIs; dashed line is the interpolation, markers are the captures (filled = selected, red ring = quarantined for this measure).</p>
-        <label class="field-label" for="cg-series">Measured series</label><select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}`)
-      + card("How the finished NAM will be controlled", `<p class="info">The Input-gain mapping used to build the training target. Shaded bands are untested regions between anchors, learned by interpolation. This is a control guide, not a physical-gain parameter.</p>${mapChart}`)
+        <label class="field-label" for="cg-series">Measured series</label><select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}${chartData("cg-series-data", S.seriesName, ["Physical gain position", `Measured ${esc(S.seriesName)}`, "Role", "Quality"], seriesRows)}`)
+      + card("How the finished NAM will be controlled", `<p class="info">The Input-gain mapping used to build the training target. Shaded bands are untested regions between anchors, learned by interpolation. This is a control guide, not a physical-gain parameter.</p>${mapChart}${chartData("cg-map-data", "input gain mapping", ["Physical gain position", "Player Input gain", "Role"], mapRows)}`)
       + card("Why each capture", table(["Capture", "Role", "Audit", "Measured reason"], rows))
       + card("Measured coverage of the omitted captures", table(["Group", "Mean error", "Max error", "Working tolerance", ""], phys || `<tr><td colspan="5">Every eligible capture is selected, so nothing is omitted.</td></tr>`)
         + `<p class="info">Tolerances are working values, not perceptual measurements. Objective J = ${fmt(cov.J, 3)}.</p>
@@ -315,6 +323,9 @@
     const adv = document.getElementById("cg-advanced"); if (adv) adv.addEventListener("toggle", () => { S.advOpen = adv.open; });
     const an = document.getElementById("cg-anchors"); if (an) an.addEventListener("change", () => replan({ anchors: an.value }));
     const se = document.getElementById("cg-series"); if (se) se.addEventListener("change", () => { S.seriesName = se.value; render(); });
+    body.querySelectorAll("#cg-series-data, #cg-map-data").forEach((details) => details.addEventListener("toggle", () => {
+      S.chartDataOpen = { ...S.chartDataOpen, [details.id]: details.open };
+    }));
     const ac = document.getElementById("cg-accept"); if (ac) ac.addEventListener("click", async () => { await (S.planQueue || Promise.resolve()); S.stage = 3; render(); });
   }
 

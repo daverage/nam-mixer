@@ -283,7 +283,7 @@
     <button type="button" class="workflow-tab" data-workflow-stage="shape"><span>3</span> Shape the sound</button>
     <button type="button" class="workflow-tab" data-workflow-stage="finish"><span>4</span> Finish &amp; polish</button>
     <button type="button" class="workflow-tab" data-workflow-stage="create"><span>5</span> Make a model</button>
-    <p id="workflow-hint" class="workflow-hint"></p>
+    <p id="workflow-hint" class="workflow-hint" role="status" aria-live="polite"></p>
   </nav>
   <section id="render-stale-callout" class="render-stale-callout" hidden aria-live="assertive">
     <div><strong>Preview needs rebuilding.</strong> <span id="render-stale-message">A source setting changed.</span></div>
@@ -736,18 +736,18 @@
         <div id="generate-result" class="generate-result" hidden aria-live="polite"></div>
 
         <div id="a2-training-section" hidden>
-          <label class="field-label">Choose model detail</label>
+          <fieldset class="radio-choice-group"><legend>Choose model detail</legend>
           <div class="radio-row">
             <label><input type="radio" name="a2-epoch-preset" id="a2-preset-draft" value="draft"> Quick check <span class="hint">(20 epochs, fastest)</span></label>
             <label><input type="radio" name="a2-epoch-preset" id="a2-preset-standard" value="standard" checked> Recommended balance <span class="hint">(60 epochs)</span></label>
             <label><input type="radio" name="a2-epoch-preset" id="a2-preset-high_def" value="high_def"> Maximum detail <span class="hint">(120 epochs, slowest)</span></label>
-          </div>
+          </div></fieldset>
 
-          <label class="field-label">Choose where to train this model</label>
+          <fieldset class="radio-choice-group"><legend>Choose where to train this model</legend>
           <div class="radio-row">
             <label><input type="radio" name="a2-backend" id="a2-backend-kaggle" value="kaggle" checked> Use a cloud GPU <span class="hint">(Kaggle, recommended)</span></label>
             <label><input type="radio" name="a2-backend" id="a2-backend-local" value="local"> Use this computer</label>
-          </div>
+          </div></fieldset>
           <p class="info" id="training-time-estimate"></p>
 
           <div id="kaggle-panel">
@@ -758,7 +758,7 @@
             <button id="btn-kaggle-install" class="btn btn-secondary btn-block" hidden>Install Kaggle CLI</button>
             <button id="btn-kaggle-connect" class="btn btn-secondary btn-block" hidden>Connect Kaggle</button>
             <button id="btn-train-a2" class="btn btn-primary btn-block" disabled>Train model</button>
-            <div id="kaggle-progress-box" class="training-activity-card" hidden aria-live="polite">
+            <div id="kaggle-progress-box" class="training-activity-card" hidden>
               <div id="kaggle-progress-line"><strong id="kaggle-progress-state" class="training-activity-title">--</strong></div>
               <div id="kaggle-progress-bar-track" class="progress-track" hidden><div id="kaggle-progress-bar-fill" class="progress-fill"></div></div>
               <div id="kaggle-progress-meta" class="training-activity-meta"></div>
@@ -772,7 +772,7 @@
           </div>
 
           <div id="local-panel" hidden>
-            <div class="training-activity-card" aria-live="polite">
+            <div class="training-activity-card">
               <div id="local-training-status" class="training-activity-title">Checking local training environment…</div>
               <div id="local-training-meta" class="training-activity-meta"></div>
               <div id="local-training-progress-track" class="progress-track" hidden><div id="local-training-progress-fill" class="progress-fill"></div></div>
@@ -812,7 +812,7 @@
   </div>
 
   <div class="status-bar">
-    <div id="activity-indicator" class="activity-indicator" hidden role="status" aria-live="polite">
+    <div id="activity-indicator" class="activity-indicator" hidden>
       <span class="activity-spinner" aria-hidden="true"></span>
       <span id="activity-message">Working…</span>
     </div>
@@ -870,6 +870,7 @@
         <button type="button" id="cg-new-project" class="btn btn-secondary btn-small">New project</button>
         <button type="button" id="cg-open-sessions" class="btn btn-secondary btn-small">Open a saved project…</button></div>
       <div class="cg-row" id="cg-new-project-form" hidden>
+        <label class="visually-hidden" for="cg-new-project-name">New project name</label>
         <input type="text" id="cg-new-project-name" class="file-input" placeholder="Project name (e.g. the amp and channel)" maxlength="100">
         <button type="button" id="cg-new-project-create" class="btn btn-primary btn-small">Create</button>
         <button type="button" id="cg-new-project-cancel" class="btn btn-secondary btn-small">Cancel</button>

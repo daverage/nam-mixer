@@ -108,6 +108,7 @@ function beginActivity(message) {
   activities.set(id, render);
   render();
   activityIndicator.hidden = false;
+  setStatus(message);
   const timer = setInterval(render, 1000);
   const finish = (finishedMessage = "") => {
     clearInterval(timer);
@@ -251,17 +252,29 @@ function setWorkflowStage(stage) {
   workflowHint.textContent = "";
 }
 
-workflowTabs.forEach((tab) => tab.addEventListener("click", () => {
+function focusVisibleHeading(container) {
+  const heading = [...container.querySelectorAll("h2")].find((el) => el.getClientRects().length && !el.closest("[hidden]"));
+  if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+}
+
+workflowTabs.forEach((tab) => tab.addEventListener("click", (event) => {
   const stage = tab.dataset.workflowStage;
   if ((stage === "compare" || stage === "shape" || stage === "finish" || stage === "create") && !havePair) {
     workflowHint.textContent = "Prepare your amps first (step 1) before moving on.";
     return;
   }
   setWorkflowStage(stage);
+  if (event.detail === 0) {
+    const section = [...document.querySelectorAll(`.workflow-${stage}`)].find((el) => el.getClientRects().length && el.querySelector("h2"));
+    if (section) focusVisibleHeading(section);
+  }
 }));
 setWorkflowStage(workflowStage);
 
-document.getElementById("btn-continue-shape").addEventListener("click", () => setWorkflowStage("shape"));
+document.getElementById("btn-continue-shape").addEventListener("click", (event) => {
+  setWorkflowStage("shape");
+  if (event.detail === 0) focusVisibleHeading(document.getElementById("design-mode-title").closest("section"));
+});
 
 const HYBRID_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A at the changeover";
 const BLEND_LEVEL_MATCH_LABEL = "Keep Amp B as loud as Amp A while you play";
@@ -3131,6 +3144,7 @@ let kaggleJobSubmittedAt = null;
 let localTrainingActive = false;
 let kaggleTrainingActive = false;
 let kaggleActivityStop = null;
+let kaggleAnnouncedState = null;
 
 function trainingIsActive() {
   return localTrainingActive || kaggleTrainingActive;
@@ -3222,6 +3236,7 @@ const localCancelBtn = document.getElementById("btn-local-cancel");
 const localResultEl = document.getElementById("local-result");
 let localTrainingPoll = null;
 let localTrainingActivityStop = null;
+let localTrainingAnnouncedState = null;
 // The design a completed "training" state actually belongs to -- captured
 // at the moment Train locally is clicked, since LocalTrainingManager is a
 // single global slot with no design_id of its own to poll back.
@@ -3392,6 +3407,10 @@ async function refreshLocalTraining() {
         : data.state === "cancelled"
           ? "Local process stopped. You can set up or train again when ready."
         : `Local training: ${data.state.replace("_", " ")}.`;
+    if (localTrainingAnnouncedState !== data.state) {
+      localTrainingAnnouncedState = data.state;
+      if (["setting_up", "training", "cancelling", "complete", "failed", "cancelled"].includes(data.state)) setStatus(stateLabel, data.state === "failed");
+    }
     localTrainingStatus.textContent = stateLabel;
     // The Train button can be blocked for a few independent reasons; always
     // say which one, rather than leaving a disabled button unexplained.
@@ -3603,6 +3622,10 @@ function kaggleStateLabel(state) {
 
 function renderKaggleProgress(stateLabel, data) {
   kaggleProgressBox.hidden = false;
+  if (data?.state && kaggleAnnouncedState !== data.state) {
+    kaggleAnnouncedState = data.state;
+    setStatus(stateLabel, data.state === "failed");
+  }
   kaggleProgressState.textContent = stateLabel;
 
   const metaParts = [];
@@ -5480,6 +5503,49 @@ settingsGroups.addEventListener("input", (event) => {
 });
 btnDiscardSettings.addEventListener("click", () => {
   if (!settingsDirty || confirm("Discard your unsaved settings changes?")) loadSettings();
+});
+
+// Preserve the existing visual controls while giving range inputs a spoken
+// value with units. The adjacent readout is already updated by each control.
+document.querySelectorAll('input[type="range"][id]').forEach((slider) => {
+  const label = document.querySelector(`label[for="${slider.id}"]`);
+  const row = label?.parentElement?.classList.contains("slider-row") ? label.parentElement : null;
+  const readout = label?.querySelector(".value-chip, output") || row?.querySelector(".value-chip, output");
+  if (!readout) return;
+  const sync = () => {
+    const value = readout.textContent.trim().replaceAll("%", " percent").replace(" / 10", " out of 10");
+    if (value) slider.setAttribute("aria-valuetext", value);
+  };
+  slider.addEventListener("input", sync);
+  new MutationObserver(sync).observe(readout, { childList: true, characterData: true, subtree: true });
+  sync();
+});
+
+// Keyboard activation of a utility moves reading focus to the opened panel.
+// Mouse activation retains its usual focus and scroll behavior.
+const utilityDestinations = {
+  "tab-builder": "active-builder-stage",
+  "tab-cg": "#cg-panel",
+  "tab-wizard": "#wizard-panel",
+  "tab-ai-assistant": "#ai-assistant-panel",
+  "tab-tone3000": "#tone3000-panel",
+  "tab-tools": "#nam-tools-panel",
+  "tab-sessions": "#sessions-panel",
+  "tab-settings": "#settings-panel",
+};
+document.querySelector(".utility-tabs").addEventListener("click", (event) => {
+  const destination = utilityDestinations[event.target.closest("button")?.id];
+  if (event.detail !== 0 || !destination || destination === "#ai-assistant-panel") return;
+  const panel = destination === "active-builder-stage"
+    ? [...document.querySelectorAll(`.workflow-${workflowStage}`)].find((el) => el.getClientRects().length && el.querySelector("h2"))
+    : document.querySelector(destination);
+  if (panel && !panel.hidden) focusVisibleHeading(panel);
+});
+document.querySelectorAll('[id^="btn-close-"]').forEach((button) => {
+  if (!/^(btn-close-(tools|sessions|settings|wizard|tone3000|ai-assistant))$/.test(button.id)) return;
+  button.addEventListener("click", (event) => {
+    if (event.detail === 0) builderTab.focus({ preventScroll: true });
+  });
 });
 settingsTab.addEventListener("click", () => setSettingsOpen(true));
 document.getElementById("btn-close-settings").addEventListener("click", () => setSettingsOpen(false));

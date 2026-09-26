@@ -11,20 +11,24 @@ Reviewed the public `daverage/nam-mixer` repository on 26 September 2026, from a
 - Made Continuous Gain's capture picker a visible native file input; named per-file position and Remove controls; named the series selector; exposed the current step; restored focus after its dynamic body is rebuilt.
 - Added capture point descriptions to Continuous Gain chart names where point data exists.
 
+## Follow-up implementation in v0.5.4
+
+- Added expandable measurement and Input-gain mapping tables for the Continuous Gain charts. The chart now points readers to exact tabular values.
+- Keyboard activation of Builder steps and utility panels moves focus to the newly active heading; blocked steps explain the reason in a status region.
+- Range controls with visible readouts expose the same value and units to assistive technology. Training presets and backend choices have group legends.
+- Removed high-frequency live announcements from elapsed-time displays and raw training logs. Stage changes and errors use concise status messages.
+- Added a keyboard guide and browser-level keyboard/ARIA checks in CI. Browser automation cannot verify the quality of spoken output.
+
 ## Remaining work, ordered by impact
 
 | Priority | Location | Issue and concrete change |
 | --- | --- | --- |
-| P0 | `static/cg.js` stage 2 charts | A series of plotted measurements is still exposed mostly as a single image with axes. Add a compact data table for each selected series with gain position, measurement and unit. The mapping chart should likewise expose each position and input gain in a table. Avoid a long ARIA label as a substitute for structured data. |
 | P0 | `static/app.js` dynamic controls and results | Test the full path with NVDA/Firefox or Chrome on Windows and VoiceOver/Safari on macOS: choose captures, render, compare, adjust sliders, create, train, export. Check focus after stage changes, results, failures and disabled controls. Source inspection cannot prove the spoken experience. |
-| P1 | `templates/index.html` and `static/app.js` Builder workflow | A step switch hides and replaces sections but leaves focus on the step button. Move focus to the new section heading when a keyboard user changes steps; announce a blocked step at the workflow hint. Do the same for utility-tab changes while preserving normal Back behavior. |
-| P1 | `static/app.js` and `static/cg.js` live regions | Many large result containers have `aria-live=polite` and are rebuilt, and training logs update repeatedly. Announce a concise status or completion sentence; keep detailed results and logs navigable without reading the whole replacement. Debounce progress announcements to milestones. |
-| P1 | `templates/index.html` range controls | Audit all 19 sliders in actual screen readers. Native arrow keys work, but percentages such as `50% B`, dB values, guitar-volume positions and soft/medium/hard context need consistent `aria-valuetext` or native output associations. Do not repeat unchanged values on every unrelated update. |
+| P1 | `static/app.js` result panels | Review large AI, search, and validation result containers that still use `aria-live=polite`; announce a short result summary without reading an entire replacement. |
+| P1 | `templates/index.html` range controls | Verify the spoken values of all sliders in NVDA and VoiceOver, including percentages, dB, and guitar-volume positions. |
 | P1 | `templates/index.html` modal and generated confirmations | The welcome dialog now traps focus, but any `confirm()` and dynamic modal flow needs keyboard and focus-return testing in Tauri on Windows and macOS. Native dialogs may behave differently in each WebView. |
 | P2 | `static/app.js` journey visualization | The canvas has a useful average and threshold in its accessible name, and the coverage table has numeric data. Add a text summary of when the signal reaches Amp A, transition, and Amp B, plus a time-based data table if exact curve exploration matters. The visual playhead is not keyboard inspectable. |
-| P2 | `templates/index.html` radio groups | Group the Wizard behavior choices and training presets/backends with `fieldset`/`legend`, or a correctly associated group label. Nearby text alone does not reliably announce the question on each radio. |
 | P2 | `static/style.css`, desktop WebViews | Verify focus indicators, zoom to 200–400%, reflow and high-contrast/forced-color modes on Windows. Current focus CSS is promising; visual inspection in each platform is still required. |
-| P2 | `docs/user_guide.md` | Add a screen-reader workflow: supported browser/desktop combinations, keyboard navigation, how to use file pickers and comparison audio, meanings of Amp A/B, and where training results and downloads appear. |
 
 ## Acceptance checks for a blind user
 
