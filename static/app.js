@@ -167,9 +167,24 @@ const WELCOME_VERSION = "1";
 const WELCOME_SEEN_KEY = "nam-mixer-welcome-seen";
 const WELCOME_COOKIE_NAME = "nam-mixer-welcome-version";
 const welcomeOverlay = document.getElementById("welcome-overlay");
-function showWelcome() { welcomeOverlay.hidden = false; }
+document.querySelector(".skip-link").addEventListener("click", (event) => {
+  const activePanel = [...document.querySelectorAll("#cg-panel, #nam-tools-panel, #sessions-panel, #ai-assistant-panel, #wizard-panel, #tone3000-panel, #settings-panel")]
+    .find((panel) => !panel.hidden);
+  if (!activePanel) return;
+  event.preventDefault();
+  const heading = activePanel.querySelector("h2");
+  if (heading) { heading.tabIndex = -1; heading.focus(); }
+});
+let welcomeReturnFocus = null;
+function showWelcome() {
+  welcomeReturnFocus = document.activeElement;
+  welcomeOverlay.hidden = false;
+  document.querySelector(".welcome-card").focus();
+}
 function hideWelcome() {
   welcomeOverlay.hidden = true;
+  if (welcomeReturnFocus && welcomeReturnFocus !== document.body) welcomeReturnFocus.focus();
+  else document.getElementById("tab-builder").focus();
   try { localStorage.setItem(WELCOME_SEEN_KEY, WELCOME_VERSION); } catch { /* private window etc. */ }
   // The desktop backend uses a different random port on every launch.
   // localStorage is port-scoped, but cookies are not, so this marker survives
@@ -180,6 +195,16 @@ function welcomeCookieHasVersion(cookieText, version = WELCOME_VERSION) {
   return String(cookieText || "").split(";").some((part) => part.trim() === `${WELCOME_COOKIE_NAME}=${version}`);
 }
 document.getElementById("btn-welcome-dismiss").addEventListener("click", hideWelcome);
+welcomeOverlay.addEventListener("keydown", (event) => {
+  if (event.key !== "Tab") return;
+  const controls = [...welcomeOverlay.querySelectorAll("button, a[href], input, select, textarea")].filter((el) => !el.disabled);
+  const first = controls[0], last = controls[controls.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement.classList.contains("welcome-card"))) {
+    event.preventDefault(); last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault(); first.focus();
+  }
+});
 document.getElementById("btn-show-welcome").addEventListener("click", showWelcome);
 let welcomeAlreadySeen = false;
 try { welcomeAlreadySeen = localStorage.getItem(WELCOME_SEEN_KEY) === WELCOME_VERSION; } catch { /* try the cookie below */ }
@@ -311,6 +336,7 @@ applyModeVisibility();
 function setStatus(msg, isError) {
   clearTimeout(statusClearTimer);
   statusEl.textContent = msg;
+  statusEl.setAttribute("role", isError ? "alert" : "status");
   statusEl.classList.toggle("is-error", Boolean(isError));
   if (msg && !isError) {
     statusClearTimer = setTimeout(() => {
@@ -442,6 +468,8 @@ cabFileButton.tabIndex = 0;
 cabFileButton.addEventListener("keydown", (event) => {
   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); cabFileInput.click(); }
 });
+// The label is the keyboard target; the file input is invoked through it.
+cabFileInput.tabIndex = -1;
 
 function updateCabStatus() {
   updateCabStrip();

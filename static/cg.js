@@ -161,7 +161,8 @@
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     const X = (v) => m.l + ((v - x0) / (x1 - x0 || 1)) * (width - m.l - m.r);
     const Y = (v) => height - m.b - ((v - y0) / (y1 - y0)) * (height - m.t - m.b);
-    let out = `<svg class="cg-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(yLabel)} against ${esc(xLabel)}">`;
+    const pointSummary = points.map((p) => p.title || `${fmt(p.x)} ${xLabel}, ${fmt(p.y)} ${yLabel}`).join("; ");
+    let out = `<svg class="cg-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(yLabel)} against ${esc(xLabel)}. ${esc(pointSummary || "No marked captures; use the adjacent measurements for exact values.")}">`;
     shade.forEach((s) => { out += `<rect x="${X(s[0])}" y="${m.t}" width="${Math.max(0, X(s[1]) - X(s[0]))}" height="${height - m.t - m.b}" fill="${s[2]}" opacity="0.25"/>`; });
     for (let i = 0; i <= 4; i++) { const v = y0 + ((y1 - y0) * i) / 4; out += `<line x1="${m.l}" x2="${width - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)"/><text x="${m.l - 6}" y="${Y(v) + 4}" text-anchor="end">${fmt(v, Math.abs(y1 - y0) < 5 ? 2 : 1)}</text>`; }
     (xTicks || xs).forEach((v) => { out += `<line x1="${X(v)}" x2="${X(v)}" y1="${height - m.b}" y2="${height - m.b + 4}" stroke="var(--text-muted)"/><text x="${X(v)}" y="${height - m.b + 16}" text-anchor="middle">${fmt(v, Number.isInteger(v) ? 0 : 1)}</text>`; });
@@ -191,16 +192,16 @@
     const fileStatus = {}; Object.entries(idx).forEach(([p, fn]) => { fileStatus[fn] = st[p]; });
     const rows = caps.map(([fn, c]) => {
       const a = fileStatus[fn];
-      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name - please confirm</div>` : ""}</td>
+      return `<tr><td>${esc(fn)}</td><td><input type="number" step="any" class="file-input" aria-label="Physical gain position for ${esc(fn)}" data-cg-pos="${esc(fn)}" value="${c.position ?? ""}" placeholder="?">${c.position_suggested ? `<div class="info">suggested from the file name - please confirm</div>` : ""}</td>
         <td>${a ? badge(a.status === "VALID" || a.status === "CORRECTED" ? "instant" : "bad", a.status) : `<span class="info">not analysed</span>`}</td>
-        <td><button type="button" class="btn btn-secondary btn-small" data-cg-remove="${esc(fn)}">Remove</button></td></tr>`;
+        <td><button type="button" class="btn btn-secondary btn-small" data-cg-remove="${esc(fn)}" aria-label="Remove ${esc(fn)}">Remove</button></td></tr>`;
     }).join("");
     const issues = d.check.issues.map((i) => `<li>${esc(i.file ? i.file + ": " : "")}${esc(i.message)}</li>`).join("");
     const setup = card("Amplifier", `
         <label class="field-label" for="cg-name">Project name</label><input class="file-input" id="cg-name" value="${esc(d.project.name)}">
         <label class="field-label" for="cg-amp">Amplifier</label><input class="file-input" id="cg-amp" placeholder="e.g. Marshall JCM800 2203" value="${esc(d.project.amp)}">
         <label class="field-label" for="cg-channel">Channel / cabinet <span class="hint">(optional)</span></label><input class="file-input" id="cg-channel" value="${esc(d.project.channel)}">`)
-      + card("Add captures", `<div class="cg-drop" id="cg-drop">Drag <strong>.nam</strong> files of this one amp/channel here, or <label class="btn btn-secondary btn-small">choose files<input type="file" id="cg-files" accept=".nam" multiple hidden></label></div>
+      + card("Add captures", `<div class="cg-drop" id="cg-drop">Drag <strong>.nam</strong> files of this one amp/channel here, or <label for="cg-files" class="field-label">Choose NAM capture files</label><input type="file" id="cg-files" accept=".nam" multiple class="file-input"></div>
         <p class="info">Any practical number of captures. Uploading all of them gives the fullest picture; it does not mean all are used for training.</p>`);
     const main = card("Fixed-gain captures",
       (caps.length ? table(["File", "Physical gain position", "Audit", ""], rows) : `<p class="info">No captures yet.</p>`)
@@ -282,7 +283,7 @@
           <label class="field-label" for="cg-anchors">Anchor method</label><select id="cg-anchors" class="select-input"><option value="fc" ${plan.anchor_method === "fc" ? "selected" : ""}>FC response-distance anchors (default, production recipe)</option><option value="fixed" ${plan.anchor_method === "fixed" ? "selected" : ""}>Fixed 4 dB spacing (v3 alternative)</option></select></details>
 `);
     const main = card("How the source amp changes", `<p class="info">Measured on the fit DIs; dashed line is the interpolation, markers are the captures (filled = selected, red ring = quarantined for this measure).</p>
-        <select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}`)
+        <label class="field-label" for="cg-series">Measured series</label><select id="cg-series" class="select-input">${names.map((n) => `<option ${n === S.seriesName ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>${chartA}`)
       + card("How the finished NAM will be controlled", `<p class="info">The Input-gain mapping used to build the training target. Shaded bands are untested regions between anchors, learned by interpolation. This is a control guide, not a physical-gain parameter.</p>${mapChart}`)
       + card("Why each capture", table(["Capture", "Role", "Audit", "Measured reason"], rows))
       + card("Measured coverage of the omitted captures", table(["Group", "Mean error", "Max error", "Working tolerance", ""], phys || `<tr><td colspan="5">Every eligible capture is selected, so nothing is omitted.</td></tr>`)
@@ -459,12 +460,29 @@
 
   // ---------- render
   function render() {
+    const focused = body.contains(document.activeElement) ? document.activeElement : null;
+    const focusKey = focused && (focused.id ? `[id="${CSS.escape(focused.id)}"]`
+      : focused.dataset.cgMode ? `[data-cg-mode="${CSS.escape(focused.dataset.cgMode)}"]`
+      : focused.dataset.cgCust ? `[data-cg-cust="${CSS.escape(focused.dataset.cgCust)}"]`
+      : focused.dataset.cgPos ? `[data-cg-pos="${CSS.escape(focused.dataset.cgPos)}"]` : null);
     if (S.stage !== 3) window.namTrainingHost.detach();
     if (S.trainHost) S.trainHost.remove();          // keep the borrowed section alive while the body is rebuilt
-    document.querySelectorAll(".cg-tab").forEach((b) => b.classList.toggle("active", Number(b.dataset.cgStage) === S.stage));
+    document.querySelectorAll(".cg-tab").forEach((b) => {
+      const active = Number(b.dataset.cgStage) === S.stage;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-current", active ? "step" : "false");
+    });
     const hint = document.getElementById("cg-hint"); if (hint) hint.textContent = HINTS[S.stage] || "";
     if (!S.data) { body.innerHTML = `${card("Continuous Gain", `<p class="info">No project selected. Use <strong>New project</strong> to start.</p>`)}`; return; }
     body.innerHTML = [stage1, stage2, stage3, stage4][S.stage - 1]();
     [bindStage1, bindStage2, bindStage3, bindStage4][S.stage - 1]();
+    if (focused) {
+      const next = focusKey && body.querySelector(focusKey);
+      if (next) next.focus({ preventScroll: true });
+      else {
+        const heading = body.querySelector("h2");
+        if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+      }
+    }
   }
 })();

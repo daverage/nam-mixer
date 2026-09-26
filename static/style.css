@@ -1357,6 +1357,16 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
   white-space: nowrap;
   border: 0;
 }
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -5rem;
+  z-index: 10000;
+  padding: 0.7rem 1rem;
+  background: var(--panel);
+  color: var(--text);
+}
+.skip-link:focus { top: 1rem; outline: 3px solid var(--accent); }
 .cab-strip .checkbox-row { margin: 0; background: var(--panel); }
 
 .cab-finish-summary {

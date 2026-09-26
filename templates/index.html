@@ -11,8 +11,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div id="welcome-overlay" class="welcome-overlay" hidden>
-    <div class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <div class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" tabindex="-1">
       <h2 id="welcome-title">Welcome to NAM Mixer</h2>
       <p>This blends two NAM amp captures into one sound, then trains a fresh model on the
         result. Everything below is free to try -- nothing is trained or downloaded until you
@@ -297,12 +298,12 @@
 
         <div class="amp-grid">
           <div class="amp-slot">
-            <label class="amp-label"><span class="dot dot-a"></span>Amp A</label>
+            <label class="amp-label" for="amp-a-file"><span class="dot dot-a" aria-hidden="true"></span>Amp A NAM file</label>
             <input type="file" id="amp-a-file" accept=".nam" class="file-input">
             <div id="amp-a-info" class="info"></div>
           </div>
           <div class="amp-slot">
-            <label class="amp-label"><span class="dot dot-b"></span>Amp B</label>
+            <label class="amp-label" for="amp-b-file"><span class="dot dot-b" aria-hidden="true"></span>Amp B NAM file</label>
             <input type="file" id="amp-b-file" accept=".nam" class="file-input">
             <div id="amp-b-info" class="info"></div>
           </div>
@@ -572,7 +573,7 @@
 
     </aside>
 
-    <main class="col col-main">
+    <main class="col col-main" id="main-content" tabindex="-1">
 
       <div class="group-label workflow-stage workflow-compare">Compare your amp choices</div>
 
@@ -596,7 +597,7 @@
             </div>
             <div class="cab-strip-actions">
               <input type="file" id="cab-file" accept=".wav" class="visually-hidden" tabindex="-1">
-              <label for="cab-file" id="cab-file-button" class="btn btn-secondary btn-small">Choose IR…</label>
+              <label for="cab-file" id="cab-file-button" role="button" class="btn btn-secondary btn-small">Choose IR…</label>
               <button type="button" id="cab-remove" class="btn btn-secondary btn-small" hidden>Remove</button>
             </div>
           </div>
