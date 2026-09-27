@@ -1,8 +1,8 @@
 # Review Handoff
 
-**Session:** Batch 3 (train_a2.py) — RF Policy Gating Review (In Progress)  
+**Session:** Batch 3 (train_a2.py) — RF Policy Gating Review (BLOCKED)  
 **Date:** 2026-09-27  
-**Status:** Batch 2 merged to master; Batch 3 planning complete, ready for Step 10 review
+**Status:** Batch 2 merged; Batch 3 Step 10 review complete; CRITICAL blocking issue found (B3-1)
 
 ---
 
@@ -76,7 +76,32 @@ tests/test_kaggle_training.py .......................................... [ 38%]
 
 ---
 
-## Deferred Work (K3, K1)
+## Batch 3 Findings (train_a2.py RF Policy Gating)
+
+**Status:** Step 10 complete; Step 11 decision: BLOCK release
+
+**Critical Finding B3-1:** Hard gate silently skips when branch_samples empty
+- Both local and cloud versions return {} if envelope_max_history_ms missing (Hybrid/Character)
+- Or if all source amp paths are missing/unreachable
+- Result: Training proceeds without RF verification (A2 trained on impossible function)
+- **Impact:** Safety-critical hard gate that must never silently skip
+- **Recommendation:** Raise TrainingAbort instead of silent skip
+- **Fix effort:** High (design change in error handling)
+
+**Medium Finding B3-2:** Parity gap if local load_nam() fails
+- Plausible but edge case; defer to 0.5.6
+- Needs additional parity test case
+
+**Low Finding B3-3:** Cabinet approximation warning missing when FIR is 0
+- Plausible but cosmetic; defer to 0.5.6
+
+**Next action:** Step 12 (triage B3-1 in fresh context), then Step 14 (implement fix)
+
+See review/FINDINGS_BATCH3.md and review/BATCH3_PROGRESS.md for details.
+
+---
+
+## Deferred Work (K3, K1, B3-2, B3-3)
 
 **K3** requires timeout-based approach to distinguish slow uploads from interrupted ones. Initial implementation failed tests because timeout window doesn't align with test execution speeds. Needs refinement:
 - Add configurable timeout parameter for testing
