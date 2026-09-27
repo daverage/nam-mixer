@@ -1141,17 +1141,34 @@ class KaggleJobManager:
         job = self._precheck_and_reserve_job(design_id, epoch_preset)
 
         def _worker() -> None:
-            try:
-                self._run_pipeline(job, bundle_dir)
-            except KaggleTrainingError:
-                pass  # already persisted (state=="failed" + job.error) by the failing step
-            except Exception as exc:  # noqa: BLE001 -- a background thread's exception has nowhere else to go
-                with self._live_lock:
-                    if job.job_id in self._cancelled:
-                        return
-                job.state = "failed"
-                job.error = f"unexpected error during Kaggle submission: {exc}"
-                save_job(self.a2_output_dir, job)
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+            for attempt in range(1, max_retries + 1):
+                try:
+                    self._run_pipeline(job, bundle_dir)
+                    return
+                except KaggleTrainingError:
+                    return  # already persisted (state=="failed" + job.error) by the failing step
+                except (OSError, ConnectionError, TimeoutError) as exc:
+                    # Transient network errors: retry with backoff
+                    if attempt < max_retries:
+                        import time
+                        time.sleep(retry_delay * (2 ** (attempt - 1)))  # exponential backoff
+                        continue
+                    # Final attempt failed; persist as failed
+                    job.state = "failed"
+                    job.error = f"Kaggle submission failed after {max_retries} retries: {exc}"
+                    save_job(self.a2_output_dir, job)
+                    return
+                except Exception as exc:  # noqa: BLE001 -- a background thread's exception has nowhere else to go
+                    # Permanent errors: don't retry
+                    with self._live_lock:
+                        if job.job_id in self._cancelled:
+                            return
+                    job.state = "failed"
+                    job.error = f"unexpected error during Kaggle submission: {exc}"
+                    save_job(self.a2_output_dir, job)
+                    return
 
         threading.Thread(target=_worker, daemon=True, name=f"kaggle-submit-{job.job_id}").start()
         return job
@@ -1484,26 +1501,38 @@ class KaggleJobManager:
             raise KaggleTrainingError(f"job is already finished (state={job.state}); use cleanup() instead")
         with self._live_lock:
             self._cancelled.add(job.job_id)  # stops a live submission pipeline at its next step
-        errors = []
-        if job.dataset_ref:
-            result = self.cli.datasets_delete(job.dataset_ref)
-            if not result.ok:
-                errors.append(f"dataset delete failed: {result.stderr.strip() or result.stdout.strip()}")
-        kernel_to_delete = job.kernel_ref or job.unverified_kernel_ref
-        if kernel_to_delete:
-            result = self.cli.kernels_delete(kernel_to_delete)
-            if not result.ok:
-                errors.append(f"kernel delete failed: {result.stderr.strip() or result.stdout.strip()}")
+
+        # Try to delete resources with retry on transient failures
+        job.cleanup_state = self._delete_kaggle_resources(job.dataset_ref, job.kernel_ref or job.unverified_kernel_ref)
         job.state = "failed"
         job.error = "Cancelled: the session that owned this job was deleted."
-        if errors:
-            job.cleanup_state = "cleanup_pending"
-            job.cleanup_error = "; ".join(errors)
-        else:
-            job.cleanup_state = "cleaned"
-            job.cleanup_error = None
         save_job(self.a2_output_dir, job)
         return job
+
+    def _delete_kaggle_resources(self, dataset_ref: str | None, kernel_ref: str | None) -> str:
+        """Attempt to delete Kaggle resources with retry on transient failures.
+        Returns cleanup_state ('cleaned' or 'cleanup_pending')."""
+        max_retries = 2
+        for attempt in range(1, max_retries + 1):
+            errors = []
+            if dataset_ref:
+                result = self.cli.datasets_delete(dataset_ref)
+                if not result.ok and "404" not in result.stderr:  # 404 = already deleted
+                    errors.append(f"dataset: {result.stderr.strip() or result.stdout.strip()}")
+            if kernel_ref:
+                result = self.cli.kernels_delete(kernel_ref)
+                if not result.ok and "404" not in result.stderr:
+                    errors.append(f"kernel: {result.stderr.strip() or result.stdout.strip()}")
+
+            if not errors:
+                return "cleaned"  # success
+
+            # If last attempt, mark as pending and return error
+            if attempt >= max_retries:
+                self.cleanup_error = "; ".join(errors)
+                return "cleanup_pending"
+
+        return "cleanup_pending"
 
 
 def _sha256_file(path: Path) -> str:
