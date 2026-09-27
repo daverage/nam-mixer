@@ -1616,6 +1616,32 @@ def test_download_and_validate_clears_stale_partial_output_first(monkeypatch, tm
     assert (output_dir / "hybrid_a2.nam").is_file()
 
 
+def test_download_and_validate_rejects_truncated_nam_file(monkeypatch, tmp_path):
+    """Partial .nam file (e.g., from Kaggle CLI charmap crash) should be rejected.
+    This is a regression test for K4: partial downloads being accepted as valid."""
+    class TruncatedNamStubCli(_DownloadStubCli):
+        def kernels_output(self, kernel_ref, out_dir, file_pattern=None):
+            # Write truncated .nam instead of valid one
+            out_path = Path(out_dir)
+            out_path.mkdir(parents=True, exist_ok=True)
+            (out_path / "hybrid_a2.nam").write_text('{"architecture": "NAM", "config": {')  # incomplete JSON
+            (out_path / "training_result.json").write_text(json.dumps({"success": True}), encoding="utf-8")
+            return CliResult(ok=True, returncode=0, stdout="", stderr="")
+
+    cli = TruncatedNamStubCli()
+    manager = KaggleJobManager(tmp_path, cli=cli)
+    job = KaggleJob(job_id="j1", design_id="d1", state="downloading", kernel_ref="testuser/k1")
+    monkeypatch.setattr(kaggle_training, "load_nam", lambda path: object())
+    monkeypatch.setattr(kaggle_training, "render", _fake_render)
+    _write_bundle_wavs(tmp_path, "d1")
+
+    manager._download_and_validate(job)
+
+    # Job should fail, not be marked complete
+    assert job.state == "failed"
+    assert "truncated" in job.error.lower() or "malformed" in job.error.lower()
+
+
 # --- recovery: completed kernel, failed local download -------------------
 
 def _failed_download_job(design_id="mydesign", job_id="j1") -> KaggleJob:

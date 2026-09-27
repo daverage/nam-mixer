@@ -1,0 +1,47 @@
+90a4e2a Accessibility: quiet result panels, journey text alternative, forced colors
+5744f9e Add chart tables and automated accessibility checks for v0.5.4
+c533d3b Improve keyboard and screen-reader access for v0.5.3
+6507036 General Updates
+d2e0fe3 Docs: fix stale AI setup, CG Sessions contradiction, README docs index; document Wizard/AI Assistant/TONE3000
+62c4922 v0.5.2: replace em dashes with hyphens; bump version; release notes
+d7ff3e2 Autosave unsaved Builder work (one record); loading prepares the amps
+9994d09 Finish & polish: name the Compare the sound card and link to its cabinet picker
+b613407 Default to clean_mayer, guitar and the vintage/PAF pickup
+2edd70d Builder modes: plain language first, technical detail under "Advanced"
+91922d4 Parallel Blend phase safety, polarity choice; player and page-load fixes
+c2d2f70 AI Assistant: show which AI is used and whether it's ready; drop the checkbox
+424e2f7 Tools: show the NAM Inspector as an "About this NAM" overview
+164717e v0.5.0: NAM Inspector, startup update notice, player-first docs
+df59f2b Merge research/ab-alignment-diagnostic: A/B timing analysis and optional fixed-offset correction
+ac953aa Release note and README section for A/B timing analysis and correction
+29611d1 Persist the timing choice in Sessions; fix timing buttons acting as presets
+4ee78c6 Document fixed timing offset correction and acceptance results
+e17b83e Offer Original/Corrected timing when a fixed offset is verified
+d2efe45 Verify a fixed A/B offset across independent DIs
+
+=== Files changed in last 5 commits ===
+   1 .github/workflows/accessibility.yml
+   1 .gitignore
+   1 AGENTS.md
+   1 CLAUDE.md
+   1 README.md
+   1 RELEASE_NOTES.md
+   1 app.py
+   1 desktop/src-tauri/Cargo.lock
+   1 desktop/src-tauri/Cargo.toml
+   1 desktop/src-tauri/tauri.conf.json
+   1 docs/accessibility_review.md
+   1 docs/continuous_gain_tab.md
+   1 docs/developer_guide.md
+   1 docs/releases/v0.5.3.md
+   1 docs/releases/v0.5.4.md
+   1 docs/user_guide.md
+   1 package-lock.json
+   1 package.json
+   1 playwright.config.cjs
+   1 static/app.js
+   1 static/cg.js
+   1 static/style.css
+   1 templates/index.html
+   1 tests/accessibility.spec.cjs
+   1 tests/frontend_state.test.cjs

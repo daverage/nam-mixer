@@ -1,0 +1,19 @@
+=== Index Summary ===
+
+Script: review/tools/build-index.py
+Output: review/INDEX.csv
+     546 review/INDEX.csv
+
+Production source breakdown:
+app.py LOC: 3214
+routes/ total LOC: 486
+scripts/ total LOC: 1284
+cloud/ LOC: 544
+hybrid/ total LOC: 11353
+tests/ total LOC: 11341
+
+Tool failures: none
+  ✅ AST parsing (public symbols): success
+  ✅ Cyclomatic complexity estimation: success
+  ✅ Git log extraction: success
+  ✅ Import dependency analysis: success

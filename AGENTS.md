@@ -68,3 +68,48 @@ When working on an existing codebase:
 - Do not invent repository structure, APIs, symbols, or implementation details when they can be retrieved from codebase memory or source.
 
 DONT USE em dashes!
+
+# Project constraints
+- [Public contracts, safety or real-time constraints, protected paths]
+
+# Commands
+- Build: [command]
+- Targeted test: [command]
+- Full required checks: [commands]
+- Baseline comparison: [filled in at Step 4]
+
+# Definitions
+- Consequential: affects a project constraint, a public contract, security,
+  data integrity, or output people see or hear.
+- Fresh context: a new session or subagent that has not seen the work.
+- Independent reviewer: a different model from the one that did the work,
+  or a person.
+
+# Retrieval
+- Index: review/INDEX.md
+- Exclude vendor, generated and build output, media, model weights and large data.
+- Save raw tool output to review/tools/; read summaries and relevant excerpts.
+- Search symbols before opening source. Read line ranges before whole files.
+
+# Retrieval budget
+- Routine question: at most 3 files, 300 source lines, 5 short tool excerpts.
+- Cross-module question: at most 8 files, 800 source lines.
+- Before exceeding a budget, record the open question and why the next
+  read answers it in review/PROGRESS.md.
+
+# Output limits
+- Chat replies: at most 400 words and 10 findings. Full detail goes in review/.
+
+# Review sessions
+- Write only to review/. Never edit production source during a review session.
+- Commit review/ at the end of every session.
+
+# Stop and hand off when
+- the same check fails twice after your changes
+- the next step needs more than the cross-module retrieval budget
+- you cannot state what would confirm or falsify a finding
+- a change would touch a project constraint or protected path
+Before stopping: commit work in progress to the current branch with a
+message starting "WIP:" (or use git stash if committing is not allowed).
+Set review/HANDOFF.md status to "blocked" with the reason, the last check
+result and the commit hash or stash reference. Never discard uncommitted work.

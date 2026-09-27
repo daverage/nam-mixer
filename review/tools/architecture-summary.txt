@@ -1,0 +1,17 @@
+=== Entry Points ===
+Flask app: app.py (main entry point, serves /api/*, templates)
+CLI scripts in scripts/:
+scripts/analyze_di.py
+scripts/train_a2.py
+scripts/validate_a2.py
+
+Cloud worker: cloud/kaggle/train_a2_cloud.py
+
+=== Main Modules ===
+hybrid/core/ - audio DSP (render, envelope, blend, alignment, calibration)
+hybrid/modes/ - design modes (hybrid, fixed_blend, character_blend, training targets)
+hybrid/continuous_gain/ - CG tab (multi_blend, project, validation)
+hybrid/training/ - A2 training (local, kaggle, validation, export)
+hybrid/services/ - auxiliary (settings, LLM, update check, NAM inspector)
+routes/ - Flask routes
+static/js - Browser UI (src/modes, src/routes, src/ui)

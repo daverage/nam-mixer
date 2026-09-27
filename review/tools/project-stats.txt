@@ -1,0 +1,19 @@
+=== Project Statistics ===
+
+Language breakdown:
+Python files: 136
+JavaScript/TypeScript files: 2
+HTML templates: 1
+
+Lines of code (production):
+   20565 total
+
+Tests:
+Test files: 61
+Test lines: 14714 total
+
+Dependencies:
+requirements.txt: 14
+requirements-training.txt: 29
+package.json dependencies:
+  npm packages: 6

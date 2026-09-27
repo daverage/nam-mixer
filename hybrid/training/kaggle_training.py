@@ -1327,6 +1327,18 @@ class KaggleJobManager:
             return
         nam_path = nam_candidates[0]
 
+        # Validate .nam file is not truncated/corrupted (e.g., from Kaggle CLI crash)
+        try:
+            with open(nam_path, "r", encoding="utf-8") as f:
+                nam_data = json.load(f)
+            if not isinstance(nam_data, dict) or "architecture" not in nam_data:
+                raise ValueError("missing 'architecture' field")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            job.state = "failed"
+            job.error = f"downloaded .nam file is truncated or malformed: {exc}"
+            save_job(self.a2_output_dir, job)
+            return
+
         result_json_candidates = sorted(output_dir.rglob("training_result.json"))
         training_result = None
         if result_json_candidates:

@@ -1,0 +1,38 @@
+
+#
+# (scripts/train_a2.py does this automatically).
+# Flask/runtime app (hybrid/, app.py) must keep working without any of this
+# Install into a DEDICATED environment (see scripts/setup_a2_env.ps1), not the
+# Kaggle GPU training backend (hybrid/training/kaggle_training.py) -- lightweight,
+# Pinned to a specific neural-amp-modeler release for reproducibility --
+# Torch is intentionally NOT pinned here -- pick the build that matches your
+# Training-only dependencies for the A2 hybrid target -- docs/history/phase3.md
+# `kaggle` CLI/executable is actually invoked (via subprocess); this repo
+# `pip show torch` / the training manifest, rather than forcing one wheel
+# environment app.py runs in. On this project's Windows dev machine the
+# install command) and record what actually got installed via
+# installed (see CLAUDE.md) -- render.py shells out to the native nam_render
+# model, then record the ACTUAL installed versions in training_manifest.json
+# never imports the `kaggle` Python package itself. See docs/history/kaggle_training.md.
+# no torch, safe in the normal torch-free runtime environment. Only the
+# own librosa dependency.
+# platform/CUDA (see https://pytorch.org/get-started/locally/ for the current
+# relying on them arriving as transitive dependencies of neural-amp-modeler's
+# runtime environment is Python 3.14, which is too new for published Torch
+# scripts/train_a2.py imports hybrid/core/cab_ir.py and hybrid/core/envelope.py,
+# sections 13-14. Deliberately SEPARATE from requirements.txt: the normal
+# that may not exist for your platform.
+# tool, not this package.
+# verify compatibility with your installed Torch/CUDA before training a real
+# wheels as of this writing -- prefer Python 3.12 for the training venv.
+# which need soundfile and scipy directly -- pin both explicitly rather than
+ddgs
+flask
+kaggle>=2.2.4
+neural-amp-modeler==0.13.0
+numpy
+psutil
+pydantic>=2.10,<3
+pytest
+scipy
+soundfile
