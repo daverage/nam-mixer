@@ -1456,7 +1456,7 @@ class KaggleJobManager:
         job.error = None
         job.state = "downloading"
         save_job(self.a2_output_dir, job)
-        self._download_once(job)
+        self._download_once(job)  # _download_once manages _downloading set and lock
         return job
 
     # -- cleanup ------------------------------------------------------
