@@ -76,17 +76,20 @@ tests/test_kaggle_training.py .......................................... [ 38%]
 
 ---
 
-## Batch 3 Findings (train_a2.py RF Policy Gating)
+## Batch 3 Findings & Fix (train_a2.py RF Policy Gating)
 
-**Status:** Step 10 complete; Step 11 decision: BLOCK release
+**Status:** Step 14 complete; B3-1 FIXED ✅
 
-**Critical Finding B3-1:** Hard gate silently skips when branch_samples empty
-- Both local and cloud versions return {} if envelope_max_history_ms missing (Hybrid/Character)
-- Or if all source amp paths are missing/unreachable
-- Result: Training proceeds without RF verification (A2 trained on impossible function)
-- **Impact:** Safety-critical hard gate that must never silently skip
-- **Recommendation:** Raise TrainingAbort instead of silent skip
-- **Fix effort:** High (design change in error handling)
+**Critical Finding B3-1:** Hard gate silently skipped when branch_samples empty
+- **Issue:** Both local and cloud versions returned {} if envelope_max_history_ms missing (Hybrid/Character)
+  or if all source amp paths missing/unreachable
+- **Impact:** Training could proceed without RF verification (A2 trained on impossible function)
+- **Fix Applied:** Commit 330d815 - Raise TrainingAbort instead of silent skip
+  - scripts/train_a2.py: Raise if envelope_max_history_ms missing (line 249-252)
+  - scripts/train_a2.py: Raise if branch_samples empty after processing (line 276-281)
+  - cloud/kaggle/train_a2_cloud.py: Raise if receptive_field missing (line 287-290)
+  - cloud/kaggle/train_a2_cloud.py: Raise if branch_samples empty (line 301-304)
+- **Tests:** 2 regression tests added, all 138 tests pass, parity maintained (4/4 parity tests pass)
 
 **Medium Finding B3-2:** Parity gap if local load_nam() fails
 - Plausible but edge case; defer to 0.5.6
@@ -95,7 +98,7 @@ tests/test_kaggle_training.py .......................................... [ 38%]
 **Low Finding B3-3:** Cabinet approximation warning missing when FIR is 0
 - Plausible but cosmetic; defer to 0.5.6
 
-**Next action:** Step 12 (triage B3-1 in fresh context), then Step 14 (implement fix)
+**Release Status:** B3-1 FIXED - 0.5.5 can proceed. B3-2/B3-3 deferred to 0.5.6.
 
 See review/FINDINGS_BATCH3.md and review/BATCH3_PROGRESS.md for details.
 
