@@ -286,8 +286,10 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     """
     rf_record = manifest.get("receptive_field")
     if not rf_record:
-        print("WARNING: manifest has no receptive_field record -- skipping receptive-field check.")
-        return {}
+        raise CloudTrainingError(
+            "cannot determine core RF requirements: manifest is missing receptive_field record. "
+            "Refusing to train without RF verification."
+        )
 
     all_branch_samples = {k: int(v) for k, v in (rf_record.get("branch_samples") or {}).items() if v is not None}
     mode = manifest.get("mode", "hybrid")
@@ -299,8 +301,10 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
         k: v for k, v in all_branch_samples.items() if mode == "character" and str(k).startswith("character_")
     }
     if not branch_samples:
-        print("WARNING: receptive_field.branch_samples is empty/unavailable -- skipping receptive-field check.")
-        return {}
+        raise CloudTrainingError(
+            "cannot determine core RF requirements: receptive_field.branch_samples is empty or unavailable. "
+            "Refusing to train without RF verification."
+        )
 
     hard_required = max(branch_samples.values())
     if mode == "character" and rf_record.get("history_qualification"):

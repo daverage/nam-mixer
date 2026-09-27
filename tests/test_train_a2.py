@@ -402,6 +402,49 @@ def test_check_receptive_field_real_world_bug_report_scenario_trains(tmp_path, m
     assert result["cab_requires_approximation"] is True
 
 
+def test_check_receptive_field_aborts_if_envelope_history_missing_hybrid(tmp_path, monkeypatch):
+    """B3-1 regression test: Hard gate must NOT silently skip when
+    envelope_max_history_ms is missing for Hybrid mode. Must raise
+    TrainingAbort, not return {}."""
+    amp_a = _write_nam_with_config(tmp_path / "a.nam", [3], [1])
+    amp_b = _write_nam_with_config(tmp_path / "b.nam", [3], [1])
+
+    manifest = {
+        "mode": "hybrid",
+        "amp_a": {"path": str(amp_a)},
+        "amp_b": {"path": str(amp_b)},
+        "design": {},  # Missing envelope_max_history_ms
+    }
+
+    monkeypatch.setattr(
+        train_a2, "assert_required_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": 100, "submodel_names": ["fake"]})(),
+    )
+
+    # Should raise TrainingAbort, not return {}
+    with pytest.raises(train_a2.TrainingAbort, match="cannot determine core RF requirements"):
+        train_a2.check_receptive_field(manifest, 48000)
+
+
+def test_check_receptive_field_aborts_if_all_sources_missing(tmp_path, monkeypatch):
+    """B3-1 regression test: Hard gate must NOT silently skip when all
+    sources (envelope + amps) are missing. Continuous gain mode with no
+    branch_samples in receptive_field record."""
+    manifest = {
+        "mode": "continuous_gain",
+        # No receptive_field.branch_samples at all
+    }
+
+    monkeypatch.setattr(
+        train_a2, "assert_required_history_fits",
+        lambda samples, sr, margin_fraction=0.0: type("R", (), {"receptive_field_samples": 100, "submodel_names": ["fake"]})(),
+    )
+
+    # Should raise TrainingAbort, not return {}
+    with pytest.raises(train_a2.TrainingAbort, match="cannot determine core RF requirements"):
+        train_a2.check_receptive_field(manifest, 48000)
+
+
 def test_validate_exported_nam_runs_native_render(tmp_path, monkeypatch):
     nam_path = _write_nam(tmp_path / "model.nam")
     input_path = tmp_path / "input.wav"

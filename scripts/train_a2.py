@@ -247,8 +247,10 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
     elif mode in ("hybrid", "character"):
         max_history_ms = manifest.get("design", {}).get("envelope_max_history_ms")
         if max_history_ms is None:
-            print("WARNING: manifest has no envelope_max_history_ms -- skipping receptive-field check.")
-            return {}
+            raise TrainingAbort(
+                "cannot determine core RF requirements: Hybrid/Character mode requires "
+                "design.envelope_max_history_ms in manifest. Refusing to train without RF verification."
+            )
         branch_samples["envelope"] = int(round(max_history_ms / 1000.0 * sample_rate))
 
     source_keys = (("Source", "amp_a"),) if mode == "cab_embed" else (("Amp A", "amp_a"), ("Amp B", "amp_b"))
@@ -274,8 +276,11 @@ def check_receptive_field(manifest: dict, sample_rate: int) -> dict:
             print(f"WARNING: {qualification}")
 
     if not branch_samples:
-        print("WARNING: no branch dependency could be determined -- skipping receptive-field check.")
-        return {}
+        raise TrainingAbort(
+            "cannot determine core RF requirements: manifest is missing or incomplete "
+            "(no envelope_max_history_ms for Hybrid/Character, no valid amp paths, or no branch_samples). "
+            "Refusing to train without RF verification."
+        )
 
     hard_required = max(branch_samples.values())
 
