@@ -35,43 +35,53 @@
 
 ---
 
-## Remaining Work (Priority Order)
+## Completed Implementations
 
-| ID | Finding | Priority | Effort | Next Action |
+| ID | Finding | Status | Commit | Tests |
 |---|---|---|---|---|
-| K2 | Broad Exception catch in submit_async | 1 (High) | Low | Implement retry backoff + transient error handling |
-| K5 | Orphaned resources on deletion failure | 2 (High) | Low | Add cleanup retry loop or webhook mechanism |
-| K3 | Slow submission marked interrupted | 3 (Medium) | Medium | Add heartbeat/timeout to _submitting tracking |
-| K1 | State staleness in concurrent downloads | 4 (Medium) | Medium | Hold lock through state update in retry_download |
+| K4 | Partial .nam downloads accepted | ✅ FIXED | 15f32ac | +1 regression test |
+| K2 | Broad Exception catch | ✅ FIXED | 6eea4f1 | All 108 pass |
+| K5 | Orphaned resources on deletion | ✅ FIXED | 6eea4f1 | All 108 pass |
+| K3 | Slow submission marked interrupted | ⏸️ DEFERRED | — | Test-blocking (timeout approach) |
+| K1 | State staleness in concurrent downloads | ⏸️ DEFERRED | — | Requires careful lock strategy |
 
 ---
 
 ## Commands & Results
 
-**Build:** `python app.py` (Flask dev server)  
-**Targeted test:** `pytest tests/test_kaggle_training.py::test_download_and_validate_rejects_truncated_nam_file -xvs`  
 **Full test suite:** `pytest tests/test_kaggle_training.py -x`
 
-**Last test run:**
+**Final test run:**
 ```
-tests/test_kaggle_training.py ........................... [ 38%]
+tests/test_kaggle_training.py .......................................... [ 38%]
 ..................................................................       [100%]
-============================= 108 passed in 4.30s ==============================
+============================= 108 passed in 4.32s ==============================
 ```
 
----
-
-## Open Questions
-
-1. **K1 impact:** Does caller of retry_download() rely on returned state being current, or re-read from disk? If re-read, impact is low (eventual consistency).
-
-2. **K3 timing:** In practice, how often do slow Kaggle uploads exceed typical refresh() poll intervals? (Affects likelihood of duplicate job creation.)
+**Changes committed:**
+- 15f32ac: K4 — File validation for partial downloads
+- 820e824: K2+K5 — Retry logic + resource cleanup
+- 6eea4f1: Consolidation commit
 
 ---
 
-## Next Action
+## Deferred Work (K3, K1)
 
-**Step 13 (Independent review):** Review commit 15f32ac for K4 fix before proceeding to K2 implementation.
+**K3** requires timeout-based approach to distinguish slow uploads from interrupted ones. Initial implementation failed tests because timeout window doesn't align with test execution speeds. Needs refinement:
+- Add configurable timeout parameter for testing
+- Or: implement heartbeat mechanism in submission thread
 
-Then continue with K2 → K5 → K3 → K1 in remaining review sessions.
+**K1** addresses race condition where retry_download() state update can race with concurrent refresh(). Initial fix added double-locking which broke _download_once(). Needs:
+- Redesign to avoid deadlock while maintaining state consistency
+- Or: accept eventual consistency model (job state may be temporarily stale)
+
+---
+
+## Session Summary
+
+**Batch 2 review & implementation: 3 of 5 findings FIXED**
+- ✅ K4 (data integrity): Critical fix complete
+- ✅ K2 (error handling): High-priority fix complete  
+- ✅ K5 (resource cleanup): High-priority fix complete
+- ⏸️ K3, K1: Deferred for next session (test/design concerns)
 
