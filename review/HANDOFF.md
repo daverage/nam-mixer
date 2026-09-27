@@ -1,8 +1,8 @@
 # Review Handoff
 
-**Session:** Batch 2 (kaggle_training.py) — Independent Review + K5 Bug Fix  
+**Session:** Batch 3 (train_a2.py) — RF Policy Gating Review (In Progress)  
 **Date:** 2026-09-27  
-**Status:** Complete (K4/K2/K5 approved; K3/K1 deferred)
+**Status:** Batch 2 merged to master; Batch 3 planning complete, ready for Step 10 review
 
 ---
 
