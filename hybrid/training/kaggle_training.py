@@ -1503,15 +1503,16 @@ class KaggleJobManager:
             self._cancelled.add(job.job_id)  # stops a live submission pipeline at its next step
 
         # Try to delete resources with retry on transient failures
-        job.cleanup_state = self._delete_kaggle_resources(job.dataset_ref, job.kernel_ref or job.unverified_kernel_ref)
+        job.cleanup_state, job.cleanup_error = self._delete_kaggle_resources(job.dataset_ref, job.kernel_ref or job.unverified_kernel_ref)
         job.state = "failed"
         job.error = "Cancelled: the session that owned this job was deleted."
         save_job(self.a2_output_dir, job)
         return job
 
-    def _delete_kaggle_resources(self, dataset_ref: str | None, kernel_ref: str | None) -> str:
+    def _delete_kaggle_resources(self, dataset_ref: str | None, kernel_ref: str | None) -> tuple[str, str | None]:
         """Attempt to delete Kaggle resources with retry on transient failures.
-        Returns cleanup_state ('cleaned' or 'cleanup_pending')."""
+        Returns (cleanup_state, cleanup_error) where cleanup_state is 'cleaned' or 'cleanup_pending',
+        and cleanup_error is None on success or an error message on failure."""
         max_retries = 2
         for attempt in range(1, max_retries + 1):
             errors = []
@@ -1525,12 +1526,11 @@ class KaggleJobManager:
                     errors.append(f"kernel: {result.stderr.strip() or result.stdout.strip()}")
 
             if not errors:
-                return "cleaned"  # success
+                return "cleaned", None  # success
 
             # If last attempt, mark as pending and return error
             if attempt >= max_retries:
-                self.cleanup_error = "; ".join(errors)
-                return "cleanup_pending"
+                return "cleanup_pending", "; ".join(errors)
 
         return "cleanup_pending"
 
