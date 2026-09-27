@@ -1389,3 +1389,35 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
 .audition-live-row .checkbox-row { display: inline-flex; margin: 0; min-height: 2.5rem; padding: 0.4rem 0.7rem; }
 
 .session-card.is-autosave { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+
+/* Windows high-contrast (forced colors): box-shadow focus rings and
+   background- or border-colour-only states are dropped or flattened, so
+   restore them with system colours. */
+@media (forced-colors: active) {
+  :focus-visible,
+  .mode-tab:focus-visible, .workflow-tab:focus-visible, .cg-tab:focus-visible, .btn:focus-visible,
+  .preset-btn:focus-visible, .link-btn:focus-visible, summary:focus-visible,
+  .file-input:focus-visible, .select-input:focus-visible, input[type="range"].slider:focus-visible,
+  input[type="checkbox"]:focus-visible, #cab-file-button:focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+  .mode-tab.active, .workflow-tab.active, .cg-tab.active, .preset-btn[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+  /* The transparent underline on inactive tabs would otherwise be forced visible. */
+  .mode-tab:not(.active) { border-bottom-color: Canvas; }
+  .workflow-tab.active span, .cg-tab.active span {
+    forced-color-adjust: none;
+    background: HighlightText;
+    color: Highlight;
+  }
+  .cab-strip.is-highlighted { outline: 3px solid Highlight; }
+  .btn:disabled, input:disabled, select:disabled { color: GrayText; border-color: GrayText; }
+  /* Chart legend keys are colour samples; keep their real colours so they
+     still match the (unadjusted) canvas drawing. */
+  .swatch, .dot-a, .dot-b { forced-color-adjust: none; }
+}

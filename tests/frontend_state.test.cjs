@@ -121,10 +121,12 @@ test('Tools results appear inline with a calm collapsed validation note', () => 
   }
   const resultEl = element();
   resultEl.hidden = true;
+  const announcements = [];
   const sandbox = {
     document: { createElement: tagName => element(tagName) },
     desktopSaveLabel: value => value,
     triggerFileDownload() {},
+    announce: message => announcements.push(message),
   };
   vm.createContext(sandbox);
   vm.runInContext(section('function showToolResult(', 'function updateToolVolumeReadout()'), sandbox);
@@ -139,6 +141,8 @@ test('Tools results appear inline with a calm collapsed validation note', () => 
   assert.equal(resultEl.children[2].textContent, 'Download edited.nam');
   assert.equal(resultEl.children[3].tagName, 'details');
   assert.equal(resultEl.children[3].children[0].textContent, 'About validation reports');
+  // The panel itself is not a live region; one short summary is spoken instead.
+  assert.deepEqual(announcements, ['New NAM ready: edited.nam. 1 requested field was changed and safety-checked.']);
   assert.doesNotMatch(source, /This edited NAM has different bytes from its source/);
 });
 

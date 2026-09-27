@@ -3,6 +3,17 @@
 The GitHub release page is the published record; drafts for the next release go
 under an "Unreleased" heading.
 
+## Unreleased
+
+### Accessibility
+
+- Screen readers hear a one-line summary when an AI reply, search, tool or
+  training result arrives, instead of the whole panel being read out.
+- The Dynamic Hybrid journey chart has a written summary and a "View chart
+  data" table.
+- Focus outlines and the selected tab, step and preset stay visible in Windows
+  high-contrast mode.
+
 ## v0.5.2
 
 ### Your work is kept

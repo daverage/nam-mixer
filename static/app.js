@@ -88,6 +88,7 @@ if (isTauriDesktop) {
 }
 
 const statusEl = document.getElementById("status");
+const srAnnouncer = document.getElementById("sr-announcer");
 const systemUsageEl = document.getElementById("system-usage");
 const activityIndicator = document.getElementById("activity-indicator");
 const activityMessage = document.getElementById("activity-message");
@@ -356,6 +357,22 @@ function setStatus(msg, isError) {
       if (statusEl.textContent === msg) statusEl.textContent = "";
     }, 6000);
   }
+}
+
+// Large result panels (AI replies, search results, validation reports) are
+// deliberately not live regions, so a screen reader never reads a whole
+// replaced panel. Their flows speak a one-line summary here instead. Clearing
+// first makes a repeated identical summary be announced again.
+function announce(message) {
+  if (!srAnnouncer || !message) return;
+  srAnnouncer.textContent = "";
+  setTimeout(() => { srAnnouncer.textContent = message; }, 50);
+}
+
+function firstSentence(text, maxLength = 160) {
+  const plain = String(text || "").replace(/[#*_`>]/g, "").replace(/\s+/g, " ").trim();
+  const sentence = (plain.match(/^.+?[.!?](?=\s|$)/) || [plain])[0];
+  return sentence.length > maxLength ? sentence.slice(0, maxLength - 1).trimEnd() + "…" : sentence;
 }
 
 function isCalibrationOnlyWarning(warnings) {
@@ -1366,7 +1383,6 @@ const recipeResult = document.getElementById("recipe-result") || (() => {
   element.id = "recipe-result";
   element.className = "recipe-result";
   element.hidden = true;
-  element.setAttribute("aria-live", "polite");
   recipePromptContainer.append(element);
   return element;
 })();
@@ -1699,6 +1715,7 @@ function addRecipeConversationMessage(role, text) {
   message.innerHTML = renderSafeMarkdown(text);
   recipeResult.prepend(message);
   recipeResult.scrollTop = 0;
+  if (role === "assistant") announce(`Assistant reply: ${firstSentence(text)} The full reply is at the top of the conversation.`);
 }
 
 function appendTone3000DiscussButtonsToLastMessage(results) {
@@ -1992,6 +2009,9 @@ document.getElementById("hybrid-only-diagnostics").addEventListener("toggle", (e
   if (evt.target.open) drawJourney();
 });
 const journeyEmpty = document.getElementById("journey-empty");
+const journeySummary = document.getElementById("journey-summary");
+const journeyData = document.getElementById("journey-data");
+const journeyDataRows = document.getElementById("journey-data-rows");
 const coverageTable = document.getElementById("coverage-table");
 const coverageTbody = document.getElementById("coverage-tbody");
 const coverageEmpty = document.getElementById("coverage-empty");
@@ -2405,6 +2425,7 @@ async function updateJourney() {
     if (!resp.ok) return;
     lastJourneyData = data;
     journeyEmpty.hidden = true;
+    renderJourneyText(data);
     drawJourney();
   } catch (err) {
     // Visualization is a debug aid, not critical path -- fail quietly.
@@ -2462,6 +2483,67 @@ async function updateCoverage() {
   } catch (err) {
     // Diagnostic panel only -- fail quietly.
   }
+}
+
+// Text alternative to the journey canvas. Uses the same buckets as
+// hybrid/core/coverage.py (mostly A below 10% B, mostly B from 90% B, playing
+// above -50 dBFS) so it agrees with the "Where the changeover is reached" table.
+const JOURNEY_MOSTLY_A_MAX = 0.10;
+const JOURNEY_MOSTLY_B_MIN = 0.90;
+const JOURNEY_ACTIVE_DBFS = -50;
+const JOURNEY_TABLE_MAX_ROWS = 60;
+
+function journeyZone(mix) {
+  if (mix < JOURNEY_MOSTLY_A_MAX) return "Mostly Amp A";
+  if (mix >= JOURNEY_MOSTLY_B_MIN) return "Mostly Amp B";
+  return "Changing between amps";
+}
+
+function renderJourneyText(data) {
+  const n = data?.times?.length || 0;
+  if (n < 2) {
+    journeySummary.hidden = true;
+    journeyData.hidden = true;
+    return;
+  }
+  const counts = { a: 0, transition: 0, b: 0 };
+  let firstTransition = null;
+  let firstB = null;
+  for (let i = 0; i < n; i += 1) {
+    if (data.envelope_db[i] <= JOURNEY_ACTIVE_DBFS) continue;
+    const mix = data.blend_weight[i];
+    if (mix < JOURNEY_MOSTLY_A_MAX) counts.a += 1;
+    else if (mix >= JOURNEY_MOSTLY_B_MIN) counts.b += 1;
+    else counts.transition += 1;
+    if (firstTransition === null && mix >= JOURNEY_MOSTLY_A_MAX) firstTransition = data.times[i];
+    if (firstB === null && mix >= JOURNEY_MOSTLY_B_MIN) firstB = data.times[i];
+  }
+  const active = counts.a + counts.transition + counts.b;
+  if (!active) {
+    journeySummary.textContent = "The input stays below -50 dBFS for the whole clip, so there is no playing to follow.";
+  } else {
+    const pct = (count) => Math.round((count / active) * 100);
+    const reaches = firstTransition === null
+      ? "The changeover is never reached: the whole performance stays with Amp A."
+      : `The changeover starts at ${firstTransition.toFixed(1)} s` + (firstB === null
+        ? " but never reaches mostly Amp B."
+        : ` and first reaches mostly Amp B at ${firstB.toFixed(1)} s.`);
+    journeySummary.textContent =
+      `While playing, the sound is mostly Amp A ${pct(counts.a)}% of the time, changing between amps ${pct(counts.transition)}%, ` +
+      `and mostly Amp B ${pct(counts.b)}%. ${reaches}`;
+  }
+  journeySummary.hidden = false;
+
+  const step = Math.max(1, Math.ceil(n / JOURNEY_TABLE_MAX_ROWS));
+  const rows = [];
+  for (let i = 0; i < n; i += step) {
+    const mix = data.blend_weight[i];
+    const level = data.envelope_db[i];
+    const playing = level > JOURNEY_ACTIVE_DBFS;
+    rows.push(`<tr><td>${data.times[i].toFixed(2)}</td><td>${level.toFixed(1)}</td><td>${Math.round(mix * 100)}%</td><td>${playing ? journeyZone(mix) : "Silent"}</td></tr>`);
+  }
+  journeyDataRows.innerHTML = rows.join("");
+  journeyData.hidden = false;
 }
 
 // ---- Journey chart: envelope + crossover band/threshold + A<->B mix strip,
@@ -3142,6 +3224,7 @@ const localPanel = document.getElementById("local-panel");
 let kaggleAuthPollTimer = null;
 let kaggleJobSubmittedAt = null;
 let localTrainingActive = false;
+let localResultAnnouncePending = false;
 let kaggleTrainingActive = false;
 let kaggleActivityStop = null;
 let kaggleAnnouncedState = null;
@@ -3363,6 +3446,13 @@ function escapeHtml(value) {
   return node.innerHTML;
 }
 
+function trainingResultAnnouncement(report) {
+  const verdict = !report ? "Validation report unavailable."
+    : report.state === "passed" ? "Technical validation passed."
+    : report.state === "needs_attention" ? "Validation needs attention." : "Validation unavailable.";
+  return `Training finished. ${verdict} The download button is in the training results.`;
+}
+
 function validationSummaryHtml(report) {
   if (!report) return `<div class="warning-box">Validation report unavailable for this export.</div>`;
   const label = report.state === "passed" ? "Technical validation passed" : report.state === "needs_attention" ? "Validation needs attention" : "Validation unavailable";
@@ -3460,6 +3550,7 @@ async function refreshLocalTraining() {
       localTrainingCurrentLine.textContent = "";
     }
     localTrainingActive = ["setting_up", "training", "cancelling"].includes(data.state);
+    if (data.state === "training") localResultAnnouncePending = true;
     if (localTrainingActive) {
       const phase = data.state === "setting_up" ? "Setting up local training" : data.state === "cancelling" ? "Stopping local training" : "Training model";
       const detail = data.progress ? ` - epoch ${data.progress.epoch}/${data.progress.total_epochs}` : " - preparing the trainer";
@@ -3487,6 +3578,12 @@ async function refreshLocalTraining() {
     }
     if (data.state === "complete" && data.exit_code === 0 && localTrainingDesignId) {
       renderLocalDownloadResult(localTrainingDesignId, data.validation_report, data.download_filename, data.embedded_artifact);
+      // Polling can report the same finished run again; only a run that was
+      // watched finishing from this page is announced, once.
+      if (localResultAnnouncePending) {
+        localResultAnnouncePending = false;
+        announce(trainingResultAnnouncement(data.validation_report));
+      }
     } else if (data.state !== "complete") {
       localResultEl.hidden = true;
     }
@@ -3889,6 +3986,7 @@ function pollKaggleJob(designId, jobId) {
         syncTrainingControls();
         renderKaggleDownloadResult(designId, jobId, data);
         setStatus("Kaggle A2 training complete.");
+        announce(trainingResultAnnouncement(completedValidationReport));
       } else if (data.state === "failed") {
         clearInterval(kaggleJobPollTimer);
         clearInterval(kaggleTickTimer);
@@ -4684,6 +4782,7 @@ function showToolResult(data, resultEl) {
   }
   if (data.warning) { const warning = document.createElement("div"); warning.className = "warning-box"; warning.textContent = data.warning; resultEl.append(warning); }
   resultEl.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  announce(`New NAM ready: ${data.filename}. ${changed.textContent}${data.warning ? " There is a warning below." : ""}`);
 }
 
 function showToolError(resultEl, message) {
@@ -4691,6 +4790,7 @@ function showToolError(resultEl, message) {
   resultEl.classList.add("is-error");
   resultEl.textContent = `Could not create the NAM: ${message}`;
   resultEl.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  announce(resultEl.textContent);
 }
 function updateToolVolumeReadout() { toolVolumeValue.textContent = `${Number(toolVolumeSlider.value).toFixed(1)} dB`; }
 async function setToolNam(data, label) {
@@ -4769,6 +4869,7 @@ async function setToolNam(data, label) {
     if (!response.ok) throw new Error(result.error || "Inspection failed");
     showNamInspectorResult(result, inspectorResult);
     inspectorPrompt.hidden = true;
+    announce(`Inspection of ${label} complete. Details are below the file picker.`);
   } catch (error) {
     if (inspectorRequestId !== toolInspectorRequestId) return;
     inspectorResult.hidden = false;
@@ -4776,6 +4877,7 @@ async function setToolNam(data, label) {
     inspectorResult.textContent = error.message || String(error);
     inspectorPrompt.hidden = false;
     inspectorPrompt.textContent = "The NAM opened, but the inspection could not be completed.";
+    announce(inspectorPrompt.textContent);
   } finally {
     if (inspectorRequestId === toolInspectorRequestId) inspectorPrompt.classList.remove("is-loading");
   }
@@ -5623,6 +5725,9 @@ function createTone3000DiscussButton(result, onError) {
 }
 
 function showSelectedTone3000Capture(capture) {
+  // Re-rendering the same capture (e.g. after the AI assigns it a role)
+  // must not repeat the announcement over the AI's reply.
+  const isNewSelection = selectedTone3000Capture !== capture;
   selectedTone3000Capture = capture;
   aiTone3000Context.hidden = false;
   aiTone3000Context.replaceChildren();
@@ -5656,6 +5761,7 @@ function showSelectedTone3000Capture(capture) {
   clear.addEventListener("click", () => { selectedTone3000Capture = null; aiTone3000Context.hidden = true; });
   if (!capture.sourceRole) aiTone3000Context.append(heading, note);
   aiTone3000Context.append(fileDetails, clear);
+  if (isNewSelection) announce(`Discussing ${capture.title}. ${capture.models.length} NAM file${capture.models.length === 1 ? "" : "s"} ready to download.`);
 }
 
 document.getElementById("btn-tone3000-search").addEventListener("click", async () => {
@@ -5891,6 +5997,7 @@ document.getElementById("btn-tool-cab-embed").addEventListener("click", async ()
       download.textContent = desktopSaveLabel(`Download ${data.filename}`);
       download.addEventListener("click", () => triggerFileDownload(data.download_url, data.filename));
       toolCabResult.append(summary, warning, download);
+      announce(`${summary.textContent} Download button below.`);
     } else {
       toolCabDesignId = data.design_id;
       const summary = document.createElement("div");
@@ -5908,9 +6015,11 @@ document.getElementById("btn-tool-cab-embed").addEventListener("click", async ()
       document.getElementById("a2-training-section").hidden = false;
       document.getElementById("a2-preset-standard").checked = true;
       updateTrainingTimeEstimate();
+      announce(summary.textContent + ((data.warnings || []).length ? " There are warnings below." : ""));
     }
   } catch (err) {
     toolCabResult.textContent = `Cab embed failed: ${err.message || err}`;
+    announce(toolCabResult.textContent);
   } finally {
     button.disabled = false;
   }
