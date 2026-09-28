@@ -40,7 +40,7 @@ The desktop app needs no Python or other setup:
 | --- | --- | --- |
 | **macOS** (Apple Silicon) | [`NAM-Mixer-macOS-arm64.dmg`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-macOS-arm64.dmg) | Not notarised: the first time, right-click the app and choose **Open** (or allow it in Privacy & Security). |
 | **Windows** (x64) | [`setup.exe`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Windows-x64-setup.exe) · [`.msi`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Windows-x64.msi) | Installer or MSI package. |
-| **Linux** (x64) | [`AppImage`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.AppImage) · [`.deb`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.deb) | Portable AppImage, or a Debian/Ubuntu package. |
+| **Linux** (x64) | [`AppImage`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-x86_64.AppImage) · [`.deb`](https://github.com/daverage/nam-mixer/releases/latest/download/NAM-Mixer-Linux-x64.deb) | Portable AppImage, or a Debian/Ubuntu package. |
 
 Older versions and release notes are on the
 [Releases page](https://github.com/daverage/nam-mixer/releases). Prefer to
