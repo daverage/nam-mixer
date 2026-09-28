@@ -39,7 +39,7 @@ jobs:
             bundles: app,dmg
 
           - name: Linux x64
-            os: ubuntu-24.04
+            os: ubuntu-22.04
             bundles: deb,appimage
 
           - name: Windows x64
@@ -88,7 +88,7 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            libfuse2t64 \
+            libfuse2 \
             librsvg2-dev \
             patchelf \
             binutils
@@ -599,6 +599,42 @@ jobs:
           echo "AppImage file type:"
           file "$APPIMAGE_PATH"
 
+      - name: Check AppImage glibc compatibility
+        if: runner.os == 'Linux'
+        working-directory: desktop/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APPIMAGE_PATH="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE_PATH"
+
+          EXTRACT_DIR="$(mktemp -d)"
+          trap 'rm -rf "$EXTRACT_DIR"' EXIT
+
+          (cd "$EXTRACT_DIR" && "$GITHUB_WORKSPACE/desktop/src-tauri/$APPIMAGE_PATH" --appimage-extract >/dev/null)
+
+          HIGHEST_REQUIRED="GLIBC_2.0"
+          while IFS= read -r -d '' candidate; do
+            if ! file -b "$candidate" | grep -q ELF; then
+              continue
+            fi
+
+            REQUIRED="$(readelf --version-info "$candidate" 2>/dev/null |
+              grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
+              sort -Vu |
+              tail -n 1 || true)"
+            if [ -n "$REQUIRED" ]; then
+              HIGHEST_REQUIRED="$(printf '%s\n%s\n' "$HIGHEST_REQUIRED" "$REQUIRED" | sort -Vu | tail -n 1)"
+            fi
+          done < <(find "$EXTRACT_DIR" -type f -print0)
+
+          echo "Highest bundled GLIBC requirement: $HIGHEST_REQUIRED"
+          if [ "$(printf '%s\n%s\n' GLIBC_2.35 "$HIGHEST_REQUIRED" | sort -Vu | tail -n 1)" != GLIBC_2.35 ]; then
+            echo "AppImage requires a glibc newer than Ubuntu 22.04 (2.35)" >&2
+            exit 1
+          fi
+
       - name: Upload Linux AppImage
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -686,7 +722,7 @@ jobs:
             echo "$src -> release-final/$2"
           }
           place '*.dmg'      NAM-Mixer-macOS-arm64.dmg
-          place '*.AppImage' NAM-Mixer-Linux-x64.AppImage
+          place '*.AppImage' NAM-Mixer-x86_64.AppImage
           place '*.deb'      NAM-Mixer-Linux-x64.deb
           place '*.msi'      NAM-Mixer-Windows-x64.msi
           place '*.exe'      NAM-Mixer-Windows-x64-setup.exe
