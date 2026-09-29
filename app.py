@@ -895,6 +895,110 @@ def api_tone3000_search():
         return jsonify({"error": str(exc)}), 502
 
 
+@app.post("/api/tone3000/ai_search")
+def api_tone3000_ai_search():
+    """AI-powered TONE3000 search: parse tone description, search TONE3000, rerank results."""
+    data = request.get_json(silent=True) or {}
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 600:
+        return jsonify({"error": "enter a tone description of 600 characters or fewer"}), 400
+
+    use_web = data.get("use_research", False)
+    if not isinstance(use_web, bool):
+        return jsonify({"error": "use_research must be a boolean"}), 400
+
+    rig_scope = data.get("rig_scope", "anything")
+    author = data.get("author", "")
+    if rig_scope not in {"anything", "heads"} or not isinstance(author, str) or len(author) > 100:
+        return jsonify({"error": "invalid search options"}), 400
+
+    if not local_llm_status().get("enabled"):
+        return jsonify({"error": "local LLM is not configured"}), 503
+
+    notes: list[str] = []
+    warnings: list[str] = []
+    matches: list[dict] = []
+    queries: list[str] = []
+    web_research_notes = None
+
+    try:
+        # Step 1: Optional web research
+        if use_web:
+            try:
+                web_research_notes = web_notes(prompt.strip())
+                notes.append("Web research findings:\n" + web_research_notes[:1_200])
+            except RuntimeError as exc:
+                warnings.append(str(exc))
+
+        # Step 2: AI analysis - parse tone description into characteristics and search queries
+        try:
+            ai_prompt = (
+                f"You are a tone expert. Analyze this tone description and provide:\n"
+                f"1. Three TONE3000 catalogue search terms (short, amp/effect focused)\n"
+                f"2. A brief tone analysis (what characteristics this describes)\n\n"
+                f"Tone description: {prompt.strip()}\n\n"
+                f"Return your response as JSON with 'search_queries' (array of 3 strings) "
+                f"and 'tone_analysis' (string describing the tone)."
+            )
+
+            conversation = converse_with_local_llm(
+                ai_prompt,
+                [],  # No conversation history for initial search
+                "\n\n".join(notes) if notes else "",
+                request_tone3000_queries=True,
+                known_source_plan=None,
+                require_recipe=False,
+            )
+
+            # Extract queries from AI response
+            proposed_queries = list(dict.fromkeys(conversation.tone3000_queries or []))[:3]
+            if not proposed_queries:
+                # Fallback to the original prompt as search term
+                proposed_queries = [prompt.strip()]
+                warnings.append("AI did not provide search terms; using your description instead.")
+
+            queries = proposed_queries
+        except LocalLlmError as exc:
+            warnings.append(f"AI analysis failed: {exc}")
+            queries = [prompt.strip()]
+
+        # Step 3: Search TONE3000 with AI-selected queries
+        seen = set()
+        rank_query = " ".join(queries).strip() or prompt.strip()
+
+        for query in queries:
+            per_family = 0
+            try:
+                for match in tone3000_search(query, rig_scope=rig_scope, author=author, rank_query=rank_query):
+                    key = str(match.get("id") or f"{match.get('title')}|{match.get('creator')}")
+                    if key not in seen:
+                        seen.add(key)
+                        matches.append({**match, "query": query})
+                        per_family += 1
+                    if len(matches) >= 12 or per_family >= 4:
+                        break
+            except RuntimeError as exc:
+                message = str(exc)
+                if message in warnings:
+                    break
+                warnings.append(message)
+            if len(matches) >= 12:
+                break
+
+        # Step 4: Optional AI reranking of results with tone analysis
+        # (Keep this simple for MVP - just return matches with query attribution)
+
+        return jsonify({
+            "results": matches,
+            "queries": queries,
+            "warnings": warnings,
+            "research_notes": web_research_notes[:500] if web_research_notes else None,
+        })
+
+    except Exception as exc:
+        return jsonify({"error": f"Search failed: {str(exc)}"}), 500
+
+
 @app.get("/api/tone3000/tones/<int:tone_id>/models")
 def api_tone3000_models(tone_id: int):
     try:
