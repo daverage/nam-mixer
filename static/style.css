@@ -1421,3 +1421,74 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
      still match the (unadjusted) canvas drawing. */
   .swatch, .dot-a, .dot-b { forced-color-adjust: none; }
 }
+
+/* TONE3000: search-mode switch and "Describe a tone (AI)" results */
+.t3-mode { display: inline-flex; gap: 0.25rem; padding: 0.25rem; margin: 0.25rem 0 0.9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-alt); }
+.t3-mode label { position: relative; cursor: pointer; }
+.t3-mode input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.t3-mode span { display: block; padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+.t3-mode input:checked + span { background: var(--accent); color: var(--accent-text); }
+.t3-mode input:focus-visible + span { box-shadow: var(--focus-ring); }
+
+.t3ai-thread { display: grid; gap: 0.9rem; margin-bottom: 0.9rem; }
+.t3ai-thread:empty { display: none; }
+.t3ai-turn { display: grid; gap: 0.5rem; }
+.t3ai-you { justify-self: end; max-width: 80%; padding: 0.5rem 0.75rem; border-radius: 12px 12px 3px 12px; background: var(--accent); color: var(--accent-text); font-size: 0.85rem; white-space: pre-wrap; }
+.t3ai-ai { max-width: 90%; padding: 0.55rem 0.75rem; border-radius: 12px 12px 12px 3px; background: var(--panel-alt); border: 1px solid var(--border); font-size: 0.85rem; line-height: 1.45; white-space: pre-wrap; }
+.t3ai-brief { padding: 0.9rem 1rem; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 9px; background: var(--panel); box-shadow: var(--shadow); }
+.t3ai-brief h3 { margin: 0 0 0.35rem; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.t3ai-summary { margin: 0; font-size: 0.95rem; line-height: 1.5; }
+.t3ai-gear { display: grid; gap: 0.35rem; margin-top: 0.7rem; }
+.t3ai-gear-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.t3ai-gear-kind { min-width: 4.5rem; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.t3ai-chip { padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.t3ai-chip-effect { background: color-mix(in srgb, var(--amp-b) 12%, transparent); border-color: color-mix(in srgb, var(--amp-b) 35%, transparent); }
+.t3ai-chip-guitar, .t3ai-chip-pickup { background: color-mix(in srgb, var(--amp-a) 12%, transparent); border-color: color-mix(in srgb, var(--amp-a) 35%, transparent); }
+.t3ai-chip[title] { cursor: help; }
+.t3ai-advice { margin-top: 0.7rem; font-size: 0.85rem; }
+.t3ai-advice summary { cursor: pointer; font-weight: 600; }
+.t3ai-advice ul { margin: 0.4rem 0 0; padding-left: 1.1rem; line-height: 1.5; }
+.t3ai-meta { margin: 0.7rem 0 0; font-size: 0.75rem; color: var(--text-muted); }
+.t3ai-warning { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--danger); }
+
+.t3ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.8rem; margin-top: 0.9rem; }
+.t3ai-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); }
+.t3ai-card.is-open { grid-column: 1 / -1; flex-direction: row; }
+.t3ai-media { position: relative; aspect-ratio: 16 / 10; background: var(--panel-alt); }
+.t3ai-card.is-open .t3ai-media { flex: 0 0 min(30%, 260px); align-self: flex-start; aspect-ratio: 4 / 5; border-radius: 0 0 10px 0; }
+.t3ai-media { overflow: hidden; }
+.t3ai-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.t3ai-media-empty { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, var(--panel-alt)), var(--panel-alt)); }
+.t3ai-fit { position: absolute; top: 0.5rem; left: 0.5rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: #fff; background: #5f6470; }
+.t3ai-fit[data-level="high"] { background: #1e8e4e; }
+.t3ai-fit[data-level="mid"] { background: #b7791f; }
+.t3ai-card-body { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.75rem 0.85rem 0.85rem; min-width: 0; flex: 1; }
+.t3ai-card-body h3 { margin: 0; font-size: 0.95rem; line-height: 1.3; }
+.t3ai-by { margin: 0; font-size: 0.78rem; color: var(--text-muted); }
+.t3ai-facts, .t3ai-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.t3ai-fact { font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 5px; background: var(--panel-alt); border: 1px solid var(--border); }
+.t3ai-tag { font-size: 0.7rem; color: var(--text-muted); }
+.t3ai-tag::before { content: "#"; }
+.t3ai-why { margin: 0; font-size: 0.82rem; line-height: 1.4; font-style: italic; }
+.t3ai-desc { font-size: 0.78rem; color: var(--text-muted); }
+.t3ai-desc summary { cursor: pointer; }
+.t3ai-desc p { margin: 0.3rem 0 0; line-height: 1.4; }
+.t3ai-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: auto; padding-top: 0.3rem; }
+.t3ai-panel { margin-top: 0.6rem; padding-top: 0.7rem; border-top: 1px solid var(--border); display: grid; gap: 0.9rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+.t3ai-panel h4 { margin: 0 0 0.45rem; font-size: 0.82rem; }
+.t3ai-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 22rem; overflow: auto; }
+.t3ai-file { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.8rem; }
+.t3ai-file.is-pick { border-color: #1e8e4e; background: color-mix(in srgb, #1e8e4e 9%, transparent); }
+.t3ai-file-name { min-width: 0; overflow-wrap: anywhere; }
+.t3ai-pick { font-size: 0.68rem; font-weight: 700; color: #1e8e4e; text-transform: uppercase; }
+.t3ai-chat { display: flex; flex-direction: column; gap: 0.5rem; }
+.t3ai-suggest { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; font-size: 0.78rem; }
+.t3ai-chat-log { display: grid; gap: 0.45rem; }
+.t3ai-chat-composer { display: flex; gap: 0.4rem; align-items: flex-end; }
+.t3ai-chat-input { flex: 1; font-size: 0.85rem; }
+@media (max-width: 720px) {
+  .t3ai-card.is-open { flex-direction: column; }
+  .t3ai-card.is-open .t3ai-media { flex: none; aspect-ratio: 16 / 7; }
+  .t3ai-panel { grid-template-columns: 1fr; }
+}
+.t3ai-grid-heading { grid-column: 1 / -1; margin: 0.6rem 0 0; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }

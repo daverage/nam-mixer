@@ -94,6 +94,7 @@ from hybrid.services.ollama_pull import (
     start_pull as start_ollama_pull,
 )
 from hybrid.services.research import tone3000_model_download, tone3000_models, tone3000_search, web_notes
+from hybrid.services.tone_search_ai import ask_about_pack, plan_tone, rank_packs
 from hybrid.core.nam_loader import load_nam
 from hybrid.services.nam_inspector import inspect_nam
 from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, compare_changes, describe_nam_tools, load_nam as load_nam_json, save_nam
@@ -895,108 +896,107 @@ def api_tone3000_search():
         return jsonify({"error": str(exc)}), 502
 
 
+def _valid_chat_history(history) -> bool:
+    return isinstance(history, list) and len(history) <= 12 and all(
+        isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+        and isinstance(item.get("content"), str) and len(item["content"]) <= 4_000
+        for item in history
+    )
+
+
 @app.post("/api/tone3000/ai_search")
 def api_tone3000_ai_search():
-    """AI-powered TONE3000 search: parse tone description, search TONE3000, rerank results."""
+    """Describe a tone -> AI plan (summary, advice, gear, catalogue searches) -> real packs, AI-ranked."""
     data = request.get_json(silent=True) or {}
     prompt = data.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 600:
-        return jsonify({"error": "enter a tone description of 600 characters or fewer"}), 400
-
+        return jsonify({"error": "describe the tone in 600 characters or fewer"}), 400
     use_web = data.get("use_research", False)
-    if not isinstance(use_web, bool):
-        return jsonify({"error": "use_research must be a boolean"}), 400
-
     rig_scope = data.get("rig_scope", "anything")
     author = data.get("author", "")
-    if rig_scope not in {"anything", "heads"} or not isinstance(author, str) or len(author) > 100:
+    history = data.get("history", [])
+    if not isinstance(use_web, bool) or rig_scope not in {"anything", "heads"} or not isinstance(author, str) or len(author) > 100:
         return jsonify({"error": "invalid search options"}), 400
-
+    if not _valid_chat_history(history):
+        return jsonify({"error": "conversation history is invalid"}), 400
     if not local_llm_status().get("enabled"):
-        return jsonify({"error": "local LLM is not configured"}), 503
+        return jsonify({"error": "AI is not set up yet - choose a provider in Settings"}), 503
 
-    notes: list[str] = []
     warnings: list[str] = []
-    matches: list[dict] = []
-    queries: list[str] = []
-    web_research_notes = None
-
-    try:
-        # Step 1: Optional web research
-        if use_web:
-            try:
-                web_research_notes = web_notes(prompt.strip())
-                notes.append("Web research findings:\n" + web_research_notes[:1_200])
-            except RuntimeError as exc:
-                warnings.append(str(exc))
-
-        # Step 2: AI analysis - parse tone description into characteristics and search queries
+    research = ""
+    if use_web:
         try:
-            ai_prompt = (
-                f"You are a tone expert. Analyze this tone description and provide:\n"
-                f"1. Three TONE3000 catalogue search terms (short, amp/effect focused)\n"
-                f"2. A brief tone analysis (what characteristics this describes)\n\n"
-                f"Tone description: {prompt.strip()}\n\n"
-                f"Return your response as JSON with 'search_queries' (array of 3 strings) "
-                f"and 'tone_analysis' (string describing the tone)."
-            )
+            research = web_notes(prompt.strip())
+        except RuntimeError as exc:
+            warnings.append(f"Web research unavailable: {exc}")
+    try:
+        plan = plan_tone(prompt, research_notes=research, history=history)
+    except LocalLlmError as exc:
+        return jsonify({"error": str(exc)}), 502
 
-            conversation = converse_with_local_llm(
-                ai_prompt,
-                [],  # No conversation history for initial search
-                "\n\n".join(notes) if notes else "",
-                request_tone3000_queries=True,
-                known_source_plan=None,
-                require_recipe=False,
-            )
-
-            # Extract queries from AI response
-            proposed_queries = list(dict.fromkeys(conversation.tone3000_queries or []))[:3]
-            if not proposed_queries:
-                # Fallback to the original prompt as search term
-                proposed_queries = [prompt.strip()]
-                warnings.append("AI did not provide search terms; using your description instead.")
-
-            queries = proposed_queries
+    queries = plan["search_queries"] or [prompt.strip()[:80]]
+    rank_query = " ".join(queries)
+    packs: list[dict] = []
+    seen: set[int] = set()
+    for query in queries:
+        try:
+            for match in tone3000_search(query, rig_scope=rig_scope, author=author, rank_query=rank_query):
+                if match["id"] not in seen:
+                    seen.add(match["id"])
+                    packs.append({**match, "query": query})
+        except RuntimeError as exc:
+            if str(exc) not in warnings:
+                warnings.append(str(exc))
+    # Small local models stop scoring partway through long lists, so only a catalogue-ranked
+    # shortlist goes to the AI; everything it scores is then ordered by its fit.
+    packs.sort(key=lambda p: (p.get("match_score", 0), p.get("downloads_count") or 0), reverse=True)
+    packs = packs[:12]
+    if packs:
+        try:
+            scores = rank_packs(prompt, plan["summary"], packs)
         except LocalLlmError as exc:
-            warnings.append(f"AI analysis failed: {exc}")
-            queries = [prompt.strip()]
+            scores = {}
+            warnings.append(f"AI ranking unavailable, showing catalogue order: {exc}")
+        for pack in packs:
+            if pack["id"] in scores:
+                pack["ai_fit"] = scores[pack["id"]]["fit"]
+                pack["ai_why"] = scores[pack["id"]]["why"]
+        packs.sort(key=lambda p: (p.get("ai_fit", -1), p.get("match_score", 0), p.get("downloads_count") or 0), reverse=True)
+    return jsonify({"plan": plan, "queries": queries, "results": packs[:12], "warnings": warnings, "researched": bool(research)})
 
-        # Step 3: Search TONE3000 with AI-selected queries
-        seen = set()
-        rank_query = " ".join(queries).strip() or prompt.strip()
 
-        for query in queries:
-            per_family = 0
-            try:
-                for match in tone3000_search(query, rig_scope=rig_scope, author=author, rank_query=rank_query):
-                    key = str(match.get("id") or f"{match.get('title')}|{match.get('creator')}")
-                    if key not in seen:
-                        seen.add(key)
-                        matches.append({**match, "query": query})
-                        per_family += 1
-                    if len(matches) >= 12 or per_family >= 4:
-                        break
-            except RuntimeError as exc:
-                message = str(exc)
-                if message in warnings:
-                    break
-                warnings.append(message)
-            if len(matches) >= 12:
-                break
-
-        # Step 4: Optional AI reranking of results with tone analysis
-        # (Keep this simple for MVP - just return matches with query attribution)
-
-        return jsonify({
-            "results": matches,
-            "queries": queries,
-            "warnings": warnings,
-            "research_notes": web_research_notes[:500] if web_research_notes else None,
-        })
-
-    except Exception as exc:
-        return jsonify({"error": f"Search failed: {str(exc)}"}), 500
+@app.post("/api/tone3000/ai_pack_chat")
+def api_tone3000_ai_pack_chat():
+    """Ask about one pack; the file list is fetched server-side so the AI only sees real file names."""
+    data = request.get_json(silent=True) or {}
+    tone_id = data.get("tone_id")
+    question = data.get("question")
+    pack = data.get("pack") or {}
+    tone_goal = data.get("tone_goal", "")
+    history = data.get("history", [])
+    if not isinstance(tone_id, int) or not isinstance(question, str) or not question.strip() or len(question) > 600:
+        return jsonify({"error": "ask a question of 600 characters or fewer"}), 400
+    if not isinstance(tone_goal, str) or len(tone_goal) > 600 or not _valid_chat_history(history):
+        return jsonify({"error": "invalid conversation"}), 400
+    if not isinstance(pack, dict):
+        return jsonify({"error": "invalid pack details"}), 400
+    safe_pack = {
+        "title": str(pack.get("title") or "")[:200],
+        "creator": str(pack.get("creator") or "")[:100],
+        "description": str(pack.get("description") or "")[:600],
+        "tags": [str(tag)[:40] for tag in (pack.get("tags") or [])[:12]] if isinstance(pack.get("tags"), list) else [],
+    }
+    if not local_llm_status().get("enabled"):
+        return jsonify({"error": "AI is not set up yet - choose a provider in Settings"}), 503
+    try:
+        models = tone3000_models(tone_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    try:
+        answer = ask_about_pack(question, safe_pack, [m["name"] for m in models], tone_goal=tone_goal, history=history)
+    except LocalLlmError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({**answer, "models": models})
 
 
 @app.get("/api/tone3000/tones/<int:tone_id>/models")

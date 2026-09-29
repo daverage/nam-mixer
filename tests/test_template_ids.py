@@ -13,6 +13,6 @@ def test_no_curly_quoted_attributes():
 
 def test_every_app_js_element_lookup_exists_in_template():
     ids = set(re.findall(r'\bid="([^"]+)"', HTML))
-    js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    js = "".join((ROOT / "static" / name).read_text(encoding="utf-8") for name in ("app.js", "tone3000-ai.js"))
     looked_up = set(re.findall(r'getElementById\("([^"$]+)"\)', js))
     assert sorted(looked_up - ids) == []

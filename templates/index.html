@@ -202,9 +202,9 @@
     </div>
     <p class="wizard-intro">Search TONE3000 captures before building a blend. “Heads only” is for captures you plan to pair with your own cab later.</p>
 
-    <div class="tone3000-search-mode-toggle">
-      <label class="checkbox-row"><input type="radio" name="tone3000-mode" value="standard" checked> Standard search</label>
-      <label class="checkbox-row"><input type="radio" name="tone3000-mode" value="ai"> AI-powered tone search</label>
+    <div class="t3-mode" role="radiogroup" aria-label="Search mode">
+      <label><input type="radio" name="tone3000-mode" value="standard" checked><span>Search by name</span></label>
+      <label><input type="radio" name="tone3000-mode" value="ai"><span>Describe a tone (AI)</span></label>
     </div>
 
     <!-- Standard search section -->
@@ -221,17 +221,21 @@
     </div>
 
     <!-- AI search section -->
-    <div id="tone3000-ai-section" class="recipe-prompt" hidden>
-      <label for="tone3000-ai-prompt">Describe the tone you want</label>
-      <textarea id="tone3000-ai-prompt" rows="3" maxlength="600" placeholder="e.g. Warm vintage tube tone with natural breakup, think 1970s blues rock"></textarea>
-      <div class="recipe-prompt-footer">
-        <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="tone3000-ai-research"> Web research for tone context</label>
-        <label class="recipe-search-option">Rigs <select id="tone3000-ai-rig-scope" class="select-input"><option value="anything">Anything</option><option value="heads">Heads only (add your own cab)</option></select></label>
-        <label class="recipe-search-option">Creator / author <input id="tone3000-ai-author" class="select-input" maxlength="100" placeholder="Optional"></label>
-        <button type="button" id="btn-tone3000-ai-search" class="btn btn-primary btn-small">Search with AI</button>
+    <div id="tone3000-ai-section" class="t3ai" hidden>
+      <div id="t3ai-thread" class="t3ai-thread" aria-live="polite"></div>
+      <div class="recipe-prompt t3ai-composer">
+        <label for="tone3000-ai-prompt" id="t3ai-label">Describe the tone you want</label>
+        <textarea id="tone3000-ai-prompt" rows="3" maxlength="600" placeholder="e.g. Early Stevie Ray Vaughan: fat, bright, on the edge of breakup, digs in when I pick hard"></textarea>
+        <div class="recipe-prompt-footer">
+          <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="tone3000-ai-research" checked> Web research</label>
+          <label class="recipe-search-option">Rigs <select id="tone3000-ai-rig-scope" class="select-input"><option value="anything">Anything</option><option value="heads">Heads only (add your own cab)</option></select></label>
+          <label class="recipe-search-option">Creator / author <input id="tone3000-ai-author" class="select-input" maxlength="100" placeholder="Optional"></label>
+          <button type="button" id="btn-t3ai-reset" class="btn btn-secondary btn-small" hidden>Start over</button>
+          <button type="button" id="btn-tone3000-ai-search" class="btn btn-primary btn-small">Find tones</button>
+        </div>
+        <div id="tone3000-ai-status" class="info" aria-live="polite"></div>
       </div>
-      <div id="tone3000-ai-status" class="info" aria-live="polite"></div>
-      <div id="tone3000-ai-results" class="tone3000-results" hidden></div>
+      <div id="tone3000-ai-results" class="t3ai-grid" hidden></div>
     </div>
   </section>
 
@@ -922,5 +926,6 @@
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script src="{{ url_for('static', filename='cg.js') }}"></script>
+  <script src="{{ url_for('static', filename='tone3000-ai.js') }}"></script>
 </body>
 </html>

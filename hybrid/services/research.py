@@ -189,6 +189,35 @@ def _require_tone3000_api_key(*, for_action: str) -> str:
     return api_key
 
 
+_TONE3000_LINK_PREFIXES = ("https://api.tone3000.com/", "https://www.tone3000.com/")
+
+
+def _tone3000_link(value: object) -> str | None:
+    text = str(value or "")
+    return text if text.startswith(_TONE3000_LINK_PREFIXES) else None
+
+
+def _tone3000_card_fields(tone: dict) -> dict:
+    """Display-only pack metadata; links are kept only when they point at TONE3000 itself."""
+    def count(key: str) -> int | None:
+        value = tone.get(key)
+        return value if isinstance(value, int) and value >= 0 else None
+
+    images = tone.get("images") if isinstance(tone.get("images"), list) else []
+    tags = tone.get("tags") if isinstance(tone.get("tags"), list) else []
+    makes = tone.get("makes") if isinstance(tone.get("makes"), list) else []
+    return {
+        "image": next((link for link in map(_tone3000_link, images) if link), None),
+        "tags": [str(tag.get("name"))[:40] for tag in tags if isinstance(tag, dict) and tag.get("name")][:12],
+        "makes": [str(make.get("name") if isinstance(make, dict) else make)[:40] for make in makes if make][:6],
+        "gear": str(tone.get("gear") or "")[:30] or None,
+        "a2_models_count": count("a2_models_count"),
+        "downloads_count": count("downloads_count"),
+        "favorites_count": count("favorites_count"),
+        "url": _tone3000_link(tone.get("url")),
+    }
+
+
 def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query: str = "", opener=urlopen) -> list[dict]:
     """Search public TONE3000 metadata; captures themselves are never downloaded.
 
@@ -237,6 +266,7 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
             "title": title,
             "creator": creator or "unknown creator",
             "description": description[:600],
+            **_tone3000_card_fields(tone),
         }
         result["match_score"], result["match_reason"] = _rank_tone3000_metadata(rank_query or query, result)
         results.append(result)

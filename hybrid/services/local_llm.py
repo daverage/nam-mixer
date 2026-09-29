@@ -725,7 +725,7 @@ def _check_recipe_narrative(reply: LocalConversationReply, *, known_source_plan:
                 )
 
 
-def _response_format(config: AiConfig, *, strict: bool) -> dict:
+def _response_format(config: AiConfig, *, strict: bool, schema: tuple[str, dict] | None = None) -> dict:
     """Pick the strongest response_format the provider is likely to accept.
 
     Ollama's current OpenAI-compatible endpoint accepts JSON Schema, and
@@ -739,7 +739,8 @@ def _response_format(config: AiConfig, *, strict: bool) -> dict:
     if capability == "json_object" or not strict:
         return {"type": "json_object"}
     if strict and config.provider in {"local", "cloudflare", "custom"}:
-        return {"type": "json_schema", "json_schema": {"name": "nam_mixer_reply", "schema": _CONVERSATION_SCHEMA, "strict": False}}
+        name, body = schema or ("nam_mixer_reply", _CONVERSATION_SCHEMA)
+        return {"type": "json_schema", "json_schema": {"name": name, "schema": body, "strict": False}}
     return {"type": "json_object"}
 
 
@@ -830,7 +831,7 @@ def _debug_provider_content(content: object) -> object:
     return str(content)[:12_000]
 
 
-def _post_chat_completion(config: AiConfig, messages: list[dict], *, max_tokens: int, temperature: float, timeout: float, opener, diagnostics: dict[str, object] | None = None) -> object:
+def _post_chat_completion(config: AiConfig, messages: list[dict], *, max_tokens: int, temperature: float, timeout: float, opener, diagnostics: dict[str, object] | None = None, schema: tuple[str, dict] | None = None) -> object:
     """Send one chat-completions request, retrying once with a plainer
     response_format if the provider rejects json_schema outright. Returns
     the decoded message content (still needing _decode_json_content)."""
@@ -894,7 +895,7 @@ def _post_chat_completion(config: AiConfig, messages: list[dict], *, max_tokens:
         return content
 
     try:
-        return _send(_response_format(config, strict=True))
+        return _send(_response_format(config, strict=True, schema=schema))
     except HTTPError as exc:
         if _looks_like_unsupported_response_format(exc):
             _FORMAT_CAPABILITIES[_format_capability_key(config)] = "json_object"
