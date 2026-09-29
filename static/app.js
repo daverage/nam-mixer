@@ -6143,7 +6143,7 @@ const trainingHost = (() => {
         syncComparisonPanel();
         return true;
       }
-      if (trainingIsActive() && lastDesignId !== designId) return false;
+      if (trainingIsActive() && lastDesignId !== designId && retainedDesign !== designId) return false;
       if (!hostedDesign) {
         home ||= { parent: section.parentElement, next: section.nextSibling };
         saved = captureState();
