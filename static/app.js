@@ -6234,11 +6234,7 @@ const trainingHost = (() => {
         syncComparisonPanel();
         return true;
       }
-      // Allow attachment if: no training is active, OR this is the design that's being trained,
-      // OR this request is from CG (which has its own training management).
-      // CG is identified by having the "cg-train-host" class.
-      const isCgRequest = hostEl.classList?.contains("cg-train-host");
-      if (trainingIsActive() && lastDesignId !== designId && retainedDesign !== designId && !isCgRequest) return false;
+      if (trainingIsActive() && lastDesignId !== designId && retainedDesign !== designId) return false;
       if (!hostedDesign) {
         home ||= { parent: section.parentElement, next: section.nextSibling };
         saved = captureState();

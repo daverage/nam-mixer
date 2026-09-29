@@ -50,7 +50,7 @@
     }
   }
   tab.addEventListener("click", () => setOpen(true));
-  const closeTab = () => { window.namTrainingHost?.detach(); setOpen(false); };
+  const closeTab = () => { window.namTrainingHost.detach(); setOpen(false); };
   document.querySelectorAll(".utility-tabs .mode-tab").forEach((b) => {
     if (b !== tab) b.addEventListener("click", () => { if (!panel.hidden) closeTab(); }, true);
   });
@@ -414,24 +414,7 @@
     if (slot && d.bundle) {
       if (!S.trainHost) { S.trainHost = document.createElement("div"); S.trainHost.className = "cg-train-host"; }
       slot.replaceWith(S.trainHost);
-      // Try to attach the training host to show live training logs.
-      const attached = window.namTrainingHost?.attach(S.trainHost, d.bundle.design_id);
-
-      // If attach failed, show appropriate message based on CG's training state
-      if (!attached) {
-        if (d.training && d.training.training_in_progress) {
-          // CG training IS in progress, but attach failed - this shouldn't happen
-          // Show the logs anyway (training host will populate when it syncs)
-          S.trainHost.innerHTML = `<p class="info">Loading training logs...</p>`;
-        } else if (d.training && d.training.trained) {
-          // Training already completed - show the result summary
-          S.trainHost.innerHTML = `<p class="info">Training completed. View the results in Stage 4 (Test & export).</p>`;
-        } else {
-          // No training for this CG project yet
-          S.trainHost.innerHTML = `<p class="info">No training yet. Generate training files and start training to see logs here.</p>`;
-        }
-      }
-      // If attached successfully, the training host section will display logs/controls automatically
+      if (!window.namTrainingHost.attach(S.trainHost, d.bundle.design_id)) S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
     }
   }
   // The hosted section announces completion; reload so the project shows the trained model.
@@ -493,7 +476,7 @@
       : focused.dataset.cgMode ? `[data-cg-mode="${CSS.escape(focused.dataset.cgMode)}"]`
       : focused.dataset.cgCust ? `[data-cg-cust="${CSS.escape(focused.dataset.cgCust)}"]`
       : focused.dataset.cgPos ? `[data-cg-pos="${CSS.escape(focused.dataset.cgPos)}"]` : null);
-    if (S.stage !== 3) window.namTrainingHost?.detach();
+    if (S.stage !== 3) window.namTrainingHost.detach();
     if (S.trainHost) S.trainHost.remove();          // keep the borrowed section alive while the body is rebuilt
     document.querySelectorAll(".cg-tab").forEach((b) => {
       const active = Number(b.dataset.cgStage) === S.stage;
