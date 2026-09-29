@@ -5657,6 +5657,16 @@ const tone3000Author = document.getElementById("tone3000-author");
 const tone3000Status = document.getElementById("tone3000-status");
 const tone3000Results = document.getElementById("tone3000-results");
 
+// AI search elements
+const tone3000AiPrompt = document.getElementById("tone3000-ai-prompt");
+const tone3000AiResearch = document.getElementById("tone3000-ai-research");
+const tone3000AiRigScope = document.getElementById("tone3000-ai-rig-scope");
+const tone3000AiAuthor = document.getElementById("tone3000-ai-author");
+const tone3000AiStatus = document.getElementById("tone3000-ai-status");
+const tone3000AiResults = document.getElementById("tone3000-ai-results");
+const tone3000StandardSection = document.getElementById("tone3000-standard-section");
+const tone3000AiSection = document.getElementById("tone3000-ai-section");
+
 let tone3000ApiKeyConfigured = false;
 async function refreshTone3000Status() {
   try {
@@ -5800,6 +5810,87 @@ document.getElementById("btn-tone3000-search").addEventListener("click", async (
     stopActivity();
   }
 });
+
+// TONE3000 AI search mode toggle
+document.querySelectorAll("input[name='tone3000-mode']").forEach((radio) => {
+  radio.addEventListener("change", (e) => {
+    const isAiMode = e.target.value === "ai";
+    tone3000StandardSection.hidden = isAiMode;
+    tone3000AiSection.hidden = !isAiMode;
+  });
+});
+
+// TONE3000 AI search handler
+document.getElementById("btn-tone3000-ai-search").addEventListener("click", async () => {
+  const prompt = tone3000AiPrompt.value.trim();
+  if (!prompt) {
+    tone3000AiStatus.textContent = "Describe the tone you want to search for.";
+    return;
+  }
+  tone3000AiStatus.textContent = "Searching with AI…";
+  const stopActivity = beginActivity("AI-powered TONE3000 search…");
+  tone3000AiResults.hidden = true;
+  tone3000AiResults.replaceChildren();
+  try {
+    const response = await fetch("/api/tone3000/ai_search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        use_research: tone3000AiResearch.checked,
+        rig_scope: tone3000AiRigScope.value,
+        author: tone3000AiAuthor.value.trim(),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "AI search failed");
+
+    // Render results
+    if (data.results && data.results.length > 0) {
+      data.results.forEach((result) => {
+        const card = document.createElement("article");
+        card.className = "tone3000-result";
+        const heading = document.createElement("h3");
+        heading.textContent = result.title;
+        const meta = document.createElement("p");
+        meta.textContent = "By " + result.creator + (Number.isFinite(result.match_score) ? ` · ${result.match_score}% metadata fit` : "");
+        const description = document.createElement("p");
+        description.textContent = result.description || "No description supplied.";
+        if (result.match_reason) description.title = result.match_reason;
+        if (result.query) {
+          const queryNote = document.createElement("small");
+          queryNote.className = "tone3000-query-note";
+          queryNote.textContent = `Matched: "${result.query}"`;
+          description.append(" ", queryNote);
+        }
+        const discuss = createTone3000DiscussButton(result, (message) => { tone3000AiStatus.textContent = message; });
+        card.append(heading, meta, description, discuss);
+        tone3000AiResults.append(card);
+      });
+      tone3000AiResults.hidden = false;
+      tone3000AiStatus.textContent = data.results.length + " capture" + (data.results.length === 1 ? "" : "s") + " found.";
+      if (data.warnings && data.warnings.length > 0) {
+        const warningNote = document.createElement("p");
+        warningNote.className = "warning-note";
+        warningNote.textContent = "Note: " + data.warnings.join("; ");
+        tone3000AiResults.prepend(warningNote);
+      }
+      if (data.research_notes) {
+        const researchNote = document.createElement("p");
+        researchNote.className = "info-note";
+        researchNote.textContent = "Research: " + data.research_notes;
+        tone3000AiResults.prepend(researchNote);
+      }
+    } else {
+      tone3000AiStatus.textContent = "No matches found. Try a different description.";
+    }
+  } catch (error) {
+    tone3000AiStatus.textContent = error.message;
+  } finally {
+    stopActivity();
+  }
+});
+
 aiAssistantTab.addEventListener("click", () => {
   setAiAssistantOpen(true);
   recipePromptInput.focus();
