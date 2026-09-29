@@ -1769,6 +1769,8 @@ def test_unverified_kernel_is_recorded_and_deleted_by_cleanup(tmp_path, bundle_d
     ('queued-queen/hybrid-a2-x has status "KernelWorkerStatus.ERROR"', "failed"),
     ('someone/complete-kernel has status "KernelWorkerStatus.RUNNING"', "running"),
     ('someone/x has status "KernelWorkerStatus.QUEUED"', "queued"),
+    ('someone/x has status "KernelWorkerStatus.CANCEL_ACKNOWLEDGED"', "failed"),
+    ('someone/x has status "KernelWorkerStatus.CANCEL_REQUESTED"', "failed"),
     ("complete", "downloading"),                      # bare status text still understood
 ])
 def test_kernel_status_comes_from_the_status_word_not_the_kernel_ref(raw, expected):

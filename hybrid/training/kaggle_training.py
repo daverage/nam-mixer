@@ -536,7 +536,7 @@ def _kernel_status_token(raw: str) -> str:
     the whole text for output without that shape."""
     match = re.search(r'has status\s+"?([\w.]+)"?', raw or "")
     token = match.group(1) if match else (raw or "")
-    return token.rsplit(".", 1)[-1].strip().lower()
+    return token.rsplit(".", 1)[-1].strip().lower().replace("_", "")  # CANCEL_ACKNOWLEDGED -> cancelacknowledged
 
 
 def _map_kernel_status(raw: str) -> str:
