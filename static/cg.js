@@ -49,7 +49,14 @@
       const md = document.getElementById("mode-description"); if (md) md.hidden = true;
     }
   }
-  tab.addEventListener("click", () => setOpen(true));
+  // Leaving the tab hands the training section back to the Builder (closeTab), so coming back must re-render to borrow
+  // it again; while a training for this project is running, return straight to its progress, log and Stop controls.
+  tab.addEventListener("click", () => {
+    setOpen(true);
+    if (!S.data) return;
+    if (typeof trainingIsActive === "function" && trainingIsActive() && S.data.bundle && !(S.data.training && S.data.training.trained)) S.stage = 3;
+    render();
+  });
   const closeTab = () => { window.namTrainingHost.detach(); setOpen(false); };
   document.querySelectorAll(".utility-tabs .mode-tab").forEach((b) => {
     if (b !== tab) b.addEventListener("click", () => { if (!panel.hidden) closeTab(); }, true);
