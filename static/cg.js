@@ -414,16 +414,24 @@
     if (slot && d.bundle) {
       if (!S.trainHost) { S.trainHost = document.createElement("div"); S.trainHost.className = "cg-train-host"; }
       slot.replaceWith(S.trainHost);
-      // Try to attach the training host. If attach fails, it means training is active elsewhere.
-      // Only show the blocking message if CG's own training is actually in progress.
+      // Try to attach the training host to show live training logs.
       const attached = window.namTrainingHost?.attach(S.trainHost, d.bundle.design_id);
-      if (!attached && !(d.training && d.training.training_in_progress)) {
-        // Training failed to attach but CG's training isn't in progress - this is a stale state.
-        // Try a silent retry or just show empty state (training will refresh when it completes elsewhere).
-        S.trainHost.innerHTML = `<p class="info">Training section temporarily unavailable. Refresh if needed.</p>`;
-      } else if (!attached) {
-        S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
+
+      // If attach failed, show appropriate message based on CG's training state
+      if (!attached) {
+        if (d.training && d.training.training_in_progress) {
+          // CG training IS in progress, but attach failed - this shouldn't happen
+          // Show the logs anyway (training host will populate when it syncs)
+          S.trainHost.innerHTML = `<p class="info">Loading training logs...</p>`;
+        } else if (d.training && d.training.trained) {
+          // Training already completed - show the result summary
+          S.trainHost.innerHTML = `<p class="info">Training completed. View the results in Stage 4 (Test & export).</p>`;
+        } else {
+          // No training for this CG project yet
+          S.trainHost.innerHTML = `<p class="info">No training yet. Generate training files and start training to see logs here.</p>`;
+        }
       }
+      // If attached successfully, the training host section will display logs/controls automatically
     }
   }
   // The hosted section announces completion; reload so the project shows the trained model.
