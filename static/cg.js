@@ -50,7 +50,7 @@
     }
   }
   tab.addEventListener("click", () => setOpen(true));
-  const closeTab = () => { window.namTrainingHost.detach(); setOpen(false); };
+  const closeTab = () => { window.namTrainingHost?.detach(); setOpen(false); };
   document.querySelectorAll(".utility-tabs .mode-tab").forEach((b) => {
     if (b !== tab) b.addEventListener("click", () => { if (!panel.hidden) closeTab(); }, true);
   });
@@ -476,7 +476,7 @@
       : focused.dataset.cgMode ? `[data-cg-mode="${CSS.escape(focused.dataset.cgMode)}"]`
       : focused.dataset.cgCust ? `[data-cg-cust="${CSS.escape(focused.dataset.cgCust)}"]`
       : focused.dataset.cgPos ? `[data-cg-pos="${CSS.escape(focused.dataset.cgPos)}"]` : null);
-    if (S.stage !== 3) window.namTrainingHost.detach();
+    if (S.stage !== 3) window.namTrainingHost?.detach();
     if (S.trainHost) S.trainHost.remove();          // keep the borrowed section alive while the body is rebuilt
     document.querySelectorAll(".cg-tab").forEach((b) => {
       const active = Number(b.dataset.cgStage) === S.stage;
