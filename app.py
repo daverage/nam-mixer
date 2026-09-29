@@ -922,17 +922,34 @@ def api_tone3000_ai_search():
     if not local_llm_status().get("enabled"):
         return jsonify({"error": "AI is not set up yet - choose a provider in Settings"}), 503
 
+    override = data.get("queries")
+    if override is not None:
+        if (not isinstance(override, list) or not 1 <= len(override) <= 3
+                or not all(isinstance(q, str) and q.strip() and len(q) <= 80 for q in override)):
+            return jsonify({"error": "give 1-3 searches of 80 characters or fewer"}), 400
+        override = list(dict.fromkeys(q.strip() for q in override))
+    reuse_plan = data.get("plan")
+
     warnings: list[str] = []
     research = ""
+    if override and isinstance(reuse_plan, dict) and isinstance(reuse_plan.get("summary"), str) and reuse_plan["summary"].strip():
+        # Edited searches: keep the brief the user already has, skip research and planning.
+        plan = {"summary": reuse_plan["summary"].strip()[:900], "advice": [], "gear": [], "search_queries": override}
+        use_web = False
+    else:
+        plan = None
     if use_web:
         try:
             research = web_notes(prompt.strip())
         except RuntimeError as exc:
             warnings.append(f"Web research unavailable: {exc}")
-    try:
-        plan = plan_tone(prompt, research_notes=research, history=history)
-    except LocalLlmError as exc:
-        return jsonify({"error": str(exc)}), 502
+    if plan is None:
+        try:
+            plan = plan_tone(prompt, research_notes=research, history=history)
+        except LocalLlmError as exc:
+            return jsonify({"error": str(exc)}), 502
+        if override:
+            plan["search_queries"] = override
 
     queries = plan["search_queries"] or [prompt.strip()[:80]]
     rank_query = " ".join(queries)

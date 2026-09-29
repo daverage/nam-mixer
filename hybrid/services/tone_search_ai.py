@@ -131,7 +131,10 @@ def plan_tone(prompt: str, *, research_notes: str = "", history: list[dict] | No
         "or album, list that player's documented gear for it.\n"
         "- search_queries: 1-3 SHORT TONE3000 catalogue searches, each an amp make/model or amp family "
         "(for example 'Marshall JCM800', 'Fender Deluxe Reverb', 'Vox AC30'), matching the amps in gear. "
-        "Always include the model, never a bare brand like 'Marshall'. No effects, no adjectives, no artist names."
+        "Always include the model, never a bare brand like 'Marshall'. No effects, no adjectives, no artist names. "
+        "When this refines an earlier request, keep the SAME core tone: the queries must stay on the amps that define "
+        "it (a refinement like adding a pedal or more gain changes the advice and gear, not which amps to search). "
+        "Never add an amp that does not fit the tone just to have more results."
     )
     plan = _ask(_STYLE, user, "tone_plan", _PLAN_SCHEMA, _Plan, history=history, opener=opener)
     queries = list(dict.fromkeys(q.strip()[:80] for q in plan.search_queries if q and q.strip()))[:3]

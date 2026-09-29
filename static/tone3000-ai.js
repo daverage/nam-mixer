@@ -48,12 +48,29 @@
     promptEl.disabled = busy;
   }
 
+  // Older turns shrink to one line (the request plus its amps) so only the current brief is expanded.
+  function collapseOlderTurns() {
+    thread.querySelectorAll(".t3ai-turn:not(.is-collapsed)").forEach((turn) => {
+      turn.classList.add("is-collapsed");
+      const edit = turn.querySelector(".t3ai-queries");
+      if (edit) edit.replaceWith(el("p", "t3ai-meta", `Searched TONE3000 for ${turn._queries.map((q) => `"${q}"`).join(", ")}.`));
+    });
+  }
+
   function renderBrief(prompt, data) {
+    collapseOlderTurns();
     const turn = el("div", "t3ai-turn");
     turn.append(el("div", "t3ai-you", prompt));
     const brief = el("article", "t3ai-brief");
     const plan = data.plan;
-    brief.append(el("h3", null, "Tone brief"), el("p", "t3ai-summary", plan.summary));
+    const amps = plan.gear.filter((g) => g.kind === "amp").map((g) => g.name);
+    const head = el("button", "t3ai-brief-head");
+    head.type = "button";
+    head.append(el("h3", null, "Tone brief"), el("span", "t3ai-brief-oneline", amps.length ? amps.join(", ") : plan.summary));
+    head.addEventListener("click", () => { if (turn.classList.contains("is-collapsed") || turn.classList.contains("is-expanded")) turn.classList.toggle("is-expanded"); });
+    const content = el("div", "t3ai-brief-body");
+    brief.append(head, content);
+    content.append(el("p", "t3ai-summary", plan.summary));
     if (plan.gear.length) {
       const groups = {};
       plan.gear.forEach((g) => { (groups[g.kind] ||= []).push(g); });
@@ -68,7 +85,7 @@
         });
         gear.append(row);
       });
-      brief.append(gear);
+      content.append(gear);
     }
     if (plan.advice.length) {
       const details = el("details", "t3ai-advice");
@@ -77,14 +94,98 @@
       const list = el("ul");
       plan.advice.forEach((tip) => list.append(el("li", null, tip)));
       details.append(list);
-      brief.append(details);
+      content.append(details);
     }
-    const meta = el("p", "t3ai-meta", `Searched TONE3000 for ${data.queries.map((q) => `"${q}"`).join(", ")}${data.researched ? " after web research" : ""}.`);
-    brief.append(meta);
-    data.warnings.forEach((w) => brief.append(el("p", "t3ai-warning", w)));
+    turn._queries = data.queries;
+    content.append(queryEditor(turn, prompt, data));
+    const warnings = el("div", "t3ai-warnings");
+    data.warnings.forEach((w) => warnings.append(el("p", "t3ai-warning", w)));
+    content.append(warnings);
     turn.append(brief);
     thread.append(turn);
     turn.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // "Searched TONE3000 for" as editable chips, so a user can correct a search the AI got wrong.
+  function queryEditor(turn, prompt, data) {
+    const box = el("div", "t3ai-queries");
+    box.append(el("span", "t3ai-queries-label", data.researched ? "Searched TONE3000 (after web research) for" : "Searched TONE3000 for"));
+    const chips = el("div", "t3ai-query-chips");
+    let queries = [...data.queries];
+    const again = el("button", "btn btn-secondary btn-small", "Search again");
+    again.type = "button";
+    again.hidden = true;
+    const add = el("input", "t3ai-query-add");
+    add.maxLength = 80;
+    add.placeholder = "+ add an amp";
+    add.setAttribute("aria-label", "Add a TONE3000 search");
+    const draw = () => {
+      chips.replaceChildren();
+      queries.forEach((q, i) => {
+        const chip = el("span", "t3ai-query");
+        chip.append(el("span", null, q));
+        const x = el("button", "t3ai-query-x", "\u00d7");
+        x.type = "button";
+        x.setAttribute("aria-label", `Remove search ${q}`);
+        x.addEventListener("click", () => { queries.splice(i, 1); changed(); });
+        chip.append(x);
+        chips.append(chip);
+      });
+      add.hidden = queries.length >= 3;
+      chips.append(add);
+    };
+    const changed = () => {
+      draw();
+      again.hidden = queries.length === 0 || queries.join("\n") === turn._queries.join("\n");
+    };
+    add.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const q = add.value.trim();
+      if (q && !queries.includes(q) && queries.length < 3) { queries.push(q); add.value = ""; changed(); add.focus(); }
+    });
+    again.addEventListener("click", async () => {
+      const ok = await runSearch({ prompt, queries, plan: data.plan, turn });
+      if (ok) { turn._queries = [...queries]; again.hidden = true; }
+    });
+    draw();
+    box.append(chips, again);
+    return box;
+  }
+
+  function renderResults(prompt, results) {
+    const rated = results.filter((p) => Number.isFinite(p.ai_fit));
+    const others = results.filter((p) => !Number.isFinite(p.ai_fit));
+    const strong = rated.filter((p) => p.ai_fit >= 50);
+    const weak = strong.length ? rated.filter((p) => p.ai_fit < 50) : [];
+    const shown = strong.length ? strong : rated;
+    const header = el("div", "t3ai-grid-title");
+    header.append(el("span", "t3ai-grid-for", "Results for"), el("q", null, prompt));
+    grid.replaceChildren(header, ...shown.map(packCard));
+    const hiddenGroup = (title, packs) => {
+      if (!packs.length) return;
+      const toggle = el("button", "btn btn-secondary btn-small t3ai-more", `${title} (${packs.length})`);
+      toggle.type = "button";
+      const cards = packs.map(packCard);
+      cards.forEach((c) => { c.hidden = true; });
+      toggle.addEventListener("click", () => {
+        const show = cards[0].hidden;
+        cards.forEach((c) => { c.hidden = !show; });
+        toggle.textContent = `${show ? "Hide" : "Show"} ${title.replace(/^Show /, "").toLowerCase()} (${packs.length})`;
+      });
+      grid.append(toggle, ...cards);
+    };
+    hiddenGroup("Show weaker matches", weak);
+    if (others.length) {
+      if (rated.length) hiddenGroup("Show matches the AI did not rate", others);
+      else grid.append(...others.map(packCard));
+    }
+    grid.hidden = results.length === 0;
+    if (!results.length) return "No TONE3000 packs matched. Try naming an amp, or set Rigs to Anything.";
+    if (!rated.length) return `Showing catalogue order; ${results.length} pack${results.length === 1 ? "" : "s"}.`;
+    return strong.length
+      ? `${strong.length} strong match${strong.length === 1 ? "" : "es"} (50% fit or better)${weak.length + others.length ? `, ${weak.length + others.length} more below` : ""}.`
+      : `No strong matches; showing the ${rated.length} best the AI found. Try editing the searches above.`;
   }
 
   function packCard(pack) {
@@ -96,6 +197,8 @@
       img.addEventListener("error", () => { img.remove(); media.classList.add("t3ai-media-empty"); });
       media.append(img);
     } else media.classList.add("t3ai-media-empty");
+    const initials = (pack.title || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+    media.append(el("span", "t3ai-media-name", initials));
     if (Number.isFinite(pack.ai_fit)) {
       const fit = el("span", "t3ai-fit", `${pack.ai_fit}% fit`);
       fit.dataset.level = pack.ai_fit >= 75 ? "high" : pack.ai_fit >= 50 ? "mid" : "low";
@@ -120,11 +223,12 @@
       body.append(d);
     }
     const actions = el("div", "t3ai-actions");
-    const open = el("button", "btn btn-primary btn-small", "Files & questions");
+    const open = el("button", "btn btn-primary btn-small", "Files \u00b7 Ask about this pack");
     open.type = "button";
     actions.append(open);
     if (pack.url) {
-      const link = el("a", "btn btn-secondary btn-small", "Open on TONE3000");
+      const link = el("a", "btn btn-secondary btn-small", "TONE3000 \u2197");
+      link.setAttribute("aria-label", `Open ${pack.title} on TONE3000`);
       link.href = pack.url; link.target = "_blank"; link.rel = "noopener noreferrer";
       actions.append(link);
     }
@@ -139,7 +243,7 @@
 
   async function togglePanel(card, panel, button, pack) {
     if (!panel.hidden) {
-      panel.hidden = true; card.classList.remove("is-open"); button.textContent = "Files & questions";
+      panel.hidden = true; card.classList.remove("is-open"); button.textContent = "Files \u00b7 Ask about this pack";
       return;
     }
     panel.hidden = false; card.classList.add("is-open"); button.textContent = "Close";
@@ -230,47 +334,57 @@
     panel.append(chat);
   }
 
-  async function search() {
-    const prompt = promptEl.value.trim();
-    if (!prompt || state.busy) { if (!prompt) status.textContent = "Describe the tone you want first."; return; }
+  async function runSearch({ prompt, queries, plan, turn }) {
+    if (state.busy) return false;
     setBusy(true);
-    status.textContent = research.checked ? "Researching the tone, then searching TONE3000... this can take a minute." : "Working out the tone, then searching TONE3000...";
+    const refining = Boolean(queries);
+    status.textContent = refining ? "Searching TONE3000 again with your edited searches..."
+      : research.checked ? "Researching the tone, then searching TONE3000... this can take a minute." : "Working out the tone, then searching TONE3000...";
     const stop = beginActivity("Finding tones on TONE3000...");
     try {
-      const data = await post("/api/tone3000/ai_search", {
-        prompt, use_research: research.checked, rig_scope: rigScope.value, author: author.value.trim(), history: state.history,
-      });
-      if (!state.goal) state.goal = prompt;
-      else state.goal = `${state.goal} / refined: ${prompt}`.slice(-600);
-      state.history.push({ role: "user", content: prompt }, { role: "assistant", content: data.plan.summary });
-      state.history = state.history.slice(-12);
-      renderBrief(prompt, data);
-      const rated = data.results.filter((p) => Number.isFinite(p.ai_fit));
-      const others = data.results.filter((p) => !Number.isFinite(p.ai_fit));
-      grid.replaceChildren(...rated.map(packCard));
-      if (others.length) {
-        grid.append(el("h3", "t3ai-grid-heading", rated.length ? "Other catalogue matches (not rated by the AI)" : "Catalogue matches"));
-        grid.append(...others.map(packCard));
+      const body = { prompt, use_research: research.checked, rig_scope: rigScope.value, author: author.value.trim(), history: state.history };
+      if (refining) Object.assign(body, { queries, plan: { summary: plan.summary } });
+      const data = await post("/api/tone3000/ai_search", body);
+      if (refining) {
+        const warnings = turn.querySelector(".t3ai-warnings");
+        warnings.replaceChildren(...data.warnings.map((w) => el("p", "t3ai-warning", w)));
+      } else {
+        state.goal = state.goal ? `${state.goal} / refined: ${prompt}`.slice(-600) : prompt;
+        state.history.push({ role: "user", content: prompt }, { role: "assistant", content: data.plan.summary });
+        state.history = state.history.slice(-12);
+        renderBrief(prompt, data);
+        promptEl.value = "";
+        label.textContent = "Refine the search (e.g. more gain, darker, a different era, a cheaper amp)";
+        promptEl.placeholder = "e.g. a bit more gain for solos";
+        resetBtn.hidden = false;
       }
-      grid.hidden = data.results.length === 0;
-      status.textContent = data.results.length
-        ? `${rated.length ? `${rated.length} rated by the AI, best fit first` : "Showing catalogue order"}; ${data.results.length} pack${data.results.length === 1 ? "" : "s"} in total.`
-        : "No TONE3000 packs matched. Try naming an amp, or set Rigs to Anything.";
-      announce(`${data.plan.summary} ${status.textContent}`);
-      promptEl.value = "";
-      label.textContent = "Refine the search (e.g. more gain, darker, a different era, a cheaper amp)";
-      promptEl.placeholder = "e.g. a bit more gain for solos";
-      resetBtn.hidden = false;
+      status.textContent = renderResults(prompt, data.results);
+      announce(`${refining ? "" : `${data.plan.summary} `}${status.textContent}`);
+      return true;
     } catch (error) {
       status.textContent = error.message;
+      return false;
     } finally {
       stop(); setBusy(false);
     }
   }
 
+  function search() {
+    const prompt = promptEl.value.trim();
+    if (!prompt) { status.textContent = "Describe the tone you want first."; return; }
+    runSearch({ prompt });
+  }
+
   searchBtn.addEventListener("click", search);
   promptEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); search(); } });
+  let resetArmed = null;
   resetBtn.addEventListener("click", () => {
+    if (!resetArmed) {
+      resetBtn.textContent = "Click again to clear everything";
+      resetArmed = setTimeout(() => { resetArmed = null; resetBtn.textContent = "Start over"; }, 4000);
+      return;
+    }
+    clearTimeout(resetArmed); resetArmed = null; resetBtn.textContent = "Start over";
     state.history = []; state.goal = "";
     thread.replaceChildren(); grid.replaceChildren(); grid.hidden = true;
     status.textContent = ""; resetBtn.hidden = true;

@@ -222,6 +222,7 @@
 
     <!-- AI search section -->
     <div id="tone3000-ai-section" class="t3ai" hidden>
+      <div class="t3ai-thread-bar"><button type="button" id="btn-t3ai-reset" class="link-btn" hidden>Start over</button></div>
       <div id="t3ai-thread" class="t3ai-thread" aria-live="polite"></div>
       <div class="recipe-prompt t3ai-composer">
         <label for="tone3000-ai-prompt" id="t3ai-label">Describe the tone you want</label>
@@ -230,7 +231,6 @@
           <label class="checkbox-row recipe-ai-option"><input type="checkbox" id="tone3000-ai-research" checked> Web research</label>
           <label class="recipe-search-option">Rigs <select id="tone3000-ai-rig-scope" class="select-input"><option value="anything">Anything</option><option value="heads">Heads only (add your own cab)</option></select></label>
           <label class="recipe-search-option">Creator / author <input id="tone3000-ai-author" class="select-input" maxlength="100" placeholder="Optional"></label>
-          <button type="button" id="btn-t3ai-reset" class="btn btn-secondary btn-small" hidden>Start over</button>
           <button type="button" id="btn-tone3000-ai-search" class="btn btn-primary btn-small">Find tones</button>
         </div>
         <div id="tone3000-ai-status" class="info" aria-live="polite"></div>

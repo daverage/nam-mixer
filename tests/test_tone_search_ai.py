@@ -122,3 +122,23 @@ def test_pack_answer_accepts_a_short_name_only_when_it_is_unambiguous(fake_llm):
     files = ["EDGY - Deluxe 65", "CLEAN - Deluxe 65", "CLEANEST - Deluxe 65"]
     replies.append({"reply": "r", "recommended_files": ["EDGY", "CLEAN"]})
     assert tone_search_ai.ask_about_pack("q", {}, files)["recommended_files"] == ["EDGY - Deluxe 65"]
+
+
+def test_ai_search_route_uses_edited_queries_without_replanning(client, monkeypatch):
+    monkeypatch.setattr(app_module, "local_llm_status", lambda: {"enabled": True})
+
+    def no_plan(*a, **k):
+        raise AssertionError("edited searches must reuse the existing brief")
+
+    monkeypatch.setattr(app_module, "plan_tone", no_plan)
+    monkeypatch.setattr(app_module, "web_notes", no_plan)
+    searched = []
+    monkeypatch.setattr(app_module, "tone3000_search", lambda q, **_: searched.append(q) or [{"id": len(searched), "title": q, "match_score": 1}])
+    monkeypatch.setattr(app_module, "rank_packs", lambda *a, **k: {})
+    data = client.post("/api/tone3000/ai_search", json={
+        "prompt": "p", "use_research": True, "queries": ["Marshall 1959", "Marshall 1959"], "plan": {"summary": "kept"},
+    }).get_json()
+    assert searched == ["Marshall 1959"]
+    assert data["plan"]["summary"] == "kept" and data["queries"] == ["Marshall 1959"]
+    bad = client.post("/api/tone3000/ai_search", json={"prompt": "p", "queries": ["a", "b", "c", "d"], "plan": {"summary": "s"}})
+    assert bad.status_code == 400
