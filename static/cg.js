@@ -414,7 +414,7 @@
     if (slot && d.bundle) {
       if (!S.trainHost) { S.trainHost = document.createElement("div"); S.trainHost.className = "cg-train-host"; }
       slot.replaceWith(S.trainHost);
-      if (!window.namTrainingHost.attach(S.trainHost, d.bundle.design_id)) S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
+      if (!window.namTrainingHost?.attach(S.trainHost, d.bundle.design_id)) S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
     }
   }
   // The hosted section announces completion; reload so the project shows the trained model.
