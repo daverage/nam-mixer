@@ -58,7 +58,7 @@ Request:
 ```json
 {
   "prompt": "Warm, vintage tube tone with natural breakup",
-  "use_research": false,
+  "use_research": true,
   "rig_scope": "heads",
   "author_filter": null
 }
@@ -75,6 +75,7 @@ Response:
     "saturation": 0.5
   },
   "search_plan": ["vintage tube tone", "warm breakup", "natural saturation"],
+  "research_notes": "Optional web research snippets if enabled (mentions reverb, natural compression)",
   "results": [
     {
       "tone_id": "...",
@@ -82,12 +83,9 @@ Response:
       "pack_name": "...",
       "creator": "...",
       "match_score": 0.92,
-      "match_reason": "Matches warm, vintage characteristics",
-      "estimated_effects": ["reverb", "subtle compression"],
-      "tone_color": "#8B4513"
+      "match_reason": "Matches warm, vintage characteristics with natural compression mentioned in tone description"
     }
-  ],
-  "research": "Optional web research snippets if enabled"
+  ]
 }
 ```
 
@@ -111,15 +109,15 @@ Response:
 #### Phase 1: MVP (minimal)
 1. Add AI search toggle to tone3000 tab
 2. Implement prompt → characteristics parsing via LLM
-3. Search TONE3000 and rerank results
-4. Display results with match score & reason
-5. Keep download flow same as standard search
+3. Optional web research (research checkbox, like AI Assistant)
+4. Search TONE3000 and rerank results
+5. Display results with match score & reason
+6. Show any effects mentioned in research/reasoning
+7. Keep download flow same as standard search
 
 #### Phase 2: Enhanced Results
-1. Add tone color indicators
-2. Add estimated effects display
-3. Add pack metadata (creator, style tags)
-4. Better visual result cards
+1. Add pack metadata (creator, style tags, capture count)
+2. Better visual result cards (improved typography/spacing)
 
 #### Phase 3: Conversation (optional)
 1. Allow follow-up questions about results
@@ -160,7 +158,7 @@ Response:
 }
 ```
 
-### Result Card
+### Result Card (MVP)
 ```python
 {
   "tone_id": str,
@@ -168,22 +166,31 @@ Response:
   "pack_name": str,
   "creator": str,
   "match_score": float,      # 0-1
-  "match_reason": str,
-  "characteristics": dict,   # Subset relevant to query
-  "estimated_effects": list, # ["reverb", "delay", etc.]
-  "tone_color": str,         # Hex color (#RRGGBB)
-  "style_tags": list,        # ["vintage", "rock", etc.]
+  "match_reason": str,       # Why this matches, mentions effects if relevant
 }
 ```
 
-## Questions for User
+### Result Card (Phase 2+)
+```python
+{
+  # All MVP fields above, plus:
+  "style_tags": list,        # ["vintage", "rock", etc.]
+  "capture_count": int,
+}
+```
 
-1. **Web Research**: Should AI search include optional web research (like AI Assistant)?
-2. **Conversation**: Should users be able to refine searches conversationally?
-3. **Images**: Is visual tone representation (colors/icons) in MVP scope?
-4. **Effects Depth**: How detailed should effects suggestions be?
-5. **Pack Info**: What metadata is most useful for amp pack downloads?
-6. **Mobile**: Any mobile-specific UX considerations?
+## Decisions Made
+
+1. **Web Research**: ✓ Include optional web research in Phase 1 (like AI Assistant)
+2. **Visual Tone Representation**: ✗ Not in MVP (can add later if valuable)
+3. **Effects Suggestions**: Organic only - show only if mentioned during research/ranking, not systematic
+4. **Conversation**: Still open - Phase 3 candidate if desired
+
+## Questions for User (Remaining)
+
+1. **Conversation**: Should users be able to refine searches conversationally?
+2. **Pack Info**: What metadata is most useful for amp pack downloads?
+3. **Mobile**: Any mobile-specific UX considerations?
 
 ## Success Criteria
 
@@ -227,7 +234,7 @@ Response:
 
 ## Timeline
 
-- **Phase 1**: 1-2 days (API + basic UI)
-- **Phase 2**: 1 day (enhanced results)
-- **Phase 3**: 1-2 days (conversation, if needed)
-- **Phase 4**: Future (images & polish)
+- **Phase 1**: 2 days (API + basic UI + web research)
+- **Phase 2**: 1 day (enhanced result cards)
+- **Phase 3**: 1-2 days (conversation refinement, if desired)
+- **Phase 4**: Future (visual enhancements)
