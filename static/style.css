@@ -1526,3 +1526,26 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
 .t3ai-card[hidden] { display: none; }
 .t3ai-media-name { font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; color: color-mix(in srgb, var(--accent) 55%, var(--text-muted)); }
 .t3ai-media:not(.t3ai-media-empty) .t3ai-media-name { display: none; }
+
+/* TONE3000 AI: progress, failed turns, research notes, file browser (ported from TONE Search) */
+.info.is-working { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--text); }
+.progress-clock { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.spinner { flex: none; width: 1rem; height: 1rem; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.t3ai-research { margin-top: 0.6rem; font-size: 0.85rem; }
+.t3ai-research summary { cursor: pointer; font-weight: 600; }
+.t3ai-research ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+.t3ai-research li { margin-bottom: 0.5rem; }
+.t3ai-research li p { margin: 0.15rem 0 0; color: var(--text-muted); overflow-wrap: anywhere; }
+.t3ai-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.5rem; min-height: 2rem; }
+.t3ai-panel-head h4 { margin: 0; }
+.t3ai-file-filter { width: 12rem; max-width: 55%; padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-alt); color: var(--text); font: inherit; font-size: 0.8rem; }
+.t3ai-picks { margin-bottom: 0.7rem; padding-bottom: 0.7rem; border-bottom: 1px dashed var(--border); }
+.t3ai-picks-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #1e8e4e; }
+.t3ai-pager { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.6rem; }
+.t3ai-pager-label { font-size: 0.78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.t3ai-pending { display: flex; align-items: center; gap: 0.5rem; min-height: 3.2rem; font-size: 0.9rem; }
+.t3ai-failed { border-left-color: var(--danger); }
+.t3ai-failed h3 { color: var(--danger); }
+.t3ai-file-filter:focus { outline: none; border-color: var(--accent); }

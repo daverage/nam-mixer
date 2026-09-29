@@ -42,6 +42,36 @@
     });
   });
 
+  // One request does the whole search, so stages follow typical timings rather than server events.
+  const RESEARCH_STAGES = [
+    [0, "Researching the tone on the web..."],
+    [8, "Research done. Asking the AI to work out the tone and gear..."],
+    [35, "Searching TONE3000 for matching captures..."],
+    [42, "The AI is ranking the packs..."],
+    [75, "Still working. Larger models can take a minute or two..."],
+  ];
+  const PLAIN_STAGES = RESEARCH_STAGES.slice(1).map(([at, text], i) => [i === 0 ? 0 : at - 6, i === 0 ? "Asking the AI to work out the tone and gear..." : text]);
+
+  function showProgress(stages, target = status) {
+    const started = Date.now();
+    const text = el("span");
+    const clock = el("span", "progress-clock");
+    const spinner = el("span", "spinner");
+    spinner.setAttribute("aria-hidden", "true");
+    clock.setAttribute("aria-hidden", "true");
+    target.replaceChildren(spinner, text, clock);
+    target.classList.add("is-working");
+    const tick = () => {
+      const seconds = (Date.now() - started) / 1000;
+      const stage = stages.filter(([at]) => seconds >= at).pop()[1];
+      if (text.textContent !== stage) text.textContent = stage; // only stage changes reach screen readers
+      clock.textContent = ` ${Math.floor(seconds)}s`;
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => { clearInterval(timer); target.classList.remove("is-working"); };
+  }
+
   function setBusy(busy) {
     state.busy = busy;
     searchBtn.disabled = busy;
@@ -49,18 +79,35 @@
   }
 
   // Older turns shrink to one line (the request plus its amps) so only the current brief is expanded.
-  function collapseOlderTurns() {
+  function collapseOlderTurns(current) {
     thread.querySelectorAll(".t3ai-turn:not(.is-collapsed)").forEach((turn) => {
+      if (turn === current) return;
       turn.classList.add("is-collapsed");
       const edit = turn.querySelector(".t3ai-queries");
       if (edit) edit.replaceWith(el("p", "t3ai-meta", `Searched TONE3000 for ${turn._queries.map((q) => `"${q}"`).join(", ")}.`));
     });
   }
 
-  function renderBrief(prompt, data) {
-    collapseOlderTurns();
+  // Shows the request at once with a working card; a failed attempt is replaced by the retry.
+  function startTurn(prompt) {
+    thread.querySelectorAll(".t3ai-turn.is-failed").forEach((failed) => failed.remove());
     const turn = el("div", "t3ai-turn");
-    turn.append(el("div", "t3ai-you", prompt));
+    const pending = el("div", "t3ai-brief t3ai-pending");
+    turn.append(el("div", "t3ai-you", prompt), pending);
+    thread.append(turn);
+    turn.scrollIntoView({ behavior: "smooth", block: "start" });
+    return { turn, pending };
+  }
+
+  function failTurn({ turn, pending }, message) {
+    const card = el("div", "t3ai-brief t3ai-failed");
+    card.append(el("h3", null, "Search failed"), el("p", "t3ai-warning", message), el("p", "t3ai-meta", "Your request is still in the box below: try again, or change it."));
+    pending.replaceWith(card);
+    turn.classList.add("is-failed");
+  }
+
+  function renderBrief(prompt, data, { turn, pending }) {
+    collapseOlderTurns(turn);
     const brief = el("article", "t3ai-brief");
     const plan = data.plan;
     const amps = plan.gear.filter((g) => g.kind === "amp").map((g) => g.name);
@@ -101,10 +148,33 @@
     const warnings = el("div", "t3ai-warnings");
     data.warnings.forEach((w) => warnings.append(el("p", "t3ai-warning", w)));
     content.append(warnings);
-    turn.append(brief);
-    thread.append(turn);
-    turn.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (data.research_notes) content.append(researchNotes(data.research_notes));
+    pending.replaceWith(brief);
   }
+
+  // The web notes the AI was given, one "- title: extract (url)" line per source.
+  function researchNotes(notes) {
+    const lines = notes.split("\n").filter((line) => line.trim());
+    const details = el("details", "t3ai-research");
+    details.append(el("summary", null, `Web research notes (${lines.length} source${lines.length === 1 ? "" : "s"})`));
+    const list = el("ul");
+    lines.forEach((line) => {
+      const item = el("li");
+      const parts = /^- (.*?): ([\s\S]*) \((https?:\/\/[^\s)]+)\)$/.exec(line);
+      if (parts) {
+        const link = el("a", null, parts[1] || parts[3]);
+        link.href = parts[3]; link.target = "_blank"; link.rel = "noopener noreferrer nofollow";
+        item.append(link, el("p", null, parts[2]));
+      } else {
+        item.textContent = line.replace(/^- /, "");
+      }
+      list.append(item);
+    });
+    details.append(list);
+    return details;
+  }
+
+
 
   // "Searched TONE3000 for" as editable chips, so a user can correct a search the AI got wrong.
   function queryEditor(turn, prompt, data) {
@@ -260,25 +330,60 @@
     }
   }
 
+  const FILES_PER_PAGE = 12;
+
   function buildPanel(panel, pack, models) {
     panel.replaceChildren();
+    let picks = [];
+    let page = 0;
+    let filter = "";
+
+    // Files: AI picks pinned on top, then a filterable, paged list.
+    const fileColumn = el("section", "t3ai-file-column");
+    const fileHead = el("div", "t3ai-panel-head");
+    fileHead.append(el("h4", null, `${models.length} NAM file${models.length === 1 ? "" : "s"}`));
+    const search = el("input", "t3ai-file-filter");
+    search.type = "search"; search.placeholder = "Filter files";
+    search.setAttribute("aria-label", `Filter the files in ${pack.title}`);
+    if (models.length > FILES_PER_PAGE) fileHead.append(search);
+    const pickList = el("ul", "t3ai-files t3ai-picks");
     const files = el("ul", "t3ai-files");
-    const rows = new Map();
-    models.forEach((model) => {
+    const pager = el("div", "t3ai-pager");
+    fileColumn.append(fileHead, pickList, files, pager);
+
+    const fileRow = (model) => {
       const row = el("li", "t3ai-file");
       const name = el("span", "t3ai-file-name", model.name);
+      if (picks.includes(model.name)) { row.classList.add("is-pick"); name.append(" ", el("span", "t3ai-pick", "AI pick")); }
       const download = el("button", "btn btn-secondary btn-small", desktopSaveLabel("Download"));
       download.type = "button";
       download.setAttribute("aria-label", desktopSaveLabel(`Download ${model.name}`));
       const url = `/api/tone3000/tones/${encodeURIComponent(pack.id)}/models/${encodeURIComponent(model.id)}/download`;
       download.addEventListener("click", () => triggerFileDownload(url, model.name));
       row.append(name, download);
-      rows.set(model.name, row);
-      files.append(row);
-    });
-    const fileColumn = el("div", "t3ai-file-column");
-    fileColumn.append(el("h4", null, `${models.length} NAM file${models.length === 1 ? "" : "s"}`), files);
-    panel.append(fileColumn);
+      return row;
+    };
+    const renderFiles = () => {
+      const pinned = models.filter((m) => picks.includes(m.name));
+      pickList.hidden = pinned.length === 0;
+      pickList.replaceChildren(...(pinned.length ? [el("li", "t3ai-picks-label", "AI picks")] : []), ...pinned.map(fileRow));
+      const shown = models.filter((m) => m.name.toLowerCase().includes(filter));
+      const pages = Math.max(1, Math.ceil(shown.length / FILES_PER_PAGE));
+      page = Math.min(page, pages - 1);
+      const from = page * FILES_PER_PAGE;
+      files.replaceChildren(...shown.slice(from, from + FILES_PER_PAGE).map(fileRow));
+      if (!shown.length) files.append(el("li", "info", "No files match that filter."));
+      pager.hidden = pages <= 1;
+      const prev = el("button", "btn btn-secondary btn-small", "Previous");
+      const next = el("button", "btn btn-secondary btn-small", "Next");
+      prev.type = next.type = "button";
+      prev.disabled = page === 0; next.disabled = page >= pages - 1;
+      prev.addEventListener("click", () => { page -= 1; renderFiles(); });
+      next.addEventListener("click", () => { page += 1; renderFiles(); });
+      pager.replaceChildren(prev, el("span", "t3ai-pager-label", `${from + 1}-${Math.min(from + FILES_PER_PAGE, shown.length)} of ${shown.length}`), next);
+    };
+    search.addEventListener("input", () => { filter = search.value.trim().toLowerCase(); page = 0; renderFiles(); });
+    renderFiles();
 
     const chat = el("div", "t3ai-chat");
     const log = el("div", "t3ai-chat-log");
@@ -312,13 +417,9 @@
         });
         thinking.className = "t3ai-ai"; thinking.textContent = data.reply;
         history.push({ role: "user", content: question }, { role: "assistant", content: data.reply });
-        rows.forEach((row) => row.classList.remove("is-pick"));
-        data.recommended_files.forEach((name) => {
-          const row = rows.get(name);
-          if (!row) return;
-          row.classList.add("is-pick");
-          if (!row.querySelector(".t3ai-pick")) row.querySelector(".t3ai-file-name").append(" ", el("span", "t3ai-pick", "AI pick"));
-        });
+        picks = data.recommended_files;
+        page = 0;
+        renderFiles();
         announce(data.reply);
       } catch (error) {
         thinking.className = "t3ai-warning"; thinking.textContent = error.message;
@@ -331,16 +432,18 @@
     const composer = el("div", "t3ai-chat-composer");
     composer.append(input, ask);
     chat.append(el("h4", null, "Ask about this pack"), suggestions, log, composer);
-    panel.append(chat);
+    panel.append(fileColumn, chat);
   }
 
   async function runSearch({ prompt, queries, plan, turn }) {
     if (state.busy) return false;
     setBusy(true);
     const refining = Boolean(queries);
-    status.textContent = refining ? "Searching TONE3000 again with your edited searches..."
-      : research.checked ? "Researching the tone, then searching TONE3000... this can take a minute." : "Working out the tone, then searching TONE3000...";
-    const stop = beginActivity("Finding tones on TONE3000...");
+    const pendingTurn = refining ? null : startTurn(prompt);
+    status.textContent = refining ? "Searching TONE3000 again with your edited searches..." : "";
+    const stopProgress = refining ? () => {} : showProgress(research.checked ? RESEARCH_STAGES : PLAIN_STAGES, pendingTurn.pending);
+    const stopActivity = beginActivity("Finding tones on TONE3000...");
+    const stop = () => { stopProgress(); stopActivity(); };
     try {
       const body = { prompt, use_research: research.checked, rig_scope: rigScope.value, author: author.value.trim(), history: state.history };
       if (refining) Object.assign(body, { queries, plan: { summary: plan.summary } });
@@ -352,7 +455,7 @@
         state.goal = state.goal ? `${state.goal} / refined: ${prompt}`.slice(-600) : prompt;
         state.history.push({ role: "user", content: prompt }, { role: "assistant", content: data.plan.summary });
         state.history = state.history.slice(-12);
-        renderBrief(prompt, data);
+        renderBrief(prompt, data, pendingTurn);
         promptEl.value = "";
         label.textContent = "Refine the search (e.g. more gain, darker, a different era, a cheaper amp)";
         promptEl.placeholder = "e.g. a bit more gain for solos";
@@ -362,7 +465,8 @@
       announce(`${refining ? "" : `${data.plan.summary} `}${status.textContent}`);
       return true;
     } catch (error) {
-      status.textContent = error.message;
+      if (pendingTurn) { stopProgress(); failTurn(pendingTurn, error.message); } else status.textContent = error.message;
+      announce(error.message);
       return false;
     } finally {
       stop(); setBusy(false);
