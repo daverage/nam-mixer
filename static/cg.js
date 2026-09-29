@@ -414,7 +414,16 @@
     if (slot && d.bundle) {
       if (!S.trainHost) { S.trainHost = document.createElement("div"); S.trainHost.className = "cg-train-host"; }
       slot.replaceWith(S.trainHost);
-      if (!window.namTrainingHost?.attach(S.trainHost, d.bundle.design_id)) S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
+      // Try to attach the training host. If attach fails, it means training is active elsewhere.
+      // Only show the blocking message if CG's own training is actually in progress.
+      const attached = window.namTrainingHost?.attach(S.trainHost, d.bundle.design_id);
+      if (!attached && !(d.training && d.training.training_in_progress)) {
+        // Training failed to attach but CG's training isn't in progress - this is a stale state.
+        // Try a silent retry or just show empty state (training will refresh when it completes elsewhere).
+        S.trainHost.innerHTML = `<p class="info">Training section temporarily unavailable. Refresh if needed.</p>`;
+      } else if (!attached) {
+        S.trainHost.innerHTML = `<p class="info">Another training is running (see the Builder). Wait for it to finish, then reopen this stage.</p>`;
+      }
     }
   }
   // The hosted section announces completion; reload so the project shows the trained model.
