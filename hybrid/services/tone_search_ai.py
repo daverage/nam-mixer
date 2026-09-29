@@ -7,6 +7,7 @@ provider plumbing (config, JSON-schema request, content decoding) so every provi
 from __future__ import annotations
 
 import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -118,6 +119,20 @@ def _ask(system: str, user: str, schema_name: str, schema: dict, model: type[_Mo
     raise LocalLlmError(f"The AI returned an answer that could not be read ({last_error}). Try again or use a larger model.")
 
 
+# Pedals whose names small models mistake for amps, usually because the brand also makes amps.
+_KNOWN_PEDALS = re.compile(
+    r"shred ?master|guv'?nor|drive ?master|jackhammer|\brat\b|"
+    r"tube ?screamer|\bts ?-?(808|9|10)\b|\bds-?[12]\b|\bsd-?1\b|big ?muff|fuzz ?face|klon|centaur|"
+    r"\bpedal\b|stomp", re.IGNORECASE)
+
+
+# Modelling/practice amps that tone-settings sites suggest for recreating a sound at home: never an artist's rig.
+_PRACTICE_AMPS = re.compile(
+    r"mustang|katana|\bspark\b|spider|\bthr\d*\b|fender frontman|\bcube\b|\bpathfinder\b|headrush|helix|"
+    r"kemper|axe-?fx|quad ?cortex|tonex|\bplugin\b|amplitube|bias fx|neural dsp|\bgp-?\d+\b", re.IGNORECASE)
+_WANTS_MODERN = re.compile(r"budget|cheap|modern|modell?ing|practice|beginner|affordable|plugin|at home", re.IGNORECASE)
+
+
 def plan_tone(prompt: str, *, research_notes: str = "", history: list[dict] | None = None, opener=None) -> dict:
     user = (
         f"Player request: {prompt.strip()}\n\n"
@@ -129,14 +144,27 @@ def plan_tone(prompt: str, *, research_notes: str = "", history: list[dict] | No
         "make and model names (for example 'Fender Vibroverb', 'Ibanez TS808 Tube Screamer', 'Fender Stratocaster'), "
         "never generic categories like 'tube amplifier' or 'overdrive pedal'. If the request names an artist, song "
         "or album, list that player's documented gear for it.\n"
+        "  Classify kind by what the product IS, not by its brand: a stompbox is an effect even from an amp maker "
+        "(Marshall Shredmaster, Marshall Guv'nor, Marshall Bluesbreaker pedal, Boss DS-1, ProCo RAT, Ibanez Tube Screamer). "
+        "When research names a specific effect, use exactly that product and never swap in a different, better-known "
+        "one; if it is uncertain, still name the researched one and say so in its role. Ignore gear that a tone-settings "
+        "site recommends for recreating the sound today (modelling or practice amps such as a Fender Mustang, Boss "
+        "Katana or Positive Grid Spark) unless the player asks for budget or modern gear.\n"
         "- search_queries: 1-3 SHORT TONE3000 catalogue searches, each an amp make/model or amp family "
         "(for example 'Marshall JCM800', 'Fender Deluxe Reverb', 'Vox AC30'), matching the amps in gear. "
-        "Always include the model, never a bare brand like 'Marshall'. No effects, no adjectives, no artist names. "
+        "Always include the model, never a bare brand like 'Marshall'. No adjectives, no artist names. "
+        "Add an effect search only when that pedal is what creates the core distortion (TONE3000 has pedal captures). "
         "When this refines an earlier request, keep the SAME core tone: the queries must stay on the amps that define "
-        "it (a refinement like adding a pedal or more gain changes the advice and gear, not which amps to search). "
+        "it (a refinement like adding a pedal or more gain changes the advice and gear, not the core searches). "
         "Never add an amp that does not fit the tone just to have more results."
     )
     plan = _ask(_STYLE, user, "tone_plan", _PLAN_SCHEMA, _Plan, history=history, opener=opener)
+    for gear in plan.gear:
+        if gear.kind == "amp" and _KNOWN_PEDALS.search(gear.name):
+            gear.kind = "effect"  # small models file amp-brand pedals (Marshall Shredmaster) under amps
+    if not _WANTS_MODERN.search(prompt):  # drop "recreate it at home" suggestions the model copied from tone sites
+        plan.gear = [g for g in plan.gear if not _PRACTICE_AMPS.search(g.name)]
+        plan.search_queries = [q for q in plan.search_queries if not _PRACTICE_AMPS.search(q)]
     queries = list(dict.fromkeys(q.strip()[:80] for q in plan.search_queries if q and q.strip()))[:3]
     return {
         "summary": plan.summary.strip(),

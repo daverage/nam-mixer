@@ -5,6 +5,7 @@ import ipaddress
 import json
 import re
 import socket
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
@@ -64,7 +65,14 @@ def _rank_tone3000_metadata(query: str, result: dict) -> tuple[int, str]:
 
 
 class _PageText(HTMLParser):
-    """Extract readable page text without executing or trusting page markup."""
+    """Extract readable page text without executing or trusting page markup.
+
+    Page chrome (navigation, headers, footers, forms) is dropped, and block elements end a line,
+    so menus never run together into one long fake "sentence".
+    """
+
+    IGNORED = {"script", "style", "noscript", "svg", "nav", "header", "footer", "aside", "form", "button", "select", "menu", "template"}
+    BLOCKS = {"p", "li", "div", "section", "article", "br", "tr", "td", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "dd", "dt"}
 
     def __init__(self):
         super().__init__()
@@ -72,12 +80,16 @@ class _PageText(HTMLParser):
         self._ignored = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style", "noscript", "svg"}:
+        if tag in self.IGNORED:
             self._ignored += 1
+        elif tag in self.BLOCKS:
+            self.parts.append("\n")
 
     def handle_endtag(self, tag):
-        if tag in {"script", "style", "noscript", "svg"} and self._ignored:
+        if tag in self.IGNORED and self._ignored:
             self._ignored -= 1
+        elif tag in self.BLOCKS:
+            self.parts.append("\n")
 
     def handle_data(self, data):
         if not self._ignored:
@@ -123,8 +135,82 @@ def _is_safe_public_host(hostname: str) -> bool:
     return True
 
 
-def _page_evidence(href: str, query: str) -> str:
-    """Fetch a short, relevant text extract from a search result page."""
+# Words that make a research sentence about the actual rig rather than about the web page.
+_GEAR_WORDS = {
+    "amp", "amps", "amplifier", "amplifiers", "head", "combo", "cabinet", "cab", "speaker", "speakers", "celestion",
+    "jensen", "marshall", "fender", "vox", "mesa", "boogie", "hiwatt", "orange", "peavey", "ampeg", "dumble", "plexi",
+    "twin", "deluxe", "champ", "bassman", "princeton", "stratocaster", "strat", "telecaster", "tele", "gibson",
+    "sg", "explorer", "flying", "humbucker", "humbuckers", "pickup", "pickups", "p90", "pedal", "pedals", "fuzz",
+    "overdrive", "distortion", "wah", "screamer", "rangemaster", "booster", "univibe", "leslie", "reverb",
+    "tremolo", "echo", "delay", "echoplex", "recorded", "recording", "studio", "session", "played", "plugged",
+    "used", "cranked", "gain", "valve", "tube", "tubes",
+}
+_FILLER_WORDS = {
+    "i", "im", "i'm", "id", "i'd", "would", "like", "want", "wanted", "need", "looking", "look", "for", "find",
+    "a", "an", "the", "tone", "tones", "sound", "sounds", "sounding", "that", "which", "to", "of", "on", "in",
+    "with", "from", "had", "has", "have", "used", "uses", "use", "get", "got", "match", "matches", "matching",
+    "similar", "please", "me", "my", "some", "is", "was", "be", "it", "and", "or", "he", "she", "they", "their",
+    "his", "her", "what", "how", "can", "you", "just", "really", "exact", "exactly", "same", "as", "at", "by",
+    # The Builder's focused amp-discovery question wraps the request in these words.
+    "which", "specific", "guitar", "amplifier", "makes", "models", "did", "artist", "song", "era", "described",
+    "this", "request",
+}
+# Social, video and preset-sharing sites rarely say what the artist actually used.
+_SKIP_HOSTS = ("tiktok.com", "youtube.com", "youtu.be", "instagram.com", "facebook.com", "pinterest.", "twitter.com",
+               "x.com", "tone.fender.com", "line6.com", "spotify.com", "apple.com", "amazon.", "ebay.", "reverb.com")
+MAX_SOURCES = 4
+EVIDENCE_CHARS = 700
+
+
+def _topic(query: str) -> str:
+    """The artist/song/gear words of a request, without conversational filler."""
+    words = re.findall(r"[\w'’.-]+", query)
+    kept = [w for w in words if w.lower().strip(".'’") not in _FILLER_WORDS]
+    return " ".join(kept) or query.strip()
+
+
+def _skip_source(href: str) -> bool:
+    host = (urlparse(href).hostname or "").lower()
+    return not host or any(host == pattern or host.endswith("." + pattern) or (pattern.endswith(".") and pattern in host)
+                           for pattern in _SKIP_HOSTS)
+
+
+def _sentence_score(sentence: str, topic_words: set) -> int:
+    """0 for menus and boilerplate; otherwise topic hits (weighted) plus distinct gear words."""
+    words = re.findall(r"[a-z0-9']+", sentence.lower())
+    if len(words) < 7 or len(sentence) > 450:
+        return 0
+    if "→" in sentence or "»" in sentence or sentence.count("·") >= 2 or sentence.count("|") >= 2:
+        return 0  # "related links" strips: arrows and dot/pipe separators
+    capitalised = sum(1 for w in re.findall(r"[A-Za-z][\w']*", sentence) if w[0].isupper())
+    if capitalised > len(words) * 0.5:  # Title Case runs are menus, headings and tag lists
+        return 0
+    gear = len(set(words) & _GEAR_WORDS) + (1 if "les paul" in sentence.lower() else 0)
+    topic = len(set(words) & topic_words)
+    return (topic * 2 + gear) if (topic and gear) or gear >= 3 else 0
+
+
+def _extract_evidence(html: str, topic: str) -> str:
+    """The best few sentences of a page about the requested rig, in page order."""
+    parser = _PageText()
+    parser.feed(html)
+    topic_words = {w.lower() for w in re.findall(r"[A-Za-z0-9']{3,}", topic)}
+    candidates, seen = [], set()
+    for block in "".join(parser.parts).split("\n"):
+        block = re.sub(r"\s+", " ", block).strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", block):
+            sentence = sentence.strip()
+            if sentence.lower() in seen:  # pages often repeat a line (summary box + body)
+                continue
+            if sentence[-1:] in ".!?\"”)" and (score := _sentence_score(sentence, topic_words)):
+                seen.add(sentence.lower())
+                candidates.append((score, len(candidates), sentence))
+    best = sorted(sorted(candidates, reverse=True)[:3], key=lambda c: c[1])
+    return " ".join(c[2] for c in best)[:EVIDENCE_CHARS]
+
+
+def _page_evidence(href: str, topic: str) -> str:
+    """Fetch a public page (no redirects, bounded size) and extract rig evidence from it."""
     parsed = urlparse(href)
     if parsed.scheme not in ("https", "http") or not _is_safe_public_host(parsed.hostname or ""):
         return ""
@@ -134,40 +220,52 @@ def _page_evidence(href: str, query: str) -> str:
         with opener.open(request, timeout=8) as response:
             if "html" not in response.headers.get("Content-Type", ""):
                 return ""
-            parser = _PageText()
-            parser.feed(response.read(750_000).decode("utf-8", errors="ignore"))
+            html = response.read(750_000).decode("utf-8", errors="ignore")
     except Exception:
         return ""
-    text = re.sub(r"\s+", " ", " ".join(parser.parts)).strip()
-    keywords = {"amp", "amplifier", "vox", "mesa", "marshall", "fender", "live", "rig"}
-    keywords.update(word.lower() for word in re.findall(r"[a-zA-Z]{4,}", query))
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    relevant = [sentence.strip() for sentence in sentences if len(sentence.strip()) >= 50 and any(word in sentence.lower() for word in keywords)]
-    return " ".join(relevant[:2])[:600]
+    return _extract_evidence(html, topic)
 
 
-def web_notes(query: str) -> str:
-    """Return search snippets plus small, relevant extracts from their source pages."""
+def _ddgs_search(query: str, max_results: int) -> list:
     try:
         from ddgs import DDGS
     except ImportError as exc:
-        raise RuntimeError("Web research needs the 'ddgs' package. Run scripts/run.sh to install it.") from exc
+        raise RuntimeError("Web research needs the 'ddgs' package (run scripts/run.sh to install it).") from exc
+    with DDGS() as search:
+        return search.text(query, max_results=max_results, timeout=10) or []
+
+
+def web_notes(query: str, *, search=_ddgs_search, evidence=_page_evidence) -> str:
+    """Return up to MAX_SOURCES notes of documented gear for the request, one "- title: text (url)" line each."""
+    topic = _topic(query)
+    results, seen = [], set()
     try:
-        with DDGS() as search:
-            results = search.text(f"{query} guitar amp rig settings", max_results=3, timeout=10)
+        for search_query in (f"{topic} guitar rig amp used recording", f"{topic} equipment gear equipboard"):
+            for result in search(search_query, 6):
+                href = str(result.get("href", "")).strip()
+                if href and href not in seen and not _skip_source(href):
+                    seen.add(href)
+                    results.append(result)
+    except RuntimeError:
+        raise
     except Exception as exc:  # ddgs exposes provider-specific exception types.
         raise RuntimeError(f"Web research failed: {exc}") from exc
+
+    candidates = results[:8]
+    with ThreadPoolExecutor(max_workers=len(candidates) or 1) as pool:
+        extracts = list(pool.map(lambda r: evidence(str(r.get("href", "")).strip(), topic), candidates))
+    topic_words = {w.lower() for w in re.findall(r"[A-Za-z0-9']{3,}", topic)}
     notes = []
-    for result in results or []:
+    for result, extract in zip(candidates, extracts):
         title = str(result.get("title", "")).strip()
-        body = str(result.get("body", "")).strip()
-        href = str(result.get("href", "")).strip()
-        if title or body:
-            evidence = _page_evidence(href, query)
-            source_text = evidence or body
-            notes.append(f"- {title}: {source_text} ({href})"[:750])
+        snippet = re.sub(r"\s+", " ", str(result.get("body", ""))).strip()
+        text = extract or (snippet if _sentence_score(snippet if snippet[-1:] in ".!?" else snippet + ".", topic_words) else "")
+        if text:
+            notes.append(f"- {title[:120]}: {text[:EVIDENCE_CHARS]} ({result['href']})")  # URL last and intact
+        if len(notes) == MAX_SOURCES:
+            break
     if not notes:
-        raise RuntimeError("Web research returned no results.")
+        raise RuntimeError("Web research found no pages describing this rig.")
     return "\n".join(notes)
 
 
@@ -289,25 +387,41 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
     )[:8]
 
 
+MODELS_PAGE_SIZE = 50
+MAX_MODELS = 250
+
+
 def _tone3000_models_payload(tone_id: int, *, opener=urlopen) -> list[dict]:
+    """Every A2 model in a pack: the API pages its results, so keep asking until a short page."""
     api_key = _require_tone3000_api_key(for_action="downloads")
-    request = Request(
-        f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': 2})}",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-    try:
-        with opener(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"TONE3000 pack details failed: {exc}") from exc
-    return payload.get("data", []) if isinstance(payload, dict) else []
+    models: list[dict] = []
+    page = 1
+    while len(models) < MAX_MODELS:
+        request = Request(
+            f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': 2, 'page': page, 'page_size': MODELS_PAGE_SIZE})}",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        try:
+            with opener(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            if models:  # keep what we have rather than failing the whole pack on a later page
+                break
+            raise RuntimeError(f"TONE3000 pack details failed: {exc}") from exc
+        batch = payload.get("data", []) if isinstance(payload, dict) else []
+        models.extend(batch)
+        total_pages = payload.get("total_pages") if isinstance(payload, dict) else None
+        if not batch or (isinstance(total_pages, int) and page >= total_pages) or (total_pages is None and len(batch) < MODELS_PAGE_SIZE):
+            break
+        page += 1
+    return models[:MAX_MODELS]
 
 
 def tone3000_models(tone_id: int, *, opener=urlopen) -> list[dict]:
     """Return model names for one public TONE3000 tone pack, never credentials."""
     raw_models = _tone3000_models_payload(tone_id, opener=opener)
     models = []
-    for model in raw_models[:30]:
+    for model in raw_models:
         url = str(model.get("model_url") or "")
         if not url.startswith("https://"):
             continue

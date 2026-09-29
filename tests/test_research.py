@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import hybrid.services.research as research
@@ -122,3 +124,68 @@ def test_page_evidence_never_opens_a_connection_to_an_unsafe_target(monkeypatch,
 
 def test_redirects_from_search_result_pages_are_refused():
     assert research._NoRedirectHandler().redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/") is None
+
+
+class _Response:
+    def __init__(self, payload):
+        self.payload = json.dumps(payload).encode()
+
+    def read(self, _n=None):
+        return self.payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+_RIG_PAGE = """<html><body><nav><a>Tools</a> Tab Generator Chord Generator Guitar Practice Planner Amp Settings Marshall Fender.</nav>
+<header>Amp Settings For Layla By Eric Clapton Gear And Tone Tips.</header>
+<article><p>Clapton recorded Layla with his Stratocaster through a small Fender Champ amp, cranked hard.</p>
+<p>Clapton recorded Layla with his Stratocaster through a small Fender Champ amp, cranked hard.</p>
+<p>Subscribe to our newsletter for weekly tips and deals.</p></article>
+<footer>Copyright Fender Marshall Vox amp pedal reviews all rights reserved.</footer></body></html>"""
+
+
+def test_research_topic_drops_conversational_filler():
+    assert research._topic("Looking for the tone eric clapton had for layla") == "eric clapton layla"
+
+
+def test_research_evidence_skips_menus_and_repeats():
+    evidence = research._extract_evidence(_RIG_PAGE, "eric clapton layla")
+    assert evidence == "Clapton recorded Layla with his Stratocaster through a small Fender Champ amp, cranked hard."
+
+
+def test_web_notes_filters_sources_and_keeps_urls_last():
+    results = [
+        {"href": "https://www.tiktok.com/@x/video/1", "title": "TikTok", "body": "Clapton used a Fender Champ amp on Layla."},
+        {"href": "https://example.com/layla", "title": "Layla rig", "body": ""},
+        {"href": "https://example.org/menu", "title": "Menu page", "body": "Home About Contact"},
+    ]
+    notes = research.web_notes("layla clapton", search=lambda q, n: results,
+                               evidence=lambda href, topic: _RIG_PAGE and research._extract_evidence(_RIG_PAGE, topic)
+                               if "example.com" in href else "")
+    assert notes.splitlines() == ["- Layla rig: Clapton recorded Layla with his Stratocaster through a small Fender Champ "
+                                  "amp, cranked hard. (https://example.com/layla)"]
+
+
+def test_pack_models_follow_every_page(monkeypatch):
+    monkeypatch.setenv("TONE3000_API_KEY", "t3k_cs_server")
+    requested = []
+
+    def opener(request, timeout):
+        page = int(request.full_url.split("page=")[1].split("&")[0])
+        requested.append(page)
+        size = 50 if page < 3 else 7
+        return _Response({"data": [{"id": page * 100 + i, "name": f"p{page}-{i}", "model_url": "https://x/m.nam"}
+                                   for i in range(size)]})
+
+    models = research.tone3000_models(1, opener=opener)
+    assert requested == [1, 2, 3] and len(models) == 107
+
+
+
+def test_research_rejects_related_link_strips():
+    strip = "How to get Radiohead's guitar tone → · more Rock guitar tones → · Mesa amp settings for the riff."
+    assert research._sentence_score(strip, {"radiohead"}) == 0

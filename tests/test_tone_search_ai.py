@@ -45,6 +45,24 @@ def test_plan_uses_its_own_schema_and_trims_queries(fake_llm):
     assert plan["advice"] == ["Roll the volume back"]
 
 
+
+def test_plan_moves_amp_brand_pedals_to_effects(fake_llm):
+    replies, _sent = fake_llm
+    names = ["Marshall Shredmaster", "Marshall Bluesbreaker", "Mesa Boogie Trem-O-Verb", "ProCo RAT", "Marshall JCM800"]
+    replies.append(json.dumps({"summary": "s", "advice": [], "gear": [{"kind": "amp", "name": n} for n in names], "search_queries": []}))
+    plan = tone_search_ai.plan_tone("creep")
+    assert [g["kind"] for g in plan["gear"]] == ["effect", "amp", "amp", "effect", "amp"]
+
+
+def test_plan_drops_practice_amps_unless_asked(fake_llm):
+    replies, _sent = fake_llm
+    content = json.dumps({"summary": "s", "advice": [], "search_queries": ["Mesa Boogie Trem-O-Verb", "Fender Mustang LT25"],
+                          "gear": [{"kind": "amp", "name": "Mesa Boogie Trem-O-Verb"}, {"kind": "amp", "name": "Fender Mustang LT25"}]})
+    replies.extend([content, content])
+    plan = tone_search_ai.plan_tone("radiohead creep")
+    assert [g["name"] for g in plan["gear"]] == ["Mesa Boogie Trem-O-Verb"] and plan["search_queries"] == ["Mesa Boogie Trem-O-Verb"]
+    assert len(tone_search_ai.plan_tone("creep on a budget practice amp")["gear"]) == 2
+
 def test_plan_retries_once_on_unreadable_json_then_fails_clearly(fake_llm):
     replies, _ = fake_llm
     replies.extend(["not json", "still not json"])

@@ -979,7 +979,8 @@ def api_tone3000_ai_search():
                 pack["ai_fit"] = scores[pack["id"]]["fit"]
                 pack["ai_why"] = scores[pack["id"]]["why"]
         packs.sort(key=lambda p: (p.get("ai_fit", -1), p.get("match_score", 0), p.get("downloads_count") or 0), reverse=True)
-    return jsonify({"plan": plan, "queries": queries, "results": packs[:12], "warnings": warnings, "researched": bool(research)})
+    return jsonify({"plan": plan, "queries": queries, "results": packs[:12], "warnings": warnings, "researched": bool(research),
+                    "research_notes": research})
 
 
 @app.post("/api/tone3000/ai_pack_chat")
