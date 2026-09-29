@@ -177,7 +177,7 @@ def register_cg_routes(app, *, cg_dir: Path, a2_output_dir: Path, training_input
         return {"design_id": b["design_id"], "output_nam_path": path, "backend": backend, "epochs": epochs, "epoch_preset": preset,
                 "quick_mode": t.get("quick_mode"), "full_metrics_vs_target": t.get("full_metrics_vs_target"),
                 "trained": path is not None, "core": m.get("core"), "receptive_field_check": m.get("receptive_field_check"),
-                "embedded_artifact": embedded_artifact}
+                "embedded_artifact": embedded_artifact, "artifact_stem": m.get("artifact_stem") or "continuous_gain"}
 
     def public_state(p: CgProject) -> dict:
         st = p.state()

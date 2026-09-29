@@ -438,12 +438,13 @@
     const v = d.validation;
     const cabReady = Boolean(d.experimental_architectures) && d.training.embedded_artifact && d.training.embedded_artifact.state === "validated";
     const learnedCab = Boolean(d.bundle && d.bundle.cab && d.bundle.cab.baked);
+    const stem = d.training.artifact_stem || "continuous_gain";
     const actions = card("Test & export", `
         <button type="button" class="btn btn-secondary btn-block" id="cg-validate" ${S.job ? "disabled" : ""}>${v ? "Re-run validation" : "Run validation"}</button>
         <p class="info">Usually ${formatDuration(estimateSeconds("validate", d.plan ? d.plan.selected.length : 4))} -- renders comparisons and the audition sweep, in parallel.</p>
-        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download>${cabReady ? "Download tested amp-only NAM" : learnedCab ? "Download tested NAM (with learned cabinet)" : "Download tested NAM"}</a>
-        ${cabReady ? `<a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=cab" download>Download NAM with embedded cabinet</a>` : ""}
-        <a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download>Download provenance package</a>
+        <a class="btn btn-primary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=head" download="${esc(stem)}.nam">${cabReady ? "Download tested amp-only NAM" : learnedCab ? "Download tested NAM (with learned cabinet)" : "Download tested NAM"}</a>
+        ${cabReady ? `<a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/nam/download?artifact=cab" download="${esc(stem)}-with-cab.nam">Download NAM with embedded cabinet</a>` : ""}
+        <a class="btn btn-secondary btn-block btn-download-artifact" href="/api/cg/projects/${S.id}/export" download="${esc(stem)}-continuous-gain.zip">Download provenance package</a>
         <p class="info">${learnedCab
           ? "This is a full-rig capture: the cabinet is learned into the NAM, so validation compares it with your captures through the same cabinet IR."
           : "Validation compares the NAM with your original captures."}${cabReady ? " The cabinet download is a separately validated exact derivative; some A2-only players may not support its Sequential architecture." : ""}</p>${jobBox()}`);
