@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, apply_volume_change, calculate_gain_multiplier, compare_changes, describe_nam_tools
@@ -5,7 +7,7 @@ from hybrid.training.nam_tools import NamToolError, apply_metadata_changes, appl
 
 def slimmable(count=2):
     return {"architecture": "SlimmableContainer", "config": {"submodels": [
-        {"max_value": i + 1, "model": {"config": {"head_scale": 0.0051461088670930214, "weights": [1, 2]}, "metadata": {"loudness": -22.8 - i}}}
+        {"max_value": i + 1, "model": {"config": {"head_scale": 0.0051461088670930214}, "weights": [1, 2, 0.0051461088670930214], "metadata": {"loudness": -22.8 - i}}}
         for i in range(count)]}, "metadata": {"loudness": -22.7, "gain": 4.0}}
 
 
@@ -14,6 +16,8 @@ def test_slimmable_volume_edits_only_approved_paths():
     edited, paths, multiplier = apply_volume_change(original, 6)
     assert multiplier == pytest.approx(1.9952623149688795)
     assert edited["config"]["submodels"][0]["model"]["config"]["head_scale"] == pytest.approx(0.01026783)
+    assert edited["config"]["submodels"][0]["model"]["weights"][-1] == pytest.approx(0.01026783)
+    assert edited["config"]["submodels"][0]["model"]["weights"][:2] == [1, 2]
     assert edited["metadata"]["gain"] == 4.0
     assert compare_changes(original, edited) == paths
 
@@ -24,10 +28,11 @@ def test_gain_multiplier(db, expected):
 
 
 def test_single_model_and_missing_loudness():
-    source = {"architecture": "WaveNet", "config": {"head_scale": 2.0}, "metadata": {"gain": 1}}
+    source = {"architecture": "WaveNet", "config": {"head_scale": 2.0}, "weights": [0.5, 2.0], "metadata": {"gain": 1}}
     edited, paths, _ = apply_volume_change(source, -6)
     assert edited["config"]["head_scale"] == pytest.approx(1.0023744672545444)
-    assert paths == ["config.head_scale"]
+    assert edited["weights"] == [0.5, pytest.approx(1.0023744672545444)]
+    assert paths == ["config.head_scale", "weights[1]"]
 
 
 def test_unknown_model_is_refused():
@@ -114,6 +119,27 @@ def test_clearing_an_absent_metadata_field_is_a_no_op():
 
 
 def test_zero_db_volume_change_is_a_no_op():
-    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [], "metadata": {"loudness": -12.0}}
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.02}, "weights": [0.02], "metadata": {"loudness": -12.0}}
     result, paths, multiplier = apply_volume_change(data, 0.0)
     assert result == data and paths == [] and multiplier == 1.0
+
+
+def test_volume_scales_the_weight_namcore_actually_plays():
+    # NAMCore's WaveNet loader takes head_scale from the last weight and
+    # ignores config.head_scale; editing only the config field made a
+    # "+12 dB" file render at exactly the original level.
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.25}, "weights": [3.0, 0.25]}
+    edited, paths, _ = apply_volume_change(data, 20 * math.log10(2))
+    assert edited["weights"] == [3.0, pytest.approx(0.5)]
+    assert edited["config"]["head_scale"] == pytest.approx(0.5)
+    assert "weights[1]" in paths
+
+
+@pytest.mark.parametrize("weights", [[], None, [1.0, 0.9]])
+def test_volume_refuses_when_runtime_head_scale_is_missing_or_disagrees(weights):
+    data = {"architecture": "WaveNet", "config": {"head_scale": 0.25}}
+    if weights is not None:
+        data["weights"] = weights
+    with pytest.raises(NamToolError):
+        apply_volume_change(data, 6)
+    assert describe_nam_tools(data)["volume_unsupported_reason"]

@@ -58,8 +58,34 @@ def calculate_gain_multiplier(db_change: float) -> float:
     return multiplier
 
 
-def find_output_scalers(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """Return known final-audio output scale locations, or refuse to guess."""
+def _runtime_head_scale(owner: dict[str, Any], config: dict[str, Any], label: str) -> int:
+    """Return the index of the weight NAMCore actually uses as head_scale.
+
+    NAMCore's WaveNet loader reads head_scale from the LAST value of the
+    model's flat ``weights`` array and ignores the JSON ``config.head_scale``
+    field, so a gain edit must change that weight. The two are written
+    together by the trainer; if they disagree (e.g. a file whose config was
+    edited alone), refuse rather than guess which one is the real gain.
+    """
+    weights = owner.get("weights")
+    if not isinstance(weights, list) or not weights or not isinstance(weights[-1], (int, float)):
+        raise NamToolError(f"{label} has no weights array ending in its output head_scale")
+    stored, declared = float(weights[-1]), float(config["head_scale"])
+    if not math.isclose(stored, declared, rel_tol=1e-6, abs_tol=1e-12):
+        raise NamToolError(
+            f"{label} config head_scale ({declared:g}) does not match the head_scale NAMCore plays "
+            f"(last weight, {stored:g}); it may have been edited by an older version of this tool. "
+            "Apply the volume change to the original file instead."
+        )
+    return len(weights) - 1
+
+
+def find_output_scalers(data: dict[str, Any]) -> list[tuple[str, dict[str, Any], str, list[Any]]]:
+    """Return known final-audio output scale locations, or refuse to guess.
+
+    Each entry is ``(config path, config, weight path, weights)``: the JSON
+    field and the trailing weight that NAMCore actually applies.
+    """
     config = data.get("config")
     if not isinstance(config, dict):
         raise NamToolError("unsupported NAM: missing object config")
@@ -71,7 +97,8 @@ def find_output_scalers(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
         found = []
         for index, submodel in enumerate(submodels):
             try:
-                model_config = submodel["model"]["config"]
+                model = submodel["model"]
+                model_config = model["config"]
             except (KeyError, TypeError) as exc:
                 raise NamToolError(
                     f"SlimmableContainer submodel {index} has no recognised audio model config"
@@ -80,11 +107,14 @@ def find_output_scalers(data: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
                 raise NamToolError(f"SlimmableContainer submodel {index} has no output head_scale")
             if not isinstance(model_config["head_scale"], (int, float)):
                 raise NamToolError(f"SlimmableContainer submodel {index} output head_scale is not numeric")
-            found.append((f"config.submodels[{index}].model.config.head_scale", model_config))
+            last = _runtime_head_scale(model, model_config, f"SlimmableContainer submodel {index}")
+            prefix = f"config.submodels[{index}].model"
+            found.append((f"{prefix}.config.head_scale", model_config, f"{prefix}.weights[{last}]", model["weights"]))
         return found
     # Older single-output files: only the root model config is unambiguous.
     if "head_scale" in config and isinstance(config["head_scale"], (int, float)):
-        return [("config.head_scale", config)]
+        last = _runtime_head_scale(data, config, f"{architecture} model")
+        return [("config.head_scale", config, f"weights[{last}]", data["weights"])]
     raise NamToolError(
         f"unsupported or ambiguous NAM architecture {architecture!r}: no recognised final output head_scale"
     )
@@ -109,11 +139,11 @@ def describe_nam_tools(data: dict[str, Any]) -> dict[str, Any]:
         volume_unsupported_reason = str(exc)
     model = NamModel(path=Path("<metadata>"), raw=data)
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-    scales = [{"path": path, "value": config["head_scale"]} for path, config in scalers]
+    scales = [{"path": path, "value": config["head_scale"]} for path, config, _, _ in scalers]
     loudness = metadata.get("loudness")
     if not isinstance(loudness, (int, float)):
         loudness_values = []
-        for path, _ in scalers:
+        for path, *_ in scalers:
             if path.startswith("config.submodels"):
                 index = int(path.split("[")[1].split("]")[0])
                 value = data["config"]["submodels"][index]["model"].get("metadata", {}).get("loudness")
@@ -182,11 +212,16 @@ def apply_volume_change(data: dict[str, Any], db_change: float) -> tuple[dict[st
     expected = []
     # Only paths whose value actually changes are expected: a 0 dB request, or
     # a head_scale of 0, changes nothing and must be a no-op, not a rejection.
-    for path, config in scalers:
+    for path, config, weight_path, weights in scalers:
         before = config["head_scale"]
         config["head_scale"] *= multiplier
         if config["head_scale"] != before:
             expected.append(path)
+        # The audible change: NAMCore plays the trailing weight, not the field.
+        before = weights[-1]
+        weights[-1] *= multiplier
+        if weights[-1] != before:
+            expected.append(weight_path)
         # The only submodel metadata associated with a recognised scaler.
         metadata_path = path.rsplit(".config.head_scale", 1)[0] + ".metadata.loudness"
         if path.startswith("config.submodels") and db_change != 0.0:

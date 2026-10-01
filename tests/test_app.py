@@ -493,7 +493,7 @@ def test_tone3000_model_download_proxies_the_selected_pack_member(client, monkey
 def _write_tool_nam(path):
     path.write_text(jsonlib.dumps({
         "architecture": "SlimmableContainer",
-        "config": {"submodels": [{"model": {"config": {"head_scale": 0.0051461088670930214, "weights": [1]}, "metadata": {"loudness": -22.8}}}]},
+        "config": {"submodels": [{"model": {"config": {"head_scale": 0.0051461088670930214}, "weights": [1, 0.0051461088670930214], "metadata": {"loudness": -22.8}}}]},
         "metadata": {"loudness": -22.7, "gain": 3.0},
     }))
 
@@ -944,6 +944,7 @@ def test_nam_volume_tool_writes_only_a_new_validated_file(client, tmp_path):
     data = response.get_json()
     assert data["changed_paths"] == [
         "config.submodels[0].model.config.head_scale",
+        "config.submodels[0].model.weights[1]",
         "config.submodels[0].model.metadata.loudness",
         "metadata.loudness",
     ]
@@ -952,7 +953,7 @@ def test_nam_volume_tool_writes_only_a_new_validated_file(client, tmp_path):
     assert downloaded.status_code == 200
     edited = jsonlib.loads(downloaded.data)
     assert edited["metadata"]["gain"] == 3.0
-    assert edited["config"]["submodels"][0]["model"]["config"]["weights"] == [1]
+    assert edited["config"]["submodels"][0]["model"]["weights"] == [1, pytest.approx(0.0051461088670930214 * 10 ** (6 / 20))]
 
 
 def test_nam_volume_validation_ignores_json_object_key_order(client, tmp_path):
@@ -965,7 +966,8 @@ def test_nam_volume_validation_ignores_json_object_key_order(client, tmp_path):
         "config": {"submodels": [{
             "model": {
                 "metadata": {"loudness": -20.5},
-                "config": {"head_scale": 0.01, "weights": [1]},
+                "config": {"head_scale": 0.01},
+                "weights": [1, 0.01],
             },
         }]},
     }))
@@ -984,6 +986,7 @@ def test_nam_volume_validation_ignores_json_object_key_order(client, tmp_path):
         "metadata.loudness",
         "config.submodels[0].model.metadata.loudness",
         "config.submodels[0].model.config.head_scale",
+        "config.submodels[0].model.weights[1]",
     }
 
 
