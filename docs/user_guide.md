@@ -494,9 +494,11 @@ change `metadata.gain`, which describes separate metadata/calibration intent.
 Modern A2 `SlimmableContainer` NAMs have one final audio model per submodel;
 the tool edits only `config.submodels[*].model.config.head_scale`. Older
 single-model files are supported only when their root `config.head_scale` is
-present. Unknown layouts are refused rather than guessed. Before saving, a
-recursive JSON diff must match exactly the approved output-scale and loudness
-paths, so weights and every other model field stay unchanged.
+present. Unknown layouts are refused rather than guessed. For each supported
+model, the tool changes both `config.head_scale` and the final `weights` value
+that NAMCore actually uses for audio output. Before saving, a recursive JSON
+diff must match exactly those output-scale paths and the available loudness
+metadata paths; all other model weights and fields stay unchanged.
 
 The slider starts at the model's measured loudness and sets the desired final
 level. For example, moving from -20 dB to -17 dB applies a +3 dB change. A +6

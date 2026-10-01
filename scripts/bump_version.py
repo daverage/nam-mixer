@@ -8,6 +8,7 @@ Updates:
     - app.py (APP_VERSION)
     - desktop/src-tauri/Cargo.toml
     - desktop/src-tauri/tauri.conf.json
+    - desktop/src-tauri/Cargo.lock (nam-mixer-desktop package entry)
 """
 import sys
 import re
@@ -60,10 +61,16 @@ def update_tauri_conf(content):
         content
     )
 
+def update_cargo_lock(content):
+    """Update only the application package entry, not dependency versions."""
+    pattern = r'(\[\[package\]\]\nname = "nam-mixer-desktop"\nversion = ")[\d.]+("'
+    return re.sub(pattern, rf'\g<1>{new_version}\g<2>', content, count=1)
+
 files = [
     (repo_root / "app.py", update_app_py),
     (repo_root / "desktop/src-tauri/Cargo.toml", update_cargo_toml),
     (repo_root / "desktop/src-tauri/tauri.conf.json", update_tauri_conf),
+    (repo_root / "desktop/src-tauri/Cargo.lock", update_cargo_lock),
 ]
 
 for file_path, updater in files:

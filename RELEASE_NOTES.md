@@ -33,6 +33,8 @@ under an "Unreleased" heading.
   finished jobs.
 - TONE3000 search shows progress and research notes, gives clearer failed-turn
   feedback, and makes pack-file browsing easier.
+- **NAM Tools output volume** changes the model's actual output scale and
+  creates a new `.nam` file; measured loudness metadata is updated to match.
 
 ## v0.5.2
 
