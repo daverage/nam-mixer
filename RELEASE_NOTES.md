@@ -14,6 +14,26 @@ under an "Unreleased" heading.
 - Focus outlines and the selected tab, step and preset stay visible in Windows
   high-contrast mode.
 
+## v0.5.7
+
+### Find captures by sound
+
+- **TONE3000 AI search** turns a plain-language tone request into a researched
+  brief, ranks matching packs, and lets you inspect their NAM files or ask the
+  AI which file fits. Search evidence and pack metadata remain visible so you
+  can review recommendations before downloading.
+- Research now gives interview and rig-rundown evidence more weight than
+  generic gear listings, distinguishes artist-wide gear from recording-era
+  evidence, and draws candidate pages from different sites.
+
+### Other improvements
+
+- The Continuous Gain tab reconnects to an active training job when you return
+  to it, displays live training logs, and handles cancelled Kaggle jobs as
+  finished jobs.
+- TONE3000 search shows progress and research notes, gives clearer failed-turn
+  feedback, and makes pack-file browsing easier.
+
 ## v0.5.2
 
 ### Your work is kept

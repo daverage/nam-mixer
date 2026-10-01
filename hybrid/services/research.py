@@ -238,13 +238,16 @@ def _ddgs_search(query: str, max_results: int) -> list:
 def web_notes(query: str, *, search=_ddgs_search, evidence=_page_evidence) -> str:
     """Return up to MAX_SOURCES notes of documented gear for the request, one "- title: text (url)" line each."""
     topic = _topic(query)
-    results, seen = [], set()
+    player = "bassist bass" if re.search(r"\bbass(?:ist)?\b", query, re.IGNORECASE) else "guitarist"
+    results, seen, seen_hosts = [], set(), set()
     try:
-        for search_query in (f"{topic} guitar rig amp used recording", f"{topic} equipment gear equipboard"):
+        for search_query in (f"{topic} {player} amp pedals gear used", f"{topic} {player} interview amplifier gear"):
             for result in search(search_query, 6):
                 href = str(result.get("href", "")).strip()
-                if href and href not in seen and not _skip_source(href):
+                host = (urlparse(href).hostname or "").lower().removeprefix("www.")
+                if href and href not in seen and host and host not in seen_hosts and not _skip_source(href):
                     seen.add(href)
+                    seen_hosts.add(host)
                     results.append(result)
     except RuntimeError:
         raise

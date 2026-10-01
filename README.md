@@ -68,6 +68,10 @@ A **Tone Wizard** can suggest settings from a plain-English description
 ("glassy clean that breaks up into a British crunch"). It works on built-in
 rules, or you can connect an AI model in **Settings**.
 
+The **TONE3000** tab also has an AI search mode: describe the sound, review
+the researched tone brief, compare ranked capture packs, then inspect a pack's
+NAM files and ask which file fits your setup.
+
 **Continuous Gain** has its own tab: add your captures, let it analyse and
 choose which ones to train on, train, then test and export. Save your work at
 any time in **Sessions**; unsaved Builder work is also autosaved, so you can

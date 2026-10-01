@@ -286,6 +286,14 @@ requests that name what should come from Amp A and what from Amp B.
 
 ### TONE3000
 
+Choose **Describe a tone (AI)** to search by sound instead of starting with an
+amp name. It builds a short tone brief from your request and optional web
+research, ranks matching packs, and lets you inspect a pack's NAM files or ask
+which file best fits. Review the research and pack metadata before downloading;
+a pack match does not establish that an artist used the capture. This mode
+needs an AI provider, and catalogue search needs the TONE3000 API key in
+[Settings](#settings).
+
 Search [TONE3000](https://www.tone3000.com) for NAM captures by amp or tone,
 optionally limited to **Heads only** (for pairing with your own cabinet IR)
 or to one creator. Each result shows how well its metadata fits your search.
