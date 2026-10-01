@@ -19,6 +19,26 @@ Reviewed the indexed `tonesearch` project against `hybrid-nam-builder`'s built-i
 - ToneSearch's SQLite schema, website UI, admin library and API-key settings are coupled to its own app. Reuse the behavior and concepts, not the whole package.
 - MCP is an interface expansion, not by itself an improvement to retrieval relevance. The reusable retrieval improvements are the cache, reviewed research library, feedback loop, and search tools over the existing service layer.
 
+## Prompt and research review: low-effort opportunities
+
+ToneSearch's most useful prompt-engineering work is its **explicit evidence policy**, not a uniquely complex prompt framework. Its planning prompt separates artist-era-specific confirmed gear from career-wide artist gear and suggestions, tells the model how to resolve source conflicts, constrains output to concrete product names, and gives task-specific search-query rules. It then validates and normalizes the model's output in code (gear kind correction, generic-name removal, practice-amp filtering, confidence normalization and query deduplication). The builder already has a rich recipe schema and prompt constraints, but can borrow the pattern: make evidence status and query purpose explicit in the AI's structured result, and keep deterministic post-validation outside the prompt. This is a small targeted change to the existing discovery planner, not a prompt rewrite.
+
+ToneSearch's research flow makes several cheap quality improvements that appear only partly present in the builder:
+
+- It strips conversational filler before composing web queries. The builder already has an extensive `_FILLER_WORDS` list and `_topic` helper in `hybrid/services/research.py`, so this is already adopted; no work needed there.
+- It searches two distinct query formulations in parallel (artist/bassist gear and interview/gear), retries other engines, and only falls back to a topic-only query if both focused searches return nothing. This can improve coverage over a single query strategy. The builder's `web_notes` currently searches two queries, but they are equipment/equipboard-oriented. A low-effort change is to replace the weaker generic/equipboard formulation with an interview/rig-rundown formulation, or add it only when the first pass has no useful evidence. Preserve the builder's existing host filtering and bounded concurrency.
+- It limits evidence to one page per host, preventing a single gear-catalogue domain from occupying the whole prompt context. The builder caps notes and sources, but should also deduplicate by host if it does not already do so in the current implementation.
+- It rejects forum sentences describing the poster's own rig and avoids treating sales copy/questions as evidence. This is valuable but should be a second small step because it needs forum/source classification and tests; don't blindly transplant heuristics without confirming source shapes.
+- It labels research in the prompt as potentially partial/noisy and asks the model to prefer direct player interviews or rig rundowns over tone-site recommendations. The builder can adopt this as a short prompt instruction immediately, with no architecture change.
+
+### Recommended simple sequence
+
+1. Inspect the exact AI discovery prompt and its structured output schema. Add concise confidence/source rules (recording/era-specific, artist-general, inference) and direct-source precedence; retain deterministic output validation.
+2. Add a rig-rundown/interview query as a fallback to current web queries, and deduplicate sources by hostname. Keep current safe-host and redirect protections.
+3. Add one focused regression fixture for conflicting sources and one for a noisy/community page before broad prompt iteration.
+
+The source-level review identifies plausible improvements; it does not establish measured accuracy gains. Confirm them with representative artist requests and before/after evidence traces before adopting more invasive prompt or research changes.
+
 ## Suggested order
 
 1. Add a small best-effort TTL cache around TONE3000 results and repeated AI/web search work, with explicit invalidation and tests for expiry/failure.
