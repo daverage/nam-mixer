@@ -1031,10 +1031,10 @@ def api_tone3000_model_download(tone_id: int, model_id: int):
         data, name = tone3000_model_download(tone_id, model_id)
         filename = secure_filename(name) or f"tone3000-{model_id}"
         if not filename.lower().endswith(".nam"):
-            filename += ".nam"
+            filename = filename.rsplit(".", 1)[0] + ".nam" if "." in filename else filename + ".nam"
         return send_file(io.BytesIO(data), mimetype="application/octet-stream", as_attachment=True, download_name=filename)
     except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": str(exc)}), 503
 
 
 @app.get("/api/renderer/readiness")

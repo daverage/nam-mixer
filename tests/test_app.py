@@ -481,13 +481,28 @@ def test_tone3000_pack_models_are_exposed_as_direct_downloads(client, monkeypatc
 
 
 def test_tone3000_model_download_proxies_the_selected_pack_member(client, monkeypatch):
-    monkeypatch.setattr(app_module, "tone3000_model_download", lambda tone_id, model_id: (b"nam-data", "Clean.nam"))
+    monkeypatch.setattr(app_module, "tone3000_model_download", lambda tone_id, model_id: (b"nam-data", "Clean.json"))
 
     response = client.get("/api/tone3000/tones/42/models/12/download")
 
     assert response.status_code == 200
     assert response.data == b"nam-data"
     assert "attachment" in response.headers["Content-Disposition"]
+    assert "Clean.nam" in response.headers["Content-Disposition"]
+    assert "Clean.json.nam" not in response.headers["Content-Disposition"]
+
+
+def test_tone3000_model_download_keeps_api_errors_as_errors(client, monkeypatch):
+    def fail_download(*_args, **_kwargs):
+        raise RuntimeError("TONE3000 key is missing.")
+
+    monkeypatch.setattr(app_module, "tone3000_model_download", fail_download)
+
+    response = client.get("/api/tone3000/tones/42/models/12/download")
+
+    assert response.status_code == 503
+    assert response.get_json() == {"error": "TONE3000 key is missing."}
+    assert "Content-Disposition" not in response.headers
 
 
 def _write_tool_nam(path):

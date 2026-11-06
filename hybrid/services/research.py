@@ -5,15 +5,24 @@ import ipaddress
 import json
 import re
 import socket
+import threading
+import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
-from urllib.parse import urlencode, urlparse
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from hybrid.services.env_file import read_saved_env_value as _env
 
 
 TONE3000_BASE = "https://www.tone3000.com/api/v1"
+MAX_MODEL_DOWNLOAD_BYTES = 50_000_000
+_CATALOGUE_CACHE_SECONDS = 300
+_CATALOGUE_CACHE_LIMIT = 128
+_catalogue_cache: OrderedDict[str, tuple[float, list[dict]]] = OrderedDict()
+_catalogue_cache_lock = threading.Lock()
 
 _METADATA_STOPWORDS = frozenset({
     # Domain filler: generic enough to appear in almost any amp listing or
@@ -290,6 +299,12 @@ def _require_tone3000_api_key(*, for_action: str) -> str:
     return api_key
 
 
+def _open_tone3000_api(request: Request, *, timeout: int, opener) -> object:
+    """Keep API credentials on the fixed TONE3000 host if the endpoint redirects."""
+    open_url = opener if opener is not urlopen else build_opener(_NoRedirectHandler).open
+    return open_url(request, timeout=timeout)
+
+
 _TONE3000_LINK_PREFIXES = ("https://api.tone3000.com/", "https://www.tone3000.com/")
 
 
@@ -338,16 +353,35 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
     params = {"query": query, "page": 1, "page_size": 20, "sort": "best-match", "format": "nam", "architecture": "2"}
     if rig_scope == "heads":
         params["gears"] = "amp"
-    request = Request(
-        f"{TONE3000_BASE}/tones/search?{urlencode(params)}",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-    try:
-        with opener(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"TONE3000 search failed: {exc}") from exc
-    tones = payload.get("data", []) if isinstance(payload, dict) else []
+    cache_key = json.dumps(params, sort_keys=True)
+    now = time.monotonic()
+    with _catalogue_cache_lock:
+        cached = _catalogue_cache.get(cache_key)
+        if cached and now - cached[0] < _CATALOGUE_CACHE_SECONDS:
+            tones = cached[1]
+            _catalogue_cache.move_to_end(cache_key)
+        else:
+            _catalogue_cache.pop(cache_key, None)
+            tones = None
+    if tones is None:
+        request = Request(
+            f"{TONE3000_BASE}/tones/search?{urlencode(params)}",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        try:
+            with _open_tone3000_api(request, timeout=20, opener=opener) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"TONE3000 search failed: {exc}") from exc
+        tones = payload.get("data", []) if isinstance(payload, dict) else []
+        if not isinstance(tones, list):
+            tones = []
+        tones = [tone for tone in tones if isinstance(tone, dict)]
+        with _catalogue_cache_lock:
+            _catalogue_cache[cache_key] = (now, tones)
+            _catalogue_cache.move_to_end(cache_key)
+            while len(_catalogue_cache) > _CATALOGUE_CACHE_LIMIT:
+                _catalogue_cache.pop(next(iter(_catalogue_cache)))
     author = author.strip().lower()
     results = []
     for tone in tones:
@@ -394,18 +428,18 @@ MODELS_PAGE_SIZE = 50
 MAX_MODELS = 250
 
 
-def _tone3000_models_payload(tone_id: int, *, opener=urlopen) -> list[dict]:
-    """Every A2 model in a pack: the API pages its results, so keep asking until a short page."""
+def _tone3000_models_payload(tone_id: int, *, architecture: str = "2", opener=urlopen) -> list[dict]:
+    """Every model in a pack for one architecture: the API pages its results."""
     api_key = _require_tone3000_api_key(for_action="downloads")
     models: list[dict] = []
     page = 1
     while len(models) < MAX_MODELS:
         request = Request(
-            f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': 2, 'page': page, 'page_size': MODELS_PAGE_SIZE})}",
+            f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': architecture, 'page': page, 'page_size': MODELS_PAGE_SIZE})}",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         )
         try:
-            with opener(request, timeout=20) as response:
+            with _open_tone3000_api(request, timeout=20, opener=opener) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             if models:  # keep what we have rather than failing the whole pack on a later page
@@ -425,8 +459,7 @@ def tone3000_models(tone_id: int, *, opener=urlopen) -> list[dict]:
     raw_models = _tone3000_models_payload(tone_id, opener=opener)
     models = []
     for model in raw_models:
-        url = str(model.get("model_url") or "")
-        if not url.startswith("https://"):
+        if not _model_link(model):
             continue
         models.append({
             "id": model.get("id"),
@@ -440,17 +473,64 @@ def tone3000_models(tone_id: int, *, opener=urlopen) -> list[dict]:
 
 def tone3000_model_download(tone_id: int, model_id: int, *, opener=urlopen) -> tuple[bytes, str]:
     """Download a selected pack member server-side, keeping the API key private."""
-    raw_models = _tone3000_models_payload(tone_id, opener=opener)
-    model = next((item for item in raw_models if item.get("id") == model_id), None)
-    url = str((model or {}).get("model_url") or "")
-    if not url.startswith(f"{TONE3000_BASE}/models/"):
-        raise RuntimeError("TONE3000 could not provide a safe download link for that NAM file.")
+    model = _find_tone3000_model(tone_id, model_id, opener)
+    if not model:
+        raise RuntimeError("TONE3000 has no download link for that NAM file.")
+    api_key = _require_tone3000_api_key(for_action="downloads")
+    data = _fetch_tone3000_model(_model_link(model), api_key, opener)
+    return data, str(model.get("name") or f"tone3000-{model_id}")
+
+
+def _model_link(model: dict) -> str:
+    return str(next((model.get(key) for key in ("model_url", "download_url", "file_url", "url") if model.get(key)), "") or "")
+
+
+def _find_tone3000_model(tone_id: int, model_id: int, opener) -> dict | None:
+    """Resolve a file by the listed pack, then other NAM versions, then the model endpoint."""
+    for architecture in ("2", "1", "any"):
+        try:
+            models = _tone3000_models_payload(tone_id, architecture=architecture, opener=opener)
+        except RuntimeError:
+            continue
+        model = next((item for item in models if item.get("id") == model_id), None)
+        if model and _model_link(model):
+            return model
     api_key = _require_tone3000_api_key(for_action="downloads")
     try:
-        with opener(Request(url, headers={"Authorization": f"Bearer {api_key}"}), timeout=30) as response:
-            data = response.read()
-    except Exception as exc:
-        raise RuntimeError(f"TONE3000 model download failed: {exc}") from exc
-    if not data:
-        raise RuntimeError("TONE3000 returned an empty NAM download.")
-    return data, str(model.get("name") or f"tone3000-{model_id}")
+        request = Request(f"{TONE3000_BASE}/models/{model_id}", headers={"Authorization": f"Bearer {api_key}"})
+        with _open_tone3000_api(request, timeout=20, opener=opener) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
+    model = payload.get("data", payload) if isinstance(payload, dict) else None
+    if not isinstance(model, dict) or model.get("tone_id") not in (None, tone_id):
+        return None
+    return model if _model_link(model) else None
+
+
+def _fetch_tone3000_model(url: str, api_key: str, opener) -> bytes:
+    """Follow signed storage redirects manually and never forward the API key to another host."""
+    open_url = opener if opener is not urlopen else build_opener(_NoRedirectHandler).open
+    for _ in range(3):
+        parsed = urlparse(url)
+        is_api_url = url.startswith(f"{TONE3000_BASE}/")
+        if not is_api_url and not (parsed.scheme == "https" and _is_safe_public_host(parsed.hostname or "")):
+            raise RuntimeError(f"TONE3000 gave a download link on an unexpected host ({parsed.hostname or 'none'}).")
+        request = Request(url, headers={"Authorization": f"Bearer {api_key}"} if is_api_url else {})
+        try:
+            with open_url(request, timeout=30) as response:
+                data = response.read(MAX_MODEL_DOWNLOAD_BYTES + 1)
+        except HTTPError as exc:
+            location = exc.headers.get("Location") if exc.code in (301, 302, 303, 307, 308) else None
+            if location:
+                url = urljoin(url, location)
+                continue
+            raise RuntimeError(f"TONE3000 download failed: HTTP {exc.code}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"TONE3000 model download failed: {exc}") from exc
+        if len(data) > MAX_MODEL_DOWNLOAD_BYTES:
+            raise RuntimeError("That NAM file is too large to download here; open the pack on TONE3000 instead.")
+        if not data:
+            raise RuntimeError("TONE3000 returned an empty NAM download.")
+        return data
+    raise RuntimeError("TONE3000 redirected the download too many times.")

@@ -1,4 +1,5 @@
 import json
+from urllib.error import HTTPError
 
 import pytest
 
@@ -67,6 +68,71 @@ def test_tone3000_search_ranks_the_complete_catalogue_page_before_limiting(monke
 
     assert ranked[0]["title"] == "Vox AC30 Top Boost"
     assert len(ranked) == 8
+
+
+def test_tone3000_catalogue_cache_reuses_public_rows_and_ranks_per_request(monkeypatch):
+    research._catalogue_cache.clear()
+    monkeypatch.setattr(research, "_require_tone3000_api_key", lambda **_kwargs: "t3k_cs_test")
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"data": [
+                {"id": 1, "title": "Vox AC30", "description": ""},
+                {"id": 2, "title": "Marshall JCM800", "description": ""},
+            ]}).encode()
+
+    def opener(*_args, **_kwargs):
+        calls.append(1)
+        return Response()
+
+    vox = research.tone3000_search("shared query", rig_scope="anything", rank_query="Vox AC30", opener=opener)
+    marshall = research.tone3000_search("shared query", rig_scope="anything", rank_query="Marshall JCM800", opener=opener)
+
+    assert len(calls) == 1
+    assert vox[0]["id"] == 1
+    assert marshall[0]["id"] == 2
+    research._catalogue_cache.clear()
+
+
+def test_tone3000_download_follows_signed_storage_redirect_without_forwarding_the_key(monkeypatch):
+    monkeypatch.setattr(research, "_require_tone3000_api_key", lambda **_kwargs: "t3k_cs_test")
+    monkeypatch.setattr(research, "_is_safe_public_host", lambda host: host == "cdn.example")
+    monkeypatch.setattr(research, "_tone3000_models_payload", lambda *_args, **_kwargs: [{
+        "id": 12,
+        "name": "Clean.json",
+        "download_url": f"{research.TONE3000_BASE}/models/12/download",
+    }])
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit=None):
+            return b"nam-data"
+
+    def opener(request, timeout):
+        requests.append(request)
+        if request.full_url.startswith(research.TONE3000_BASE):
+            raise HTTPError(request.full_url, 302, "Found", {"Location": "https://cdn.example/clean.nam"}, None)
+        return Response()
+
+    data, name = research.tone3000_model_download(42, 12, opener=opener)
+
+    assert data == b"nam-data"
+    assert name == "Clean.json"
+    assert requests[0].get_header("Authorization") == "Bearer t3k_cs_test"
+    assert requests[1].get_header("Authorization") is None
 
 
 # ---- SSRF guard for pages linked from third-party search results

@@ -29,6 +29,59 @@ test('TONE3000 settings validation distinguishes secret and publishable keys', (
   assert.equal(sandbox.settingValidationMessage(field, ''), '');
 });
 
+test('TONE3000 NAM downloads reject JSON errors and force a NAM filename', async () => {
+  const sandbox = {
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'Content-Type' ? 'application/octet-stream' : 'attachment; filename="Clean.nam"' },
+      blob: async () => ({ type: 'application/octet-stream', size: 8 }),
+    }),
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('function tone3000NamFilename(', 'function buildRecipeConversationMarkdown('), sandbox);
+
+  const result = await sandbox.downloadTone3000Nam('/download', 'Clean.json');
+  assert.equal(result.filename, 'Clean.nam');
+  assert.equal(result.blob.size, 8);
+
+  sandbox.fetch = async () => ({
+    ok: false,
+    status: 502,
+    headers: { get: name => name === 'Content-Type' ? 'application/json' : null },
+    clone: () => ({ json: async () => ({ error: 'TONE3000 key is missing.' }) }),
+    blob: async () => { throw new Error('error response must not become a NAM download'); },
+  });
+  await assert.rejects(sandbox.downloadTone3000Nam('/download', 'Clean.nam'), /TONE3000 key is missing/);
+
+  sandbox.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: name => name === 'Content-Type' ? 'application/json' : null },
+    blob: async () => ({ type: 'application/json', size: 8 }),
+  });
+  await assert.rejects(sandbox.downloadTone3000Nam('/download', 'Clean.nam'), /did not return a NAM file/);
+});
+
+test('desktop blob saving encodes large NAM files without overflowing the argument stack', async () => {
+  const saved = [];
+  const sandbox = {
+    isTauriDesktop: true,
+    btoa,
+    desktopSave: async (...args) => saved.push(args),
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('async function saveBlobAsFile(', 'async function triggerFileDownload('), sandbox);
+  const bytes = Uint8Array.from({ length: 200_000 }, (_, index) => index % 251);
+  const buffer = bytes.buffer;
+
+  await sandbox.saveBlobAsFile('Large capture.nam', { arrayBuffer: async () => buffer });
+
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0][0], 'save_bytes');
+  assert.deepEqual(Buffer.from(saved[0][1].dataBase64, 'base64'), Buffer.from(bytes));
+});
+
 test('welcome cookie is versioned and independent of the backend port', () => {
   const sandbox = { WELCOME_COOKIE_NAME: 'nam-mixer-welcome-version' };
   vm.createContext(sandbox);

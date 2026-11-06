@@ -1875,7 +1875,14 @@ async function saveBlobAsFile(filename, blob) {
     // click -- the anchor-based path revokes its object URL synchronously
     // right after the click, before an async Tauri save could ever read it.
     const buf = await blob.arrayBuffer();
-    const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const bytes = new Uint8Array(buf);
+    const encoded = [];
+    // Keep each conversion small enough for WebKit/Chromium's argument and
+    // string limits; NAM captures are much larger than ordinary UI blobs.
+    for (let offset = 0; offset < bytes.length; offset += 0x6000) {
+      encoded.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + 0x6000))));
+    }
+    const dataBase64 = encoded.join("");
     await desktopSave("save_bytes", { filename, dataBase64 }, filename);
     return filename;
   }
@@ -1903,6 +1910,33 @@ async function triggerFileDownload(url, filename) {
   link.click();
   link.remove();
   return filename;
+}
+
+function tone3000NamFilename(value) {
+  let filename = String(value || "tone3000-model").split(/[\\/]/).pop();
+  filename = filename.replace(/[<>:"|?*\x00-\x1f]/g, "_").trim() || "tone3000-model";
+  return /\.nam$/i.test(filename) ? filename : filename.replace(/\.[^.]+$/, "") + ".nam";
+}
+
+async function downloadTone3000Nam(url, requestedName, fetchImpl = fetch) {
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    const problem = await response.clone().json().catch(() => null);
+    throw new Error(problem?.error || `NAM download failed (${response.status})`);
+  }
+  const contentType = (response.headers.get("Content-Type") || "").split(";", 1)[0].trim().toLowerCase();
+  if (contentType === "application/json" || contentType === "text/html") {
+    throw new Error("TONE3000 did not return a NAM file. Check the TONE3000 key and try again.");
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const utf8Name = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const quotedName = /filename="([^"]+)"/i.exec(disposition);
+  const plainName = /filename=([^;]+)/i.exec(disposition);
+  let responseName = utf8Name?.[1] ? decodeURIComponent(utf8Name[1]) : quotedName?.[1] || plainName?.[1]?.trim();
+  if (responseName) responseName = responseName.replace(/^"|"$/g, "");
+  const blob = await response.blob();
+  if (!blob.size) throw new Error("TONE3000 returned an empty NAM file.");
+  return { filename: tone3000NamFilename(responseName || requestedName), blob };
 }
 
 function buildRecipeConversationMarkdown(messages, { includeDebug = false, debugTrace = [] } = {}) {
@@ -5752,7 +5786,22 @@ function showSelectedTone3000Capture(capture) {
     download.className = "btn btn-secondary btn-small";
     download.textContent = desktopSaveLabel("Download " + model.name);
     const url = `/api/tone3000/tones/${encodeURIComponent(capture.id)}/models/${encodeURIComponent(model.id)}/download`;
-    download.addEventListener("click", () => triggerFileDownload(url, model.name));
+    download.addEventListener("click", async () => {
+      download.disabled = true;
+      try {
+        const file = await downloadTone3000Nam(url, model.name);
+        await saveBlobAsFile(file.filename, file.blob);
+        announce(`Saved ${file.filename}.`);
+      } catch (error) {
+        const warning = document.createElement("p");
+        warning.className = "t3ai-warning";
+        warning.textContent = error.message || "NAM download failed.";
+        models.append(warning);
+        announce(warning.textContent);
+      } finally {
+        download.disabled = false;
+      }
+    });
     models.append(download);
   });
   fileDetails.append(summary, models);
