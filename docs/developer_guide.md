@@ -165,9 +165,10 @@ to the checkout's untracked `.env` and applied to the running process.
 To configure by hand instead, copy `.env.example` to `.env`. It sets up the
 Local provider with Ollama (`gemma4:e4b` at `http://127.0.0.1:11434/v1`) and
 documents the optional `TONE3000_API_KEY` and `TONE3000_CLIENT_ID`. The API
-secret key is used for catalogue requests. The publishable key identifies the
-OAuth client; user authorization tokens remain in browser session storage and
-are passed to the server only for downloads. The launchers (`scripts/run.sh`,
+secret key is used for catalogue searches and model names. The publishable key
+identifies the OAuth client; user authorization tokens remain in browser
+session storage and are passed to the server for fresh model lookup and file
+downloads. The launchers (`scripts/run.sh`,
 `scripts/run.ps1`) read `.env` automatically.
 
 TONE3000 model downloads use the exact `model_url` returned by the catalogue,

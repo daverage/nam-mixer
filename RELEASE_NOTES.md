@@ -28,8 +28,8 @@ under an "Unreleased" heading.
   OAuth device authorization. The connection refreshes while the browser tab
   remains open.
 - NAM downloads use the exact TONE3000 `model_url` and authorize requests to
-  TONE3000 file hosts. Signed external storage redirects do not receive the
-  OAuth token.
+  TONE3000 file hosts. Download-time model lookup uses the same connected
+  account. Signed external storage redirects do not receive the OAuth token.
 - Added an identifying User-Agent to TONE3000 API and file requests.
 
 ## v0.5.7

@@ -314,10 +314,11 @@ The OAuth access and refresh tokens are kept in the current browser tab's
 session storage. Access tokens refresh automatically; closing the tab ends
 the connection, and you can reconnect from Settings. Use **Disconnect** to
 clear it sooner. The secret API key remains server-side and is used for
-catalogue metadata. The OAuth access token authorizes a file download and is
-sent to TONE3000 only for TONE3000-owned file hosts. If TONE3000 redirects a
-download to signed external storage, the token is removed before following
-that redirect. The app requests the exact `model_url` returned by TONE3000,
+catalogue searches and displaying model names. At download time, the OAuth
+access token fetches fresh model metadata and the exact download URL, then
+authorizes the file request. It is sent only to TONE3000-owned hosts. If
+TONE3000 redirects a download to signed external storage, the token is removed
+before following that redirect. The app requests the exact `model_url` returned by TONE3000,
 including its verification query parameter, and preserves the original file
 host.
 

@@ -429,15 +429,15 @@ MODELS_PAGE_SIZE = 50
 MAX_MODELS = 250
 
 
-def _tone3000_models_payload(tone_id: int, *, architecture: str = "2", opener=urlopen) -> list[dict]:
+def _tone3000_models_payload(tone_id: int, *, architecture: str = "2", access_token: str = "", opener=urlopen) -> list[dict]:
     """Every model in a pack for one architecture: the API pages its results."""
-    api_key = _require_tone3000_api_key(for_action="downloads")
+    bearer = access_token or _require_tone3000_api_key(for_action="downloads")
     models: list[dict] = []
     page = 1
     while len(models) < MAX_MODELS:
         request = Request(
             f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': architecture, 'page': page, 'page_size': MODELS_PAGE_SIZE})}",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": TONE3000_USER_AGENT},
+            headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json", "User-Agent": TONE3000_USER_AGENT},
         )
         try:
             with _open_tone3000_api(request, timeout=20, opener=opener) as response:
@@ -456,7 +456,7 @@ def _tone3000_models_payload(tone_id: int, *, architecture: str = "2", opener=ur
 
 
 def tone3000_models(tone_id: int, *, opener=urlopen) -> list[dict]:
-    """Return model names for one public TONE3000 tone pack, never credentials."""
+    """Return model names for one public TONE3000 pack, never download URLs."""
     raw_models = _tone3000_models_payload(tone_id, opener=opener)
     models = []
     for model in raw_models:
@@ -474,11 +474,11 @@ def tone3000_models(tone_id: int, *, opener=urlopen) -> list[dict]:
 
 def tone3000_model_download(tone_id: int, model_id: int, *, access_token: str = "", opener=urlopen) -> tuple[bytes, str]:
     """Download a selected pack member using the connected user's OAuth token."""
-    model = _find_tone3000_model(tone_id, model_id, opener)
-    if not model:
-        raise RuntimeError("TONE3000 has no download link for that NAM file.")
     if not access_token:
         raise RuntimeError("Connect your TONE3000 account in Settings before downloading NAM files.")
+    model = _find_tone3000_model(tone_id, model_id, opener, access_token=access_token)
+    if not model:
+        raise RuntimeError("TONE3000 has no download link for that NAM file.")
     data = _fetch_tone3000_model(_model_link(model), opener, access_token=access_token)
     return data, str(model.get("name") or f"tone3000-{model_id}")
 
@@ -487,19 +487,17 @@ def _model_link(model: dict) -> str:
     return str(next((model.get(key) for key in ("model_url", "download_url", "file_url", "url") if model.get(key)), "") or "")
 
 
-def _find_tone3000_model(tone_id: int, model_id: int, opener) -> dict | None:
+def _find_tone3000_model(tone_id: int, model_id: int, opener, *, access_token: str = "") -> dict | None:
     """Resolve a file by the listed pack, then other NAM versions, then the model endpoint."""
     for architecture in ("2", "1", "any"):
-        try:
-            models = _tone3000_models_payload(tone_id, architecture=architecture, opener=opener)
-        except RuntimeError:
-            continue
+        models = _tone3000_models_payload(tone_id, architecture=architecture, access_token=access_token, opener=opener)
         model = next((item for item in models if item.get("id") == model_id), None)
         if model and _model_link(model):
             return model
-    api_key = _require_tone3000_api_key(for_action="downloads")
     try:
-        request = Request(f"{TONE3000_BASE}/models/{model_id}", headers={"Authorization": f"Bearer {api_key}", "User-Agent": TONE3000_USER_AGENT})
+        request = Request(f"{TONE3000_BASE}/models/{model_id}", headers={
+            "Authorization": f"Bearer {access_token}", "Content-Type": "application/json", "User-Agent": TONE3000_USER_AGENT,
+        })
         with _open_tone3000_api(request, timeout=20, opener=opener) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception:

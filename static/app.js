@@ -1967,18 +1967,23 @@ async function tone3000AccessToken(clientId) {
   return t3kRefreshRequest;
 }
 
-async function downloadTone3000Nam(url, requestedName, fetchImpl = fetch) {
-  const settings = await fetch("/api/settings").then((response) => response.json());
+async function tone3000AccessHeaders() {
+  const response = await fetch("/api/settings");
+  const settings = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error("Could not read TONE3000 connection settings.");
   const clientId = (settings.settings || []).find((field) => field.name === "TONE3000_CLIENT_ID")?.value || "";
-  const accessToken = await tone3000AccessToken(clientId);
-  const response = await fetchImpl(url, { headers: { "X-TONE3000-Access-Token": accessToken } });
+  return { "X-TONE3000-Access-Token": await tone3000AccessToken(clientId) };
+}
+
+async function downloadTone3000Nam(url, requestedName, fetchImpl = fetch) {
+  const response = await fetchImpl(url, { headers: await tone3000AccessHeaders() });
   if (!response.ok) {
     const problem = await response.clone().json().catch(() => null);
     throw new Error(problem?.error || `NAM download failed (${response.status})`);
   }
   const contentType = (response.headers.get("Content-Type") || "").split(";", 1)[0].trim().toLowerCase();
   if (contentType === "application/json" || contentType === "text/html") {
-    throw new Error("TONE3000 did not return a NAM file. Check the TONE3000 key and try again.");
+    throw new Error("TONE3000 did not return a NAM file. Check your account connection and try again.");
   }
   const disposition = response.headers.get("Content-Disposition") || "";
   const utf8Name = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
