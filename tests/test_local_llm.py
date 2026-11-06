@@ -672,11 +672,39 @@ def test_custom_remote_requires_https_and_public_resolution(monkeypatch):
     monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "custom")
     monkeypatch.setenv("NAM_MIXER_AI_MODEL", "test")
     monkeypatch.setenv("NAM_MIXER_AI_BASE_URL", "http://example.com/v1")
+    monkeypatch.setattr(local_llm.socket, "getaddrinfo", lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))])
     assert "HTTPS" in local_llm.status()["error"]
 
     monkeypatch.setenv("NAM_MIXER_AI_BASE_URL", "https://example.com/v1")
     monkeypatch.setattr(local_llm.socket, "getaddrinfo", lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))])
     with pytest.raises(local_llm.LocalLlmError, match="disallowed"):
+        local_llm._config()
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "::1", "192.168.1.20", "172.18.0.3", "fe80::12"])
+def test_custom_local_ai_accepts_http_on_local_addresses(monkeypatch, address):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "custom")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "local-openai-model")
+    monkeypatch.setenv("NAM_MIXER_AI_API_KEY", "local-token")
+    monkeypatch.setenv("NAM_MIXER_AI_BASE_URL", "http://local-model.test:1234/v1")
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    monkeypatch.setattr(local_llm.socket, "getaddrinfo", lambda *_args, **_kwargs: [(family, socket.SOCK_STREAM, 6, "", (address, 1234))])
+
+    assert local_llm._config() == local_llm.AiConfig(
+        "custom", "http://local-model.test:1234/v1", "local-openai-model", "local-token",
+    )
+
+
+def test_custom_local_ai_rejects_http_hosts_with_any_public_resolution(monkeypatch):
+    monkeypatch.setenv("NAM_MIXER_AI_PROVIDER", "custom")
+    monkeypatch.setenv("NAM_MIXER_AI_MODEL", "local-openai-model")
+    monkeypatch.setenv("NAM_MIXER_AI_BASE_URL", "http://mixed.example/v1")
+    monkeypatch.setattr(local_llm.socket, "getaddrinfo", lambda *_args, **_kwargs: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.20", 80)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
+    ])
+
+    with pytest.raises(local_llm.LocalLlmError, match="HTTPS"):
         local_llm._config()
 
 

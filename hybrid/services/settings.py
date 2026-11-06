@@ -78,7 +78,7 @@ SETTINGS: tuple[SettingField, ...] = (
     SettingField(
         name="NAM_MIXER_AI_PROVIDER",
         label="Provider",
-        description="Choose Local, Cloudflare Workers AI, or another OpenAI-compatible HTTPS provider.",
+        description="Choose Local, Cloudflare Workers AI, or another OpenAI-compatible provider. Custom local servers may use HTTP.",
         group="AI Assistant",
         kind="select",
         options=(("local", "Local"), ("cloudflare", "Cloudflare Workers AI"), ("custom", "Custom OpenAI-compatible")),
@@ -86,7 +86,7 @@ SETTINGS: tuple[SettingField, ...] = (
     SettingField(
         name="NAM_MIXER_AI_BASE_URL",
         label="Base URL",
-        description="Local URLs may use HTTP only on localhost. Custom remote endpoints must use HTTPS and public addresses.",
+        description="Custom local AI servers may use HTTP when the host resolves only to loopback, private, or link-local addresses. Remote custom endpoints must use HTTPS and public addresses.",
         group="AI Assistant",
         placeholder="http://127.0.0.1:11434/v1",
         providers=("local", "custom"),

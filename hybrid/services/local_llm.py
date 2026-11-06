@@ -410,6 +410,34 @@ def _validate_remote_url(base_url: str) -> None:
         raise LocalLlmError("AI provider hostname resolves to a disallowed address")
 
 
+def _validate_custom_base_url(base_url: str) -> None:
+    """Allow plain HTTP only when a custom AI endpoint resolves entirely to local addresses."""
+    parsed = urlparse(base_url)
+    if not parsed.hostname or parsed.username or parsed.password or parsed.scheme not in {"http", "https"}:
+        raise LocalLlmError("custom AI URL must be HTTP or HTTPS without embedded credentials")
+    if parsed.scheme == "https":
+        _validate_remote_url(base_url)
+        return
+    try:
+        port = parsed.port or 80
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)}
+    except ValueError as exc:
+        raise LocalLlmError("custom AI URL has an invalid port") from exc
+    except OSError as exc:
+        raise LocalLlmError("AI provider hostname could not be resolved") from exc
+    local_addresses = set()
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local) and not (ip.is_multicast or ip.is_unspecified):
+            local_addresses.add(address)
+    if addresses and len(local_addresses) == len(addresses):
+        return
+    raise LocalLlmError("custom AI on a remote address must use HTTPS")
+
+
 class _ValidatedRedirectHandler(HTTPRedirectHandler):
     """Re-check every remote redirect instead of letting urllib follow it blindly."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
@@ -449,7 +477,7 @@ def _config(*, require_model: bool = True) -> AiConfig | None:
         # never be reused when the user switches back to Ollama.
         api_key = None
     else:
-        _validate_remote_url(base_url)
+        _validate_custom_base_url(base_url)
     return AiConfig(provider, base_url, model, api_key)
 
 

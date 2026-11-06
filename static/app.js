@@ -5427,7 +5427,7 @@ function renderLocalLlmStatusRow() {
         pullButton.hidden = true;
       } else if (!data.enabled && selectedProvider === "custom") {
         status.textContent = data.error === "not configured"
-          ? "Custom AI is selected. Enter a model and HTTPS base URL, then save Settings."
+          ? "Custom AI is selected. Enter a model and base URL, then save Settings. Local servers can use HTTP."
           : `Custom AI is not ready: ${data.error || "check the provider fields above."}`;
         pullButton.hidden = true;
       } else if (!data.enabled) {
