@@ -71,6 +71,9 @@ rules, or you can connect an AI model in **Settings**.
 The **TONE3000** tab also has an AI search mode: describe the sound, review
 the researched tone brief, compare ranked capture packs, then inspect a pack's
 NAM files and ask which file fits your setup.
+Search uses the server-side TONE3000 secret key configured in Settings. To
+download NAM files, connect your TONE3000 account there with its publishable
+key. See the [TONE3000 setup guide](docs/user_guide.md#tone3000-account-and-downloads).
 
 **Continuous Gain** has its own tab: add your captures, let it analyse and
 choose which ones to train on, train, then test and export. Save your work at

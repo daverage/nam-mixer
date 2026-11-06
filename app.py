@@ -123,7 +123,7 @@ DI_DIR = BASE_DIR / "assets" / "di"
 _data_dir = os.environ.get("NAM_MIXER_DATA_DIR", "").strip()
 WORK_DIR = Path(_data_dir).expanduser() if _data_dir else BASE_DIR / "work"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
-APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.5.7")
+APP_VERSION = os.environ.get("NAM_MIXER_VERSION", "v0.5.8")
 NAM_UPLOAD_DIR = WORK_DIR / "uploaded_nam"
 NAM_UPLOAD_DIR.mkdir(exist_ok=True)
 CAB_UPLOAD_DIR = WORK_DIR / "uploaded_cab"
@@ -1028,7 +1028,10 @@ def api_tone3000_models(tone_id: int):
 @app.get("/api/tone3000/tones/<int:tone_id>/models/<int:model_id>/download")
 def api_tone3000_model_download(tone_id: int, model_id: int):
     try:
-        data, name = tone3000_model_download(tone_id, model_id)
+        access_token = request.headers.get("X-TONE3000-Access-Token", "")
+        if len(access_token) > 8192:
+            return jsonify({"error": "Invalid TONE3000 access token."}), 400
+        data, name = tone3000_model_download(tone_id, model_id, access_token=access_token)
         filename = secure_filename(name) or f"tone3000-{model_id}"
         if not filename.lower().endswith(".nam"):
             filename = filename.rsplit(".", 1)[0] + ".nam" if "." in filename else filename + ".nam"

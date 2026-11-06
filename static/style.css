@@ -1102,6 +1102,28 @@ body[data-workflow-stage="shape"] .audition-live-row.shape-only { display: flex;
 }
 .settings-download-row .btn { flex: none; }
 .settings-download-row .info { flex: 1 1 14rem; margin: 0; }
+.tone3000-oauth-controls { align-items: center; }
+.tone3000-oauth-controls > .info { flex: 1 1 100%; order: 2; }
+.tone3000-device-authorization {
+  flex: 1 1 100%;
+  order: 3;
+  margin-top: 0.35rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+}
+.tone3000-device-authorization p { margin: 0 0 0.55rem; }
+.tone3000-device-authorization strong {
+  display: inline-block;
+  margin: 0.1rem 0 0.7rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 5px;
+  background: var(--surface-raised, #f1f3f6);
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+}
+.tone3000-device-authorization a { display: inline-block; margin-right: 0.75rem; }
 
 .settings-group-advanced {
   border: 1px solid var(--border);

@@ -301,6 +301,26 @@ or to one creator. Each result shows how well its metadata fits your search.
 and lets the AI Assistant recommend one and whether it suits Amp A or Amp B.
 Search needs a TONE3000 API key in [Settings](#settings).
 
+### TONE3000 account and downloads
+
+TONE3000 search and file downloads use two different credentials. In
+**Settings → TONE3000**, enter your secret key (`t3k_cs_…`) for catalogue
+searches, then enter the publishable key (`t3k_pub_…`) from your
+[TONE3000 settings](https://www.tone3000.com/settings) and choose
+**Connect TONE3000**. Enter the displayed device code on TONE3000 and approve
+NAM Mixer. The connection status changes to **TONE3000 account connected**.
+
+The OAuth access and refresh tokens are kept in the current browser tab's
+session storage. Access tokens refresh automatically; closing the tab ends
+the connection, and you can reconnect from Settings. Use **Disconnect** to
+clear it sooner. The secret API key remains server-side and is used for
+catalogue metadata. The OAuth access token authorizes a file download and is
+sent to TONE3000 only for TONE3000-owned file hosts. If TONE3000 redirects a
+download to signed external storage, the token is removed before following
+that redirect. The app requests the exact `model_url` returned by TONE3000,
+including its verification query parameter, and preserves the original file
+host.
+
 ## Design modes and the shared Cabinet stage
 
 The workflow above describes **Dynamic Hybrid** mode, the original/default
@@ -596,6 +616,9 @@ checkout doesn't require hunting for each setup button individually.
 - **TONE3000 API key** - enables the TONE3000 tab's capture search. Get a
   key from your account at [tone3000.com](https://www.tone3000.com); saved
   keys are never echoed back by the app once entered.
+- **TONE3000 publishable key** - used with **Connect TONE3000** to authorize
+  NAM downloads. It starts with `t3k_pub_`; the connection is scoped to the
+  current browser tab. See [TONE3000 account and downloads](#tone3000-account-and-downloads).
 - **Advanced → Enable experimental NAM architectures** - off by default.
   Turning it on reveals **Create both**, which exports the tested amp-only
   NAM plus an exact Sequential embedded-cabinet derivative. Sequential NAMs

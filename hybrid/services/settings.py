@@ -247,6 +247,15 @@ SETTINGS: tuple[SettingField, ...] = (
         required_prefix="t3k_cs_",
         validation_message="Use the TONE3000 Secret Key beginning t3k_cs_. The t3k_pub_ key is for OAuth and cannot be used for direct API access.",
     ),
+    SettingField(
+        name="TONE3000_CLIENT_ID",
+        label="TONE3000 publishable key",
+        description="Publishable key (t3k_pub_...) used to connect your TONE3000 account for NAM downloads. The OAuth tokens stay in this browser tab.",
+        group="TONE3000",
+        placeholder="t3k_pub_...",
+        required_prefix="t3k_pub_",
+        validation_message="Use the TONE3000 publishable key beginning t3k_pub_.",
+    ),
 )
 
 _KNOWN_NAMES = {field.name for field in SETTINGS}

@@ -14,6 +14,18 @@ under an "Unreleased" heading.
 - Focus outlines and the selected tab, step and preset stay visible in Windows
   high-contrast mode.
 
+## v0.5.8
+
+### TONE3000 downloads
+
+- TONE3000 Settings now supports account connection with a publishable key and
+  OAuth device authorization. The connection refreshes while the browser tab
+  remains open.
+- NAM downloads use the exact TONE3000 `model_url` and authorize requests to
+  TONE3000 file hosts. Signed external storage redirects do not receive the
+  OAuth token.
+- Added an identifying User-Agent to TONE3000 API and file requests.
+
 ## v0.5.7
 
 ### Find captures by sound

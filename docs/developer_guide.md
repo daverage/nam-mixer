@@ -164,8 +164,17 @@ to the checkout's untracked `.env` and applied to the running process.
 
 To configure by hand instead, copy `.env.example` to `.env`. It sets up the
 Local provider with Ollama (`gemma4:e4b` at `http://127.0.0.1:11434/v1`) and
-documents the optional `TONE3000_API_KEY`. The launchers (`scripts/run.sh`,
+documents the optional `TONE3000_API_KEY` and `TONE3000_CLIENT_ID`. The API
+secret key is used for catalogue requests. The publishable key identifies the
+OAuth client; user authorization tokens remain in browser session storage and
+are passed to the server only for downloads. The launchers (`scripts/run.sh`,
 `scripts/run.ps1`) read `.env` automatically.
+
+TONE3000 model downloads use the exact `model_url` returned by the catalogue,
+including query parameters such as `verify`. Requests to TONE3000-owned hosts
+include the connected user's Bearer token and the NAM Mixer User-Agent. The
+redirect handler follows signed external storage URLs manually and omits the
+Bearer token on those requests.
 
 Endpoint rules, enforced in `hybrid/services/local_llm.py`: the Local
 provider must use a loopback HTTP URL (`localhost`, `127.0.0.1` or `::1`);

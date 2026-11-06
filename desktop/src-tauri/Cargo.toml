@@ -1,6 +1,6 @@
 [package]
 name = "nam-mixer-desktop"
-version = "0.5.7"
+version = "0.5.8"
 description = "NAM Mixer desktop shell"
 edition = "2021"
 

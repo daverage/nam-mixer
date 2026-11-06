@@ -18,6 +18,7 @@ from hybrid.services.env_file import read_saved_env_value as _env
 
 
 TONE3000_BASE = "https://www.tone3000.com/api/v1"
+TONE3000_USER_AGENT = "NAM-Mixer/1.0 (TONE3000 API client)"
 MAX_MODEL_DOWNLOAD_BYTES = 50_000_000
 _CATALOGUE_CACHE_SECONDS = 300
 _CATALOGUE_CACHE_LIMIT = 128
@@ -366,7 +367,7 @@ def tone3000_search(query: str, *, rig_scope: str, author: str = "", rank_query:
     if tones is None:
         request = Request(
             f"{TONE3000_BASE}/tones/search?{urlencode(params)}",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": TONE3000_USER_AGENT},
         )
         try:
             with _open_tone3000_api(request, timeout=20, opener=opener) as response:
@@ -436,7 +437,7 @@ def _tone3000_models_payload(tone_id: int, *, architecture: str = "2", opener=ur
     while len(models) < MAX_MODELS:
         request = Request(
             f"{TONE3000_BASE}/models?{urlencode({'tone_id': tone_id, 'architecture': architecture, 'page': page, 'page_size': MODELS_PAGE_SIZE})}",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": TONE3000_USER_AGENT},
         )
         try:
             with _open_tone3000_api(request, timeout=20, opener=opener) as response:
@@ -471,13 +472,14 @@ def tone3000_models(tone_id: int, *, opener=urlopen) -> list[dict]:
     return models
 
 
-def tone3000_model_download(tone_id: int, model_id: int, *, opener=urlopen) -> tuple[bytes, str]:
-    """Download a selected pack member server-side, keeping the API key private."""
+def tone3000_model_download(tone_id: int, model_id: int, *, access_token: str = "", opener=urlopen) -> tuple[bytes, str]:
+    """Download a selected pack member using the connected user's OAuth token."""
     model = _find_tone3000_model(tone_id, model_id, opener)
     if not model:
         raise RuntimeError("TONE3000 has no download link for that NAM file.")
-    api_key = _require_tone3000_api_key(for_action="downloads")
-    data = _fetch_tone3000_model(_model_link(model), api_key, opener)
+    if not access_token:
+        raise RuntimeError("Connect your TONE3000 account in Settings before downloading NAM files.")
+    data = _fetch_tone3000_model(_model_link(model), opener, access_token=access_token)
     return data, str(model.get("name") or f"tone3000-{model_id}")
 
 
@@ -497,7 +499,7 @@ def _find_tone3000_model(tone_id: int, model_id: int, opener) -> dict | None:
             return model
     api_key = _require_tone3000_api_key(for_action="downloads")
     try:
-        request = Request(f"{TONE3000_BASE}/models/{model_id}", headers={"Authorization": f"Bearer {api_key}"})
+        request = Request(f"{TONE3000_BASE}/models/{model_id}", headers={"Authorization": f"Bearer {api_key}", "User-Agent": TONE3000_USER_AGENT})
         with _open_tone3000_api(request, timeout=20, opener=opener) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except Exception:
@@ -508,15 +510,21 @@ def _find_tone3000_model(tone_id: int, model_id: int, opener) -> dict | None:
     return model if _model_link(model) else None
 
 
-def _fetch_tone3000_model(url: str, api_key: str, opener) -> bytes:
-    """Follow signed storage redirects manually and never forward the API key to another host."""
+def _fetch_tone3000_model(url: str, opener, *, access_token: str = "") -> bytes:
+    """Fetch TONE3000's exact model URL and keep OAuth authorization on its hosts."""
     open_url = opener if opener is not urlopen else build_opener(_NoRedirectHandler).open
     for _ in range(3):
         parsed = urlparse(url)
-        is_api_url = url.startswith(f"{TONE3000_BASE}/")
-        if not is_api_url and not (parsed.scheme == "https" and _is_safe_public_host(parsed.hostname or "")):
+        host = (parsed.hostname or "").lower()
+        tone3000_host = host == "tone3000.com" or host.endswith(".tone3000.com")
+        if parsed.scheme != "https" or (not tone3000_host and not _is_safe_public_host(host)):
             raise RuntimeError(f"TONE3000 gave a download link on an unexpected host ({parsed.hostname or 'none'}).")
-        request = Request(url, headers={"Authorization": f"Bearer {api_key}"} if is_api_url else {})
+        headers = {"User-Agent": TONE3000_USER_AGENT}
+        if tone3000_host:
+            if not access_token:
+                raise RuntimeError("Connect your TONE3000 account in Settings before downloading NAM files.")
+            headers["Authorization"] = f"Bearer {access_token}"
+        request = Request(url, headers=headers)
         try:
             with open_url(request, timeout=30) as response:
                 data = response.read(MAX_MODEL_DOWNLOAD_BYTES + 1)

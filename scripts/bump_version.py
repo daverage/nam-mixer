@@ -63,7 +63,7 @@ def update_tauri_conf(content):
 
 def update_cargo_lock(content):
     """Update only the application package entry, not dependency versions."""
-    pattern = r'(\[\[package\]\]\nname = "nam-mixer-desktop"\nversion = ")[\d.]+("'
+    pattern = r'(\[\[package\]\]\nname = "nam-mixer-desktop"\nversion = ")[\d.]+(")'
     return re.sub(pattern, rf'\g<1>{new_version}\g<2>', content, count=1)
 
 files = [
