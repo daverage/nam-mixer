@@ -5,6 +5,12 @@ under an "Unreleased" heading.
 
 ## Unreleased
 
+### Cloud training
+
+- Kaggle private-dataset verification now allows five minutes for the file
+  listing to become available after an accepted upload. Kernels still start
+  only after every staged file is present with the expected size.
+
 ### Accessibility
 
 - Screen readers hear a one-line summary when an AI reply, search, tool or

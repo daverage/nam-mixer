@@ -80,10 +80,9 @@ DATASET_UPLOAD_TIMEOUT_S = 1800
 # and a complete, correctly-sized file listing. That is Kaggle-side eventual
 # consistency after dataset creation, not a real permission or content
 # problem, so verification must tolerate a bounded settling window rather
-# than failing on the first transient response. This window is much shorter
-# than DATASET_UPLOAD_TIMEOUT_S above -- it's for post-create propagation,
-# not for the upload itself.
-DATASET_VERIFY_TIMEOUT_S = 120
+# than failing on the first transient response. Allow five minutes for
+# post-create propagation; this is separate from the upload timeout above.
+DATASET_VERIFY_TIMEOUT_S = 300
 DATASET_VERIFY_INTERVAL_S = 3
 
 # `kernels push` returning exit code 0 is NOT sufficient evidence the kernel
