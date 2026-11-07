@@ -1,0 +1,642 @@
+
+hybrid/core/pipeline.py
+115:     range (see docs/user_guide.md "Why the genre/style DI files are included"). Unlike
+116:     `input_profile_gain_db`, it does NOT represent an instrument/pickup
+117:     identity and is deliberately excluded from `hybrid.modes.design.HybridDesign`
+118:     provenance -- it is purely an audition aid. `source_envelope_db` (used
+119:     by the crossover-coverage table to explore hypothetical profiles) is
+120:     still computed from the fully raw, ungained `dry`, so dialing in a test
+121:     gain doesn't distort that separate analysis.
+122: 
+123:     If `calibration_mode="auto"` and both models report a calibrated
+124:     `input_level_dbu`, an additional PER-MODEL calibration gain (the official
+125:     NAM plugin's `reference_input_level_dbu - model_input_level_dbu`
+126:     formula) is applied to what each individual model actually receives, so
+127:     two differently-calibrated `.nam` captures see the same virtual physical
+128:     input level. The crossover envelope is always derived from the
+129:     profile-adjusted signal BEFORE this per-model calibration split, so the
+130:     crossover stays linked to one common virtual guitar level rather than
+131:     either source model's own recording calibration.
+132: 
+133:     `amp_a_input_gain_db`/`amp_b_input_gain_db` are an ADDITIONAL, independent
+134:     per-amp trim applied on top of calibration -- see `RenderedPair`'s field
+135:     docstring for why this exists (an amp with limited headroom otherwise
+136:     distorts at exactly the moments the crossfade picks it, no matter how
+137:     crossover/transition are tuned). The crossover envelope is still derived
+138:     from the common `profiled_dry` BEFORE this split, same as calibration.
+139:     """
+140:     dry = np.asarray(dry, dtype=np.float32)
+141:     profiled_dry = (dry * db_to_amplitude(input_profile_gain_db + test_gain_db)).astype(np.float32)
+142: 
+143:     calib = resolve_calibration(
+144:         calibration_mode, reference_input_level_dbu, amp_a.input_level_dbu, amp_b.input_level_dbu
+145:     )
+146: 
+147:     amp_a_input = (profiled_dry * db_to_amplitude(calib.amp_a_gain_db + amp_a_input_gain_db)).astype(np.float32)
+148:     amp_b_input = (profiled_dry * db_to_amplitude(calib.amp_b_gain_db + amp_b_input_gain_db)).astype(np.float32)
+149: 
+150:     amp_a_render = render(amp_a, amp_a_input, sample_rate)
+151:     amp_b_render = render(amp_b, amp_b_input, sample_rate)
+152: 
+153:     envelope_db = bounded_causal_envelope_db(profiled_dry, sample_rate, envelope_config)
+154:     source_envelope_db = bounded_causal_envelope_db(dry, sample_rate, envelope_config)
+155: 
+156:     return RenderedPair(
+157:         dry=dry,
+158:         profiled_dry=profiled_dry,
+159:         amp_a=amp_a_render,
+160:         amp_b=amp_b_render,
+161:         envelope_db=envelope_db,
+162:         source_envelope_db=source_envelope_db,
+163:         sample_rate=sample_rate,
+164:         instrument_type=instrument_type,
+165:         input_profile_id=input_profile_id,
+166:         input_profile_gain_db=input_profile_gain_db,
+167:         test_gain_db=test_gain_db,
+168:         calibration_mode=calib.mode,
+169:         reference_input_level_dbu=reference_input_level_dbu,
+170:         calibration_applied=calib.applied,
+171:         amp_a_model_input_level_dbu=calib.amp_a_model_input_level_dbu,
+172:         amp_b_model_input_level_dbu=calib.amp_b_model_input_level_dbu,
+173:         amp_a_calibration_gain_db=calib.amp_a_gain_db,
+174:         amp_b_calibration_gain_db=calib.amp_b_gain_db,
+175:         amp_a_input_gain_db=amp_a_input_gain_db,
+176:         amp_b_input_gain_db=amp_b_input_gain_db,
+177:         input_peak_dbfs=_peak_dbfs(profiled_dry),
+178:         amp_a_input_peak_dbfs=_peak_dbfs(amp_a_input),
+179:         amp_b_input_peak_dbfs=_peak_dbfs(amp_b_input),
+180:         calibration_warning=calib.warning,
+181:     )
+182: 
+183: 
+184: def amp_input_peak_warnings(pair: RenderedPair, threshold_dbfs: float = 0.0) -> list[str]:
+185:     """One warning per amp whose actual NAM input peaks at or above
+186:     `threshold_dbfs`, naming the gains that got it there. NAM captures are
+187:     trained on audio within +/-1.0, so these peaks are outside what the model
+188:     has seen, whatever the common input peak says."""
+189:     warnings = []
+190:     shared_db = pair.input_profile_gain_db + pair.test_gain_db
+191:     for label, peak, calibration_db, trim_db in (
+192:         ("Amp A", pair.amp_a_input_peak_dbfs, pair.amp_a_calibration_gain_db, pair.amp_a_input_gain_db),
+193:         ("Amp B", pair.amp_b_input_peak_dbfs, pair.amp_b_calibration_gain_db, pair.amp_b_input_gain_db),
+194:     ):
+195:         if peak >= threshold_dbfs:
+196:             warnings.append(
+197:                 f"{label} receives peaks of {peak:+.1f} dBFS (profile/test {shared_db:+.1f} dB, "
+198:                 f"calibration {calibration_db:+.1f} dB, input trim {trim_db:+.1f} dB). NAM captures are "
+199:                 "trained on audio within 0 dBFS, so this amp may respond unpredictably at these peaks."
+200:             )
+201:     return warnings
+202: 
+203: 
+204: @dataclass
+
+hybrid/core/pipeline.py
+216: def build_hybrid(
+217:     pair: RenderedPair,
+218:     crossover_dbfs: float,
+219:     transition_width_db: float,
+220:     auto_level: bool = True,
+221:     manual_b_trim_db: float = 0.0,
+222:     align_enabled: bool = False,
+223:     dry_gain_db: float = 0.0,
+224:     alignment_offset_samples: int = 0,
+225: ) -> HybridResult:
+226:     """Blend an already-rendered amp pair. Cheap -- safe to call on every
+227:     crossover/transition/trim slider move without re-running NAM inference.
+228: 
+229:     `manual_b_trim_db` is always applied, on top of the auto-match trim when
+230:     `auto_level` is on -- auto-level gives a safe starting point, the manual
+231:     trim is the user's tweak from there, and the two combine rather than one
+232:     replacing the other.
+233: 
+234:     `align_enabled`/`alignment_offset_samples` apply ONE already-chosen integer
+235:     timing correction to Amp B (see `hybrid.core.align.apply_fixed_offset`);
+236:     nothing here measures an offset. Off by default.
+237: 
+238:     `dry_gain_db` is DEPRECATED and TEST-ONLY (kept for regression tests
+239:     exercising the blend/threshold logic in isolation) -- it shifts only the
+240:     envelope used for blending, by a constant (dB(x*g) = dB(x) + 20*log10(g),
+241:     an exact O(n) shift), without touching the actual audio. The real,
+242:     production input-level control is `input_profile_gain_db` on
+243:     `render_pair`, which changes what both NAMs actually receive. Do not wire
+244:     this parameter to a user-facing control.
+245:     """
+246:     envelope_db = pair.envelope_db + dry_gain_db
+247: 
+248:     offset = resolve_alignment_request(align_enabled, alignment_offset_samples)
+249:     amp_b_render = apply_fixed_offset(pair.amp_b, offset, len(pair.amp_a))
+250: 
+251:     level_match_result: LevelMatchResult | None = None
+252:     auto_trim_db = 0.0
+253:     if auto_level:
+254:         level_match_result = compute_crossover_trim(
+255:             pair.envelope_db, pair.amp_a, amp_b_render, crossover_dbfs, transition_width_db
+256:         )
+257:         auto_trim_db = level_match_result.suggested_b_trim_db
+258: 
+259:     effective_b_trim_db = auto_trim_db + manual_b_trim_db
+260: 
+261:     config = CrossoverConfig(
+262:         crossover_dbfs=crossover_dbfs,
+263:         transition_width_db=transition_width_db,
+264:         amp_b_trim_db=effective_b_trim_db,
+265:     )
+266:     hybrid_audio, t_curve = blend(envelope_db, pair.amp_a, amp_b_render, config)
+267: 
+268:     return HybridResult(
+269:         hybrid=hybrid_audio,
+270:         blend_curve=t_curve,
+271:         envelope_db=envelope_db,
+272:         auto_trim_db=auto_trim_db,
+273:         manual_trim_db=manual_b_trim_db,
+274:         effective_b_trim_db=effective_b_trim_db,
+275:         alignment_offset_samples=offset,
+276:         level_match=level_match_result,
+277:     )
+
+hybrid/modes/blend.py
+42: def blend_weight(envelope_db: np.ndarray, config: CrossoverConfig) -> np.ndarray:
+43:     """Compute the Amp B mix weight `t` in [0, 1] for each sample of envelope_db.
+44: 
+45:     t=0 -> pure Amp A (quiet input), t=1 -> pure Amp B (loud input).
+46:     """
+47:     width = max(config.transition_width_db, 1e-6)
+48:     start = config.crossover_dbfs - width / 2.0
+49:     t_linear = (envelope_db - start) / width
+50:     t_linear = np.clip(t_linear, 0.0, 1.0)
+51:     return config.curve(t_linear)
+52: 
+53: 
+54: def blend(
+55:     dry_envelope_db: np.ndarray,
+56:     amp_a_render: np.ndarray,
+57:     amp_b_render: np.ndarray,
+58:     config: CrossoverConfig,
+59: ) -> tuple[np.ndarray, np.ndarray]:
+60:     """Blend two (already aligned, already trimmed-if-desired) amp renders.
+61: 
+62:     Uses a LINEAR amplitude crossfade (not equal-power) because amp_a_render and
+63:     amp_b_render are correlated versions of the same guitar signal, not
+64:     independent sources -- equal-power crossfades assume decorrelated content
+65:     and would produce a level bump in the transition region here.
+66: 
+67:     Returns (hybrid_audio, t_curve) where t_curve is the per-sample Amp B weight
+68:     actually used, useful for debugging/plotting the transition.
+69:     """
+70:     n = min(len(dry_envelope_db), len(amp_a_render), len(amp_b_render))
+71:     envelope_db = dry_envelope_db[:n]
+72:     a = amp_a_render[:n] * (10.0 ** (config.amp_a_trim_db / 20.0))
+73:     b = amp_b_render[:n] * (10.0 ** (config.amp_b_trim_db / 20.0))
+74: 
+75:     t = blend_weight(envelope_db, config)
+76:     hybrid = a * (1.0 - t) + b * t
+77:     return hybrid, t
+
+hybrid/core/envelope.py
+168: def bounded_causal_envelope_db(
+169:     audio: np.ndarray,
+170:     sample_rate: int,
+171:     config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
+172: ) -> np.ndarray:
+173:     """The PRODUCTION crossover envelope: strictly causal AND strictly
+174:     bounded-memory (see module docstring for why `rms_envelope_db`'s one-pole
+175:     release is not acceptable for this).
+176: 
+177:     Three cascaded FIR (non-recursive) stages, each a fixed causal window:
+178: 
+179:       1. Causal moving RMS over `rms_window_ms` (dB), exactly like
+180:          `rms_envelope_db`'s first stage.
+181:       2. Causal moving average over `attack_avg_ms` of stage 1's dB values --
+182:          a bounded stand-in for the old one-pole attack smoothing, replacing
+183:          "abrupt" transient jumps with a short, finite-length blur instead of
+184:          instant response.
+185:       3. Causal decaying-maximum ("peak hold with linear dB decay") over
+186:          `release_window_ms`: sample i is
+187:          `max_{k in [i-W+1, i]} (stage2_db[k] - release_range_db * (i-k) / W)`.
+188:          This is the bounded replacement for a one-pole release: a loud peak's
+189:          influence provably reaches exactly zero `release_window_ms` later,
+190:          not asymptotically. Implemented as a shifted causal sliding-max (see
+191:          `_causal_sliding_max`), which is the standard O(n) technique for a
+192:          decaying peak-hold detector.
+193: 
+194:     Deterministic, causal (no sample depends on any `audio[j]` for `j > i`),
+195:     and its total dependency on `audio` is bounded by
+196:     `bounded_envelope_max_history_samples(sample_rate, config)` -- see
+197:     tests/test_envelope_finite.py.
+198:     """
+199:     audio = np.asarray(audio, dtype=np.float64)
+200:     n = len(audio)
+201:     if n == 0:
+202:         return np.zeros(0, dtype=np.float64)
+203: 
+204:     w1 = _ms_to_samples(config.rms_window_ms, sample_rate)
+205:     squared = audio * audio
+206:     padded = np.concatenate([np.zeros(w1 - 1, dtype=np.float64), squared])
+207:     cumsum = np.concatenate([[0.0], np.cumsum(padded)])
+208:     window_sum = cumsum[w1:] - cumsum[:n]
+209:     rms = np.sqrt(np.maximum(window_sum / w1, 0.0))
+210:     stage1_db = 20.0 * np.log10(np.maximum(rms, _EPS))
+211: 
+212:     w2 = _ms_to_samples(config.attack_avg_ms, sample_rate)
+213:     stage2_db = _causal_moving_mean(stage1_db, w2)
+214: 
+215:     w3 = _ms_to_samples(config.release_window_ms, sample_rate)
+216:     if w3 <= 1:
+217:         return stage2_db
+218: 
+219:     decay_per_sample = config.release_range_db / w3
+220:     idx = np.arange(n, dtype=np.float64)
+221:     ramped = stage2_db + decay_per_sample * idx
+222:     floor_db = float(stage2_db.min()) - config.release_range_db - 1.0
+223:     floor_ramped = floor_db  # sentinel is below any real ramped value at idx=0
+224:     windowed_max = _causal_sliding_max(ramped, w3, floor=floor_ramped)
+225:     stage3_db = windowed_max - decay_per_sample * idx
+226:     return stage3_db
+
+hybrid/modes/training_target.py
+654: def generate_training_bundle(
+655:     design: HybridDesign,
+656:     official_input_path: str | Path,
+657:     output_directory: str | Path,
+658:     target_peak_dbfs: float = A2_TARGET_PEAK_CEILING_DBFS,
+659:     envelope_config: BoundedEnvelopeConfig = DEFAULT_BOUNDED_ENVELOPE_CONFIG,
+660: ) -> TrainingBundle:
+661:     """Generate a self-contained, reproducible A2 training bundle from a
+662:     FROZEN `HybridDesign` and the official NAM training excitation. Pure
+663:     function of its arguments -- no Flask dependency, directly testable.
+664:     """
+665:     official_input_path = Path(official_input_path)
+666:     output_directory = Path(output_directory)
+667:     output_directory.mkdir(parents=True, exist_ok=True)
+668: 
+669:     official_input, input_info = validate_training_input(official_input_path)
+670: 
+671:     amp_a = load_nam(design.amp_a_path)
+672:     amp_b = load_nam(design.amp_b_path)
+673:     amp_a_sha = _sha256_file(design.amp_a_path)
+674:     amp_b_sha = _sha256_file(design.amp_b_path)
+675: 
+676:     warnings: list[str] = []
+677: 
+678:     calib = resolve_calibration(
+679:         design.calibration_mode, design.reference_input_level_dbu,
+680:         amp_a.input_level_dbu, amp_b.input_level_dbu,
+681:     )
+682:     if calib.warning:
+683:         warnings.append(calib.warning)
+684: 
+685:     # NOTE: design.design_reference_profile_gain_db is deliberately NOT
+686:     # applied here -- see module docstring / docs/history/phase3.md section 1.
+687:     # amp_a_input_gain_db/amp_b_input_gain_db, unlike the profile gain, ARE
+688:     # applied -- they correct what each amp actually receives (see
+689:     # hybrid.core.pipeline.RenderedPair's docstring), not a hypothetical pickup.
+690:     amp_a_input = (official_input * db_to_amplitude(calib.amp_a_gain_db + design.amp_a_input_gain_db)).astype(np.float32)
+691:     amp_b_input = (official_input * db_to_amplitude(calib.amp_b_gain_db + design.amp_b_input_gain_db)).astype(np.float32)
+692: 
+693:     amp_a_render = render(amp_a, amp_a_input, input_info.sample_rate)
+694:     amp_b_render = render(amp_b, amp_b_input, input_info.sample_rate)
+695: 
+696:     # Crossover envelope sees the common, uncalibrated official input --
+697:     # BEFORE the per-model calibration split above (docs/history/phase3.md section 8).
+698:     envelope_db = bounded_causal_envelope_db(official_input, input_info.sample_rate, envelope_config)
+699: 
+700:     # The design's frozen integer, applied verbatim -- never re-measured on
+701:     # the training input (hybrid.core.align.frozen_alignment_offset).
+702:     alignment_offset = frozen_alignment_offset(design)
+703:     amp_b_aligned = apply_fixed_offset(amp_b_render, alignment_offset, len(amp_a_render))
+704: 
+705:     config = CrossoverConfig(
+706:         crossover_dbfs=design.crossover_dbfs,
+707:         transition_width_db=design.transition_width_db,
+708:         amp_b_trim_db=design.effective_b_trim_db,  # frozen -- not recomputed
+709:     )
+710:     hybrid_raw, _t_curve = blend(envelope_db, amp_a_render, amp_b_aligned, config)
+711: 
+712:     if len(hybrid_raw) != len(official_input):
+713:         raise TrainingInputError(
+714:             f"generated target length {len(hybrid_raw)} != training input length "
+715:             f"{len(official_input)} -- input/target must be exactly sample-aligned"
+716:         )
+717: 
+718:     # Baked cab (if any) runs AFTER the Hybrid combination, BEFORE safety --
+719:     # see docs/history/blend-mode.md "SHARED CABINET IR STAGE"/"CAB PREVIEW SEMANTICS".
+720:     # No-op for every pre-Blend-mode design (design.cab is None), preserving
+721:     # existing no-cab Hybrid output exactly.
+722:     hybrid_raw = maybe_bake_cab(hybrid_raw, design.cab, input_info.sample_rate)
+723: 
+724:     # Shared post-combination output gain, BEFORE the safety ceiling below.
+725:     hybrid_raw, output_gain_db, output_gain_peak_before_dbfs = apply_design_output_gain(
+726:         hybrid_raw, design, target_peak_dbfs)
+727: 
+728:     receptive_field = compute_receptive_field_record(
+729:         "hybrid", amp_a, amp_b, input_info.sample_rate, design.cab,
+730:         envelope_max_history_ms=bounded_envelope_max_history_ms(envelope_config),
+731:     )
+732: 
+733:     safety_check = check_audio(hybrid_raw)
+734:     if safety_check.has_nan_or_inf:
+735:         raise TrainingInputError("generated hybrid target contains NaN/Inf -- aborting")
+736:     if safety_check.is_silent:
+737:         warnings.append("generated hybrid target is silent -- check amp/DI/design selection")
+738: 
+739:     raw_peak_dbfs = safety_check.peak_dbfs
+740:     hybrid_final, gain_reduction_db = apply_peak_ceiling(hybrid_raw, target_peak_dbfs)
+741:     final_peak_dbfs = raw_peak_dbfs - gain_reduction_db if np.isfinite(raw_peak_dbfs) else raw_peak_dbfs
+742: 
+743:     input_out = output_directory / "input.wav"
+744:     raw_out = output_directory / "hybrid_target_raw.wav"
+745:     final_out = output_directory / "hybrid_target.wav"
+
+hybrid/core/render.py
+110: def render(model: NamModel, audio: np.ndarray, sample_rate: int, slim: float | None = None,
+111:            executable: Path | None = None) -> np.ndarray:
+112:     """Render `audio` (mono float32, at `sample_rate`) through `model`.
+113: 
+114:     - Input and output are both mono float32 numpy arrays of the same length.
+115:     - Resampling `audio` to `model.sample_rate` (if known and different) is
+116:       the caller's responsibility, not this function's. If `sample_rate`
+117:       doesn't match what the model expects, nam_render's own check will
+118:       raise NamRenderError with the mismatch reported.
+119:     - `slim`: optional NAMCore "slimmable size" in [0.0, 1.0] -- only
+120:       meaningful for models built as a `SlimmableContainer`/slimmable WaveNet
+121:       (e.g. an A2 packed model's Full/Lite submodels), forwarded to the
+122:       native tool's `--slim` flag verbatim. Use SLIM_FULL (None: no flag) /
+123:       SLIM_LITE (0.0) rather than literals -- see their definition for NAMCore's
+124:       selection rule (native/nam_render/build/_deps/namcore-src/NAM/container.cpp).
+125:       Left as `None` (the default, no flag passed) for ordinary
+126:       non-slimmable models -- this is purely additive, existing callers are
+127:       unaffected. docs/history/phase3.md section 20.
+128:     - Raises NamRenderError if the native tool is missing, times out, exits
+129:       non-zero, or its output doesn't match this function's contract (mono,
+130:       same length, same sample rate, all-finite) -- this module is the
+131:       boundary between native code and the rest of the app, so it verifies
+132:       that contract rather than trusting the subprocess blindly.
+133:     """
+134:     exe = executable or find_nam_render_exe()
+135:     audio = np.asarray(audio, dtype=np.float32)
+136:     if audio.ndim != 1:
+137:         raise NamRenderError(f"NAM render currently requires mono audio, got shape {audio.shape}")
+138: 
+139:     with tempfile.TemporaryDirectory(prefix="hybrid_nam_render_") as tmp:
+140:         tmp_dir = Path(tmp)
+141:         in_path = tmp_dir / "input.wav"
+142:         out_path = tmp_dir / "output.wav"
+143:         sf.write(in_path, audio, sample_rate, subtype="FLOAT")
+144: 
+145:         cmd = [str(exe)]
+146:         if slim is not None:
+147:             cmd += ["--slim", str(slim)]
+148:         cmd += [str(model.path), str(in_path), str(out_path)]
+149: 
+150:         try:
+151:             result = subprocess.run(
+152:                 cmd,
+153:                 capture_output=True,
+154:                 text=True,
+155:                 timeout=_SUBPROCESS_TIMEOUT_S,
+156:             )
+157:         except subprocess.TimeoutExpired as exc:
+158:             raise NamRenderError(
+159:                 f"nam_render timed out after {_SUBPROCESS_TIMEOUT_S}s for {model.path}"
+160:             ) from exc
+161:         except OSError as exc:  # e.g. no exec bit, or a binary for another CPU
+162:             raise NamRenderError(f"could not run nam_render at {exe}: {exc}") from exc
+163: 
+164:         if result.returncode != 0 or not out_path.is_file():
+165:             message = result.stderr.strip() or result.stdout.strip() or "unknown error"
+166:             raise NamRenderError(f"nam_render failed for {model.path}: {message}")
+167: 
+168:         rendered, out_sample_rate = sf.read(out_path, dtype="float32")
+169: 
+170:     if rendered.ndim != 1:
+171:         raise NamRenderError(
+172:             f"nam_render produced non-mono output for {model.path}: shape {rendered.shape}"
+173:         )
+174:     if len(rendered) != len(audio):
+175:         raise NamRenderError(
+176:             f"nam_render output length {len(rendered)} != input length {len(audio)} for {model.path}"
+177:         )
+178:     if out_sample_rate != sample_rate:
+179:         raise NamRenderError(
+180:             f"nam_render output sample rate {out_sample_rate} != input sample rate {sample_rate} for {model.path}"
+181:         )
+182:     if not np.all(np.isfinite(rendered)):
+183:         raise NamRenderError(f"nam_render produced non-finite samples for {model.path}")
+184: 
+185:     return rendered
+
+hybrid/training/validation_report.py
+48: def build_validation_report(model_sha256: str, variants: dict, *, quiet_playing: Optional[dict] = None, cabinet: Optional[dict] = None, policy: Optional[dict] = None, mode: Optional[str] = None) -> dict:
+49:     """Normalize Full/Lite validation into an honest aggregate outcome.
+50: 
+51:     Metrics are measurements, not a claim of perceptual equivalence.  A
+52:     rendering failure is a failed check; absent/legacy evidence is explicitly
+53:     unavailable, never a green pass.
+54: 
+55:     The quiet-playing check only exists for Character Blend bundles (its
+56:     low-level-response sweep -- see CLAUDE.md "Design modes"). For any other
+57:     `mode`, its absence is expected, not a gap in coverage, so it is reported
+58:     as `not_applicable` and does NOT downgrade the overall `state` the way a
+59:     genuinely missing/unavailable check does.
+60:     """
+61:     effective_policy = {**DEFAULT_VALIDATION_POLICY, **(policy or {})}
+62:     checks = []
+63:     for variant in ("full", "lite"):
+64:         result = variants.get(variant)
+65:         if result is None:
+66:             checks.append({"id": f"{variant}_render", "state": "unavailable", "reason": "check was not run"})
+67:         elif result.get("rendered_ok"):
+68:             checks.append({"id": f"{variant}_render", "state": "passed", "metrics": result.get("metrics", {})})
+69:         elif result.get("state") == "unavailable":
+70:             checks.append({"id": f"{variant}_render", "state": "unavailable", "reason": result.get("error", "render check unavailable")})
+71:         else:
+72:             checks.append({"id": f"{variant}_render", "state": "failed", "reason": result.get("error", "invalid render")})
+73:         checks.append(_variant_quality_check(variant, result, effective_policy))
+74: 
+75:     quiet_variants = quiet_playing if quiet_playing and any(k in quiet_playing for k in ("full", "lite")) else {"full": quiet_playing}
+76:     quiet_applicable = mode == "character"
+77:     for variant in ("full", "lite"):
+78:         quiet = quiet_variants.get(variant)
+79:         check_id = f"{variant}_quiet_playing"
+80:         if quiet is None and not quiet_applicable:
+81:             checks.append({
+82:                 "id": check_id,
+83:                 "state": "not_applicable",
+84:                 "reason": (
+85:                     "The quiet-playing check only exists for Character Blend, which measures response at a "
+86:                     "level-selected drive donor and checks it doesn't collapse at low playing level. Dynamic "
+87:                     "Hybrid and Parallel Blend targets have no equivalent low-level reference to compare "
+88:                     "against, so this check does not apply to this mode."
+89:                 ),
+90:             })
+91:         elif quiet is None:
+92:             checks.append({"id": check_id, "state": "unavailable", "reason": "no equivalent validation reference result"})
+93:         elif quiet.get("pass") is True:
+94:             checks.append({"id": check_id, "state": "passed", "reason": "quiet response is within the documented policy", "metrics": quiet})
+95:         elif quiet.get("pass") is False:
+96:             checks.append({"id": check_id, "state": "failed", "reason": quiet.get("reason") or "quiet-playing response differs from the frozen teacher", "metrics": quiet})
+97:         else:
+98:             checks.append({"id": check_id, "state": "unavailable", "reason": quiet.get("reason", "check unavailable"), "metrics": quiet})
+99: 
+100:     states = {check["state"] for check in checks}
+101:     state = "needs_attention" if "failed" in states else "unavailable" if "unavailable" in states else "passed"
+102:     # "not_applicable" checks (quiet-playing on non-Character modes) are
+103:     # expected absences, not missing coverage -- they never downgrade `state`.
+104:     cabinet_record = dict(cabinet or {"baked": False, "approximation": None})
+105:     approximation = cabinet_record.get("approximation", cabinet_record.get("cab_requires_approximation"))
+106:     cabinet_record["approximation"] = approximation
+107:     cabinet_record["note"] = (
+108:         "The baked cabinet exceeds the destination temporal field and is an approximation; inspect metrics and listen."
+109:         if cabinet_record.get("baked") and approximation is True else
+110:         "The baked cabinet fits the recorded destination temporal field."
+111:         if cabinet_record.get("baked") and approximation is False else
+112:         "Cabinet approximation status is unavailable."
+113:         if cabinet_record.get("baked") else
+114:         "No cabinet was baked into the trained target."
+115:     )
+116:     return {
+117:         "schema_version": VALIDATION_REPORT_SCHEMA_VERSION,
+118:         "policy_version": VALIDATION_POLICY_VERSION,
+119:         "policy": effective_policy,
+120:         "model_sha256": model_sha256,
+121:         "state": state,
+122:         "checks": checks,
+123:         "cabinet": cabinet_record,
+124:         "summary": (
+125:             "Validation found one or more issues; inspect the failed checks and listen to the export."
+126:             if state == "needs_attention" else
+127:             "Validation is incomplete because one or more checks are unavailable."
+128:             if state == "unavailable" else
+129:             "Required technical checks passed. This does not establish perceptual equivalence."
+130:         ),
+131:     }
+
+scripts/train_a2.py
+600:         other_metadata={TRAINING_KEY: result.metadata.model_dump()},
+601:     )
+602: 
+603:     nam_path = export_dir / f"{artifact_stem}.nam"
+604:     if not nam_path.is_file():
+605:         raise TrainingAbort(f"BaseNet.export() did not produce the expected file: {nam_path}")
+606:     return nam_path
+607: 
+608: 
+609: def validate_exported_nam(nam_path: Path, input_path: Path, expected_sample_rate: int, slim: bool = False) -> dict:
+610:     """`slim=True` exercises the Lite/slim submodel of a packed A2 export
+611:     (NAMCore's `--slim` flag, forwarded via hybrid.core.render.render's `slim`
+612:     kwarg -- see docs/history/phase3.md section 20); `slim=False` (default) exercises
+613:     the Full submodel. Only meaningful for a slimmable/packed export; a
+614:     NamRenderError from a non-slimmable model when slim=True is expected and
+615:     surfaces as a TrainingAbort so callers can treat "Lite not supported by
+616:     this export" as a distinct, visible outcome rather than a silent no-op.
+617:     """
+618:     model = load_nam(nam_path)
+619:     input_audio, sr = _read_audio(input_path)
+620:     if sr != expected_sample_rate:
+621:         raise TrainingAbort(f"input sample rate {sr} != expected {expected_sample_rate}")
+622: 
+623:     try:
+624:         rendered = render(model, input_audio, sr, slim=(SLIM_LITE if slim else SLIM_FULL))
+625:     except NamRenderError as exc:
+626:         raise TrainingAbort(f"NAMCore failed to render the exported model ({nam_path}): {exc}") from exc
+627: 
+628:     if rendered.ndim != 1:
+629:         raise TrainingAbort(f"exported model produced non-mono output: shape {rendered.shape}")
+630:     if len(rendered) != len(input_audio):
+631:         raise TrainingAbort(f"exported model output length {len(rendered)} != input length {len(input_audio)}")
+632:     if not np.all(np.isfinite(rendered)):
+633:         raise TrainingAbort("exported model produced non-finite samples")
+634: 
+635:     print(f"NAMCore validation OK for {nam_path.name}: mono, {len(rendered)} frames, {sr} Hz, all finite.")
+636:     return {"path": str(nam_path), "sample_rate": sr, "frame_count": len(rendered), "rendered": rendered}
+637: 
+638: 
+639: def check_full_low_level_response(manifest: dict, nam_path: Path, input_path: Path, sample_rate: int, *, variant: str = "full", slim: float | None = SLIM_FULL) -> "dict | None":
+640:     """Thin wrapper over `hybrid.modes.character_training_target.check_export_low_
+641:     level_response` (docs/history/blend-mode-fixes.md, Phases 10-11) that also prints
+642:     a verdict line -- the actual sweep/comparison logic is shared with
+643:     `hybrid.training.kaggle_training.validate_downloaded_model` so both local and
+644:     Kaggle-trained models are held to the identical bar (see that function's
+645:     docstring). Only meaningful for Character Blend bundles that recorded a
+646:     `low_level_response` section; returns None otherwise.
+647:     """
+648:     try:
+649:         result = character_training_target.check_export_low_level_response(
+650:             manifest, nam_path, input_path, sample_rate, variant=variant, slim=slim,
+651:         )
+652:     except (NamRenderError, OSError, ValueError) as exc:
+653:         result = {"state": "unavailable", "pass": None, "variant": variant, "reason": f"quiet validation could not run: {exc}"}
+654:     if result is not None:
+655:         if result.get("pass") is None:
+
+static/app.js
+1005: // --- "Guitar volume feel" 0-10 knob -----------------------------------
+1006: // A cosmetic, per-DI-calibrated alternative to the raw dBFS crossover
+1007: // slider (see static/app.js's crossoverSlider above, which remains the
+1008: // single source of truth -- this knob only ever reads/writes that value).
+1009: // crossoverKnobCalibration.{minDb,maxDb} anchor "0"/"10" to this render's
+1010: // OWN measured instrument-level-into-NAM envelope (blend_envelope_percentiles
+1011: // from /api/render_pair, i.e. pair.envelope_db -- the profiled envelope
+1012: // that actually drives build_hybrid()'s crossfade, per the user's request
+1013: // to calibrate against real "instrument level into NAM" signal rather than
+1014: // an assumed universal volume-pot law -- see docs/README known caveats on
+1015: // why a literal per-guitar pot-taper simulation is deliberately not done).
+1016: // Mapping the knob LINEARLY onto that dBFS range is already the "audio
+1017: // taper" behaviour: dB is itself a log scale of amplitude, so a linear
+1018: // sweep in dB reads as the perceptually-log sweep a real volume pot aims
+1019: // for -- no extra exponential curve is needed on top.
+1020: const crossoverKnobSlider = document.getElementById("crossover-knob-slider");
+1021: const crossoverKnobValue = document.getElementById("crossover-knob-value");
+1022: const crossoverKnobNote = document.getElementById("crossover-knob-note");
+1023: let crossoverKnobCalibration = { minDb: -40.0, maxDb: -6.0, calibrated: false };
+1024: 
+1025: function dbFromKnob(knobValue) {
+1026:   const { minDb, maxDb } = crossoverKnobCalibration;
+1027:   return minDb + (parseFloat(knobValue) / 10.0) * (maxDb - minDb);
+1028: }
+1029: 
+1030: function knobFromDb(db) {
+1031:   const { minDb, maxDb } = crossoverKnobCalibration;
+1032:   if (maxDb <= minDb) return 0;
+1033:   return Math.min(10, Math.max(0, ((parseFloat(db) - minDb) / (maxDb - minDb)) * 10.0));
+1034: }
+1035: 
+1036: // Reflects the raw dBFS crossover value (however it changed -- manual drag,
+1037: // a preset load, the suggested-crossover auto-set, or its reset link) back
+1038: // onto the knob's position, without re-triggering the raw slider's own
+1039: // input handling.
+1040: // The slider clamps (-40..0) and snaps (0.5 dB) whatever it is given; always
+1041: // label the value it will actually send, not the number it was handed.
+1042: function showCrossoverSliderValue() {
+1043:   crossoverValue.textContent = `${parseFloat(crossoverSlider.value).toFixed(1)} dBFS`;
+1044: }
+1045: 
+1046: function syncCrossoverKnobFromDb() {
+1047:   const knobPos = knobFromDb(crossoverSlider.value);
+1048:   crossoverKnobSlider.value = knobPos.toFixed(1);
+1049:   crossoverKnobValue.textContent = `${knobPos.toFixed(1)} / 10`;
+1050:   updateTransitionAroundSwitchNote();
+1051: }
+1052: 
+1053: const transitionAroundSwitchNote = document.getElementById("transition-around-switch-note");
+1054: function updateTransitionAroundSwitchNote() {
+1055:   const width = parseFloat(transitionSlider.value);
+1056:   transitionAroundSwitchNote.textContent =
+1057:     `The change happens across a ${width.toFixed(1)} dB range. Below it you hear Amp A; above it you hear Amp B.`;
+1058: }
+1059: 
+1060: function updateCrossoverKnobCalibration(blendEnvelopePercentiles) {
+1061:   const p10 = blendEnvelopePercentiles && blendEnvelopePercentiles.p10;
+1062:   const p90 = blendEnvelopePercentiles && blendEnvelopePercentiles.p90;
+1063:   if (p10 == null || p90 == null || p90 <= p10) {
+1064:     crossoverKnobNote.textContent =
+1065:       "0 is the quiet end of this performance; 10 is the loud end. Prepare the amps to calibrate this control.";
+1066:     return;
+1067:   }
+1068:   crossoverKnobCalibration = { minDb: p10, maxDb: p90, calibrated: true };
+1069:   crossoverKnobNote.textContent =
+1070:     "0 is the softest playing in this test performance and 10 the hardest. " +
+1071:     `It's a playing guide, not a guitar volume knob. (Advanced: ${p10.toFixed(1)} to ${p90.toFixed(1)} dBFS.)`;
+1072:   syncCrossoverKnobFromDb();
+1073: }

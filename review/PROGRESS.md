@@ -87,3 +87,9 @@
 **Batches completed:** 2 (app.py: 0 consequential after triage; kaggle_training.py: 5 confirmed)  
 **Next steps:** Step 12 (triage Batch 2), then either Step 14 (implement fixes) or continue to Batch 3 (train_a2.py, Risk 8.5) if triage confirms findings are high-confidence and actionable.
 
+
+## HybridN investigation, 2026-11-07
+
+Open question: does the reported low-gain result originate in source calibration, crossover coverage, or A2 approximation? Baseline HEAD 933c1218760d345a3b4396dedbedbe250852f21b; run provenance edfe82ff84cf7ba7af7de25d916c1f8ad5fa995c. Existing static/style.css modification is outside this review. Read-only production review; artifacts only in review/. Targeted eight-file source budget: pipeline.py, blend.py, envelope.py, training_target.py, render.py, validation_report.py, static/app.js and scripts/train_a2.py, with bounded excerpts. Saved run manifests and audio/model measurements establish the specific case. No branch diff requested, so the fixed-point code-review workflow is inapplicable.
+
+Completed HybridN investigation: matching exported SHA verified; six DI input levels rendered through both sources, exact teacher and Full/Lite; seven sine levels rendered through both sources and Full/Lite. Result: Full retains Mesa behavior when input reaches crossover; input-level sensitivity demonstrated. Report: review/HYBRIDN_REVIEW.md. No production changes. Eight implementation files, 624 bounded source lines preserved in tools; source snippets and measurement JSON saved. No production tests required for documentation-only review. Known limit: no user playback signal or host settings, so exact listening cause remains unconfirmed.
