@@ -3,7 +3,20 @@
 The GitHub release page is the published record; drafts for the next release go
 under an "Unreleased" heading.
 
-## Unreleased
+## v0.5.8
+
+### Dynamic Hybrid
+
+- A guide beside the crossover shows soft, typical and hard playing levels,
+  the Amp A/B changeover boundaries, and estimated time spent on each side.
+- Centre the changeover on the prepared performance, or audition input
+  6 dB quieter or hotter using the existing input test. Guidance explains
+  how input drive differs from output volume and how to compare your guitar.
+
+### TONE3000 layout
+
+- Expanded capture packs give files and chat more room, with columns that
+  adapt to the available panel width.
 
 ### Cloud training
 
@@ -19,8 +32,6 @@ under an "Unreleased" heading.
   data" table.
 - Focus outlines and the selected tab, step and preset stay visible in Windows
   high-contrast mode.
-
-## v0.5.8
 
 ### TONE3000 downloads
 

@@ -41,6 +41,9 @@ test('TONE3000 NAM downloads reject JSON errors and force a NAM filename', async
   vm.createContext(sandbox);
   vm.runInContext(section('function tone3000NamFilename(', 'function buildRecipeConversationMarkdown('), sandbox);
 
+  // File-response fixtures do not model the separate OAuth settings request.
+  sandbox.tone3000AccessHeaders = async () => ({ 'X-TONE3000-Access-Token': 'test-token' });
+
   const result = await sandbox.downloadTone3000Nam('/download', 'Clean.json');
   assert.equal(result.filename, 'Clean.nam');
   assert.equal(result.blob.size, 8);

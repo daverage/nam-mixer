@@ -1,3 +1,14 @@
+# v0.5.8 release handoff update
+
+Status: ready for release
+Date: 2026-11-10
+
+The user resumed work and authorized commit, push and release. The frontend download mock now stubs the separate OAuth-header dependency. All 50 frontend tests and JavaScript syntax checks pass. Python suite: 1,036 passed, 12 skipped, six failed; all six failures were independently reproduced at pre-feature baseline 933c121. They concern cloud-worker fixture RF records, OAuth download fixtures, and an AI prompt-length assertion. This release does not claim a green Python suite. Browser visual verification remains unavailable.
+
+Release notes: RELEASE_NOTES.md, v0.5.8. Full validation evidence is under review/tools/v0.5.8-*.txt. Prior stylesheet changes are included under the user's explicit commit-and-release authorization.
+
+---
+
 # Input-level guide handoff
 
 Status: blocked

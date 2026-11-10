@@ -101,3 +101,9 @@ User authorized making Dynamic Hybrid behavior easier to see and balance for qui
 ### Input guide handoff, 2026-11-10
 
 Implemented visible input/crossover guide, playing-level range, sample-based branch coverage, median crossover action, and +/-6 dB/reset audition buttons wired to existing gain control. DSP and public API unchanged. New frontend checks: 3 passed. JavaScript syntax: passed. Broader frontend suite: 49 passed, 1 failed; TONE3000 download mock lacks response.json. Same failure reproduced on untouched HEAD in an isolated temporary checkout; raw baseline output saved to tools/input_guide_baseline_test.txt. Attempt to exclude the failing case with a test name pattern still ran it, triggering the explicit two-failure stop rule. Stop and preserve work. No further implementation or test runs. Browser runtime found no available browsers, so visual QA remains pending. Preserve pre-existing stylesheet changes outside the new appended guide styles.
+
+## v0.5.8 release preparation, 2026-11-10
+
+User authorized commit, push and release, resuming the input-guide handoff. Latest published version is v0.5.7; application and desktop configs already use v0.5.8, so no version bump needed. Remaining stylesheet layout changes are included in this explicit commit-all request. Fix the confirmed pre-existing download-test mock by stubbing the separate OAuth headers dependency; no production OAuth behavior changes. Consolidate release notes and run frontend and Python checks before tagging.
+
+Release validation: frontend 50/50 passed; node syntax passed; Python 1036 passed, 12 skipped, 6 failed. All six independently reproduced on pre-feature baseline 933c121 in a temporary git archive. Baseline and full test outputs saved under review/tools/v0.5.8-*.txt. Proceed with explicit validation caveat rather than unrelated backend changes. Visual QA remains unavailable due to no browser connection.

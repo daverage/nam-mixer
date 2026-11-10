@@ -1473,7 +1473,7 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
 .t3ai-meta { margin: 0.7rem 0 0; font-size: 0.82rem; color: var(--text-muted); }
 .t3ai-warning { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--danger); }
 
-.t3ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.8rem; margin-top: 0.9rem; }
+.t3ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.8rem; margin-top: 0.9rem; container-type: inline-size; }
 .t3ai-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); }
 .t3ai-card.is-open { grid-column: 1 / -1; flex-direction: row; }
 .t3ai-media { position: relative; aspect-ratio: 16 / 10; background: var(--panel-alt); }
@@ -1513,6 +1513,25 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
   .t3ai-card.is-open { flex-direction: column; }
   .t3ai-card.is-open .t3ai-media { flex: none; aspect-ratio: 16 / 7; }
   .t3ai-panel { grid-template-columns: 1fr; }
+}
+/* Expanded pack details span the card, with the header kept compact above. */
+.t3ai-card.is-open { display: grid; grid-template-columns: 180px minmax(0, 1fr); }
+.t3ai-card.is-open .t3ai-media { aspect-ratio: 1; align-self: stretch; border-radius: 0; }
+.t3ai-card.is-open .t3ai-panel { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0.9rem; background: var(--panel-alt); grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0.8rem; align-items: start; }
+.t3ai-card.is-open .t3ai-actions .btn-primary { flex: 0 0 auto; }
+.t3ai-file-column, .t3ai-chat { min-width: 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.t3ai-files { max-height: none; overflow: visible; }
+.t3ai-chat-log { display: flex; flex-direction: column; gap: 0.5rem; min-height: 7rem; max-height: 22rem; overflow-y: auto; padding: 0.2rem 0.2rem 0.2rem 0; }
+.t3ai-chat-composer { padding-top: 0.55rem; border-top: 1px solid var(--border); }
+.t3ai-chat-input { resize: vertical; min-height: 2.6rem; padding: 0.45rem 0.55rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-alt); color: var(--text); }
+@container (max-width: 850px) {
+  .t3ai-card.is-open { grid-template-columns: 150px minmax(0, 1fr); }
+  .t3ai-card.is-open .t3ai-panel { grid-template-columns: 1fr; gap: 0.65rem; padding: 0.75rem; }
+}
+@container (max-width: 560px) {
+  .t3ai-card.is-open { grid-template-columns: 1fr; }
+  .t3ai-card.is-open .t3ai-media { aspect-ratio: 16 / 6; }
+  .t3ai-card.is-open .t3ai-panel { padding: 0.65rem; }
 }
 .t3ai-grid-heading { grid-column: 1 / -1; margin: 0.6rem 0 0; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
 
