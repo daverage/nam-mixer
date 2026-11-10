@@ -1,9 +1,11 @@
 # v0.5.8 release handoff update
 
-Status: ready for release
+Status: released
 Date: 2026-11-10
 
 The user resumed work and authorized commit, push and release. The frontend download mock now stubs the separate OAuth-header dependency. All 50 frontend tests and JavaScript syntax checks pass. Python suite: 1,036 passed, 12 skipped, six failed; all six failures were independently reproduced at pre-feature baseline 933c121. They concern cloud-worker fixture RF records, OAuth download fixtures, and an AI prompt-length assertion. This release does not claim a green Python suite. Browser visual verification remains unavailable.
+
+Release v0.5.8 is published with all five installers. The original tag workflow could not start macOS 14; the supported macOS 15 runner fix is commit 7515683. Replacement workflow 42815087256 succeeded for Linux x64, macOS arm64, and Windows x64; its installers were version-checked and attached to the unchanged v0.5.8 tag. Release: https://github.com/daverage/nam-mixer/releases/tag/v0.5.8
 
 Release notes: RELEASE_NOTES.md, v0.5.8. Full validation evidence is under review/tools/v0.5.8-*.txt. Prior stylesheet changes are included under the user's explicit commit-and-release authorization.
 

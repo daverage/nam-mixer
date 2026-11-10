@@ -8,3 +8,5 @@
 - Journey-chart text alternatives and clearer screen-reader announcements improve accessibility.
 
 Validation: all 50 frontend tests and JavaScript syntax checks pass. Python tests: 1,036 passed, 12 skipped, six failed. The same six failures reproduce on the pre-feature baseline: cloud-training fixture RF metadata (three cases), OAuth download fixtures (two), and an AI prompt-length assertion (one). Browser visual verification was unavailable. These existing failures remain unresolved in this release.
+
+Installer build provenance: the published v0.5.8 tag is unchanged. The replacement installer workflow uses commit `7515683`, whose only changes after the tag are a macOS runner update from macOS 14 to macOS 15 and review progress notes. Application code and version match v0.5.8.
