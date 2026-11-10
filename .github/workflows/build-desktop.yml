@@ -35,7 +35,7 @@ jobs:
       matrix:
         include:
           - name: macOS arm64
-            os: macos-14
+            os: macos-15
             bundles: app,dmg
 
           - name: Linux x64
