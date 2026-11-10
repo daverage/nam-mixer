@@ -1,3 +1,23 @@
+# Input-level guide handoff
+
+Status: blocked
+Date: 2026-11-10
+WIP commit: 02ab7d0
+
+Reason: repository stop rule reached: the same broader frontend check failed twice after changes. The failure is pre-existing and was reproduced on unchanged HEAD. Browser visual verification also remains unavailable because browser discovery returned no connected browsers.
+
+Last check: `node --test --test-name-pattern '^(?!TONE3000 NAM downloads)' tests/frontend_state.test.cjs` ran 50 tests: 49 passed, 1 failed. The exclusion attempt did not suppress the TONE3000 test. Error: `TypeError: response.json is not a function` in `tone3000AccessHeaders`, raised by the TONE3000 download test's mock. Baseline evidence: `review/tools/input_guide_baseline_test.txt`.
+
+Completed: visible Dynamic Hybrid input-level guide beside crossover controls; soft/typical/hard playing range; exact crossover boundary labels; approximate routing percentages from existing chart data including audition gain; centre-on-performance action; +/-6 dB/reset buttons using existing audition rendering; stale response protection. Three new guide tests and JavaScript syntax check passed. No DSP or public API change.
+
+Next session: resolve or explicitly quarantine the confirmed baseline mock failure, then verify the guide on the saved AC30/Mesa session in a connected browser, including centring, quieter/hotter audition re-rendering, silence, gain limits, narrow screens, and stale settings. Review the added explanatory copy for clarity. The local verification server was stopped.
+
+User's prior stylesheet changes remain unstaged and were excluded from the WIP commit. Do not discard them.
+
+---
+
+## Earlier handoff history
+
 # Review Handoff: BATCHES 1-10 COMPLETE
 
 **Session:** Comprehensive code review (Batches 1-10)  
