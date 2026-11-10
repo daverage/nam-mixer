@@ -1571,3 +1571,15 @@ body[data-workflow-stage="create"] .layout { grid-template-columns: minmax(0, 82
 .t3ai-failed { border-left-color: var(--danger); }
 .t3ai-failed h3 { color: var(--danger); }
 .t3ai-file-filter:focus { outline: none; border-color: var(--accent); }
+
+/* Dynamic Hybrid input-level guidance, next to the changeover controls. */
+.hybrid-input-guide { margin: 1rem 0 1.5rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; }
+.hybrid-input-guide h3 { margin: 0 0 .5rem; font-size: 1rem; }
+.hybrid-input-scale { display: grid; position: relative; margin: 1rem 0 .5rem; padding-bottom: 18px; min-width: 0; }
+.hybrid-input-zone { padding: .65rem .15rem; text-align: center; font-size: .8rem; overflow-wrap: anywhere; }
+.hybrid-input-zone-a { background: color-mix(in srgb, var(--amp-a) 20%, transparent); }
+.hybrid-input-zone-transition { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.hybrid-input-zone-b { background: color-mix(in srgb, var(--amp-b) 20%, transparent); }
+.hybrid-input-playing-range { position: absolute; bottom: 5px; height: 3px; background: var(--text); min-width: 2px; }
+.hybrid-input-typical { position: absolute; bottom: 0; height: 13px; width: 3px; background: var(--text); transform: translateX(-50%); }
+.hybrid-input-guide .preset-row { flex-wrap: wrap; }

@@ -985,3 +985,88 @@ test('loading a Builder session prepares the amps when both are set', () => {
   assert.match(source, /if \(session\.autosave\) \{ restoreAutosave\(session\); return; \}/);
   assert.match(source, /autosave\.hasUnsavedWork\(\) && !window\.confirm\(/);
 });
+
+
+test('Hybrid input guide distinguishes quiet, mixed and hot performances without counting silence', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(section('function hybridInputGuideStats(', 'function clearHybridInputGuide('), sandbox);
+  const analyse = sandbox.hybridInputGuideStats;
+  assert.equal(analyse({ envelope_db: [-80, -50], blend_weight: [0, 0] }), null);
+  assert.equal(analyse({ envelope_db: [-25], blend_weight: [] }), null);
+  const quiet = analyse({ envelope_db: [-80, -40, -36, -32], blend_weight: [1, 0, 0, 0.1] });
+  assert.equal(quiet.a, 1);
+  assert.equal(quiet.b, 0);
+  assert.equal(quiet.typical, -36);
+  const mixed = analyse({ envelope_db: [-35, -28, -22], blend_weight: [0, 0.5, 1] });
+  assert.equal(mixed.a, 1 / 3);
+  assert.equal(mixed.transition, 1 / 3);
+  assert.equal(mixed.b, 1 / 3);
+  const hot = analyse({ envelope_db: [-25, -20], blend_weight: [0.9, 1] });
+  assert.equal(hot.b, 1);
+});
+
+test('Hybrid input guide centres only the switch and input audition uses the existing gain control', () => {
+  const listeners = {};
+  const centre = { dataset: { crossover: '-29.7' }, addEventListener: (_, fn) => { listeners.centre = fn; } };
+  const gainEvents = [];
+  const crossoverEvents = [];
+  const sandbox = {
+    havePair: true,
+    document: { getElementById: id => id === 'btn-centre-hybrid-input' ? centre : { addEventListener: (_, fn) => { listeners[id] = fn; } } },
+    crossoverSlider: { value: '-22', min: '-40', max: '0', step: '0.5', dispatchEvent: e => crossoverEvents.push(e.type) },
+    testGainSlider: { value: '0', min: '-24', max: '24', dispatchEvent: e => gainEvents.push(e.type) },
+    Event: class { constructor(type) { this.type = type; } },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('document.getElementById("btn-centre-hybrid-input").addEventListener(', 'let journeyRequestSeq'), sandbox);
+  listeners.centre();
+  assert.equal(sandbox.crossoverSlider.value, '-29.5');
+  assert.equal(sandbox.testGainSlider.value, '0');
+  assert.deepEqual(crossoverEvents, ['input']);
+  listeners['btn-hybrid-input-hotter']();
+  assert.equal(sandbox.testGainSlider.value, '6');
+  listeners['btn-hybrid-input-quieter']();
+  assert.equal(sandbox.testGainSlider.value, '0');
+  sandbox.testGainSlider.value = '22';
+  listeners['btn-hybrid-input-hotter']();
+  assert.equal(sandbox.testGainSlider.value, '24');
+  listeners['btn-hybrid-input-reset']();
+  assert.equal(sandbox.testGainSlider.value, '0');
+  assert.equal(gainEvents.length, 4);
+  sandbox.havePair = false;
+  listeners.centre();
+  listeners['btn-hybrid-input-hotter']();
+  assert.equal(gainEvents.length, 4);
+  assert.equal(crossoverEvents.length, 1);
+});
+
+test('Hybrid input guide ignores older and invalidated audition responses', async () => {
+  const old = deferred();
+  const latest = deferred();
+  let calls = 0;
+  const rendered = [];
+  const sandbox = {
+    havePair: true, activeRenderId: 'render-1', journeyRequestSeq: 0,
+    fetch: () => (++calls === 1 ? old.promise : latest.promise),
+    hybridParamsBody: () => ({}), clearHybridInputGuide: () => {},
+    renderHybridInputGuide: data => rendered.push(data.id), renderJourneyText: () => {}, drawJourney: () => {},
+    journeyEmpty: {}, lastJourneyData: null,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(section('async function updateJourney()', 'let coverageRequestSeq'), sandbox);
+  const first = sandbox.updateJourney();
+  const second = sandbox.updateJourney();
+  latest.resolve({ ok: true, json: async () => ({ id: 'new' }) });
+  await second;
+  old.resolve({ ok: true, json: async () => ({ id: 'old' }) });
+  await first;
+  assert.deepEqual(rendered, ['new']);
+  const pending = deferred();
+  sandbox.fetch = () => pending.promise;
+  const third = sandbox.updateJourney();
+  sandbox.havePair = false;
+  pending.resolve({ ok: true, json: async () => ({ id: 'stale' }) });
+  await third;
+  assert.deepEqual(rendered, ['new']);
+});

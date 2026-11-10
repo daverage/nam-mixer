@@ -1,0 +1,20 @@
+✖ TONE3000 NAM downloads reject JSON errors and force a NAM filename (0.9885ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30.994209
+
+✖ failing tests:
+
+test at ../../../../../private/tmp/hybrid-input-baseline-67v2r011/tests/frontend_state.test.cjs:32:1
+✖ TONE3000 NAM downloads reject JSON errors and force a NAM filename (0.9885ms)
+  TypeError: response.json is not a function
+      at tone3000AccessHeaders (evalmachine.<anonymous>:58:35)
+      at async Object.downloadTone3000Nam (evalmachine.<anonymous>:65:52)
+      at async TestContext.<anonymous> (/private/tmp/hybrid-input-baseline-67v2r011/tests/frontend_state.test.cjs:44:18)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)

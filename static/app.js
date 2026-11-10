@@ -848,6 +848,7 @@ document.querySelectorAll(".timing-choice [data-timing]").forEach((button) => {
 });
 
 function markProfileStale(reason, { preserveAudition = false } = {}) {
+  clearHybridInputGuide("Input settings changed. Prepare the amps again to see how this performance behaves.");
   clearParallelVerification();
   const wasCurrentPreview = havePair;
   if (!preserveAudition) pendingAuditionResume = null;
@@ -2505,7 +2506,112 @@ async function updateTrimReadout() {
   }
 }
 
+// The guide follows the prepared audition, including pickup profile and test gain.
+// Percentages are estimates from the existing chart samples, not full-rate counts.
+function hybridInputGuideStats(data) {
+  const levels = [];
+  const counts = { a: 0, transition: 0, b: 0 };
+  for (let i = 0; i < (data?.envelope_db?.length || 0); i += 1) {
+    const level = data.envelope_db[i];
+    const weight = data.blend_weight?.[i];
+    if (!Number.isFinite(level) || !Number.isFinite(weight) || level <= -50) continue;
+    levels.push(level);
+    if (weight <= 0.1) counts.a += 1;
+    else if (weight >= 0.9) counts.b += 1;
+    else counts.transition += 1;
+  }
+  if (!levels.length) return null;
+  levels.sort((a, b) => a - b);
+  const percentile = (fraction) => {
+    const position = (levels.length - 1) * fraction;
+    const lower = Math.floor(position);
+    return levels[lower] + (levels[Math.ceil(position)] - levels[lower]) * (position - lower);
+  };
+  return {
+    soft: percentile(0.1), typical: percentile(0.5), hard: percentile(0.9),
+    a: counts.a / levels.length, transition: counts.transition / levels.length,
+    b: counts.b / levels.length,
+  };
+}
+
+function clearHybridInputGuide(message) {
+  document.getElementById("hybrid-input-readout").hidden = true;
+  document.getElementById("hybrid-input-status").textContent = message;
+}
+
+function renderHybridInputGuide(data) {
+  const stats = hybridInputGuideStats(data);
+  if (!stats) {
+    clearHybridInputGuide("No active playing detected. Choose a DI with a clear guitar signal and prepare the amps again.");
+    return;
+  }
+  const crossover = parseFloat(crossoverSlider.value);
+  const width = parseFloat(transitionSlider.value);
+  const lower = crossover - width / 2;
+  const upper = crossover + width / 2;
+  const scaleMin = Math.min(stats.soft, lower) - 3;
+  const scaleMax = Math.max(stats.hard, upper) + 3;
+  const position = (level) => 100 * (level - scaleMin) / (scaleMax - scaleMin);
+  const scale = document.getElementById("hybrid-input-scale");
+  scale.style.gridTemplateColumns = `${position(lower)}fr ${position(upper) - position(lower)}fr ${100 - position(upper)}fr`;
+  scale.setAttribute("aria-label", `Soft playing ${stats.soft.toFixed(1)}, typical ${stats.typical.toFixed(1)}, hard ${stats.hard.toFixed(1)} dBFS. Amp A only below ${lower.toFixed(1)}, Amp B only above ${upper.toFixed(1)} dBFS. The line spans soft to hard playing; the marker is typical playing.`);
+  const range = document.getElementById("hybrid-input-playing-range");
+  range.style.left = `${position(stats.soft)}%`;
+  range.style.width = `${position(stats.hard) - position(stats.soft)}%`;
+  document.getElementById("hybrid-input-typical").style.left = `${position(stats.typical)}%`;
+  const testGain = parseFloat(testGainSlider.value) || 0;
+  document.getElementById("hybrid-input-levels").textContent =
+    `Playing level: soft ${stats.soft.toFixed(1)}, typical ${stats.typical.toFixed(1)}, hard ${stats.hard.toFixed(1)} dBFS. Line: soft to hard; marker: typical. Input test: ${fmtSigned(testGain)} dB.`;
+  document.getElementById("hybrid-input-thresholds").textContent =
+    `Amp A only below ${lower.toFixed(1)} dBFS; Amp B only above ${upper.toFixed(1)} dBFS. These are smoothed playing levels, not pick peaks.`;
+  document.getElementById("hybrid-input-shares").textContent =
+    `Estimated active playing time: mostly A ${Math.round(stats.a * 100)}%, changing ${Math.round(stats.transition * 100)}%, mostly B ${Math.round(stats.b * 100)}%. Based on the prepared performance, including the input test.`;
+  document.getElementById("hybrid-input-status").textContent = stats.a >= 0.9
+    ? "This performance mostly stays with Amp A. Lower the changeover to bring Amp B in sooner, or audition a hotter input."
+    : stats.b >= 0.9
+      ? "This performance mostly stays with Amp B. Raise the changeover to keep Amp A for softer playing, or audition a quieter input."
+      : stats.b < 0.05
+        ? "This performance rarely reaches mostly Amp B. Lower the changeover if you want more of Amp B at this playing level."
+        : stats.a < 0.05
+          ? "This performance rarely reaches mostly Amp A. Raise the changeover if you want Amp A for more of your softer playing."
+          : "This performance reaches both sides of the changeover. Listen to decide whether Amp B arrives at the right playing strength.";
+  const centre = document.getElementById("btn-centre-hybrid-input");
+  centre.dataset.crossover = String(stats.typical);
+  centre.disabled = stats.typical < Number(crossoverSlider.min) || stats.typical > Number(crossoverSlider.max);
+  centre.title = centre.disabled
+    ? "Typical playing is outside the available changeover range. Try adjusting the input level."
+    : "Place the middle of the changeover at this performance's typical playing level.";
+  document.getElementById("hybrid-input-readout").hidden = false;
+  document.getElementById("btn-hybrid-input-quieter").disabled = testGain <= Number(testGainSlider.min);
+  document.getElementById("btn-hybrid-input-hotter").disabled = testGain >= Number(testGainSlider.max);
+  document.getElementById("btn-hybrid-input-reset").disabled = testGain === 0;
+}
+
+document.getElementById("btn-centre-hybrid-input").addEventListener("click", () => {
+  if (!havePair) return;
+  const target = Number(document.getElementById("btn-centre-hybrid-input").dataset.crossover);
+  if (!Number.isFinite(target)) return;
+  const step = Number(crossoverSlider.step) || 0.5;
+  crossoverSlider.value = String(Math.max(Number(crossoverSlider.min), Math.min(Number(crossoverSlider.max), Math.round(target / step) * step)));
+  crossoverSlider.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+function auditionHybridInput(delta, reset = false) {
+  if (!havePair) return;
+  const gain = reset ? 0 : (parseFloat(testGainSlider.value) || 0) + delta;
+  testGainSlider.value = String(Math.max(Number(testGainSlider.min), Math.min(Number(testGainSlider.max), gain)));
+  testGainSlider.dispatchEvent(new Event("input", { bubbles: true }));
+}
+document.getElementById("btn-hybrid-input-quieter").addEventListener("click", () => auditionHybridInput(-6));
+document.getElementById("btn-hybrid-input-hotter").addEventListener("click", () => auditionHybridInput(6));
+document.getElementById("btn-hybrid-input-reset").addEventListener("click", () => auditionHybridInput(0, true));
+
+let journeyRequestSeq = 0;
 async function updateJourney() {
+  if (!havePair) return;
+  const mine = ++journeyRequestSeq;
+  const renderId = activeRenderId;
+  clearHybridInputGuide("Updating this performance's input-level guide...");
   try {
     const resp = await fetch("/api/blend_curve", {
       method: "POST",
@@ -2513,13 +2619,20 @@ async function updateJourney() {
       body: JSON.stringify({ render_id: activeRenderId, ...hybridParamsBody() }),
     });
     const data = await resp.json();
-    if (!resp.ok) return;
+    if (mine !== journeyRequestSeq || renderId !== activeRenderId || !havePair) return;
+    if (!resp.ok) {
+      clearHybridInputGuide("Input-level guide unavailable. Prepare the amps again to retry.");
+      return;
+    }
     lastJourneyData = data;
     journeyEmpty.hidden = true;
+    renderHybridInputGuide(data);
     renderJourneyText(data);
     drawJourney();
   } catch (err) {
-    // Visualization is a debug aid, not critical path -- fail quietly.
+    if (mine === journeyRequestSeq && renderId === activeRenderId && havePair) {
+      clearHybridInputGuide("Input-level guide unavailable. Prepare the amps again to retry.");
+    }
   }
 }
 

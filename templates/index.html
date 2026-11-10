@@ -427,6 +427,32 @@
       <section class="card workflow-stage workflow-shape" id="hybrid-panel-crossover" data-mode-panel="hybrid">
         <h2>When should it change? <span class="cost-badge cost-badge-instant" title="Uses the prepared amps; no new NAM rendering">✓ instant</span></h2>
 
+        <div id="hybrid-input-guide" class="hybrid-input-guide">
+          <h3>Will this guitar reach both amps?</h3>
+          <p id="hybrid-input-status" class="info" aria-live="polite">Prepare the amps to compare this test performance with your changeover.</p>
+          <div id="hybrid-input-readout" hidden>
+            <div id="hybrid-input-scale" class="hybrid-input-scale" role="img" aria-label="Input playing levels and amp changeover">
+              <div class="hybrid-input-zone hybrid-input-zone-a">Amp A</div>
+              <div class="hybrid-input-zone hybrid-input-zone-transition">Changing</div>
+              <div class="hybrid-input-zone hybrid-input-zone-b">Amp B</div>
+              <div id="hybrid-input-playing-range" class="hybrid-input-playing-range"></div>
+              <div id="hybrid-input-typical" class="hybrid-input-typical"></div>
+            </div>
+            <p id="hybrid-input-levels" class="info"></p>
+            <p id="hybrid-input-thresholds" class="info"></p>
+            <p id="hybrid-input-shares" class="info"></p>
+            <div class="preset-row">
+              <button type="button" id="btn-centre-hybrid-input" class="preset-btn">Centre on this performance</button>
+              <button type="button" id="btn-hybrid-input-quieter" class="preset-btn">Hear 6 dB quieter</button>
+              <button type="button" id="btn-hybrid-input-hotter" class="preset-btn">Hear 6 dB hotter</button>
+              <button type="button" id="btn-hybrid-input-reset" class="preset-btn">Reset input test</button>
+            </div>
+          </div>
+          <p class="info">Use a dry recording of your own guitar for a useful comparison. Pickup types are estimates; your interface gain and guitar volume also matter.</p>
+          <p class="info">Move the changeover lower to reach Amp B sooner without changing either amp's drive. A hotter input drives both amps harder and also reaches Amp B sooner. Output volume and Amp B level matching do not change when the switch happens.</p>
+          <p class="info">The input test is for listening only and is not baked into the export. In your NAM player, use an equivalent input level to get the same changeover.</p>
+        </div>
+
         <div class="slider-row">
           <label for="crossover-knob-slider">Where does it start to change?</label>
           <span id="crossover-knob-value" class="value-chip">7.0 / 10</span>
